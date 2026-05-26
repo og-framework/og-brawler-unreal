@@ -1,0 +1,47 @@
+# PARKED: GitHub Actions ignores non-.yml workflow files.
+#
+# Re-enable by renaming back to standalone-tests.yml. Requires either:
+#   (a) the og-framework org repos to be public, OR
+#   (b) a fine-grained PAT secret (read-only on og-simulation/og-brawler/og-brawler-unreal)
+#       added as `OG_FRAMEWORK_TOKEN` and referenced in the actions/checkout step
+#       with `token: ${{ secrets.OG_FRAMEWORK_TOKEN }}` and `persist-credentials: true`.
+#
+# Disabled because the default GITHUB_TOKEN cannot fetch private sibling repos
+# in the same org (Plugins/OGSimulation and Plugins/OGBrawler submodules).
+
+# SPDX-License-Identifier: MPL-2.0
+name: Standalone tests
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify OGSimulation pin consistency
+        shell: pwsh
+        run: |
+          $a = (git -C Plugins/OGSimulation rev-parse HEAD).Trim()
+          $b = (git -C Plugins/OGBrawler/extern/og-simulation rev-parse HEAD).Trim()
+          if ($a -ne $b) {
+            Write-Error "OGSimulation pin drift: Plugins/OGSimulation=$a vs Plugins/OGBrawler/extern/og-simulation=$b"
+            exit 1
+          }
+          Write-Host "OGSimulation pin OK: $a"
+
+      - name: Configure
+        run: cmake -S Plugins/OGBrawler -B Plugins/OGBrawler/build -G "Visual Studio 17 2022"
+
+      - name: Build
+        run: cmake --build Plugins/OGBrawler/build --config Debug
+
+      - name: Test
+        working-directory: Plugins/OGBrawler/build
+        run: ctest -C Debug --output-on-failure

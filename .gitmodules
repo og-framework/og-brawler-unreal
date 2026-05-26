@@ -1,0 +1,16 @@
+[submodule "Plugins/OGSimulation"]
+	path = Plugins/OGSimulation
+	url = https://github.com/og-framework/og-simulation-ue.git
+	branch = main
+[submodule "Plugins/OGBrawler"]
+	path = Plugins/OGBrawler
+	url = https://github.com/og-framework/og-brawler-ue.git
+[submodule "Source/OGSimulationTests/extern/og-simulation-tests"]
+	path = Source/OGSimulationTests/extern/og-simulation-tests
+	url = https://github.com/og-framework/og-simulation-tests.git
+[submodule "Source/OGBrawlerTests/extern/og-brawler-tests"]
+	path = Source/OGBrawlerTests/extern/og-brawler-tests
+	url = https://github.com/og-framework/og-brawler-tests.git
+[submodule "tools/og-tools"]
+	path = tools/og-tools
+	url = https://github.com/og-framework/og-tools.git
