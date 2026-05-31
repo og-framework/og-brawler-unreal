@@ -38,7 +38,7 @@
 		},
 		{
 			"Name": "RawInput",
-			"Enabled": true,
+			"Enabled": false,
 			"SupportedTargetPlatforms": [
 				"Win64"
 			]

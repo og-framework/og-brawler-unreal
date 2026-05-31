@@ -2,18 +2,27 @@
 
 #include "OGBrawlerUEGameMode.h"
 #include "OGBrawlerUECharacter.h"
+#include "OGBrawlerPlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/GameViewportClient.h"
 
 
 AOGBrawlerUEGameMode::AOGBrawlerUEGameMode()
 {
 	DefaultPawnClass = AOGBrawlerUECharacter::StaticClass();
+	PlayerControllerClass = AOGBrawlerPlayerController::StaticClass();
 }
 
 void AOGBrawlerUEGameMode::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (UGameViewportClient* viewport = GetWorld()->GetGameViewport())
+    {
+        viewport->SetForceDisableSplitscreen(true);
+        viewport->UpdateActiveSplitscreenType();
+    }
 
     // Get all PlayerStarts in the level
     TArray<AActor*> PlayerStarts;

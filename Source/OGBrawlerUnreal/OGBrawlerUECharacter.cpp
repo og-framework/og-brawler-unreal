@@ -205,17 +205,43 @@ void AOGBrawlerUECharacter::RebuildHumanoidMesh()
 
 void AOGBrawlerUECharacter::BeginPlay()
 {
-	// Call the base class  
 	Super::BeginPlay();
 
-	//Add Input Mapping Context
-	if (APlayerController* PlayerController = Cast<APlayerController>(Controller))
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
-		{
-			m_inputTranslator.addToSubsystem(Subsystem, 0);
-		}
-	}
+	// Belt-and-suspenders IMC-add — works for LP0 at game start (BeginPlay
+	// deferred until after possession). For mid-game-spawned pawns (LP1+),
+	// PossessedBy and OnRep_Controller cover the cases this site misses;
+	// SetupPlayerInputComponent re-adds after the translator is initialized.
+	addInputMappingContextForController(Controller);
+}
+
+void AOGBrawlerUECharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	// Server-side hook for mid-game-spawned pawns: fires after Controller is
+	// wired, which BeginPlay's IMC-add misses because BeginPlay can run before
+	// Possess on the server.
+	addInputMappingContextForController(NewController);
+}
+
+void AOGBrawlerUECharacter::OnRep_Controller()
+{
+	Super::OnRep_Controller();
+
+	// Client-side mirror: in PIE-as-client / dedicated-server-client setups
+	// PossessedBy fires only on the server. On the client, the Controller
+	// pointer replicates in and OnRep_Controller fires here.
+	addInputMappingContextForController(Controller);
+}
+
+void AOGBrawlerUECharacter::addInputMappingContextForController(AController* InController)
+{
+	APlayerController* pc = Cast<APlayerController>(InController);
+	if (pc == nullptr) return;
+	UEnhancedInputLocalPlayerSubsystem* subsystem =
+		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(pc->GetLocalPlayer());
+	if (subsystem == nullptr) return;
+	m_inputTranslator.addToSubsystem(subsystem, 0);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -225,6 +251,15 @@ void AOGBrawlerUECharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 {
 	// Initialize translator here — SetupPlayerInputComponent runs before BeginPlay (during possession).
 	m_inputTranslator.initialize(this, dInput::gameMapping::buildDefaultContext());
+
+	// CRITICAL: for client-side mid-game-spawned pawns (LP1+ via CreatePlayer),
+	// the IMC-add calls in OnRep_Controller / PossessedBy / BeginPlay all fire
+	// BEFORE this initialize() because client-side possession/replication order
+	// is different from LP0's game-start order. Those earlier addToSubsystem
+	// calls are silent no-ops because m_inputTranslator's mapping context is
+	// still null. We re-add here so the joining LP's Enhanced Input subsystem
+	// actually receives the IMC and can match incoming gamepad events.
+	addInputMappingContextForController(Controller);
 
 	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
@@ -269,9 +304,16 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	FVector fCurrentCamForward = FollowCamera->GetForwardVector();
-	glm::vec3 currentCamForward = uglm::toGLMVec3(fCurrentCamForward);
-	SimmableUpdateComponent->setCameraForward(currentCamForward);
+	const FVector fCurrentCamForward = [this]() -> FVector {
+		if (const APlayerController* pc = Cast<APlayerController>(Controller))
+			if (pc->PlayerCameraManager != nullptr)
+				return pc->PlayerCameraManager->GetCameraRotation().Vector();
+		// Fallback for the brief window before possession / PCM ready, and for
+		// simulated proxies of remote players (no Controller). Matches pre-task
+		// behaviour exactly so non-locally-controlled paths are unchanged.
+		return FollowCamera->GetForwardVector();
+	}();
+	SimmableUpdateComponent->setCameraForward(uglm::toGLMVec3(fCurrentCamForward));
 
 	if (APlayerController* PlayerController = Cast<APlayerController>(Controller))
 	{
@@ -367,18 +409,32 @@ void AOGBrawlerUECharacter::Move(const FInputActionValue& Value)
 		}
 		else
 		{
-			// find out which way is forward
-//const FRotator Rotation = Controller->GetControlRotation();
-			const FRotator Rotation = CameraBoom->GetRelativeRotation();
+			// Use the active view-target camera's yaw via PlayerCameraManager so the
+			// CMC path stays camera-relative under both the per-character follow cam
+			// AND the shared iso cam. CameraBoom is per-character (its yaw is driven
+			// by DAttackCamera + right stick) and diverges from the iso cam's fixed
+			// yaw, so using it directly would produce a different move direction than
+			// the sim's moveDirectionWorld (which already uses PCM via setCameraForward).
+			// Mirrors the same redirect pattern Task 5 applied to the setCameraForward
+			// feed in Tick. Fallback to CameraBoom for the brief pre-possession window
+			// and for simulated proxies where Controller / PCM aren't local.
+			FRotator Rotation = CameraBoom->GetRelativeRotation();
+			if (const APlayerController* pc = Cast<APlayerController>(Controller))
+			{
+				if (pc->PlayerCameraManager != nullptr)
+				{
+					Rotation = pc->PlayerCameraManager->GetCameraRotation();
+				}
+			}
 			const FRotator YawRotation(0, Rotation.Yaw, 0);
 
 			// get forward vector
 			const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 
-			// get right vector 
+			// get right vector
 			const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-			// add movement 
+			// add movement
 			AddMovementInput(ForwardDirection, MovementVector.Y);
 			AddMovementInput(RightDirection, MovementVector.X);
 		}

@@ -164,11 +164,27 @@ protected:
 protected:
 	// APawn interface
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-	
+
 	virtual void PostInitializeComponents() override;
 
 	// To add mapping context
 	virtual void BeginPlay();
+
+	virtual void PossessedBy(AController* NewController) override;
+
+	// Client-side mirror of PossessedBy's IMC-add. Fires when the server-
+	// authoritative Controller pointer replicates to this client-side pawn.
+	// Required in PIE-as-client / dedicated-server-client setups where
+	// PossessedBy is server-only.
+	virtual void OnRep_Controller() override;
+
+private:
+	// Adds m_inputTranslator's IMC to the controlling LP's Enhanced Input
+	// subsystem. Idempotent. Called from BeginPlay, PossessedBy, OnRep_Controller,
+	// and SetupPlayerInputComponent so the IMC lands regardless of which
+	// possession-ordering path the engine takes for this pawn.
+	void addInputMappingContextForController(class AController* InController);
+
 public:
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
