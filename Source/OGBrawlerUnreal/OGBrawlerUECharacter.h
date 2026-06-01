@@ -20,7 +20,7 @@
 #include <optional>
 #include <vector>
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
-#include "OGSimulationUnreal/InputMappingUETranslator.h"
+#include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
 
@@ -61,6 +61,9 @@ class AOGBrawlerUECharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	USimmableUpdateComponent* SimmableUpdateComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+	UOGBrawlerInputCollectionComponent* InputCollection;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Visualization", meta = (AllowPrivateAccess = "true"))
 	UProceduralMeshComponent* HumanoidMesh;
 
@@ -70,8 +73,6 @@ class AOGBrawlerUECharacter : public ACharacter
 	HumanoidVisualization m_humanoidViz;
 
 	void RebuildHumanoidMesh();
-
-	InputMappingUETranslator m_inputTranslator;
 
 	UEnhancedInputComponent* m_inputComponent = nullptr;
 
@@ -143,19 +144,7 @@ protected:
 	DAttackCameraState m_cameraState;
 
 	void Move(const FInputActionValue& Value);
-	glm::vec2 m_mouseAxis;
-	void Look(const FInputActionValue& Value){
-		FVector2D LookAxisVector = Value.Get<FVector2D>();
-		m_mouseAxis.x = LookAxisVector.X; m_mouseAxis.y = LookAxisVector.Y;
-	}
-	glm::vec3 m_rStickAxis;
-	void setAimInput(const FInputActionValue& Value) {
-		FVector2D AimAxisVector = Value.Get<FVector2D>();
-		m_rStickAxis.x = AimAxisVector.X; m_rStickAxis.y = AimAxisVector.Y; m_rStickAxis.z = 0.f;
-	}
-	void BlockLook(const FInputActionValue& Value) { m_blockLook = Value.Get<bool>(); }
 	OGBrawlerUEPID m_camPid;
-	bool m_blockLook = false;
 
 	void Attack(const FInputActionValue& Value);
 	virtual void Tick(float DeltaSeconds) override;
@@ -178,16 +167,11 @@ protected:
 	// PossessedBy is server-only.
 	virtual void OnRep_Controller() override;
 
-private:
-	// Adds m_inputTranslator's IMC to the controlling LP's Enhanced Input
-	// subsystem. Idempotent. Called from BeginPlay, PossessedBy, OnRep_Controller,
-	// and SetupPlayerInputComponent so the IMC lands regardless of which
-	// possession-ordering path the engine takes for this pawn.
-	void addInputMappingContextForController(class AController* InController);
-
 public:
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	/** Returns InputCollection subobject **/
+	FORCEINLINE UOGBrawlerInputCollectionComponent* getInputCollection() const { return InputCollection; }
 };

@@ -36,6 +36,8 @@
 
 #include "OGBrawlerUnreal/DAttackCircleUImplementation.h"
 #include "OGBrawlerUnreal/DShapeUImplementation.h"
+#include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/DAttackCircularVisualizationUimpl.h"
 #include "OGSimulationUnreal/LoggingFunctorUImpl.h"
 #include "OGSimulation/SimulationTimeContext.h"
@@ -161,15 +163,6 @@ namespace DAttackRadialVisualizationCVars
 //		ECVF_Default);
 //}
 
-namespace DAttackMovementCVars
-{
-	TAutoConsoleVariable<int32> movementAndAimMode(
-		TEXT("DAttackMovementCVars.movementAndAimMode"),
-		2,
-		TEXT("test)"),
-		ECVF_Default);
-}
-
 //Component
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -178,9 +171,6 @@ constexpr int32 kMaxRegistrationAttempts = 600;
 
 USimmableUpdateComponent::USimmableUpdateComponent(const FObjectInitializer& ObjectInitializer)
 	: UActorComponent(ObjectInitializer)
-	, m_inputComponent(nullptr)
-	, m_aimDirection(0.f, 0.f, 0.f)
-	, m_camForward(0.f, 0.f, 0.f)
 {
 	SetIsReplicatedByDefault(true);
 
@@ -240,6 +230,9 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 
 	if (Owner == nullptr)
 		return;
+
+	if (AOGBrawlerUECharacter* brawlerOwner = Cast<AOGBrawlerUECharacter>(Owner))
+		m_ownerInputCollection = brawlerOwner->getInputCollection();
 
 	ChaosSpatialQueryAdapter& queryAdapter = manager->editQueryAdapter();
 
@@ -302,30 +295,13 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		&& ownerActor != nullptr
 		&& ownerActor->GetLocalRole() == ROLE_AutonomousProxy;
 
-	const uint32 componentId = (unsigned int)GetUniqueID();
 	std::function<simulatableBrawler::PlayerInput(const SimulationTimeStep&)> inputProvider;
 	if (isLocallyPredicted)
 	{
-		inputProvider = [this, componentId](const SimulationTimeStep& step) -> simulatableBrawler::PlayerInput
-		{
-			if (m_inputComponent != nullptr)
-			{
-				const glm::vec3 aimDirection = buildAimDirection();
-				const glm::vec3 moveDirectionWorld = [this, &aimDirection]() {
-					if (dAttackMachineSimulation::MovementAndAimModeTest == 1)
-						return getInputDirectionInAimSpace(aimDirection, glm::vec3(m_moveDirection, 0.0f));
-					else
-						return getInputDirectionInCameraSpace(m_camForward, glm::vec3(m_moveDirection, 0.0f));
-				}();
-				UE_LOG(LogOGSimTick, Log,
-					TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d"),
-					componentId, step.getTick(), m_leftAttackInput ? 1 : 0);
-				return simulatableBrawler::PlayerInput(
-					dAttackRadialSimulation::PlayerInput(aimDirection, m_leftAttackInput, m_rightAttachInput),
-					dAttackMachineSimulation::PlayerInput(aimDirection, m_leftAttackInput, m_rightAttachInput, m_moveDirection, moveDirectionWorld),
-					dAttackGuardSimulation::PlayerInput(aimDirection));
-			}
-			return simulatableBrawler::getZeroPlayerInput();
+		UOGBrawlerInputCollectionComponent* ic = m_ownerInputCollection;
+		const uint32 id = (unsigned int)GetUniqueID();
+		inputProvider = [ic, id](const SimulationTimeStep& step) {
+			return ic->buildPlayerInput(step, id);
 		};
 	}
 
@@ -363,24 +339,6 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	UActorComponent::EndPlay(EndPlayReason);
 }
 
-void USimmableUpdateComponent::setInputComponent(UEnhancedInputComponent* inputComponent, const InputMappingUETranslator& translator)
-{
-	m_inputComponent = inputComponent;
-
-	UInputAction* LeftAttackAction = translator.getAction(dInput::gameMapping::LeftAttack);
-	UInputAction* RightAttackAction = translator.getAction(dInput::gameMapping::RightAttack);
-	UInputAction* AimAction = translator.getAction(dInput::gameMapping::Aim);
-	UInputAction* MoveAction = translator.getAction(dInput::gameMapping::Move);
-
-	m_inputComponent->BindAction(LeftAttackAction, ETriggerEvent::Triggered, this, &USimmableUpdateComponent::setLeftAttackInput);
-	m_inputComponent->BindAction(LeftAttackAction, ETriggerEvent::Completed, this, &USimmableUpdateComponent::setLeftAttackInput);
-	m_inputComponent->BindAction(RightAttackAction, ETriggerEvent::Triggered, this, &USimmableUpdateComponent::setRightAttackInput);
-	m_inputComponent->BindAction(RightAttackAction, ETriggerEvent::Completed, this, &USimmableUpdateComponent::setRightAttackInput);
-	m_inputComponent->BindAction(AimAction, ETriggerEvent::Triggered, this, &USimmableUpdateComponent::setAimInput);
-	m_inputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &USimmableUpdateComponent::setMoveInput);
-	m_inputComponent->BindAction(MoveAction, ETriggerEvent::Completed, this, &USimmableUpdateComponent::setMoveInput);
-
-}
 
 void USimmableUpdateComponent::OnRep_CorrectionState()
 {
@@ -424,88 +382,6 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FSim
 		m_onRemoteMoveReceivedCallback(inputBuffer);
 }
 
-//
-//glm::vec3 USimmableUpdateComponent::buildAimDirection()
-//{
-//	glm::vec3 camForward = m_camForward;
-//	camForward.z = 0.f;
-//	camForward = glm::normalize(camForward);
-//
-//	glm::mat4 camRotationMatrix;
-//	dMathUtil::getRotationMatrix(glm::vec3(0.f, -1.f, 0.f), camForward, camRotationMatrix);
-//
-//	if (glm::length(m_aimDirection) > 0.2f)
-//	{
-//		glm::vec3 normalizedAimDirection = glm::normalize(m_aimDirection);
-//		glm::vec4 aimDirection4(normalizedAimDirection, 0.f);
-//		glm::vec3 worldAimDirection = camRotationMatrix * aimDirection4;
-//		return worldAimDirection;
-//	}
-//	else if (glm::length(m_mouseAimDirection) > 0.2f)
-//	{
-//		glm::vec3 normalizedAimDirection = glm::normalize(m_mouseAimDirection);
-//		return normalizedAimDirection;
-//	}
-//	else
-//	{
-//		return camForward;
-//	}
-//}
-
-
-glm::vec3 USimmableUpdateComponent::buildAimDirection()
-{
-	if (glm::length(m_aimDirection) > 0.2f)
-	{
-		return getInputDirectionInCameraSpace(m_camForward, m_aimDirection);
-	}
-	else if (glm::length(m_mouseAimDirection) > 0.2f)
-	{
-		return glm::normalize(m_mouseAimDirection);
-	}
-	else
-	{
-		glm::vec3 camForward = m_camForward;
-		camForward.z = 0.f;
-		camForward = glm::normalize(camForward);
-		return camForward;
-	}
-}
-
-
-glm::vec3 USimmableUpdateComponent::getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection)
-{
-	glm::vec3 camForwardNormalized = camForward;
-	camForwardNormalized.z = 0.f;
-	camForwardNormalized = glm::normalize(camForwardNormalized);
-
-	glm::mat4 camRotationMatrix;
-	dMathUtil::getRotationMatrix(glm::vec3(0.f, -1.f, 0.f), camForwardNormalized, camRotationMatrix);
-
-	glm::vec3 normalizedDirection = glm::normalize(inputDirection);
-	glm::vec4 direction4(normalizedDirection, 0.f);
-	glm::vec3 worldDirection = camRotationMatrix * direction4;
-
-	return worldDirection;
-}
-
-glm::vec3 USimmableUpdateComponent::getInputDirectionInAimSpace(const glm::vec3& aimDirection, const glm::vec3& inputDirection)
-{
-	glm::vec3 aimDirectionNormalized = aimDirection;
-	aimDirectionNormalized.z = 0.f;
-	aimDirectionNormalized = glm::normalize(aimDirectionNormalized);
-
-	glm::mat4 aimRotationMatrix;
-	dMathUtil::getRotationMatrix(glm::vec3(0.f, -1.f, 0.f), aimDirectionNormalized, aimRotationMatrix);
-
-	glm::vec3 normalizedDirection = glm::normalize(inputDirection);
-	glm::vec4 direction4(normalizedDirection, 0.f);
-	glm::vec3 worldDirection = aimRotationMatrix * direction4;
-
-	return worldDirection;
-}
-
-
 void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -521,13 +397,9 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 	SimulatableBrawler& simulatable = storage.get<SimulatableBrawler>((unsigned int)GetUniqueID());
 
 	{
-		const glm::vec3 aimDirection = buildAimDirection();
-		const glm::vec3 moveDirectionWorld = [this, &aimDirection]() {
-			if (DAttackMovementCVars::movementAndAimMode.GetValueOnAnyThread() == 1)
-				return getInputDirectionInAimSpace(aimDirection, glm::vec3(m_moveDirection, 0.0f));
-			else
-				return getInputDirectionInCameraSpace(m_camForward, glm::vec3(m_moveDirection, 0.0f));
-			}();
+		const glm::vec3 aimDirection = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildAimDirection() : glm::vec3(1.f, 0.f, 0.f);
+		const glm::vec2 moveStick = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->getMoveStick() : glm::vec2(0.f);
+		const glm::vec3 moveDirectionWorld = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildMoveDirectionWorld() : glm::vec3(0.f, 1.f, 0.f);
 
 		LoggingFunctorUImpl loggingFunctor(DAttackRadialVisualizationCVars::loggingEnabled);
 		DAttackRendererFunctorUImpl rendererFunctorImpl(GetWorld());
@@ -536,7 +408,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		const simulatableBrawler::State* attackSimState = &(attackSimAllState.getState());
 
 		glm::vec3 tmpAimInput = glm::vec3(1.f, 0.f, 0.f);
-		if (m_inputComponent != nullptr)
+		if (m_ownerInputCollection != nullptr && m_ownerInputCollection->hasInputComponent())
 			tmpAimInput = aimDirection;
 
 		{
@@ -575,13 +447,13 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 		}
 
-		if (m_inputComponent != nullptr)
+		if (m_ownerInputCollection != nullptr && m_ownerInputCollection->hasInputComponent())
 		{
 			dAttackAimVisualization::Input aimInput(DeltaTime,
 				aimDirection,
 				rendererFunctorImpl,
 				loggingFunctor,
-				m_moveDirection,
+				moveStick,
 				moveDirectionWorld);
 
 			switch (dAttackMachineSimulation::MovementAndAimModeTest)

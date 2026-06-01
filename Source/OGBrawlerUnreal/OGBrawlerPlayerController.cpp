@@ -6,9 +6,27 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
+#include "Camera/PlayerCameraManager.h"
 #include "EngineUtils.h"
 #include "OGBrawlerUECharacter.h"
+#include "OGBrawlerPlayerCameraManager.h"
 #include "SharedIsometricCameraActor.h"
+
+AOGBrawlerPlayerController::AOGBrawlerPlayerController()
+{
+    // Layer 1 — disable engine's "auto-fall-back to suggested pawn as view
+    // target" path. APlayerController::AutoManageActiveCameraTarget gates on
+    // this flag; false makes it a no-op, which kills Clobber #1 identified in
+    // impl_notes_phase-d_task-9.md (SetPawn / APawn::PossessedBy invoking
+    // AutoManage → PCM->SetViewTarget(pawn, blend=0)). Our refreshViewTarget
+    // covers the work AutoManage would have done.
+    bAutoManageActiveCameraTarget = false;
+
+    // Layer 2 enabler — install our PCM subclass so refreshViewTarget can
+    // drive its setSuppressPawnFallback() chokepoint to drop Clobber #2
+    // (AcknowledgePossession's PCM->SetViewTarget(P, blend=0)).
+    PlayerCameraManagerClass = AOGBrawlerPlayerCameraManager::StaticClass();
+}
 
 void AOGBrawlerPlayerController::JoinLocalPlayer()
 {
@@ -25,9 +43,8 @@ void AOGBrawlerPlayerController::JoinLocalPlayer()
         viewport->UpdateActiveSplitscreenType();
     }
 
-    // Fan out refreshViewTarget to all local PCs on this client — LP0's PC
-    // does not natively fire OnPossess when LP1 joins, so it needs an external
-    // trigger to re-evaluate its view-target policy.
+    // Fan out refreshViewTarget to all local PCs on this client so each PC
+    // re-evaluates its policy now that Num() has changed.
     if (UGameInstance* gi = GetGameInstance())
     {
         for (ULocalPlayer* lp : gi->GetLocalPlayers())
@@ -60,8 +77,7 @@ void AOGBrawlerPlayerController::LeaveLocalPlayer()
     UGameplayStatics::RemovePlayer(this, /*bDestroyPawn=*/true);
 
     // After the leaving LP's pawn is destroyed, fan out refreshViewTarget to
-    // remaining local PCs so LP0 switches back to per-character cam when
-    // Num() drops to 1.
+    // remaining local PCs so each one re-evaluates policy with the new Num().
     if (UGameInstance* gi = GetGameInstance())
     {
         for (ULocalPlayer* remainingLp : gi->GetLocalPlayers())
@@ -135,12 +151,11 @@ void AOGBrawlerPlayerController::fanOutRefreshToSiblings()
     }
 }
 
-void AOGBrawlerPlayerController::refreshViewTarget()
+AActor* AOGBrawlerPlayerController::computeDesiredViewTarget()
 {
-    if (!IsLocalController()) return;
-
+    if (!IsLocalController()) return nullptr;
     UWorld* world = GetWorld();
-    if (world == nullptr) return;
+    if (world == nullptr) return nullptr;
 
     TArray<AOGBrawlerUECharacter*> localBrawlers;
     for (TActorIterator<AOGBrawlerUECharacter> it(world); it; ++it)
@@ -150,20 +165,34 @@ void AOGBrawlerPlayerController::refreshViewTarget()
     }
 
     if (localBrawlers.Num() == 0)
-    {
-        // No local brawler yet — OnPossess / OnRep_Pawn will refire this. Never SetViewTarget(nullptr).
-        return;
-    }
-
+        return nullptr;
     if (localBrawlers.Num() == 1)
-    {
-        SetViewTargetWithBlend(localBrawlers[0], m_viewTargetBlendSeconds);
-        return;
-    }
+        return localBrawlers[0];
 
     ASharedIsometricCameraActor* cam = findOrSpawnSharedCamera();
-    cam->setOwningWorld(world);
-    SetViewTargetWithBlend(cam, m_viewTargetBlendSeconds);
+    if (cam != nullptr)
+        cam->setOwningWorld(world);
+    return cam;
+}
+
+void AOGBrawlerPlayerController::refreshViewTarget()
+{
+    AActor* desired = computeDesiredViewTarget();
+    if (desired == nullptr)
+        return; // No local brawler yet — lifecycle hook will refire.
+
+    // Layer 2 control: sync the PCM's pawn-fallback filter with the policy.
+    // - desired == GetPawn() (solo mode): suppress=false. Engine fallback paths
+    //   align with our policy; let them through unmolested.
+    // - desired != GetPawn() (iso-cam mode): suppress=true. Engine attempts to
+    //   reassert VT=pawn at blend=0 (AcknowledgePossession's pattern) are
+    //   dropped at the PCM API boundary.
+    if (auto* pcm = Cast<AOGBrawlerPlayerCameraManager>(PlayerCameraManager))
+    {
+        pcm->setSuppressPawnFallback(desired != GetPawn());
+    }
+
+    SetViewTargetWithBlend(desired, m_viewTargetBlendSeconds);
 }
 
 ASharedIsometricCameraActor* AOGBrawlerPlayerController::findOrSpawnSharedCamera()

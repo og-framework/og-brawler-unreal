@@ -35,14 +35,7 @@ class UInputAction;
 class UEnhancedInputComponent;
 class USimmableUpdateComponent;
 class ChaosTickMapper;
-
-namespace DAttackMovementCVars
-{
-	//1 aim relative movement
-	//2 movement relative strike
-	//3 movementRelativeStrikeJoyAimRelativeMoveMouse
-	extern TAutoConsoleVariable<int32> movementAndAimMode;
-}
+class UOGBrawlerInputCollectionComponent;
 
 UCLASS(ClassGroup = DPhysics, BlueprintType, Blueprintable, EditInlineNew, meta = (BlueprintSpawnableComponent))
 class USimmableUpdateComponent : public UActorComponent
@@ -62,16 +55,8 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	//Input
 	void setAttackAxisBody(FBodyInstance* attackAxisBody) { m_attackAxisBody = attackAxisBody; }
 	void setAttackAxisBody(FBodyInstanceAsyncPhysicsTickHandle attackAxisPhysicsHandle) { m_attackAxisPhysicshandle = attackAxisPhysicsHandle; }
-	void setInputComponent(UEnhancedInputComponent* inputComponent, const InputMappingUETranslator& translator);
-	void setCameraForward(glm::vec3 cameraForward) { m_camForward = cameraForward; }
-	void setMouseAimDirection(glm::vec3 mouseAimDirection) { m_mouseAimDirection = mouseAimDirection; }
-
-	glm::vec3 buildAimDirection();
-	static glm::vec3 getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection);
-	static glm::vec3 getInputDirectionInAimSpace(const glm::vec3& aimDirection, const glm::vec3& inputDirection);
 
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
@@ -151,21 +136,7 @@ private:
 	UFUNCTION()
 	void OnRep_CorrectionInput();
 
-	//Input
-	UEnhancedInputComponent* m_inputComponent;
-	glm::vec3 m_aimDirection;
-	bool m_leftAttackInput;
-	bool m_rightAttachInput;
-	glm::vec2 m_moveDirection;
-
-
-	void setAimInput(const FInputActionValue& Value) { FVector2D AimAxisVector = Value.Get<FVector2D>(); m_aimDirection.x = AimAxisVector.X; m_aimDirection.y = AimAxisVector.Y; m_aimDirection.z = 0.f; }
-	void setLeftAttackInput(const FInputActionValue& Value) { m_leftAttackInput = Value.Get<bool>(); }
-	void setRightAttackInput(const FInputActionValue& Value) { m_rightAttachInput = Value.Get<bool>(); }
-	void setMoveInput(const FInputActionValue& Value) { FVector2D valueVector = Value.Get<FVector2D>(); m_moveDirection.x = valueVector.X; m_moveDirection.y = valueVector.Y*(-1.f); }
-
-	glm::vec3 m_camForward;
-	glm::vec3 m_mouseAimDirection;
+	UOGBrawlerInputCollectionComponent* m_ownerInputCollection = nullptr;
 
 	//Physics
 	FBodyInstance* m_attackAxisBody;

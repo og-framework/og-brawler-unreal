@@ -14,6 +14,7 @@
 #include "DVolume/DVolumeAsset.h"
 #include "OGBrawlerUnreal/DShapeUImplementation.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
 #include "OGBrawlerUnreal/DAttackCircleUImplementation.h"
 #include "OGBrawlerUnreal/HumanoidMeshBuilder.h"
 #include "Materials/Material.h"
@@ -21,6 +22,7 @@
 #include "UObject/ConstructorHelpers.h"
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
+#include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
 #include "glm/mat4x4.hpp"
 #include "glm/ext/matrix_transform.hpp"
@@ -125,6 +127,7 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	m_cameraAxis->SetEnableGravity(false);
 
 	SimmableUpdateComponent = CreateDefaultSubobject<USimmableUpdateComponent>(TEXT("USimmableUpdateComponent"));
+	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
 	OnCalculateCustomPhysics.BindUObject(this, &AOGBrawlerUECharacter::CustomPhysics);
 
@@ -211,7 +214,7 @@ void AOGBrawlerUECharacter::BeginPlay()
 	// deferred until after possession). For mid-game-spawned pawns (LP1+),
 	// PossessedBy and OnRep_Controller cover the cases this site misses;
 	// SetupPlayerInputComponent re-adds after the translator is initialized.
-	addInputMappingContextForController(Controller);
+	InputCollection->addInputMappingContextForController(Controller);
 }
 
 void AOGBrawlerUECharacter::PossessedBy(AController* NewController)
@@ -221,7 +224,7 @@ void AOGBrawlerUECharacter::PossessedBy(AController* NewController)
 	// Server-side hook for mid-game-spawned pawns: fires after Controller is
 	// wired, which BeginPlay's IMC-add misses because BeginPlay can run before
 	// Possess on the server.
-	addInputMappingContextForController(NewController);
+	InputCollection->addInputMappingContextForController(NewController);
 }
 
 void AOGBrawlerUECharacter::OnRep_Controller()
@@ -231,17 +234,7 @@ void AOGBrawlerUECharacter::OnRep_Controller()
 	// Client-side mirror: in PIE-as-client / dedicated-server-client setups
 	// PossessedBy fires only on the server. On the client, the Controller
 	// pointer replicates in and OnRep_Controller fires here.
-	addInputMappingContextForController(Controller);
-}
-
-void AOGBrawlerUECharacter::addInputMappingContextForController(AController* InController)
-{
-	APlayerController* pc = Cast<APlayerController>(InController);
-	if (pc == nullptr) return;
-	UEnhancedInputLocalPlayerSubsystem* subsystem =
-		ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(pc->GetLocalPlayer());
-	if (subsystem == nullptr) return;
-	m_inputTranslator.addToSubsystem(subsystem, 0);
+	InputCollection->addInputMappingContextForController(Controller);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -250,7 +243,7 @@ void AOGBrawlerUECharacter::addInputMappingContextForController(AController* InC
 void AOGBrawlerUECharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	// Initialize translator here — SetupPlayerInputComponent runs before BeginPlay (during possession).
-	m_inputTranslator.initialize(this, dInput::gameMapping::buildDefaultContext());
+	InputCollection->initializeTranslator();
 
 	// CRITICAL: for client-side mid-game-spawned pawns (LP1+ via CreatePlayer),
 	// the IMC-add calls in OnRep_Controller / PossessedBy / BeginPlay all fire
@@ -259,31 +252,18 @@ void AOGBrawlerUECharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	// calls are silent no-ops because m_inputTranslator's mapping context is
 	// still null. We re-add here so the joining LP's Enhanced Input subsystem
 	// actually receives the IMC and can match incoming gamepad events.
-	addInputMappingContextForController(Controller);
+	InputCollection->addInputMappingContextForController(Controller);
 
 	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
-		SimmableUpdateComponent->setInputComponent(EnhancedInputComponent, m_inputTranslator);
+		InputCollection->setupBindings(EnhancedInputComponent);
 		m_inputComponent = EnhancedInputComponent;
-		// Jumping
-		UInputAction* JumpAction = m_inputTranslator.getAction(dInput::gameMapping::Jump);
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 
-		// Moving
-		UInputAction* MoveAction = m_inputTranslator.getAction(dInput::gameMapping::Move);
+		// CMC Move binding stays on the character — AOGBrawlerUECharacter::Move feeds
+		// AddMovementInput for the legacy CharacterMovementComponent path (sim path is
+		// handled by InputCollection::onMove). Two consumers, one action.
+		UInputAction* MoveAction = InputCollection->getTranslator().getAction(dInput::gameMapping::Move);
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AOGBrawlerUECharacter::Move);
-
-		// Looking
-		UInputAction* LookAction = m_inputTranslator.getAction(dInput::gameMapping::Look);
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AOGBrawlerUECharacter::Look);
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::None, this, &AOGBrawlerUECharacter::Look);
-		UInputAction* BlockLookAction = m_inputTranslator.getAction(dInput::gameMapping::BlockLook);
-		EnhancedInputComponent->BindAction(BlockLookAction, ETriggerEvent::Triggered, this, &AOGBrawlerUECharacter::BlockLook);
-		EnhancedInputComponent->BindAction(BlockLookAction, ETriggerEvent::Completed, this, &AOGBrawlerUECharacter::BlockLook);
-
-		UInputAction* AimAction = m_inputTranslator.getAction(dInput::gameMapping::Aim);
-		EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Triggered, this, &AOGBrawlerUECharacter::setAimInput);
 	}
 	else
 	{
@@ -304,61 +284,21 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	const FVector fCurrentCamForward = [this]() -> FVector {
-		if (const APlayerController* pc = Cast<APlayerController>(Controller))
-			if (pc->PlayerCameraManager != nullptr)
-				return pc->PlayerCameraManager->GetCameraRotation().Vector();
-		// Fallback for the brief window before possession / PCM ready, and for
-		// simulated proxies of remote players (no Controller). Matches pre-task
-		// behaviour exactly so non-locally-controlled paths are unchanged.
-		return FollowCamera->GetForwardVector();
-	}();
-	SimmableUpdateComponent->setCameraForward(uglm::toGLMVec3(fCurrentCamForward));
+	InputCollection->updateGameThreadCache();
 
-	if (APlayerController* PlayerController = Cast<APlayerController>(Controller))
-	{
-		if (m_blockLook)
-		{
-			PlayerController->SetShowMouseCursor(false);
-			SimmableUpdateComponent->setMouseAimDirection(glm::vec3(0.f, 0.f, 0.f));
-		}
-		else
-		{
-			PlayerController->SetShowMouseCursor(true);
-
-			PlayerController->GetMousePosition(m_mouseAxis.x, m_mouseAxis.y);
-			FVector worldLocation;
-			FVector worldDirection;
-			PlayerController->DeprojectMousePositionToWorld(worldLocation, worldDirection);
-
-			//line intersection with plane
-			const FVector planeNormal = FVector(0.f, 0.f, 1.f);
-			const FVector planePoint = GetCapsuleComponent()->GetComponentTransform().GetTranslation();
-			const FVector linePoint = worldLocation;
-			const FVector lineDirection = worldDirection;
-			const FVector planePointToLinePoint = linePoint - planePoint;
-			const float dotProduct = FVector::DotProduct(planeNormal, lineDirection);
-			const float distance = FVector::DotProduct(planeNormal, planePointToLinePoint) / dotProduct;
-			const FVector intersectionPoint = linePoint - distance * lineDirection;
-
-			SimmableUpdateComponent->setMouseAimDirection(glm::normalize(uglm::toGLMVec3(intersectionPoint - planePoint)));
-		}
-	}
-
-	const glm::vec3 mouseAxis= glm::normalize(glm::vec3(m_mouseAxis.x, m_mouseAxis.y, 0.f));
-	const glm::vec3 defaultForward(1.f, 0.f, 0.f);
+	const glm::vec2 lookStick = InputCollection->consumeLookStick();
 
 	DPIDSettings settings(0.03f, 0.01f, 0.01f);
-	dAttackCameraBehaviour::integrate(DeltaSeconds, DAttackCameraInput{ m_rStickAxis, m_mouseAxis, m_blockLook, 0.8f, settings }, m_cameraState);
+	const glm::vec3 aimStick3 = glm::vec3(InputCollection->getAimStick(), 0.f);
+	dAttackCameraBehaviour::integrate(DeltaSeconds, DAttackCameraInput{ aimStick3, lookStick, InputCollection->getBlockLook(), 0.8f, settings }, m_cameraState);
 	CameraBoom->SetRelativeRotation(uglm::toFRotator(m_cameraState.getCameraBoomTransform()));
 	CameraBoom->TargetArmLength = m_cameraState.getCameraBoomLength();
-	m_mouseAxis = glm::vec2(0.f, 0.f);
 
 	{ // rotate the character mesh
-		glm::vec3 worldAimDirection = SimmableUpdateComponent->buildAimDirection();
+		glm::vec3 worldAimDirection = InputCollection->buildAimDirection();
 
 		glm::vec3 tmpAimInput = glm::vec3(1.f, 0.f, 0.f);
-		if (m_inputComponent != nullptr)
+		if (InputCollection->hasInputComponent())
 			tmpAimInput = worldAimDirection;
 
 		glm::mat4 aimRotationMatrix2;
@@ -373,7 +313,7 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 		HumanoidMesh->SetWorldRotation(uglm::toFtransform(humanoidAimRotationMatrix).GetRotation());
 	}
 
-	if(m_inputComponent == nullptr)
+	if(!InputCollection->hasInputComponent())
 		DrawDebugSphere(GetWorld(), GetMesh()->GetComponentTransform().GetTranslation() + FVector(0.f, 0.f, 100.f), 10, 10, FColor::Green);
 
 }
@@ -385,9 +325,9 @@ void AOGBrawlerUECharacter::Move(const FInputActionValue& Value)
 
 	if (Controller != nullptr)
 	{
-		if(DAttackMovementCVars::movementAndAimMode.GetValueOnAnyThread() == 1)
+		if(dAttackMachineSimulation::MovementAndAimModeTest == 1)
 		{
-			glm::vec3 worldAimDirection = SimmableUpdateComponent->buildAimDirection();
+			glm::vec3 worldAimDirection = InputCollection->buildAimDirection();
 			glm::mat4 aimRotationMatrix2;
 			const glm::vec3 defaultLeft(0.f, 1.f, 0.f);
 			dMathUtil::getRotationMatrix(defaultLeft, worldAimDirection, aimRotationMatrix2);
@@ -409,24 +349,8 @@ void AOGBrawlerUECharacter::Move(const FInputActionValue& Value)
 		}
 		else
 		{
-			// Use the active view-target camera's yaw via PlayerCameraManager so the
-			// CMC path stays camera-relative under both the per-character follow cam
-			// AND the shared iso cam. CameraBoom is per-character (its yaw is driven
-			// by DAttackCamera + right stick) and diverges from the iso cam's fixed
-			// yaw, so using it directly would produce a different move direction than
-			// the sim's moveDirectionWorld (which already uses PCM via setCameraForward).
-			// Mirrors the same redirect pattern Task 5 applied to the setCameraForward
-			// feed in Tick. Fallback to CameraBoom for the brief pre-possession window
-			// and for simulated proxies where Controller / PCM aren't local.
-			FRotator Rotation = CameraBoom->GetRelativeRotation();
-			if (const APlayerController* pc = Cast<APlayerController>(Controller))
-			{
-				if (pc->PlayerCameraManager != nullptr)
-				{
-					Rotation = pc->PlayerCameraManager->GetCameraRotation();
-				}
-			}
-			const FRotator YawRotation(0, Rotation.Yaw, 0);
+			const FVector forward = uglm::toFVector(InputCollection->resolveCameraForward());
+			const FRotator YawRotation(0, forward.Rotation().Yaw, 0);
 
 			// get forward vector
 			const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
