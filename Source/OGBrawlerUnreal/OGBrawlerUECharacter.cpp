@@ -38,25 +38,6 @@
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
-//namespace DAttackMovementCVars
-//{
-//	int movementAndAimMode = 0;
-//	//1 aim relative movement
-//	//2 movement relative strike
-//	//3 movementRelativeStrikeJoyAimRelativeMoveMouse
-//	static FAutoConsoleVariableRef movementAndAimModeCVar(
-//		TEXT("DAttackMovementCVars.movementAndAimMode"),
-//		movementAndAimMode,
-//		TEXT("test)"),
-//		ECVF_Default);
-//
-//	bool aimRelativeMovement = false;
-//	static FAutoConsoleVariableRef aimRelativeMovementCVar(
-//		TEXT("DAttackMovementCVars.aimRelativeMovement"),
-//		aimRelativeMovement,
-//		TEXT("test)"),
-//		ECVF_Default);
-//}
 //////////////////////////////////////////////////////////////////////////
 // AOGBrawlerUECharacter
 
@@ -97,7 +78,7 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	// instead of recompiling to adjust them
 	GetCharacterMovement()->JumpZVelocity = 700.f;
 	GetCharacterMovement()->AirControl = 0.35f;
-	GetCharacterMovement()->MaxWalkSpeed = 200.f;
+	GetCharacterMovement()->MaxWalkSpeed = 100.f; // bootstrap; Tick() resyncs from g_moveSpeed.
 	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
 	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
@@ -286,6 +267,9 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 
 	InputCollection->updateGameThreadCache();
 
+	// Sync MaxWalkSpeed from the tweakable each frame so OGBrawler.MoveSpeed updates live.
+	GetCharacterMovement()->MaxWalkSpeed = dAttackMachineSimulation::g_moveSpeed.load();
+
 	const glm::vec2 lookStick = InputCollection->consumeLookStick();
 
 	DPIDSettings settings(0.03f, 0.01f, 0.01f);
@@ -320,50 +304,52 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 
 void AOGBrawlerUECharacter::Move(const FInputActionValue& Value)
 {
-	// input is a Vector2D
-	FVector2D MovementVector = Value.Get<FVector2D>();
+	if (Controller == nullptr)
+		return;
 
-	if (Controller != nullptr)
-	{
-		if(dAttackMachineSimulation::MovementAndAimModeTest == 1)
-		{
-			glm::vec3 worldAimDirection = InputCollection->buildAimDirection();
-			glm::mat4 aimRotationMatrix2;
-			const glm::vec3 defaultLeft(0.f, 1.f, 0.f);
-			dMathUtil::getRotationMatrix(defaultLeft, worldAimDirection, aimRotationMatrix2);
-			FTransform fAimRotationMatrix = uglm::toFtransform(aimRotationMatrix2);
-			
-			const FRotator Rotation = fAimRotationMatrix.Rotator();
-			const FRotator YawRotation(0, Rotation.Yaw, 0);
+	// HoldGuard (left trigger axis / Left Shift) freezes CMC movement so the character roots
+	// in place while in guard stance. The sim still sees the unchanged moveStick +
+	// moveDirectionWorld because those flow via UOGBrawlerInputCollectionComponent::
+	// buildPlayerInput() on the physics tick — that path does not consult getHoldGuard().
+	// Net result: visible motion stops but the attack picker (integrate3) keeps reading
+	// the player's intended direction.
+	if (InputCollection->getHoldGuard())
+		return;
 
-			// get forward vector
-			const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	// Stick magnitude carries analog speed: buildMoveDirectionWorld() returns a unit
+	// world direction (internal normalize), so the magnitude must be passed as the
+	// AddMovementInput scalar — otherwise any deflection produces full-speed motion.
+	// Deadzone-gate before computing the direction: buildMoveDirectionWorld itself
+	// returns zero below the deadzone, but exiting early here skips the work and avoids
+	// feeding a zero direction to AddMovementInput.
+	const glm::vec2 stick = InputCollection->getMoveStick();
+	const float stickMagnitude = glm::length(stick);
+	const float moveDeadzone = dAttackMachineSimulation::g_moveStickDeadzone.load();
+	if (stickMagnitude < moveDeadzone)
+		return;
 
-			// get right vector 
-			const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+	glm::vec3 worldDir = InputCollection->buildMoveDirectionWorld();
+	worldDir.z = 0.f;
 
+	// TEMPORARILY DISABLED: freeze CMC movement when the player's intended move direction
+	// is sharply away from where they're aiming (XY-projected angle ≥ 3π/4 ≈ 135°). Acts
+	// like the HoldGuard freeze above — the sim's PlayerInput still receives the
+	// unchanged moveDirectionWorld via buildPlayerInput() on the physics tick, so the
+	// attack picker continues to read the player's intended direction.
+	//const glm::vec3 aimDir = InputCollection->buildAimDirection();
+	//const glm::vec3 aimDirXY(aimDir.x, aimDir.y, 0.f);
+	//const float aimLenXY  = glm::length(aimDirXY);
+	//const float moveLenXY = glm::length(worldDir);
+	//if (aimLenXY > KINDA_SMALL_NUMBER && moveLenXY > KINDA_SMALL_NUMBER)
+	//{
+	//	const float dotXY = glm::clamp(
+	//		glm::dot(aimDirXY / aimLenXY, worldDir / moveLenXY), -1.f, 1.f);
+	//	const float angle = glm::acos(dotXY);
+	//	if (angle >= 3.f * glm::pi<float>() / 4.f)
+	//		return;
+	//}
 
-			// add movement 
-			AddMovementInput(ForwardDirection, -MovementVector.X);
-			AddMovementInput(RightDirection, MovementVector.Y);
-		}
-		else
-		{
-			const FVector forward = uglm::toFVector(InputCollection->resolveCameraForward());
-			const FRotator YawRotation(0, forward.Rotation().Yaw, 0);
-
-			// get forward vector
-			const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-
-			// get right vector
-			const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-			// add movement
-			AddMovementInput(ForwardDirection, MovementVector.Y);
-			AddMovementInput(RightDirection, MovementVector.X);
-		}
-
-	}
+	AddMovementInput(uglm::toFVector(worldDir), FMath::Min(stickMagnitude, 1.f));
 }
 
 void AOGBrawlerUECharacter::Attack(const FInputActionValue& Value)

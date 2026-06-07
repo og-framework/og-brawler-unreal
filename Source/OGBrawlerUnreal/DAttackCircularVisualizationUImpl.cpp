@@ -77,7 +77,20 @@ void DAttackRendererFunctorUImpl::drawTriangle(glm::vec3 one, glm::vec3 two, glm
 
 void DAttackRendererFunctorUImpl::drawPoint(glm::vec3 point) const
 {
-	DrawDebugPoint(m_world, uglm::toFVector(point), 50.f, FColor::Red, false, 0.5f, 0);
+	// Hit-indicator: 50 cm red sphere on the hit position. Previously this used
+	// DrawDebugPoint with size 50, which UE renders as a large red square at that size.
+	DrawDebugSphere(m_world, uglm::toFVector(point), 50.f, 16, FColor::Red, false, 0.5f, 0);
+}
+
+void DAttackRendererFunctorUImpl::drawSphere(glm::vec3 position, float radius, unsigned int colorId, float lifetime) const
+{
+	// Default lifetime = -1.f → single-frame draw (UE convention for "this frame only").
+	// The visualization is re-invoked every frame from SimmableUpdateComponent::TickComponent,
+	// so a multi-frame persistence on a moving sphere (e.g. the GuardFlinch indicator
+	// following the character through the flinch duration) leaves a trail. Callers that
+	// know the sphere position is static for the duration can pass a positive lifetime to
+	// keep the sphere visible after the underlying data has been cleared.
+	DrawDebugSphere(m_world, uglm::toFVector(position), radius, 16, idToColor(colorId), false, lifetime, 0);
 }
 
 void DAttackRendererFunctorUImpl::drawSolidBox(glm::vec3 position, const glm::mat3& rotation, glm::vec3 extents, unsigned int colorId) const

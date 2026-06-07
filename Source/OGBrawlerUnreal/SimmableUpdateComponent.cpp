@@ -129,40 +129,6 @@ namespace DAttackRadialVisualizationCVars
 		ECVF_Default);
 }
 
-//namespace DAttackMovementCVars
-//{
-//	int movementAndAimMode = 0;
-//	//1 aim relative movement
-//	//2 movement relative strike
-//	//3 movementRelativeStrikeJoyAimRelativeMoveMouse
-//	static FAutoConsoleVariableRef movementAndAimModeCVar(
-//		TEXT("DAttackMovementCVars.movementAndAimMode"),
-//		movementAndAimMode,
-//		TEXT("test)"),
-//		ECVF_Default);
-//
-//	bool aimRelativeMovement = false;
-//	static FAutoConsoleVariableRef aimRelativeMovementCVar(
-//		TEXT("DAttackMovementCVars.aimRelativeMovement"),
-//		aimRelativeMovement,
-//		TEXT("test)"),
-//		ECVF_Default);
-//
-//	bool movementRelativeStrike = true;
-//	static FAutoConsoleVariableRef movementRelativeStrikeCVar(
-//		TEXT("DAttackMovementCVars.movementRelativeStrike"),
-//		movementRelativeStrike,
-//		TEXT("test)"),
-//		ECVF_Default);
-//
-//	bool movementRelativeStrikeJoyAimRelativeMoveMouse = true;
-//	static FAutoConsoleVariableRef movementRelativeStrikeJoyAimRelativeMoveMouseCVar(
-//		TEXT("DAttackMovementCVars.movementRelativeStrike"),
-//		movementRelativeStrike,
-//		TEXT("test)"),
-//		ECVF_Default);
-//}
-
 //Component
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -417,16 +383,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				tmpAimInput,
 				rendererFunctorImpl,
 				loggingFunctor);
-			if (dAttackMachineSimulation::MovementAndAimModeTest == 2)
-			{
-				dAttackRadialVisualization::visualize2(attackCircularVisualizationInput,
-					(*attackSimState).get<dAttackRadialSimulation::State>(),
-					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
-					m_staticData->m_attackSimulationStaticData,
-					m_visualizationState);
-			}
-			else if (dAttackMachineSimulation::MovementAndAimModeTest == 1)
+			if (dAttackMachineSimulation::g_movementScheme == dAttackMachineSimulation::MovementScheme::AimRelative)
 			{
 				dAttackRadialVisualization::visualize2(attackCircularVisualizationInput,
 					(*attackSimState).get<dAttackRadialSimulation::State>(),
@@ -456,33 +413,12 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				moveStick,
 				moveDirectionWorld);
 
-			switch (dAttackMachineSimulation::MovementAndAimModeTest)
-			{
-				case 1:
-				dAttackAimVisualization::visualize(aimInput,
-					(*attackSimState).get<dAttackRadialSimulation::State>(),
-					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
-					m_staticData->m_attackSimulationStaticData,
-					m_attackAimVisualizationState.value());
-				break;
-				case 2:
-				dAttackAimVisualization::visualize(aimInput,
-					(*attackSimState).get<dAttackRadialSimulation::State>(),
-					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
-					m_staticData->m_attackSimulationStaticData,
-					m_attackAimVisualizationState.value());
-				break;
-			default:
-				dAttackAimVisualization::visualize(aimInput,
-					(*attackSimState).get<dAttackRadialSimulation::State>(),
-					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
-					m_staticData->m_attackSimulationStaticData,
-					m_attackAimVisualizationState.value());
-				break;
-			}
+			dAttackAimVisualization::visualize(aimInput,
+				(*attackSimState).get<dAttackRadialSimulation::State>(),
+				(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
+				attackSimAllState.getDerivedState().m_attackDerivedState,
+				m_staticData->m_attackSimulationStaticData,
+				m_attackAimVisualizationState.value());
 		}
 
 		{

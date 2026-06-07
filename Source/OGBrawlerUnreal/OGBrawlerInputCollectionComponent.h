@@ -53,21 +53,26 @@ public:
 	glm::vec3 buildAimDirection() const;
 	glm::vec3 buildMoveDirectionWorld() const;
 	static glm::vec3 getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection);
-	static glm::vec3 getInputDirectionInAimSpace(const glm::vec3& aimDirection, const glm::vec3& inputDirection);
 
 	// Builds the full sim-tick PlayerInput. Called from the inputProvider lambda on the physics thread.
 	simulatableBrawler::PlayerInput buildPlayerInput(const SimulationTimeStep& step, uint32 componentId) const;
 
-	// Cached raw input — single source of truth per value; no duplicates across owners.
-	// x = right, y = forward; Y is stored negated to match pre-refactor setMoveInput convention
-	// (stick up → positive world-forward after getInputDirectionInCameraSpace rotation).
-	const glm::vec2& getMoveStick() const { return m_moveStick; }
-	const glm::vec2& getAimStick() const { return m_aimStick; }
+	// Logical stick accessors. Both raw members end up with the same "stick-up = -Y in
+	// storage" convention but get there differently: onMove explicitly negates v.Y (left
+	// stick raw is +Y for stick-up); onAim stores raw (right stick raw is already -Y for
+	// stick-up per the IMC asset). With both members in the same storage convention, the
+	// swap is a straight pointer swap with no sign flips. When g_swapMoveAndAimSticks is
+	// true, getMoveStick() returns the raw aim stick and getAimStick() returns the raw
+	// move stick. All consumers (Move, buildMoveDirectionWorld, buildAimDirection,
+	// buildPlayerInput) must route through these accessors so the swap is observed uniformly.
+	glm::vec2 getMoveStick() const;
+	glm::vec2 getAimStick() const;
 	// Returns the current mouse delta and resets it to zero (consumed each frame by character Tick).
 	glm::vec2 consumeLookStick() { const glm::vec2 v = m_lookStick; m_lookStick = glm::vec2(0.f, 0.f); return v; }
 	bool getLeftAttack() const { return m_leftAttack; }
 	bool getRightAttack() const { return m_rightAttack; }
 	bool getBlockLook() const { return m_blockLook; }
+	bool getHoldGuard() const { return m_holdGuard; }
 	bool hasInputComponent() const { return m_inputComponent != nullptr; }
 
 private:
@@ -87,13 +92,26 @@ private:
 	bool m_leftAttack  = false;
 	bool m_rightAttack = false;
 	bool m_blockLook   = false;
+	bool m_holdGuard   = false;
+
+	// Source-of-move latch updated each onMove call. true ⇒ most recent non-zero move
+	// input came from the gamepad left stick; false ⇒ from WASD (or initial state).
+	// Used by buildAimDirection to gate the "move stick feeds aim" fallback so the rule
+	// only fires in the gamepad case, leaving mouse+kbd's mouse-aim behavior untouched.
+	bool m_lastMoveInputWasGamepad = false;
 
 	UEnhancedInputComponent* m_inputComponent = nullptr;
+
+	glm::vec3 buildMoveDirectionWorldFor(const glm::vec3& referenceForward) const;
 
 	void onMove(const FInputActionValue& Value);
 	void onAim(const FInputActionValue& Value);
 	void onLook(const FInputActionValue& Value);
 	void onBlockLook(const FInputActionValue& Value);
+	void onHoldGuard(const FInputActionValue& Value);
 	void onLeftAttack(const FInputActionValue& Value);
 	void onRightAttack(const FInputActionValue& Value);
+	void onSetSchemeCameraRelative(const FInputActionValue& Value);
+	void onSetSchemeAimRelative(const FInputActionValue& Value);
+	void onSetSchemeMoveRelativeAim(const FInputActionValue& Value);
 };

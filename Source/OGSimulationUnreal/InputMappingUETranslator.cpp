@@ -113,6 +113,18 @@ FKey InputMappingUETranslator::toUnrealKey(dInput::KeyId keyId)
 	case dInput::KeyId::Key_Z:          return EKeys::Z;
 	case dInput::KeyId::Key_Space:      return EKeys::SpaceBar;
 	case dInput::KeyId::Key_LeftShift:  return EKeys::LeftShift;
+	case dInput::KeyId::Key_LeftControl: return EKeys::LeftControl;
+	case dInput::KeyId::Key_LeftAlt:    return EKeys::LeftAlt;
+	case dInput::KeyId::Key_1: return EKeys::One;
+	case dInput::KeyId::Key_2: return EKeys::Two;
+	case dInput::KeyId::Key_3: return EKeys::Three;
+	case dInput::KeyId::Key_4: return EKeys::Four;
+	case dInput::KeyId::Key_5: return EKeys::Five;
+	case dInput::KeyId::Key_6: return EKeys::Six;
+	case dInput::KeyId::Key_7: return EKeys::Seven;
+	case dInput::KeyId::Key_8: return EKeys::Eight;
+	case dInput::KeyId::Key_9: return EKeys::Nine;
+	case dInput::KeyId::Key_0: return EKeys::Zero;
 
 	// Mouse
 	case dInput::KeyId::Mouse_X:        return EKeys::MouseX;
@@ -133,6 +145,8 @@ FKey InputMappingUETranslator::toUnrealKey(dInput::KeyId keyId)
 	case dInput::KeyId::Gamepad_RightTrigger:       return EKeys::Gamepad_RightTrigger;
 	case dInput::KeyId::Gamepad_LeftTriggerAxis:    return EKeys::Gamepad_LeftTriggerAxis;
 	case dInput::KeyId::Gamepad_RightTriggerAxis:   return EKeys::Gamepad_RightTriggerAxis;
+	case dInput::KeyId::Gamepad_LeftShoulder:       return EKeys::Gamepad_LeftShoulder;
+	case dInput::KeyId::Gamepad_RightShoulder:      return EKeys::Gamepad_RightShoulder;
 
 	default: return EKeys::Invalid;
 	}
