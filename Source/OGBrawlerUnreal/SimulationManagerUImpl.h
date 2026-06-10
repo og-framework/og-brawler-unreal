@@ -198,6 +198,9 @@ public:
     ChaosSpatialQueryAdapter& editQueryAdapter()       { return m_queryAdapter.value(); }
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
 
+    SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
+    const SimulationReconciliation<SimulatableBrawler>& editReconciliation() const { return m_reconciliation; }
+
 private:
     FSimulationManagerAsyncCallback* m_asyncCallback;
 

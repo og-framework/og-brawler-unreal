@@ -18,17 +18,35 @@ struct OGSIMULATIONUNREAL_API FSimulationStateSyncBuffer
 public:
 	GENERATED_BODY()
 
+	// Wire format budget. Must hold the largest composite the project replicates
+	// through this buffer (simulatableBrawler::State / PlayerInput).
+	//
+	// 2026-06-10: previously bumped to 1024 to fit brawlerProjectileSimulation's
+	// State+IC additions; that triggered ~7x MaxClientRate overrun on the
+	// 100Hz Reliable input RPC (see OGBrawlerNetworkModelResearch /
+	// research/spike_input_rpc_saturation.md). Reverted to 256 after un-wiring
+	// the projectile sub-sim from the brawler composite. Do NOT bump this
+	// without coordinating with the OGBrawlerNetworkModelResearch wire-format
+	// decisions (split buffer types vs custom NetSerialize vs unreliable
+	// transport).
+	static constexpr int32 kBufferBytes = 256;
+
 	FSimulationStateSyncBuffer()
 		: buffer( {0} )
 	{
-		buffer.SetNum(256);
+		buffer.SetNum(kBufferBytes);
 	}
 
 	template <typename T>
 	void writeToBuffer(uint32 ByteIndex, const T& Value)
 	{
-		if(ByteIndex + sizeof(T) > buffer.Num())
-			std::invalid_argument("writing out of bounds");
+		// Note: pre-fix bounds check was constructing std::invalid_argument
+		// without throwing — silent no-op that let the underlying TArray
+		// bounds-assert fire instead. checkf surfaces the overflow cleanly with
+		// the offending offset/size in the log.
+		checkf(ByteIndex + sizeof(T) <= static_cast<uint32>(buffer.Num()),
+			TEXT("FSimulationStateSyncBuffer write OOB: offset=%u size=%llu capacity=%d (raise kBufferBytes)"),
+			ByteIndex, static_cast<uint64>(sizeof(T)), buffer.Num());
 
 		// Copy the value into the buffer as raw bytes
 		const uint8* ValueAsBytes = reinterpret_cast<const uint8*>(&Value);
@@ -39,8 +57,9 @@ public:
 	template <typename T>
 	T readFromBuffer(uint32 ByteIndex) const
 	{
-		if (ByteIndex + sizeof(T) > buffer.Num())
-			std::invalid_argument("writing out of bounds");
+		checkf(ByteIndex + sizeof(T) <= static_cast<uint32>(buffer.Num()),
+			TEXT("FSimulationStateSyncBuffer read OOB: offset=%u size=%llu capacity=%d"),
+			ByteIndex, static_cast<uint64>(sizeof(T)), buffer.Num());
 
 		// Read the value from the buffer as raw bytes
 		T Value;

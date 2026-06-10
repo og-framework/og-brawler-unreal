@@ -6,6 +6,9 @@
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
+// BrawlerProjectileVisualization intentionally not included while the projectile
+// sub-sim is un-wired — see SimulatableBrawlerTypes.h.
+// #include "OGBrawler/BrawlerProjectileVisualization.h"
 #include "OGBrawler/DAttackAimVisualization.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
@@ -420,6 +423,10 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				m_staticData->m_attackSimulationStaticData,
 				m_attackAimVisualizationState.value());
 		}
+
+		// Projectile visualization intentionally not invoked while
+		// brawlerProjectileSimulation is un-wired from the brawler composite.
+		// See SimulatableBrawlerTypes.h.
 
 		{
 			dAttackTargetVisualizationTwo::Input attackTargetVisualizationInput(DeltaTime,

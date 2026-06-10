@@ -16,6 +16,9 @@
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
+// InputSequence/* + BrawlerProjectileSimulation intentionally not included while
+// the projectile sub-sim is un-wired from the brawler composite. See
+// SimulatableBrawlerTypes.h for context.
 
 UOGBrawlerInputCollectionComponent::UOGBrawlerInputCollectionComponent()
 {
@@ -320,7 +323,8 @@ void UOGBrawlerInputCollectionComponent::onRightAttack(const FInputActionValue& 
 	m_rightAttack = Value.Get<bool>();
 }
 
-simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(const SimulationTimeStep& step, uint32 componentId) const
+simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(
+    const SimulationTimeStep& step, uint32 componentId) const
 {
 	if (!hasInputComponent())
 		return simulatableBrawler::getZeroPlayerInput();
@@ -333,6 +337,7 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	UE_LOG(LogOGSimTick, Log,
 		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d"),
 		componentId, step.getTick(), leftAttack ? 1 : 0);
+
 	return simulatableBrawler::PlayerInput(
 		dAttackRadialSimulation::PlayerInput(aimDirection, leftAttack, rightAttack),
 		dAttackMachineSimulation::PlayerInput(aimDirection, leftAttack, rightAttack, moveStick, moveDirectionWorld),

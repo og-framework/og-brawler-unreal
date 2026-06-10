@@ -13,6 +13,9 @@
 #include "OGBrawler/DAttackMachineSimulation.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
+// BrawlerProjectileVisualization intentionally not included while the projectile
+// sub-sim is un-wired — see SimulatableBrawlerTypes.h.
+// #include "OGBrawler/BrawlerProjectileVisualization.h"
 #include "OGBrawler/DAttackTargetVisualization.h"
 #include "OGBrawler/DAttackTargetVisualizationTwo.h"
 #include "OGBrawler/DAttackAimVisualization.h"

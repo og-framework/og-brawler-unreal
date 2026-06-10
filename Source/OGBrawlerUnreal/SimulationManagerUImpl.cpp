@@ -14,6 +14,9 @@
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
 #include "OGBrawler/DAttackGuardSimulation.h"
+// BrawlerProjectileSimulation intentionally not included — sub-sim is un-wired
+// from the brawler composite. See SimulatableBrawlerTypes.h.
+// #include "OGBrawler/BrawlerProjectileSimulation.h"
 #include "OGBrawler/OGBrawlerLog.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGSimulationUnreal/ChaosPhysicsFactory.h"
@@ -94,6 +97,7 @@ namespace
 
 #undef EMIT_OG
 	}
+
 }
 
 #pragma optimize( "", off )
