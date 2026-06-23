@@ -55,6 +55,15 @@ That's the full loop.
 
 ## Build (on the dev PC, with UE source build at `C:\dev\UnrealEngine`)
 
+> **Wire-format note (post `og-netcode-v1-impl` Stage 1).** After Stage 1 of
+> `og-netcode-v1-impl` lands, all THREE archives (WinServer + WinClient + Android)
+> MUST be re-cooked from the **same git revision simultaneously**.
+> `playtest_winserver_cook.bat` / `playtest_winclient_cook.bat` /
+> `playtest_android_cook.bat` must run against the same SHA. A mixed pair
+> (one side pre-Stage-1, the other post-Stage-1) will refuse to interop loudly
+> per the wire-format version byte — see "Things that will not work" below and
+> `OGBrawlerNetworkModelResearch/arch/risks_and_plan.md` §5.2.
+
 ### Quick — wrapped scripts
 
 ```powershell
@@ -247,6 +256,18 @@ What does *not* work:
 ### Things that will *not* work
 - Mixing builds from different git revisions — silent disconnect or crash.
   Re-cook all three sides whenever assets or replicated code change.
+- Mixing pre-Stage-1 and post-Stage-1 builds (any pair where one side has the
+  `og-netcode-v1-impl` Stage 1 wire-format change and the other doesn't) —
+  clients refuse to connect with a build-mismatch error. The wire-format version
+  byte (`FInputRedundancyBundle::kWireFormatVersion`,
+  `FSimulationStateSyncBuffer::kWireFormatVersion`) is checked on the server's
+  `ServerReceiveRemoteMove` and the client's `OnRep_CorrectionState`. A mismatch
+  surfaces as a clear log error on the server and an on-screen
+  "Build mismatch — please get the latest archive" message on the client.
+  Unlike the generic revision-mismatch row above, this one is *explicitly
+  detected* — it fails loudly instead of silently. See
+  `OGBrawlerNetworkModelResearch/arch/risks_and_plan.md` §5.2 for the
+  design rationale.
 - Phone joining an Internet-routable host without port forwarding or a VPN.
   This setup is LAN-only by design.
 - Closing the server window without closing the clients first — clients will

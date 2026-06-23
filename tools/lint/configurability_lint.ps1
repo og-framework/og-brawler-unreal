@@ -119,6 +119,52 @@ $Blacklist = @(
         Pattern = '(?<![\w.>])hardResyncThresholdTicks\s*=\s*15\b'
         Allowed = @()
         Message = 'hardResyncThresholdTicks old default 15 must not reappear — current default is 21 (R-P1 / R-D3)'
+    },
+
+    # -----------------------------------------------------------------------
+    # Product-target session constants (og-netcode-v1-impl Phase 2a, Task 18).
+    #
+    # NOT TimeConfig fields — these live in the og-brawler core header
+    # SessionConstants.h (namespace og::brawler::session) and define the ratified
+    # player-count envelope (Tier 1 = 3, Tier 2 = 6, up to 3 LPs/client). Same
+    # "single source of truth" rule as the TimeConfig entries above: the magic
+    # 3/6 player-count literals must be read from SessionConstants.h, never
+    # re-declared in game/UE/test code. Member-access reads
+    # (og::brawler::session::maxPlayersPerServer) and qualified uses are auto-
+    # excluded by the (?<![\w.>]) lookbehind; only a non-member lvalue assigned
+    # the magic literal is flagged. CONTRACT: a future server-session gate that
+    # legitimately re-houses one of these values adds its file leaf to Allowed in
+    # the same change. A test fixture that exercises a literal cap adds itself too.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'maxPlayersPerServer'
+        Pattern = '(?<![\w.>])maxPlayersPerServer\s*=\s*3\b'
+        Allowed = @('SessionConstants.h')
+        Message = 'maxPlayersPerServer Tier 1 default (3) must live only in SessionConstants.h; read og::brawler::session::maxPlayersPerServer instead of re-declaring it (R-P1 / Phase 2a)'
+    },
+    @{
+        Field   = 'maxPlayersPerServerTier2'
+        Pattern = '(?<![\w.>])maxPlayersPerServerTier2\s*=\s*6\b'
+        Allowed = @('SessionConstants.h')
+        Message = 'maxPlayersPerServerTier2 Tier 2 stretch target (6) must live only in SessionConstants.h; read og::brawler::session::maxPlayersPerServerTier2 instead of re-declaring it (R-P1 / Phase 2a)'
+    },
+    @{
+        Field   = 'maxLocalPlayersPerClient'
+        Pattern = '(?<![\w.>])maxLocalPlayersPerClient\s*=\s*3\b'
+        Allowed = @('SessionConstants.h')
+        Message = 'maxLocalPlayersPerClient (3 LPs/client) must live only in SessionConstants.h; read og::brawler::session::maxLocalPlayersPerClient instead of re-declaring it (R-P1 / Phase 2a)'
+    },
+    @{
+        # Generic catch for hardcoded player-count caps that DON'T use the
+        # SessionConstants names above (e.g. player_count = 3, maxPlayers = 6).
+        # Overshoot is intentional per the Task 18 spec — any false positive is
+        # surfaced for manual review rather than silently passing. The name
+        # alternation does NOT match the SessionConstants fields (they have
+        # suffixes after 'maxPlayers'), so the source-of-truth header is not hit.
+        Field   = 'player-count literal (generic)'
+        Pattern = '(?<![\w.>])(player_count|playerCount|PlayerCount|maxPlayers|numPlayers|NumPlayers)\s*[=:]\s*[36]\b'
+        Allowed = @('SessionConstants.h')
+        Message = 'hardcoded player-count literal (3 = Tier 1, 6 = Tier 2) must read from og::brawler::session in SessionConstants.h, not a magic 3/6 (R-P1 / Phase 2a)'
     }
 )
 

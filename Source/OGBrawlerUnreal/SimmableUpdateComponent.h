@@ -30,6 +30,7 @@
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
+#include "OGSimulation/SimulationQueues.h"
 
 #include "SimmableUpdateComponent.generated.h"
 
@@ -64,8 +65,11 @@ public:
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
 	// --- PredictionSyncedBufferOwnerConcept ---
+	// Correction-STATE role stays FSimulationStateSyncBuffer; the input role
+	// (remote input + correction input) is now FSimulationInputSyncBuffer per the
+	// Task 8 buffer split. Identical template surface — no use-site logic changes.
 	using SyncedCorrectionBufferType  = FSimulationStateSyncBuffer;
-	using SyncedRemoteInputBufferType = FSimulationStateSyncBuffer;
+	using SyncedRemoteInputBufferType = FSimulationInputSyncBuffer;
 
 	void setOnCorrectionStateReceivedCallback(
 		std::function<void(const FSimulationStateSyncBuffer&)> fn)
@@ -79,7 +83,7 @@ public:
 	}
 
 	void setOnCorrectionInputReceivedCallback(
-		std::function<void(const FSimulationStateSyncBuffer&)> fn)
+		std::function<void(const FSimulationInputSyncBuffer&)> fn)
 	{
 		m_onCorrectionInputReceivedCallback = std::move(fn);
 	}
@@ -89,19 +93,26 @@ public:
 		m_onCorrectionInputReceivedCallback = nullptr;
 	}
 
-	FSimulationStateSyncBuffer* getClientToServerInputSyncedBuffer()
+	FSimulationInputSyncBuffer* getClientToServerInputSyncedBuffer()
 	{
 		return &m_clientToServerInputSyncedBuffer;
 	}
 
-	void sendLocalInputToAuthority(const FSimulationStateSyncBuffer& buffer)
-	{
-		ServerReceiveRemoteMove(buffer);
-	}
+	// Stage 1 (Task 9): builds an FInputRedundancyBundle from the most-recent
+	// `redundancyDepth` ticks still retained in `queue` and fires the unreliable
+	// ServerReceiveRemoteMove RPC. Bridges the UE-free SimulationNetSync send path
+	// (which hands us its core PendingInputQueue) to the UE wire type. Defined in
+	// the .cpp so the InputRedundancyBundleBuilder include stays out of this header.
+	void sendLocalInputToAuthority(
+		const PendingInputQueue<simulatableBrawler::PlayerInput>& queue,
+		uint32 currentTick,
+		uint32 redundancyDepth);
 
 	// --- AuthoritySyncedBufferOwnerConcept ---
+	// Stage 1 (Task 9): per-slot inbound callback. ServerReceiveRemoteMove unpacks
+	// the bundle and invokes this once per (capture_tick, input) slot.
 	void setOnRemoteMoveReceivedCallback(
-		std::function<void(const FSimulationStateSyncBuffer&)> fn)
+		std::function<void(uint32, const simulatableBrawler::PlayerInput&)> fn)
 	{
 		m_onRemoteMoveReceivedCallback = std::move(fn);
 	}
@@ -112,7 +123,7 @@ public:
 	}
 
 	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
-	FSimulationStateSyncBuffer& getSyncedCorrectionInputBuffer() { return m_replicatedInputSyncedBuffer; }
+	FSimulationInputSyncBuffer& getSyncedCorrectionInputBuffer() { return m_replicatedInputSyncedBuffer; }
 
 protected:
 	// To add mapping context
@@ -130,12 +141,27 @@ private:
 	UFUNCTION()
 	void OnRep_CorrectionState();
 
-	UFUNCTION(Server, Reliable)
-	void ServerReceiveRemoteMove(const FSimulationStateSyncBuffer& inputBuffer);
-	FSimulationStateSyncBuffer m_clientToServerInputSyncedBuffer;
+	// Stage 1 (Task 11) — wire-format compat fence. Set true the first time
+	// OnRep_CorrectionState observes a correction-state buffer whose wire-format
+	// version byte does not match FSimulationStateSyncBuffer::kWireFormatVersion
+	// (a pre/post-Stage-1 build mismatch). Once set, subsequent OnRep callbacks
+	// no-op so a mismatched peer cannot corrupt local state and the toast does not
+	// re-fire (the on-screen message uses a stable key so it never spams per tick).
+	bool m_wireFormatMismatchDetected = false;
+	// Stable AddOnScreenDebugMessage key for the build-mismatch toast so repeated
+	// calls replace rather than stack the message.
+	static constexpr uint64 kWireFormatMismatchToastKey = 0x4F47574DF0000001ull; // 'OGWM' + tag
+
+	// Stage 1 (Task 9): unreliable + redundancy input channel. Reliable -> Unreliable
+	// (no head-of-line blocking on input RPCs — the R-T1 streeting-saturation fix);
+	// payload FSimulationInputSyncBuffer -> FInputRedundancyBundle (the client re-sends
+	// the last `redundancyDepthTicks` ticks each frame so a dropped datagram self-heals).
+	UFUNCTION(Server, Unreliable)
+	void ServerReceiveRemoteMove(const FInputRedundancyBundle& bundle);
+	FSimulationInputSyncBuffer m_clientToServerInputSyncedBuffer;
 
 	UPROPERTY(ReplicatedUsing = OnRep_CorrectionInput)
-	FSimulationStateSyncBuffer m_replicatedInputSyncedBuffer;
+	FSimulationInputSyncBuffer m_replicatedInputSyncedBuffer;
 	UFUNCTION()
 	void OnRep_CorrectionInput();
 
@@ -159,8 +185,9 @@ private:
 	// Callbacks registered by SimulationNetSync at registerSimulatable time.
 	// Null until Task 7 wires the new path; OnRep_ handlers fall through to old logic when null.
 	std::function<void(const FSimulationStateSyncBuffer&)> m_onCorrectionStateReceivedCallback;
-	std::function<void(const FSimulationStateSyncBuffer&)> m_onCorrectionInputReceivedCallback;
-	std::function<void(const FSimulationStateSyncBuffer&)> m_onRemoteMoveReceivedCallback;
+	std::function<void(const FSimulationInputSyncBuffer&)> m_onCorrectionInputReceivedCallback;
+	// Per-slot (capture_tick, input) — invoked once per FInputRedundancyBundle slot (Task 9).
+	std::function<void(uint32, const simulatableBrawler::PlayerInput&)> m_onRemoteMoveReceivedCallback;
 
 };
 

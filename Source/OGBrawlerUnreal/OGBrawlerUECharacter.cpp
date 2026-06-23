@@ -113,8 +113,11 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	OnCalculateCustomPhysics.BindUObject(this, &AOGBrawlerUECharacter::CustomPhysics);
 
 	//
-	this->NetUpdateFrequency = 100.0f; // Higher = more updates per second
-	this->MinNetUpdateFrequency = 100.0f;
+	// Tracks the Chaos async-physics tick rate (60 Hz; Config/DefaultEngine.ini
+	// AsyncFixedTimeStepSize). Replicating faster than the sim produces new states
+	// just wastes bandwidth, so this moves in lockstep with the tick-rate flip (T15).
+	this->NetUpdateFrequency = 60.0f; // Higher = more updates per second
+	this->MinNetUpdateFrequency = 60.0f;
 
 	this->bAlwaysRelevant = true; // Always relevant for network updates
 

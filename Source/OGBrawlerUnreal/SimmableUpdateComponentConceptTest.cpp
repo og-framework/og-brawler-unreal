@@ -5,6 +5,7 @@
 #include "Misc/AutomationTest.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
+#include "OGSimulation/SimulationQueues.h"
 
 // ---------------------------------------------------------------------------
 // Inline concept definitions — mirrors SimulationNetSync.h exactly.
@@ -34,7 +35,9 @@ concept PredictionSyncedBufferOwnerConceptLocal =
     requires(OwnerT& owner,
              std::function<void(const typename OwnerT::SyncedCorrectionBufferType&)> corrFn,
              std::function<void(const typename OwnerT::SyncedRemoteInputBufferType&)> inputFn,
-             const typename OwnerT::SyncedRemoteInputBufferType& buffer)
+             const PendingInputQueue<InputT>& pendingQueue,
+             uint32 currentTick,
+             uint32 redundancyDepth)
     {
         typename OwnerT::SyncedCorrectionBufferType;
         typename OwnerT::SyncedRemoteInputBufferType;
@@ -45,13 +48,13 @@ concept PredictionSyncedBufferOwnerConceptLocal =
         { owner.clearOnCorrectionStateReceivedCallback() };
         { owner.clearOnCorrectionInputReceivedCallback() };
         { owner.getClientToServerInputSyncedBuffer() } -> std::same_as<typename OwnerT::SyncedRemoteInputBufferType*>;
-        { owner.sendLocalInputToAuthority(buffer) };
+        { owner.sendLocalInputToAuthority(pendingQueue, currentTick, redundancyDepth) };
     };
 
 template <typename OwnerT, typename StateT, typename InputT>
 concept AuthoritySyncedBufferOwnerConceptLocal =
     requires(OwnerT& owner,
-             std::function<void(const typename OwnerT::SyncedRemoteInputBufferType&)> fn)
+             std::function<void(uint32, const InputT&)> fn)
     {
         typename OwnerT::SyncedRemoteInputBufferType;
         requires CompositeSyncedBufferConceptLocal<typename OwnerT::SyncedRemoteInputBufferType, InputT>;

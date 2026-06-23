@@ -46,6 +46,7 @@
 #include "OGSimulation/SimulationTimeContext.h"
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGSimulationUnreal/InputRedundancyBundleBuilder.h"
 
 #include "glm/ext/matrix_transform.hpp"
 #include "glm/mat4x4.hpp"
@@ -53,6 +54,7 @@
 #include <variant>
 
 #include "Net/UnrealNetwork.h"
+#include "Engine/Engine.h"   // GEngine->AddOnScreenDebugMessage (Task 11 build-mismatch toast)
 
 
 
@@ -311,6 +313,35 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void USimmableUpdateComponent::OnRep_CorrectionState()
 {
+	// Stage 1 (Task 11) — wire-format compat fence (client side). Once a mismatch
+	// has been detected, no-op every subsequent OnRep so a mismatched peer cannot
+	// drive local correction logic.
+	if (m_wireFormatMismatchDetected)
+		return;
+
+	// Version byte detection: the buffer's NetSerialize captured the sender's
+	// wire-format version byte (byte 0 of the wire payload). If it disagrees with
+	// what this build expects, refuse to process and surface a loud build-mismatch
+	// error + one-time on-screen toast (risks_and_plan.md §5.2).
+	const uint8 expectedVersion = FSimulationStateSyncBuffer::kWireFormatVersion;
+	const uint8 wireVersion = m_simulationStateCorrectionSyncedBuffer.getReceivedWireFormatVersion();
+	if (wireVersion != expectedVersion)
+	{
+		UE_LOG(LogOGNet, Error,
+			TEXT("Wire-format mismatch on OnRep_CorrectionState: server version=%u, client expects=%u. Get matching builds from Saved/Archive/ — see PLAYTEST_PORTABLE_README.md."),
+			(unsigned int)wireVersion, (unsigned int)expectedVersion);
+
+		if (GEngine != nullptr)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				kWireFormatMismatchToastKey, /*TimeToDisplay*/ 15.f, FColor::Red,
+				TEXT("Build mismatch — please get the latest archive (see PLAYTEST_PORTABLE_README.md)"));
+		}
+
+		m_wireFormatMismatchDetected = true;
+		return;
+	}
+
 	{
 		simulatableBrawler::State peeked;
 		const uint32 tick = m_simulationStateCorrectionSyncedBuffer.readInto(peeked);
@@ -336,19 +367,57 @@ void USimmableUpdateComponent::OnRep_CorrectionInput()
 		m_onCorrectionInputReceivedCallback(m_replicatedInputSyncedBuffer);
 }
 
-void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FSimulationStateSyncBuffer& inputBuffer)
+void USimmableUpdateComponent::sendLocalInputToAuthority(
+	const PendingInputQueue<simulatableBrawler::PlayerInput>& queue,
+	uint32 currentTick,
+	uint32 redundancyDepth)
 {
+	// Build the redundancy bundle from the most-recent `redundancyDepth` ticks
+	// (clamped to kMaxSlots inside the builder) and fire the unreliable RPC.
+	FInputRedundancyBundle bundle;
+	buildRedundancyBundle<simulatableBrawler::PlayerInput>(
+		queue, currentTick, static_cast<uint8>(redundancyDepth), bundle);
+	ServerReceiveRemoteMove(bundle);
+}
+
+void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInputRedundancyBundle& bundle)
+{
+	// Stage 1 (Task 11) — wire-format compat fence (server side).
+	// An empty bundle (the client had no pending input in the redundancy window)
+	// carries no wire header and therefore no version byte; getWireFormatVersion()
+	// returns 0 for it. That is normal idle traffic, NOT a mismatch — skip it
+	// silently (forEachSlot is a no-op on it anyway) so we don't log a false
+	// mismatch every idle frame.
+	if (bundle.wireBytes.Num() == 0)
+		return;
+
+	// Version byte detection: refuse to process a bundle whose wire-format version
+	// disagrees with this build (a pre/post-Stage-1 mismatch). Surface a loud error
+	// and early-return — do NOT disconnect the client here; the disconnect path is
+	// engine-managed and is a Stage 6 dedicated-server-validation concern
+	// (risks_and_plan.md §5.2).
+	const uint8 clientVersion = bundle.getWireFormatVersion();
+	if (clientVersion != FInputRedundancyBundle::kWireFormatVersion)
 	{
-		simulatableBrawler::PlayerInput peeked;
-		const uint32 tick = inputBuffer.readInto(peeked);
-		UE_LOG(LogOGNet, Log,
-			TEXT("[ServerReceive] id=%u tick=%u attackLeft=%d"),
-			(unsigned int)GetUniqueID(), tick,
-			peeked.get<dAttackRadialSimulation::PlayerInput>().attackLeft ? 1 : 0);
+		UE_LOG(LogOGNet, Error,
+			TEXT("Wire-format mismatch on ServerReceiveRemoteMove: client version=%u, server expects=%u. Get matching builds from Saved/Archive/ — see PLAYTEST_PORTABLE_README.md."),
+			(unsigned int)clientVersion, (unsigned int)FInputRedundancyBundle::kWireFormatVersion);
+		return;
 	}
 
-	if (m_onRemoteMoveReceivedCallback)
-		m_onRemoteMoveReceivedCallback(inputBuffer);
+	// Dispatch each redundancy slot to the per-slot inbound callback registered by
+	// SimulationNetSync. Capture-tick dedup on the queue side lands in Task 10.
+	bundle.forEachSlot<simulatableBrawler::PlayerInput>(
+		[this](uint32 captureTick, const simulatableBrawler::PlayerInput& input)
+		{
+			UE_LOG(LogOGNet, Log,
+				TEXT("[ServerReceive] id=%u tick=%u attackLeft=%d"),
+				(unsigned int)GetUniqueID(), captureTick,
+				input.get<dAttackRadialSimulation::PlayerInput>().attackLeft ? 1 : 0);
+
+			if (m_onRemoteMoveReceivedCallback)
+				m_onRemoteMoveReceivedCallback(captureTick, input);
+		});
 }
 
 void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
