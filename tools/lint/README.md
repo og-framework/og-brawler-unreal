@@ -191,3 +191,172 @@ submodules or compiler — just the source tree):
 `windows-latest` ships PowerShell 7 (`pwsh`) by default. On a Linux runner, install
 PowerShell first or run via the `mcr.microsoft.com/powershell` container. The step
 fails the job on exit code `1`, surfacing the offending `file:line` in the CI log.
+
+---
+
+# Bandwidth measurement (`measure_bandwidth.ps1`)
+
+`measure_bandwidth.ps1` is the Phase 2a (`og-netcode-v1-impl` Task 19) measurement
+harness — a sibling of `configurability_lint.ps1` in the same `tools/lint/` tree
+(parent repo, not a submodule). It drives **one** `MaxClientRate` cap-ramp run at
+one of the four T18-locked product-target topologies, on the **post-Stage-2 60 Hz
+runtime**, and captures the engine network/timing stats for that run.
+
+> Requires **PowerShell 7+** (`pwsh`) and a built UE 5.6 editor at `C:\dev\UnrealEngine`
+> (override with `-EngineDir`). It launches `UnrealEditor.exe -game` clients against
+> a `UnrealEditor.exe -server`, the same launch model as `playtest_client.bat` /
+> `playtest_server.bat`.
+
+## What the script does
+
+```pwsh
+pwsh tools/lint/measure_bandwidth.ps1 -MaxClientRate 100000 -Topology 1x3 `
+    -OutputPath impl/ramp_100000_1x3.txt -DurationSec 60
+```
+
+| Parameter        | Required | Default              | Purpose |
+| ---------------- | -------- | -------------------- | ------- |
+| `-MaxClientRate` | yes      | —                    | Per-client server-side cap (B/s) written ephemerally to `[/Script/OnlineSubsystemUtils.IpNetDriver]` (the project's concrete net-driver class — see binding-section note). |
+| `-Topology`      | yes      | —                    | One of `1x3`, `3x1`, `2x3`, `6x1` (validated set). See matrix below. |
+| `-OutputPath`    | yes      | —                    | File the run capture is written to (parent dir must exist). |
+| `-NetworkProfile`| no       | `none`               | `none` = no link emulation (T19 behaviour). `cellular` = prepend UE net-emulation to the client `-ExecCmds` (see "Cellular profile" below). |
+| `-DurationSec`   | no       | `60`                 | Seconds to hold under load before teardown. |
+| `-RepoRoot`      | no       | two levels above script | Repo root used to resolve the INI / project / `Saved/`. |
+| `-EngineDir`     | no       | `C:\dev\UnrealEngine`| UE 5.6 source-build root. |
+| `-Port`          | no       | `7777`               | Dedicated-server UDP port. |
+
+Run flow: snapshot the INI → ephemeral edit → launch 1 dedicated server +
+*clients* clients (each spawning *LPs* local players) → hold `DurationSec` → tear
+the processes down → assemble the capture file → **restore the INI (always)**.
+
+Extra local players per client are added via `JoinLocalPlayer` — the
+`UFUNCTION(Exec)` on `AOGBrawlerPlayerController` from the
+OGBrawlerMultiPlayerPerClient initiative — issued `LPs - 1` times through the
+client's startup `-ExecCmds`. (The generic engine `debug.CreatePlayer` is **not**
+used; `OGBrawlerUEGameMode` force-disables splitscreen, which no-ops it.)
+
+Exit codes: **0** = run done + INI restored & verified · **1** = run error (INI
+still restored in `finally`) · **2** = usage/IO error *or* — critically — restore
+verification failed and the `.bak` was left for manual recovery.
+
+## `-Topology` argument matrix (the four T18-locked scenarios)
+
+These are the **fixed scenario set** locked in T18 §1 — do not vary them.
+
+| `-Topology` | clients × LPs | Tier | Stress axis |
+| ----------- | ------------- | ---- | ----------- |
+| `1x3` | 1 client × 3 LPs   | Tier 1 | densest (one connection carries all 3 chars) |
+| `3x1` | 3 clients × 1 LP   | Tier 1 | most-connections |
+| `2x3` | 2 clients × 3 LPs  | Tier 2 | densest |
+| `6x1` | 6 clients × 1 LP   | Tier 2 | most-connections |
+
+T19 measures **6 caps × 4 topologies = 24 runs** at 60 Hz LAN; T20 extends the same
+script with `-NetworkProfile cellular` for the cellular matrix.
+
+## Cellular profile (`-NetworkProfile cellular`) — T20
+
+`-NetworkProfile cellular` measures the same cap × topology matrix under an emulated
+Android **cellular** link instead of the LAN profile. When set, the script **prepends**
+UE's built-in network-emulation console commands to **every client's** `-ExecCmds`
+(ahead of the `JoinLocalPlayer` / `open` commands), leaving the dedicated server
+un-emulated:
+
+```text
+NetEmulation.PktLag 150, NetEmulation.PktLagVariance 30, NetEmulation.PktLoss 5, NetEmulation.PktIncomingLoss 5
+```
+
+| `NetEmulation.*` command | Value | Direction | Meaning (UE units)            | C.2 tier-3 cellular |
+| ------------------------ | ----- | --------- | ----------------------------- | ------------------- |
+| `PktLag`                 | 150   | outgoing  | one-way added latency, **ms** | ~150 ms RTT (R-A1)  |
+| `PktLagVariance`         | 30    | outgoing  | latency jitter, **ms**        | 30 ms jitter (R-A2) |
+| `PktLoss`                | 5     | outgoing  | uplink packet drop, **%**     | 5 % loss (R-A3)     |
+| `PktIncomingLoss`        | 5     | incoming  | downlink packet drop, **%**   | 5 % loss (R-A3)     |
+
+These numbers are the **C.2 tier-3 cellular profile** per
+`OGBrawlerNetworkModelResearch/arch/risks_and_plan.md §1` (R-A1 = 150 ms RTT,
+R-A2 = 30 ms jitter, R-A3 = 5 % packet loss).
+
+> **⚠ Two mechanism corrections vs the Backlog literal `Net PktLag=150 ...`** (validated
+> empirically in T20 — see `impl/impl_notes_phase2a_task20.md`):
+>
+> 1. **`NetEmulation.*`, not `Net Pkt*`.** The UE4-era `Net Pkt*` exec form routes through
+>    `UNetDriver::Exec` and needs a *live* net driver; it fires from the client's frame-1
+>    `-ExecCmds` ~30 frames before the connection exists (and the multi-LP densest
+>    topologies boot *standalone*, with no client net driver until the `open` travel), so it
+>    **silently no-ops** (a validation `1x3` run with the literal form read 0 % loss / 10 ms
+>    ping, identical to LAN). The modern `NetEmulation.*` commands store into the engine-global
+>    **`PersistentPacketSimulationSettings`** (`DO_ENABLE_NET_TEST` dev builds), which
+>    `UNetDriver` re-applies to every connection created later — so emulation set at frame 1
+>    survives the standalone→`open` travel.
+> 2. **`PktIncomingLoss` added for the downlink.** `PktLag`/`PktLoss` are *outgoing-only*
+>    (the connection send path), i.e. on a client they degrade only the **uplink**. The task
+>    measures the cellular **downstream** ceiling (the bandwidth-heavy server→client
+>    broadcast), so a 4th knob `PktIncomingLoss 5` degrades the **downlink** by 5 % too. Lag
+>    is kept one-way (RTT ≈ 150 ms per R-A1, not doubled); loss is applied to **both**
+>    directions at 5 % each (R-A3) — one bad cellular link modelled entirely client-side.
+
+Because emulation runs **client-side**, the client CSV's `Replication/InPacketsLost` /
+`InLostPacketsFoundPerFrame` counters become meaningful (they read ~0 on the lossless LAN
+profile), and the **client-received** downstream (`Replication/InRate`) can be compared
+against the **lossless LAN demand** (the T19 plateau at the same cap × topology, i.e. what
+the server attempts to send) — the gap is the cellular link's downlink drop.
+
+The cellular matrix is **5 caps × 4 topologies = 20 runs**
+(caps `{15000, 60000, 120000, 250000, 500000}` — `30000` is dropped vs T19's six;
+interpolation is sufficient at that low end). Output capture files are named
+`impl/ramp_<cap>_<topology>_cellular.txt`. The ephemeral-cap edit + SHA256 restore core
+is **identical** to the LAN profile — `-NetworkProfile` only changes the client
+`-ExecCmds`, never the `DefaultEngine.ini` edit/restore path.
+
+## Restore-at-end discipline (the safety contract)
+
+The script makes the **only** `DefaultEngine.ini` state change internal to itself
+and reverts it before returning:
+
+1. **Before any edit**, the original file's SHA256 is captured into a script-local
+   variable **and** the verbatim original bytes are written to
+   `Config/DefaultEngine.ini.measure_bandwidth.bak`. The backup is itself
+   hash-checked against the original before proceeding.
+2. The `[/Script/OnlineSubsystemUtils.IpNetDriver]` section is **appended** with the
+   cap (the project ships no such section — see
+   `research/spike_max_client_rate_ceiling.md` §4). If a section already exists the
+   script aborts rather than guess at merge semantics.
+   **⚠ Binding-section correction (T19):** the cap MUST go in the `IpNetDriver`
+   class section, NOT the `[/Script/Engine.GameNetDriver]` *DefName* section the
+   Backlog literal named — the latter is inert (there is no `UGameNetDriver` class),
+   so a cap written there does not bind (proven: a 15000-cap run still pushed
+   ~40 KB/s). The concrete driver is `UIpNetDriver`, which reads `MaxClientRate`
+   from its own class section.
+3. The run happens inside a `try`.
+4. A `finally` block (runs on success, PIE crash, Ctrl-C, or any throw) copies the
+   `.bak` back over the INI and recomputes the SHA256:
+   - **match** → the `.bak` is deleted; the tree is provably clean.
+   - **mismatch** → the script **aborts loudly (exit 2) and LEAVES the `.bak` in
+     place** for manual recovery — it never deletes a backup it could not verify.
+
+## ⚠ Measurement-mechanism note (read before trusting the capture)
+
+`stat net` and `stat unit` render to the **in-viewport overlay** — they do **not**
+print their KB/s / frame-ms numbers to stdout or the log. The dispatch-prescribed
+`-ExecCmds="stat unit, stat net"` is still issued so the overlay is on screen for
+manual observation, but to make the capture file carry real numbers the script also:
+
+- enables `-LogCmds="LogNet Verbose, LogNetTraffic Verbose"` (per-bunch byte counts
+  land in the log/stdout), and
+- starts the **CSV profiler** (`csvprofile start`), whose Net category emits
+  parseable `InBytes`/`OutBytes`/`Ping` columns to `Saved/Profiling/CSV/*.csv` (the
+  capture header points at that directory).
+
+The per-client downstream/upstream/server-aggregate KB/s for the ramp tables are
+extracted from the **CSV profiler Net columns**, not from the `stat net` overlay.
+This is flagged in `impl/impl_notes_phase2a_task19.md` for user review before the
+full 24-run matrix is authorised.
+
+## ⚠ No-git rule (initiative-binding)
+
+`measure_bandwidth.ps1` edits `Config/DefaultEngine.ini` **ephemerally** and restores
+it. **Implementers MUST NOT commit any `Config/DefaultEngine.ini` change** — the file
+must be in its pre-task state (and the `.bak` gone) at end of task. Per the initiative
+git policy, the user owns all state-changing git operations; agents only modify the
+working tree. If a run aborts and leaves a `.bak`, recover the INI from it manually and
+do **not** stage either file.
