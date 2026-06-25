@@ -141,6 +141,10 @@ FKey InputMappingUETranslator::toUnrealKey(dInput::KeyId keyId)
 	case dInput::KeyId::Gamepad_FaceRight:          return EKeys::Gamepad_FaceButton_Right;
 	case dInput::KeyId::Gamepad_FaceLeft:           return EKeys::Gamepad_FaceButton_Left;
 	case dInput::KeyId::Gamepad_FaceTop:            return EKeys::Gamepad_FaceButton_Top;
+	case dInput::KeyId::Gamepad_DPad_Up:            return EKeys::Gamepad_DPad_Up;
+	case dInput::KeyId::Gamepad_DPad_Down:          return EKeys::Gamepad_DPad_Down;
+	case dInput::KeyId::Gamepad_DPad_Left:          return EKeys::Gamepad_DPad_Left;
+	case dInput::KeyId::Gamepad_DPad_Right:         return EKeys::Gamepad_DPad_Right;
 	case dInput::KeyId::Gamepad_LeftTrigger:        return EKeys::Gamepad_LeftTrigger;
 	case dInput::KeyId::Gamepad_RightTrigger:       return EKeys::Gamepad_RightTrigger;
 	case dInput::KeyId::Gamepad_LeftTriggerAxis:    return EKeys::Gamepad_LeftTriggerAxis;

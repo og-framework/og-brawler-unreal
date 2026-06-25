@@ -13,9 +13,7 @@
 #include "OGBrawler/DAttackMachineSimulation.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
-// BrawlerProjectileVisualization intentionally not included while the projectile
-// sub-sim is un-wired — see SimulatableBrawlerTypes.h.
-// #include "OGBrawler/BrawlerProjectileVisualization.h"
+#include "OGBrawler/BrawlerProjectileVisualization.h"
 #include "OGBrawler/DAttackTargetVisualization.h"
 #include "OGBrawler/DAttackTargetVisualizationTwo.h"
 #include "OGBrawler/DAttackAimVisualization.h"
@@ -67,7 +65,6 @@ public:
 	// --- PredictionSyncedBufferOwnerConcept ---
 	// Correction-STATE role stays FSimulationStateSyncBuffer; the input role
 	// (remote input + correction input) is now FSimulationInputSyncBuffer per the
-	// Task 8 buffer split. Identical template surface — no use-site logic changes.
 	using SyncedCorrectionBufferType  = FSimulationStateSyncBuffer;
 	using SyncedRemoteInputBufferType = FSimulationInputSyncBuffer;
 
@@ -141,7 +138,7 @@ private:
 	UFUNCTION()
 	void OnRep_CorrectionState();
 
-	// Stage 1 (Task 11) — wire-format compat fence. Set true the first time
+	// wire-format compat fence. Set true the first time
 	// OnRep_CorrectionState observes a correction-state buffer whose wire-format
 	// version byte does not match FSimulationStateSyncBuffer::kWireFormatVersion
 	// (a pre/post-Stage-1 build mismatch). Once set, subsequent OnRep callbacks
@@ -153,7 +150,7 @@ private:
 	static constexpr uint64 kWireFormatMismatchToastKey = 0x4F47574DF0000001ull; // 'OGWM' + tag
 
 	// Stage 1 (Task 9): unreliable + redundancy input channel. Reliable -> Unreliable
-	// (no head-of-line blocking on input RPCs — the R-T1 streeting-saturation fix);
+	// (no head-of-line blocking on input RPCs � the R-T1 streeting-saturation fix);
 	// payload FSimulationInputSyncBuffer -> FInputRedundancyBundle (the client re-sends
 	// the last `redundancyDepthTicks` ticks each frame so a dropped datagram self-heals).
 	UFUNCTION(Server, Unreliable)
@@ -174,6 +171,7 @@ private:
 	//Visualization
 
 	dAttackRadialVisualization::State m_visualizationState;
+	brawlerProjectileVisualization::State m_projectileVisualizationState;
 
 	std::vector<QueryVolumeId> m_targetVisualizationVolumeIds;
 	std::optional<dAttackTargetVisualizationTwo::State> m_attackTargetVisualizationState;
@@ -186,11 +184,11 @@ private:
 	// Null until Task 7 wires the new path; OnRep_ handlers fall through to old logic when null.
 	std::function<void(const FSimulationStateSyncBuffer&)> m_onCorrectionStateReceivedCallback;
 	std::function<void(const FSimulationInputSyncBuffer&)> m_onCorrectionInputReceivedCallback;
-	// Per-slot (capture_tick, input) — invoked once per FInputRedundancyBundle slot (Task 9).
+	// Per-slot (capture_tick, input) � invoked once per FInputRedundancyBundle slot.
 	std::function<void(uint32, const simulatableBrawler::PlayerInput&)> m_onRemoteMoveReceivedCallback;
 
 };
 
 // SimulatableOwnerTraits<SimulatableBrawler> is specialized in
-// OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h — include that header at any
+// OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h � include that header at any
 // site that instantiates SimulationNetSync<SimulatableBrawler>.

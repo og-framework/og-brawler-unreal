@@ -14,9 +14,7 @@
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
 #include "OGBrawler/DAttackGuardSimulation.h"
-// BrawlerProjectileSimulation intentionally not included — sub-sim is un-wired
-// from the brawler composite. See SimulatableBrawlerTypes.h.
-// #include "OGBrawler/BrawlerProjectileSimulation.h"
+#include "OGBrawler/BrawlerProjectileSimulation.h"
 #include "OGBrawler/OGBrawlerLog.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGSimulationUnreal/ChaosPhysicsFactory.h"
@@ -36,6 +34,15 @@ DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 namespace
 {
+	// Matches any brawlerProjectileSimulation::PhysicsDeclaration<I> (one instantiation
+	// per pool slot) so the tryRegister sub-StaticData selector can route all projectile
+	// slot declarations to staticData.m_projectileStaticData. A partial specialization is
+	// used rather than a concept because the declaration is parameterized on a non-type
+	// (int) template argument.
+	template <typename T> struct is_projectile_physics_decl : std::false_type {};
+	template <int I> struct is_projectile_physics_decl<brawlerProjectileSimulation::PhysicsDeclaration<I>> : std::true_type {};
+	template <typename T> inline constexpr bool is_projectile_physics_decl_v = is_projectile_physics_decl<T>::value;
+
 	// Routes a SIMLOG message to the appropriate OG log category based on its
 	// leading [Tag] prefix. Severity is derived from the optional [Verbose] or
 	// [Warning] prefix; everything else lands at Log severity.
@@ -533,6 +540,18 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         const BodyId parentBodyId = m_physAdapter->registerBody(parentHandle);
         record.parentBodyId = parentBodyId;
 
+        // Stamp the authoritative capsule body id into the brawler's CharacterBindings
+        // member (T33). SOURCE TODAY: the UE ACharacter's CapsuleComponent body
+        // registered above from parentHandle — the capsule is created/owned/moved by
+        // CharacterMovementComponent and we just learn its BodyId here. FUTURE: when
+        // the planned character-movement sub-sim lands (modeled on radial/guard with
+        // its own PhysicsDeclaration), the capsule body will be created and registered
+        // through the forEach factory pass below — same path radial/guard use today —
+        // and capsuleBodyId will be sourced from that sub-sim's bindings.ownBodyId
+        // instead of from the UE-CapsuleComponent lookup. See BrawlerMovementSimulation.h
+        // CharacterBindings comment for the full future-direction note.
+        record.simulatable->setCharacterBindings({ /*.capsuleBodyId =*/ parentBodyId });
+
         AActor* ownerActor = owner.GetOwner();
         USceneComponent* attachParent = ownerActor->GetRootComponent();
         const simulatableBrawler::StaticData& staticData = owner.getStaticData();
@@ -547,6 +566,8 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
             const auto& subStaticData = [&]() -> const auto& {
                 if constexpr (std::is_same_v<D, dAttackRadialSimulation::PhysicsDeclaration>)
                     return staticData.m_attackSimulationStaticData;
+                else if constexpr (is_projectile_physics_decl_v<D>)
+                    return staticData.m_projectileStaticData;
                 else
                     return staticData.m_guardSimulationStaticData;
             }();

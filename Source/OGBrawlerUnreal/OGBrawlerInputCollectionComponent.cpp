@@ -16,9 +16,9 @@
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
-// InputSequence/* + BrawlerProjectileSimulation intentionally not included while
-// the projectile sub-sim is un-wired from the brawler composite. See
-// SimulatableBrawlerTypes.h for context.
+#include "OGBrawler/BrawlerProjectileSimulation.h"
+#include "OGBrawler/InputSequence/InputSequence.h"
+#include "OGBrawler/InputSequence/GameMotions.h"
 
 UOGBrawlerInputCollectionComponent::UOGBrawlerInputCollectionComponent()
 {
@@ -250,22 +250,36 @@ void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)
 	// after getInputDirectionInCameraSpace rotation — matches pre-refactor setMoveInput.
 	m_moveStick = glm::vec2(v.X, v.Y * -1.f);
 
-	// Latch the input source for non-zero events. WASD and the gamepad left stick both
-	// feed this same Move action (see GameInputMapping.cpp Move bindings) — to keep
-	// buildAimDirection's gamepad-only fallback from triggering on WASD, we check whether
-	// any WASD key is actually held down right now. If yes → keyboard; if no but value
-	// is non-zero → must be the gamepad. We don't update on near-zero events (Completed
-	// release) so the latch stays meaningful between input bursts.
+	// Enhanced Input sums axis contributions across every source bound to Move (left stick
+	// + WASD + D-pad). Holding two positive sources on the same axis (e.g. LeftStick-Right
+	// + DPad-Right) can push the summed magnitude past 1.0, which would feed a >1 analog
+	// speed scalar downstream (AddMovementInput / sim PlayerInput). Clamp to the unit disk
+	// while preserving sub-unit partial input so analog stick nuance is kept. (length > 1
+	// guarantees a non-zero vector, so normalize is safe.)
+	if (glm::length(m_moveStick) > 1.f)
+		m_moveStick = glm::normalize(m_moveStick);
+
+	// Latch the input source for non-zero events. WASD, the gamepad left stick, and the
+	// gamepad D-pad all feed this same Move action (see GameInputMapping.cpp Move bindings)
+	// — to keep buildAimDirection's gamepad-only fallback from triggering on WASD, we check
+	// which physical source is actually held right now. The D-pad is a gamepad source, so if
+	// any D-pad direction is held the latch is gamepad regardless of WASD; otherwise a held
+	// WASD key means keyboard; a non-zero value with neither held means the left stick (also
+	// gamepad). We don't update on near-zero events (Completed release) so the latch stays
+	// meaningful between input bursts.
 	if (!v.IsNearlyZero())
 	{
 		const ACharacter* ch = Cast<ACharacter>(GetOwner());
 		const APlayerController* pc = ch ? Cast<APlayerController>(ch->GetController()) : nullptr;
 		if (pc != nullptr)
 		{
-			const bool kbdMoveDown =
+			const bool dpadMoveDown =
+				pc->IsInputKeyDown(EKeys::Gamepad_DPad_Up) || pc->IsInputKeyDown(EKeys::Gamepad_DPad_Down) ||
+				pc->IsInputKeyDown(EKeys::Gamepad_DPad_Left) || pc->IsInputKeyDown(EKeys::Gamepad_DPad_Right);
+			const bool nonGamepadMoveDown =
 				pc->IsInputKeyDown(EKeys::W) || pc->IsInputKeyDown(EKeys::A) ||
 				pc->IsInputKeyDown(EKeys::S) || pc->IsInputKeyDown(EKeys::D);
-			m_lastMoveInputWasGamepad = !kbdMoveDown;
+			m_lastMoveInputWasGamepad = dpadMoveDown || !nonGamepadMoveDown;
 		}
 	}
 }
@@ -324,7 +338,7 @@ void UOGBrawlerInputCollectionComponent::onRightAttack(const FInputActionValue& 
 }
 
 simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(
-    const SimulationTimeStep& step, uint32 componentId) const
+    const SimulationTimeStep& step, uint32 componentId, const ASimulationManagerUImpl* manager) const
 {
 	if (!hasInputComponent())
 		return simulatableBrawler::getZeroPlayerInput();
@@ -334,12 +348,62 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	const glm::vec3 moveDirectionWorld = buildMoveDirectionWorld();
 	const bool leftAttack  = getLeftAttack();
 	const bool rightAttack = getRightAttack();
+
+	// --- Motion-sequence matching (predicting client only) ---
+	// Runs over the recent input history kept in StateCorrectionCache and produces a
+	// triggeredActionId carried on the machine PlayerInput. The result replicates to the
+	// server through the normal PlayerInput RPC path — same trust model as attackLeft.
+	using BrawlerCache = StateCorrectionCache<simulatableBrawler::State, simulatableBrawler::PlayerInput>;
+	const uint8_t currentButtonsHeld = (leftAttack ? 0b01 : 0) | (rightAttack ? 0b10 : 0);
+	uint32_t triggeredActionId = inputSequence::kNoMatch;
+
+	const BrawlerCache* cache = (manager != nullptr)
+		? manager->editReconciliation().findInputCache<SimulatableBrawler>(componentId)
+		: nullptr;
+
+	if (cache != nullptr)
+	{
+		// tick -> machine sub-input from the composite cache entry, or nullptr if the
+		// tick is outside the retained window.
+		auto accessor = [cache](uint32_t tick) -> const dAttackMachineSimulation::PlayerInput*
+		{
+			const uint32 idx = cache->getCacheIndex(tick);
+			if (idx == BrawlerCache::InvalidCacheIndex)
+				return nullptr;
+			return &cache->getInput(idx).get<dAttackMachineSimulation::PlayerInput>();
+		};
+
+		// Rising-edge mask: current held & ~previous held. The previous tick's input is
+		// the most-recently-cached entry (step.getTick() - 1). If it is not in the cache
+		// (cold start), treat the whole held mask as an edge.
+		uint8_t currentButtonsEdge = currentButtonsHeld;
+		if (step.getTick() > 0)
+		{
+			if (const dAttackMachineSimulation::PlayerInput* prev = accessor(step.getTick() - 1))
+			{
+				const uint8_t prevHeld = (prev->attackLeft ? 0b01 : 0) | (prev->attackRight ? 0b10 : 0);
+				currentButtonsEdge = static_cast<uint8_t>(currentButtonsHeld & ~prevHeld);
+			}
+		}
+
+		triggeredActionId = inputSequence::matchSequence(
+			accessor,
+			step.getTick(),
+			moveStick,
+			glm::vec3(aimDirection.x, aimDirection.y, 0.f),
+			currentButtonsHeld,
+			currentButtonsEdge,
+			dAttackMachineSimulation::g_moveStickDeadzone.load(),
+			kGameMotions);
+	}
+
 	UE_LOG(LogOGSimTick, Log,
-		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d"),
-		componentId, step.getTick(), leftAttack ? 1 : 0);
+		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u"),
+		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId);
 
 	return simulatableBrawler::PlayerInput(
 		dAttackRadialSimulation::PlayerInput(aimDirection, leftAttack, rightAttack),
-		dAttackMachineSimulation::PlayerInput(aimDirection, leftAttack, rightAttack, moveStick, moveDirectionWorld),
-		dAttackGuardSimulation::PlayerInput(aimDirection));
+		dAttackMachineSimulation::PlayerInput(aimDirection, leftAttack, rightAttack, moveStick, moveDirectionWorld, triggeredActionId),
+		dAttackGuardSimulation::PlayerInput(aimDirection),
+		brawlerProjectileSimulation::PlayerInput{aimDirection});
 }

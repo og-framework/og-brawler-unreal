@@ -14,6 +14,7 @@
 
 class UEnhancedInputComponent;
 struct FInputActionValue;
+class ASimulationManagerUImpl;
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class UOGBrawlerInputCollectionComponent : public UActorComponent
@@ -55,7 +56,9 @@ public:
 	static glm::vec3 getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection);
 
 	// Builds the full sim-tick PlayerInput. Called from the inputProvider lambda on the physics thread.
-	simulatableBrawler::PlayerInput buildPlayerInput(const SimulationTimeStep& step, uint32 componentId) const;
+	// `manager` gives the matcher read access to the recent-input correction cache (may be null on
+	// paths where no cache exists, e.g. the authority — matching is then skipped).
+	simulatableBrawler::PlayerInput buildPlayerInput(const SimulationTimeStep& step, uint32 componentId, const ASimulationManagerUImpl* manager) const;
 
 	// Logical stick accessors. Both raw members end up with the same "stick-up = -Y in
 	// storage" convention but get there differently: onMove explicitly negates v.Y (left

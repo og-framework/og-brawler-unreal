@@ -165,6 +165,28 @@ $Blacklist = @(
         Pattern = '(?<![\w.>])(player_count|playerCount|PlayerCount|maxPlayers|numPlayers|NumPlayers)\s*[=:]\s*[36]\b'
         Allowed = @('SessionConstants.h')
         Message = 'hardcoded player-count literal (3 = Tier 1, 6 = Tier 2) must read from og::brawler::session in SessionConstants.h, not a magic 3/6 (R-P1 / Phase 2a)'
+    },
+
+    # -----------------------------------------------------------------------
+    # Projectile pool size (OGBrawlerHadouken Phase 2, Task 12 — R-P1 config move).
+    #
+    # NOT a TimeConfig field — the runtime pool size lives in the og-brawler core
+    # header BrawlerProjectileSimulation.h as brawlerProjectileSimulation::StaticData
+    # ::projectilePoolSize (default 3), the single wire-affecting sizing knob read at
+    # runtime via sd.projectilePoolSize. The compile-time CAPACITY constant
+    # kMaxProjectilePoolSize (also 3) is intentionally NOT guarded here — the R-P1 lint
+    # guards tuning values, not template-instantiation/array/SIM_VECTOR capacities.
+    # Member-access reads (sd.projectilePoolSize) and the runtime-cap test fixture
+    # (sd.projectilePoolSize = 1) are auto-excluded by the (?<![\w.>]) lookbehind and the
+    # value anchor; only a non-member lvalue assigned the magic default 3 is flagged.
+    # CONTRACT: if T15 re-houses this value onto simulatableBrawler::StaticData under a
+    # different name, that file leaf is added to Allowed in the same change.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'projectilePoolSize'
+        Pattern = '(?<![\w.>])projectilePoolSize\s*=\s*3\b'
+        Allowed = @('BrawlerProjectileSimulation.h')
+        Message = 'projectilePoolSize default (3) must live only in BrawlerProjectileSimulation.h StaticData; read sd.projectilePoolSize instead of re-declaring it (R-P1)'
     }
 )
 

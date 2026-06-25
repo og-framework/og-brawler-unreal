@@ -6,9 +6,7 @@
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
-// BrawlerProjectileVisualization intentionally not included while the projectile
-// sub-sim is un-wired — see SimulatableBrawlerTypes.h.
-// #include "OGBrawler/BrawlerProjectileVisualization.h"
+#include "OGBrawler/BrawlerProjectileVisualization.h"
 #include "OGBrawler/DAttackAimVisualization.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
@@ -271,8 +269,8 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 	{
 		UOGBrawlerInputCollectionComponent* ic = m_ownerInputCollection;
 		const uint32 id = (unsigned int)GetUniqueID();
-		inputProvider = [ic, id](const SimulationTimeStep& step) {
-			return ic->buildPlayerInput(step, id);
+		inputProvider = [ic, id, mgr = regManager](const SimulationTimeStep& step) {
+			return ic->buildPlayerInput(step, id, mgr);
 		};
 	}
 
@@ -493,9 +491,25 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				m_attackAimVisualizationState.value());
 		}
 
-		// Projectile visualization intentionally not invoked while
-		// brawlerProjectileSimulation is un-wired from the brawler composite.
-		// See SimulatableBrawlerTypes.h.
+		// Projectile visualization — debug sphere per alive (flying) projectile slot,
+		// plus tick-stamped hit/block indicators (T30). currentTick + dt come from the
+		// SAME clock the sim uses (prediction tick on clients, server tick on the
+		// authority), so the viz residual-lifetime maths line up with the sim's pruning.
+		{
+			const SimulationTimeStep projectileVizStep = vizManager->runsPrediction()
+				? vizManager->getClientClock().getPredictionStep()
+				: vizManager->getServerClock().getSimulationStep();
+
+			brawlerProjectileVisualization::Input projectileVisualizationInput(
+				rendererFunctorImpl,
+				m_staticData->m_projectileStaticData,
+				projectileVizStep.getTick(),
+				projectileVizStep.getDeltaSeconds());
+			brawlerProjectileVisualization::visualize(projectileVisualizationInput,
+				(*attackSimState).get<brawlerProjectileSimulation::State>(),
+				attackSimAllState.getDerivedState().m_projectileDerivedState,
+				m_projectileVisualizationState);
+		}
 
 		{
 			dAttackTargetVisualizationTwo::Input attackTargetVisualizationInput(DeltaTime,

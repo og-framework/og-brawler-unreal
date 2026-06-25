@@ -135,17 +135,38 @@ public:
 	GENERATED_BODY()
 
 	// Wire format budget. Must hold the largest composite the project replicates
-	// through this buffer (simulatableBrawler::State / PlayerInput).
+	// through this buffer (simulatableBrawler::State correction payload). NOTE:
+	// raising this is *wire-cheap* — NetSerialize watermark-trims to usedBytes,
+	// so a larger capacity does NOT increase per-tick bytes-on-wire; it only
+	// raises the ceiling before the checkf OOB path is hit. The actual per-second
+	// bandwidth is governed by MaxClientRate (Config/DefaultEngine.ini, owned by
+	// the bandwidth re-measure task), NOT by this constant.
 	//
-	// 2026-06-10: previously bumped to 1024 to fit brawlerProjectileSimulation's
-	// State+IC additions; that triggered ~7x MaxClientRate overrun on the
-	// 100Hz Reliable input RPC (see OGBrawlerNetworkModelResearch /
-	// research/spike_input_rpc_saturation.md). Reverted to 256 after un-wiring
-	// the projectile sub-sim from the brawler composite. Do NOT bump this
-	// without coordinating with the OGBrawlerNetworkModelResearch wire-format
-	// decisions (split buffer types vs custom NetSerialize vs unreliable
-	// transport).
-	static constexpr int32 kBufferBytes = 256;
+	// History:
+	//   2026-06-10: briefly 1024 to fit the original PhysicsBodyState-per-slot
+	//     projectile State+IC; that 100Hz Reliable-RPC era hit ~7x MaxClientRate
+	//     overrun (OGBrawlerNetworkModelResearch/research/spike_input_rpc_saturation.md),
+	//     so the projectile sub-sim was un-wired and this reverted to 256.
+	//   2026-06-24 (Phase 2 / Task 14): bumped 256 -> 384 to fit the re-wired
+	//     composite under the closed-form projectile redesign (Task 13).
+	//
+	// Sizing math (2026-06-24), all numbers compile-time syncSize<> measured via
+	// a temporary LLT (un-wired State composite + the closed-form projectile
+	// additions T15 will append to simulatableBrawler::State):
+	//     un-wired composite               = 157 B
+	//       (radialIC 24 + radialSt 61 + guardSt 56 + guardIC 0 + machineSt 16)
+	//   + projectile InitialConditions     =  28 B
+	//   + projectile State (T13 closed-form, SIM_VECTOR cap 3 = 4 + 3*37) = 115 B
+	//   = re-wired State composite         = 300 B
+	//   + tick header (uint32 at offset 0) =   4 B
+	//   = re-wired wire footprint          = 304 B   (exact; composite is byte-packed)
+	//
+	// 384 = smallest 64-byte multiple above 304 + ~25% margin (304*1.25 = 380):
+	//   headroom = 384 - 304 = 80 B (~26%) for future composite growth. 320 was
+	//   rejected (only 16 B / ~5% headroom — one extra vec3 would overflow again);
+	//   512 was deemed over-budget vs the measured footprint (kept the budget-
+	//   discipline signal tight). Re-measure if the State composite grows.
+	static constexpr int32 kBufferBytes = 384;
 
 	// Wire-format version. Parallels FSimulationInputSyncBuffer::kWireFormatVersion
 	// and FInputRedundancyBundle::kWireFormatVersion (Stage 1 wire format = 1).
@@ -300,7 +321,7 @@ struct TStructOpsTypeTraits<FSimulationStateSyncBuffer> : public TStructOpsTypeT
 // Input-only sync buffer, split out from FSimulationStateSyncBuffer per
 // proposal §1.1 row 3. The input role carries only a simulatable's PlayerInput
 // composite, which is far smaller than the full State correction payload, so
-// the wire budget is kBufferBytes = 128 (vs the correction buffer's 256).
+// the wire budget is kBufferBytes = 128 (vs the correction buffer's 384).
 //
 // Mirrors FSimulationStateSyncBuffer's template surface
 // (writeToBuffer / readFromBuffer / write(composite, tick) / readInto) so a
