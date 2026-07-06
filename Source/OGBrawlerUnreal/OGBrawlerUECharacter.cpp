@@ -310,6 +310,20 @@ void AOGBrawlerUECharacter::Move(const FInputActionValue& Value)
 	if (Controller == nullptr)
 		return;
 
+	// [hit-resolution T12] Freeze CMC movement while the character is in a flinch
+	// state — HitFlinch (target-side, driven by the T3 inbound-hit routing pass)
+	// or GuardFlinch (attacker-side, from a successful guard-block on the target).
+	// Same shape as the HoldGuard freeze below: an early return suppresses
+	// AddMovementInput while the sim path still sees the raw stick + world
+	// direction via buildPlayerInput() on the physics tick. The machine sim's
+	// flinch cases already veto attack inputs (T1/T2), so the propagated move
+	// direction is a harmless no-op during flinch — no need to also gate the sim
+	// path. Read via SimulatableBrawler's viz-state snapshot (game-thread safe;
+	// worst-case 1-physics-tick lag ≈ 16 ms at 60 Hz, well inside the 300 ms
+	// flinch window).
+	if (isCharacterInFlinch())
+		return;
+
 	// HoldGuard (left trigger axis / Left Shift) freezes CMC movement so the character roots
 	// in place while in guard stance. The sim still sees the unchanged moveStick +
 	// moveDirectionWorld because those flow via UOGBrawlerInputCollectionComponent::
@@ -359,4 +373,19 @@ void AOGBrawlerUECharacter::Attack(const FInputActionValue& Value)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, FString::Printf(TEXT("attack!")));
 
+}
+
+bool AOGBrawlerUECharacter::isCharacterInFlinch() const
+{
+	// SimmableUpdateComponent is created in the ctor as a default subobject, so
+	// it should never be null once construction completes — but nullptr-guard
+	// anyway because Move() is called from Enhanced Input callbacks and no input
+	// event should ever be able to crash the character. Falls back to "not
+	// flinching" so the movement path proceeds normally when the sim isn't
+	// wired up.
+	if (SimmableUpdateComponent == nullptr)
+		return false;
+
+	const DAttackState state = SimmableUpdateComponent->getMachineVizState();
+	return state == DAttackState::HitFlinch || state == DAttackState::GuardFlinch;
 }

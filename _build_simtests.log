@@ -1,0 +1,33 @@
+Using bundled DotNet SDK version: 8.0.300 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" OGSimulationTests Win64 Development C:\dev\og-brawler-unreal\OGBrawlerUnreal.uproject
+Log file: C:\dev\UnrealEngine\Engine\Programs\UnrealBuildTool\Log.txt
+Using 'git status' to determine working set for adaptive non-unity build (C:\dev\UnrealEngine).
+Using 'git status' to determine working set for adaptive non-unity build (C:\dev\og-brawler-unreal).
+Creating makefile for OGSimulationTests (UnrealBuildTool assembly is newer)
+Waiting for 'git status' command to complete
+Building OGSimulationTests...
+Using Visual Studio 2022 14.38.33145 toolchain (C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.38.33130) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+Determining max actions to execute in parallel (12 physical cores, 24 logical cores)
+  Executing up to 12 processes, one per physical core
+Using Unreal Build Accelerator local executor to run 8 action(s)
+  Storage capacity 40Gb
+---- Starting trace: 260702_092015 ----
+UbaSessionServer - Disable remote execution (remote sessions will finish current processes)
+------ Building 8 action(s) started ------
+[1/8] Compile [x64] NetworkTimeEstimatorTest.cpp
+[2/8] Compile [x64] NetworkTimeEstimatorFloorTest.cpp
+[3/8] Compile [x64] TimeConfigDefaultsTest.cpp
+[4/8] Compile [x64] ClientPredictionClockTest.cpp
+[5/8] Compile [x64] Module.OGSimulation.cpp
+C:\dev\og-brawler-unreal\Plugins\OGSimulation\Source\OGSimulation\og-simulation\OGSimulation\DPID.cpp(17,4): warning C5038: data member 'DPIDSettings::m_d' will be initialized after data member 'DPIDSettings::m_maxAdjustment'
+	, m_d(d)
+	  ^
+[6/8] Link [x64] OGSimulationTests.exe
+[7/8] WriteMetadata OGSimulationTests.target (UBA disabled)
+[8/8] cmd Executing post build script (PostBuild-1.bat) (UBA disabled)
+Trace written to file C:/dev/UnrealEngine/Engine/Programs/UnrealBuildTool/Log.uba with size 4.3kb
+Total time in Unreal Build Accelerator local executor: 3.55 seconds
+Deploying OGSimulationTests Win64 Development...
+
+Result: Succeeded
+Total execution time: 6.02 seconds

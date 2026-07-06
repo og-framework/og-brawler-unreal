@@ -80,6 +80,16 @@ $ErrorActionPreference = 'Stop'
 # ---------------------------------------------------------------------------
 $Blacklist = @(
     @{
+        Field   = 'predOffsetFloorTicks'
+        # Netcode Fix A (Task 23): minimum floor for getPredictionOffsetTicks().
+        # TimeConfig.h is the source of truth; TimeConfigDefaultsTest.cpp asserts
+        # the default. NetworkTimeEstimator.cpp consumes it via member access
+        # (m_config.predOffsetFloorTicks), which the (?<![\w.>]) lookbehind auto-excludes.
+        Pattern = '(?<![\w.>])predOffsetFloorTicks\s*=\s*4\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'predOffsetFloorTicks default (4) must live only in TimeConfig; read config.predOffsetFloorTicks instead of re-declaring it (R-P1)'
+    },
+    @{
         Field   = 'rollbackWindowTicks'
         Pattern = '(?<![\w.>])rollbackWindowTicks\s*=\s*12\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')

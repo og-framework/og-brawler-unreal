@@ -27,6 +27,7 @@
 #include "OGSimulation/SimulationIntegrationExecutor.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
+#include "OGBrawler/BrawlerHitRouter.h"
 
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
@@ -145,7 +146,16 @@ public:
     ServerTickClock& editServerClock()             { return m_manager->editServerClock(); }
     const ClientPredictionClock& getClientClock() const { return m_manager->getClientClock(); }
     bool runsPrediction() const { return m_manager->runsPrediction(); }
-    void onGameSimulation(const SimulationUpdateInfo& info) { m_manager->onGameSimulation(info); }
+    void onGameSimulation(const SimulationUpdateInfo& info)
+    {
+        m_manager->onGameSimulation(info);
+        // [hit-resolution T3] Cross-character inbound-hit routing runs once per tick,
+        // AFTER integrateAll has produced every character's radial attackHits[] and
+        // projectile slot state. Placed here (not onPostGameSimulation) so it executes
+        // on every tick INCLUDING each resim replay tick — onGameSimulation is the
+        // per-sim-tick hook — keeping the routed HitFlinch flags deterministic (D4).
+        routeInboundHits();
+    }
     void onPostGameSimulation(const SimulationUpdateInfo& info) { m_manager->onPostGameSimulation(info); }
     unsigned int onCheckIsSimilar() { return m_manager->onCheckIsSimilar(); }
     void prepareResimulation(int32_t chaosStep, uint32_t simTick) { m_manager->prepareResimulation(chaosStep, simTick); }
@@ -202,6 +212,25 @@ public:
     const SimulationReconciliation<SimulatableBrawler>& editReconciliation() const { return m_reconciliation; }
 
 private:
+    // [hit-resolution T3/T11/T15/T16] Post-integrate cross-character routing. Thin
+    // UE-adapter wrapper — the actual game-agnostic-of-engine routing logic lives in
+    // OGBrawler core (Plugins/OGBrawler/.../BrawlerHitRouter.h). This method just
+    // wires the storage + registration map + current tick into
+    // brawlerHitRouter::routeInboundHitsAll. A future Godot adapter would have an
+    // equivalent one-liner from its own post-integrate hook.
+    void routeInboundHits();
+
+    // [hit-resolution T11/T16] Actor-level root-body-id -> registered brawler, for
+    // cross-character routing. Key = the character capsule's BodyId.value
+    // (CharacterBindings::capsuleBodyId); value = raw pointer into m_storage's unique_ptr
+    // (stable across the character's registered lifetime). The query adapter emits
+    // SpatialQueryHit::rootBodyId == this capsule id for hits on ANY shape of the character
+    // (hurtbox or guard), so a single key per character routes all its inbound hits.
+    // Populated at registration, erased at unregister (Q2). Owned engine-adapter-side
+    // because populate/erase are engine-timed lifecycle events; the OGBrawler-core
+    // router (BrawlerHitRouter.h) only reads through the canonical alias type below.
+    brawlerHitRouter::RootBodyIdMap m_byRootBodyId;
+
     FSimulationManagerAsyncCallback* m_asyncCallback;
 
     FDelegateHandle m_injectInputsExternalCallbackHandle;

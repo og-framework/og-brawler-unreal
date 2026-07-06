@@ -149,6 +149,13 @@ protected:
 	void Attack(const FInputActionValue& Value);
 	virtual void Tick(float DeltaSeconds) override;
 
+	// [hit-resolution T12] True while the character's machine sim state is
+	// HitFlinch (target-side, driven by the T3 inbound-hit routing pass) or
+	// GuardFlinch (attacker-side, from a successful guard-block on the target).
+	// Consulted by Move() to freeze CMC movement during the ~0.3 s flinch window,
+	// mirroring the existing HoldGuard freeze idiom in that function.
+	bool isCharacterInFlinch() const;
+
 
 protected:
 	// APawn interface

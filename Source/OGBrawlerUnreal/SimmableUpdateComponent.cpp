@@ -418,6 +418,27 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInp
 		});
 }
 
+DAttackState USimmableUpdateComponent::getMachineVizState()
+{
+	// Mirrors the TickComponent viz lookup below (same pattern, same authority
+	// resolution). Returns Idle on any missing link so callers stay ungated
+	// during registration ordering races.
+	const bool vizIsAuthority = (GetNetMode() != NM_Client);
+	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(vizIsAuthority);
+	if (manager == nullptr)
+		return DAttackState::Idle;
+
+	SimulationObjectStorage<SimulatableBrawler>& storage = manager->editStorage();
+	if (!storage.has<SimulatableBrawler>((unsigned int)GetUniqueID()))
+		return DAttackState::Idle;
+
+	const SimulatableBrawler& simulatable = storage.get<SimulatableBrawler>((unsigned int)GetUniqueID());
+	return simulatable.getVizState()
+		.getState()
+		.get<dAttackMachineSimulation::State>()
+		.m_currentState;
+}
+
 void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);

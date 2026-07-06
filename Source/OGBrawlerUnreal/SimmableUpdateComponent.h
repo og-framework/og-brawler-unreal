@@ -122,6 +122,16 @@ public:
 	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
 	FSimulationInputSyncBuffer& getSyncedCorrectionInputBuffer() { return m_replicatedInputSyncedBuffer; }
 
+	// [hit-resolution T12] Game-thread-safe read of the character's machine sim
+	// state via the viz-state snapshot the composite refreshes each physics tick
+	// (SimulatableBrawler::getVizState). Safe from any game-thread context â€” input
+	// callbacks (AOGBrawlerUECharacter::Move gates on HitFlinch/GuardFlinch),
+	// Tick, viz. Returns DAttackState::Idle when the manager or storage entry is
+	// not yet available (pre-registration ordering, or already unregistered) â€” the
+	// safe default that keeps callers ungated. Non-const because SimulationManagerUImpl
+	// currently only exposes editStorage(); read-only in intent.
+	DAttackState getMachineVizState();
+
 protected:
 	// To add mapping context
 	virtual void BeginPlay();
@@ -150,7 +160,7 @@ private:
 	static constexpr uint64 kWireFormatMismatchToastKey = 0x4F47574DF0000001ull; // 'OGWM' + tag
 
 	// Stage 1 (Task 9): unreliable + redundancy input channel. Reliable -> Unreliable
-	// (no head-of-line blocking on input RPCs — the R-T1 streeting-saturation fix);
+	// (no head-of-line blocking on input RPCs ï¿½ the R-T1 streeting-saturation fix);
 	// payload FSimulationInputSyncBuffer -> FInputRedundancyBundle (the client re-sends
 	// the last `redundancyDepthTicks` ticks each frame so a dropped datagram self-heals).
 	UFUNCTION(Server, Unreliable)
@@ -184,11 +194,11 @@ private:
 	// Null until Task 7 wires the new path; OnRep_ handlers fall through to old logic when null.
 	std::function<void(const FSimulationStateSyncBuffer&)> m_onCorrectionStateReceivedCallback;
 	std::function<void(const FSimulationInputSyncBuffer&)> m_onCorrectionInputReceivedCallback;
-	// Per-slot (capture_tick, input) — invoked once per FInputRedundancyBundle slot.
+	// Per-slot (capture_tick, input) ï¿½ invoked once per FInputRedundancyBundle slot.
 	std::function<void(uint32, const simulatableBrawler::PlayerInput&)> m_onRemoteMoveReceivedCallback;
 
 };
 
 // SimulatableOwnerTraits<SimulatableBrawler> is specialized in
-// OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h — include that header at any
+// OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h ï¿½ include that header at any
 // site that instantiates SimulationNetSync<SimulatableBrawler>.

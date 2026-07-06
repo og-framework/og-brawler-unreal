@@ -21,7 +21,14 @@ public:
 	{
 	}
 
-	BodyId registerBody(JPH::BodyID joltBodyId) const
+	// Extract the OGSim BodyId from a Jolt native body id. Stateless / idempotent
+	// / const — the "body id" IS the Jolt index-and-sequence-number that Jolt
+	// itself assigns at body creation; this just wraps it in the engine-agnostic
+	// BodyId type. Safe to call multiple times with the same joltBodyId; every
+	// call returns the same value. Not part of the PhysicsBodyAdapter concept —
+	// engine-specific convenience for code that has a Jolt BodyID and needs the
+	// abstract BodyId to feed into other adapter methods.
+	BodyId getBodyId(JPH::BodyID joltBodyId) const
 	{
 		return BodyId{joltBodyId.GetIndexAndSequenceNumber()};
 	}

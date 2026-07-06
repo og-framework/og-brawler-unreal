@@ -25,6 +25,10 @@
 #include "Runtime/Engine/Classes/Engine/NetConnection.h"
 #include "Runtime/Engine/Classes/Engine/NetDriver.h"
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 DEFINE_LOG_CATEGORY(LogOGSim);
 DEFINE_LOG_CATEGORY(LogOGSimTick);
 DEFINE_LOG_CATEGORY(LogOGMgmt);
@@ -342,7 +346,12 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_queryAdapter.emplace(uWorld, std::initializer_list<ChaosCategoryMapping>{
 			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
 			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
-			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 }
+			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
+			// [hit-resolution T13] Projectile category — routes to a previously
+			// unused UE trace channel so projectile bodies register separately from
+			// character hurtboxes and projectile-vs-projectile overlaps can be
+			// distinguished at the sim layer.
+			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
 		});
 		m_integrationLayer.emplace(*m_physAdapter, *m_queryAdapter, m_storage);
 		m_manager.emplace(false, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, std::function<void(const char*)>(pctmloggerServer));
@@ -385,7 +394,12 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_queryAdapter.emplace(uWorld, std::initializer_list<ChaosCategoryMapping>{
 			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
 			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
-			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 }
+			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
+			// [hit-resolution T13] Projectile category — routes to a previously
+			// unused UE trace channel so projectile bodies register separately from
+			// character hurtboxes and projectile-vs-projectile overlaps can be
+			// distinguished at the sim layer.
+			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
 		});
 		m_integrationLayer.emplace(*m_physAdapter, *m_queryAdapter, m_storage);
 		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, std::function<void(const char*)>(pctmlogger));
@@ -537,7 +551,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         checkf(character != nullptr, TEXT("USimmableUpdateComponent must be attached to an ACharacter"));
         FBodyInstanceAsyncPhysicsTickHandle parentHandle =
             character->GetCapsuleComponent()->GetBodyInstanceAsyncPhysicsTickHandle();
-        const BodyId parentBodyId = m_physAdapter->registerBody(parentHandle);
+        const BodyId parentBodyId = m_physAdapter->getBodyId(parentHandle);
         record.parentBodyId = parentBodyId;
 
         // Stamp the authoritative capsule body id into the brawler's CharacterBindings
@@ -553,9 +567,18 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         record.simulatable->setCharacterBindings({ /*.capsuleBodyId =*/ parentBodyId });
 
         AActor* ownerActor = owner.GetOwner();
-        USceneComponent* attachParent = ownerActor->GetRootComponent();
+        // Attach + parent-body are the same capsule component under the one-deep
+        // hierarchy — passing the capsule to the factory expresses "these shapes
+        // belong to this character" through a single handle. Previously we
+        // passed attachParent (as USceneComponent*) AND parentBodyId separately;
+        // callers could get them out of sync. The factory now derives the parent
+        // BodyId from attachParent's body-instance handle internally.
+        UPrimitiveComponent* attachParent = character->GetCapsuleComponent();
         const simulatableBrawler::StaticData& staticData = owner.getStaticData();
 
+        // [hit-resolution T11] The factory-owned parentBodyId (derived from
+        // attachParent's body handle) becomes the root for every shape it
+        // registers, so overlap() emits an actor-level rootBodyId == capsule id.
         ChaosPhysicsFactory factory(*m_physAdapter, *m_queryAdapter, ownerActor, attachParent);
 
         record.simulatable->editPhysicsComposite().forEach([&](auto& decl)
@@ -611,6 +634,14 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     if (!allResolvable)
         return TryRegisterStatus::Pending;
 
+    // [hit-resolution T11] Capture the routing key BEFORE the std::move below empties the
+    // pending record. The key is the character's CAPSULE (root) body id — the value the
+    // query adapter now emits as SpatialQueryHit::rootBodyId for hits on ANY of the
+    // character's shapes (hurtbox or guard), and hence carried by radial
+    // attackHits[].hitRootBodyId / projectile slot.hitRootBodyId.
+    const uint32_t routingRootBodyId =
+        record.simulatable->getCharacterBindings().capsuleBodyId.value;
+
     // All resolvable — perform the actual registration.
     if (record.isAuthority)
     {
@@ -630,6 +661,12 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     }
     UE_LOG(LogOGMgmt, Log, TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, isAuthority ? 1 : 0);
 
+    // [hit-resolution T3] Index the now-stored simulatable for inbound-hit routing.
+    // The instance lives in m_storage behind a unique_ptr, so its address is stable for
+    // the lifetime of the registration (safe to cache here). Erased in
+    // unregisterFromNewFramework before the instance is destroyed (Q2 despawn safety).
+    m_byRootBodyId[routingRootBodyId] = &m_storage.get<SimulatableBrawler>(id);
+
     m_pendingRegistrations.erase(it);
     return TryRegisterStatus::Ready;
 }
@@ -637,12 +674,46 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 void ASimulationManagerUImpl::unregisterFromNewFramework(
     unsigned int id, USimmableUpdateComponent& owner, bool isAuthority)
 {
+    // [hit-resolution T3 / Q2 despawn safety] Drop this character's routing-map entry
+    // BEFORE unregisterSimulatable destroys the SimulatableBrawler, so the per-tick
+    // routing pass can never dereference a dangling pointer. Erase by stored-pointer
+    // identity (not by recomputed key) so no stale entry can survive regardless of how
+    // the key was derived.
+    if (m_storage.has<SimulatableBrawler>(id))
+    {
+        const SimulatableBrawler* removed = &m_storage.get<SimulatableBrawler>(id);
+        for (auto mapIt = m_byRootBodyId.begin(); mapIt != m_byRootBodyId.end(); )
+        {
+            if (mapIt->second == removed)
+                mapIt = m_byRootBodyId.erase(mapIt);
+            else
+                ++mapIt;
+        }
+    }
+
     unregisterSimulatable<SimulatableBrawler>(
         m_storage, m_reconciliation, m_netSync,
         id,
         /*predictionOwner=*/&owner,
         /*authorityOwner=*/isAuthority ? &owner : nullptr);
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
+}
+
+void ASimulationManagerUImpl::routeInboundHits()
+{
+    // [T16] UE-adapter wrapper. All the actual game-logic — the reset step, the four
+    // routing branches (radial hits, projectile damage, projectile guard-blocks), the
+    // D4 deterministic sort, the D5 self-hit filter — lives in OGBrawler core at
+    // Plugins/OGBrawler/.../BrawlerHitRouter.h. This method's only job is to wire the
+    // adapter-owned storage + registration map + current tick into the game-agnostic-
+    // of-engine router. When the Godot adapter arrives, its equivalent method will
+    // have the same three-line shape.
+    if (!m_manager.has_value())
+        return;
+    brawlerHitRouter::routeInboundHitsAll(
+        m_storage,
+        m_byRootBodyId,
+        m_manager->currentIntegratedTick());
 }
 
 void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)

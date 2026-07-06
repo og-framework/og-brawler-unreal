@@ -62,8 +62,38 @@ QueryVolumeId ChaosSpatialQueryAdapter::registerVolume(
 	return QueryVolumeId{m_nextVolumeId++};
 }
 
-ShapeId ChaosSpatialQueryAdapter::registerShape(FBodyInstanceAsyncPhysicsTickHandle body, unsigned int shapeIndex)
+ShapeId ChaosSpatialQueryAdapter::registerShape(FBodyInstanceAsyncPhysicsTickHandle body,
+                                                unsigned int shapeIndex,
+                                                std::optional<BodyId> parentBodyId)
 {
+	// Record the shape body -> root body mapping so overlap() can emit a meaningful
+	// rootBodyId for hits on this shape. The shape body's key is the same Chaos particle
+	// UniqueIdx that overlap() writes into SpatialQueryHit::bodyId (and that
+	// ChaosPhysicsBodyAdapter::getBodyId hands back as a BodyId), so the two agree.
+	// No parent supplied => no entry => overlap() falls back to rootBodyId == bodyId.
+	//
+	// parentBodyId is the IMMEDIATE parent — under multi-level hierarchies it may not
+	// be the root. Walk the parent chain here to flatten to root at store-time so
+	// overlap()'s lookup is always O(1). By the "register parents before children"
+	// invariant (see header), every intermediate parent's own map entry ALSO already
+	// points to root, so this walk terminates in at most one hop. The while-loop form
+	// defends against out-of-order registration if that invariant ever slips.
+	if (parentBodyId.has_value())
+	{
+		const uint32_t shapeBodyUniqueIdx =
+			static_cast<uint32_t>(body.Proxy->GetParticle_LowLevel()->UniqueIdx().Idx);
+
+		uint32_t rootIdxValue = parentBodyId->value;
+		auto it = m_shapeBodyToRootBody.find(rootIdxValue);
+		while (it != m_shapeBodyToRootBody.end())
+		{
+			rootIdxValue = it->second;
+			it = m_shapeBodyToRootBody.find(rootIdxValue);
+		}
+
+		m_shapeBodyToRootBody[shapeBodyUniqueIdx] = rootIdxValue;
+	}
+
 	m_shapes.push_back(ShapeEntry{body, shapeIndex});
 	return ShapeId{m_nextShapeId++};
 }
@@ -121,7 +151,6 @@ SpatialQueryReport ChaosSpatialQueryAdapter::overlap(const std::vector<QueryVolu
 	{
 		SpatialQueryHit sqHit;
 		sqHit.objectPosition = uglm::toGLMVec3(hit.HitObjectHandle.GetLocation());
-		sqHit.objectIndex = hit.HitObjectHandle.GetInstanceIndex();
 
 		// Reverse-map: extract Chaos channel from hit, convert to DAttack category.
 		auto* bodyInstance = hit.GetComponent()->GetBodyInstance();
@@ -144,8 +173,18 @@ SpatialQueryReport ChaosSpatialQueryAdapter::overlap(const std::vector<QueryVolu
 		if (dattackCat != kUnmapped)
 			sqHit.objectCategories = CollisionCategories::single(dattackCat);
 
-		// Body ID from engine's native particle index
+		// Body ID from engine's native particle index (the SHAPE body actually hit).
 		sqHit.bodyId = BodyId{static_cast<uint32_t>(handle.Proxy->GetParticle_LowLevel()->UniqueIdx().Idx)};
+
+		// [hit-resolution T11] Root (actor-level) identity: look up the shape body's
+		// registered parent. Character shapes (hurtbox, guard) map to the character
+		// capsule's body id, so every shape on a character resolves to the SAME
+		// rootBodyId — the id cross-character routing and actor-hit mergers key on.
+		// A shape with no registered parent (standalone body) falls back to self-as-root.
+		if (auto it = m_shapeBodyToRootBody.find(sqHit.bodyId.value); it != m_shapeBodyToRootBody.end())
+			sqHit.rootBodyId = BodyId{it->second};
+		else
+			sqHit.rootBodyId = sqHit.bodyId;
 
 		report.hits.push_back(sqHit);
 	}

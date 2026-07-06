@@ -19,7 +19,14 @@ public:
 		: m_solver(solver)
 	{}
 
-	BodyId registerBody(FBodyInstanceAsyncPhysicsTickHandle handle) const
+	// Extract the OGSim BodyId from a Chaos particle handle. Stateless / idempotent
+	// / const — the "body id" IS the Chaos particle UniqueIdx that Chaos itself
+	// assigns at particle creation; this just wraps it in the engine-agnostic
+	// BodyId type. Safe to call multiple times with the same handle; every call
+	// returns the same value. Not part of the PhysicsBodyAdapter concept —
+	// engine-specific convenience for code that has a Chaos handle and needs the
+	// abstract BodyId to feed into other adapter methods.
+	BodyId getBodyId(FBodyInstanceAsyncPhysicsTickHandle handle) const
 	{
 		const uint32_t nativeId = static_cast<uint32_t>(handle.Proxy->GetParticle_LowLevel()->UniqueIdx().Idx);
 		return BodyId{nativeId};
