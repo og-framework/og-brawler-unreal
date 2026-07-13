@@ -17,6 +17,8 @@
 #include "Runtime/CoreUObject/Public/UObject/Object.h"
 
 #include "OGSimulation/SimulationManager.h"
+#include "OGSimulation/SimulatableList.h"
+#include "OGSimulation/SystemsExecutor.h"
 #include "OGSimulationUnreal/PCTimeManagement/ChaosTickMapper.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
@@ -27,7 +29,7 @@
 #include "OGSimulation/SimulationIntegrationExecutor.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
-#include "OGBrawler/BrawlerHitRouter.h"
+#include "OGBrawler/BrawlerHitRoutingSystem.h"   // brawlerHitRouting::System (fourth-peer system)
 
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
@@ -148,13 +150,16 @@ public:
     bool runsPrediction() const { return m_manager->runsPrediction(); }
     void onGameSimulation(const SimulationUpdateInfo& info)
     {
+        // [ogsim-system-api] Cross-character inbound-hit routing runs INSIDE
+        // m_manager->onGameSimulation, via brawlerHitRouting::System::postIntegrate
+        // (fired by the SimulationSystemsExecutor after integrateAll on every tick —
+        // including each resim replay tick — so the routed HitFlinch flags stay
+        // deterministic, D4). There is no adapter-side routing wrapper anymore: the
+        // former routeInboundHits() shim + its map were removed once the routing
+        // system owned the whole pass (T8 emptied the adapter map, T10 deleted the
+        // shim). No reset-order hazard remains — the single routing pass is the
+        // system's postIntegrate.
         m_manager->onGameSimulation(info);
-        // [hit-resolution T3] Cross-character inbound-hit routing runs once per tick,
-        // AFTER integrateAll has produced every character's radial attackHits[] and
-        // projectile slot state. Placed here (not onPostGameSimulation) so it executes
-        // on every tick INCLUDING each resim replay tick — onGameSimulation is the
-        // per-sim-tick hook — keeping the routed HitFlinch flags deterministic (D4).
-        routeInboundHits();
     }
     void onPostGameSimulation(const SimulationUpdateInfo& info) { m_manager->onPostGameSimulation(info); }
     unsigned int onCheckIsSimilar() { return m_manager->onCheckIsSimilar(); }
@@ -212,25 +217,6 @@ public:
     const SimulationReconciliation<SimulatableBrawler>& editReconciliation() const { return m_reconciliation; }
 
 private:
-    // [hit-resolution T3/T11/T15/T16] Post-integrate cross-character routing. Thin
-    // UE-adapter wrapper — the actual game-agnostic-of-engine routing logic lives in
-    // OGBrawler core (Plugins/OGBrawler/.../BrawlerHitRouter.h). This method just
-    // wires the storage + registration map + current tick into
-    // brawlerHitRouter::routeInboundHitsAll. A future Godot adapter would have an
-    // equivalent one-liner from its own post-integrate hook.
-    void routeInboundHits();
-
-    // [hit-resolution T11/T16] Actor-level root-body-id -> registered brawler, for
-    // cross-character routing. Key = the character capsule's BodyId.value
-    // (CharacterBindings::capsuleBodyId); value = raw pointer into m_storage's unique_ptr
-    // (stable across the character's registered lifetime). The query adapter emits
-    // SpatialQueryHit::rootBodyId == this capsule id for hits on ANY shape of the character
-    // (hurtbox or guard), so a single key per character routes all its inbound hits.
-    // Populated at registration, erased at unregister (Q2). Owned engine-adapter-side
-    // because populate/erase are engine-timed lifecycle events; the OGBrawler-core
-    // router (BrawlerHitRouter.h) only reads through the canonical alias type below.
-    brawlerHitRouter::RootBodyIdMap m_byRootBodyId;
-
     FSimulationManagerAsyncCallback* m_asyncCallback;
 
     FDelegateHandle m_injectInputsExternalCallbackHandle;
@@ -245,17 +231,55 @@ private:
     std::optional<ChaosPhysicsBodyAdapter>   m_physAdapter;
     std::optional<ChaosSpatialQueryAdapter>  m_queryAdapter;
 
+    // ---- ogsim-system-api alias chain (design §4.3) -----------------------
+    // Single source of truth for the game's simulatable pack: widen this one
+    // alias and every executor + storage type below inherits the widening
+    // (adding SimulatableVehicle later = edit BrawlerSimulatables only).
+    //
+    // Kept CLASS-scoped (matching the pre-existing IntegrationLayerType /
+    // ManagerType aliases this replaces) rather than the design's file-scope
+    // depiction, so these names don't leak into the global namespace from a
+    // widely-included UE adapter header. OGSim primitives named UNQUALIFIED —
+    // the whole OGSim core is in the global namespace (lead D12, 2026-07-07).
+    using BrawlerSimulatables   = SimulatableList<SimulatableBrawler>;
+    using BrawlerStorage        = apply_t<SimulationObjectStorage,  BrawlerSimulatables>;
+    using BrawlerNetSync        = apply_t<SimulationNetSync,        BrawlerSimulatables>;
+    using BrawlerReconciliation = apply_t<SimulationReconciliation, BrawlerSimulatables>;
+
     // Simulation peers — construction order: storage → reconciliation → netSync.
+    // (Concrete types are identical to the aliases above — Brawler*{Storage,…}.)
     SimulationObjectStorage<SimulatableBrawler>  m_storage;
     SimulationReconciliation<SimulatableBrawler> m_reconciliation{ m_storage };
     SimulationNetSync<SimulatableBrawler>        m_netSync{ m_storage, m_reconciliation };
 
+    // SimulationIntegrationExecutor's leading three params are engine-specific
+    // (StaticData is game-specific; the adapters are Chaos/UE), so apply_t can't
+    // unpack the sim-pack marker into them. A per-adapter bind wrapper fixes
+    // those three slots once, then apply_t applies the sim pack (C1 pick,
+    // Option B) — preserving the single-source-of-truth property.
+    template <typename... SimulatableTs>
+    using BrawlerIntegrationExecFor_UE = SimulationIntegrationExecutor<
+        simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableTs...>;
+    using BrawlerIntegrationExec = apply_t<BrawlerIntegrationExecFor_UE, BrawlerSimulatables>;
+
+    // Fourth peer — systems executor. Takes (a) the sim-pack marker, (b) the
+    // StaticData type (systems look up game-static config in their hooks), and
+    // (c) the system pack — just brawlerHitRouting::System at this point.
+    using BrawlerSystemsExec = SimulationSystemsExecutor<
+        BrawlerSimulatables,
+        simulatableBrawler::StaticData,
+        brawlerHitRouting::System>;
+
+    // Value-owned; default-constructs the routing system (empty map, no heap).
+    // Passed by reference into the manager at emplace() in BeginPlay.
+    BrawlerSystemsExec m_systemsExec;
+
     // Integration layer and manager require adapters — emplaced in BeginPlay.
-    using IntegrationLayerType = SimulationIntegrationExecutor<
-        simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableBrawler>;
+    using IntegrationLayerType = BrawlerIntegrationExec;
     std::optional<IntegrationLayerType> m_integrationLayer;
 
-    using ManagerType = SimulationManager<IntegrationLayerType, decltype(m_netSync), decltype(m_reconciliation)>;
+    using ManagerType = SimulationManager<
+        BrawlerIntegrationExec, BrawlerNetSync, BrawlerReconciliation, BrawlerSystemsExec>;
     std::optional<ManagerType> m_manager;
 
     static ASimulationManagerUImpl* s_instances[2];

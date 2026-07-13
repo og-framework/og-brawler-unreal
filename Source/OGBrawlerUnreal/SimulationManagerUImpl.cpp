@@ -354,7 +354,7 @@ void ASimulationManagerUImpl::BeginPlay()
 			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
 		});
 		m_integrationLayer.emplace(*m_physAdapter, *m_queryAdapter, m_storage);
-		m_manager.emplace(false, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, std::function<void(const char*)>(pctmloggerServer));
+		m_manager.emplace(false, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec, std::function<void(const char*)>(pctmloggerServer));
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		// Process-global sinks for deeply-nested simulation templates that don't
@@ -402,7 +402,7 @@ void ASimulationManagerUImpl::BeginPlay()
 			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
 		});
 		m_integrationLayer.emplace(*m_physAdapter, *m_queryAdapter, m_storage);
-		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, std::function<void(const char*)>(pctmlogger));
+		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec, std::function<void(const char*)>(pctmlogger));
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmlogger));
 		// Process-global sinks for deeply-nested simulation templates that don't
@@ -634,14 +634,6 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     if (!allResolvable)
         return TryRegisterStatus::Pending;
 
-    // [hit-resolution T11] Capture the routing key BEFORE the std::move below empties the
-    // pending record. The key is the character's CAPSULE (root) body id — the value the
-    // query adapter now emits as SpatialQueryHit::rootBodyId for hits on ANY of the
-    // character's shapes (hurtbox or guard), and hence carried by radial
-    // attackHits[].hitRootBodyId / projectile slot.hitRootBodyId.
-    const uint32_t routingRootBodyId =
-        record.simulatable->getCharacterBindings().capsuleBodyId.value;
-
     // All resolvable — perform the actual registration.
     if (record.isAuthority)
     {
@@ -661,11 +653,15 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     }
     UE_LOG(LogOGMgmt, Log, TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, isAuthority ? 1 : 0);
 
-    // [hit-resolution T3] Index the now-stored simulatable for inbound-hit routing.
-    // The instance lives in m_storage behind a unique_ptr, so its address is stable for
-    // the lifetime of the registration (safe to cache here). Erased in
-    // unregisterFromNewFramework before the instance is destroyed (Q2 despawn safety).
-    m_byRootBodyId[routingRootBodyId] = &m_storage.get<SimulatableBrawler>(id);
+    // [ogsim-system-api T8] Notify the systems executor that the character is now in
+    // storage, so brawlerHitRouting::System::onCharacterRegistered indexes it for
+    // inbound-hit routing (§3.11 timing: the character IS in storage at this point, so
+    // the system's view.get<>(id) resolves it and reads capsuleBodyId itself). This
+    // replaces the old adapter-owned m_byRootBodyId insert — the routing system now owns
+    // its map. Wiring the notify AND dropping the adapter insert land in the SAME commit
+    // (SB-5): there is never a window where both the adapter map and the system map are
+    // populated, so no inbound-hit stream is double-routed.
+    m_manager->notifyCharacterRegistered(id);
 
     m_pendingRegistrations.erase(it);
     return TryRegisterStatus::Ready;
@@ -674,21 +670,19 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 void ASimulationManagerUImpl::unregisterFromNewFramework(
     unsigned int id, USimmableUpdateComponent& owner, bool isAuthority)
 {
-    // [hit-resolution T3 / Q2 despawn safety] Drop this character's routing-map entry
-    // BEFORE unregisterSimulatable destroys the SimulatableBrawler, so the per-tick
-    // routing pass can never dereference a dangling pointer. Erase by stored-pointer
-    // identity (not by recomputed key) so no stale entry can survive regardless of how
-    // the key was derived.
+    // [ogsim-system-api T8] Notify the systems executor to drop this character's routing
+    // entry BEFORE unregisterSimulatable destroys the SimulatableBrawler (§3.11 timing:
+    // the character is still in storage here, so brawlerHitRouting::System::
+    // onCharacterUnregistered resolves it through the view and erases by stored-pointer
+    // identity — no stale entry survives, no dangling pointer is ever dereferenced by the
+    // per-tick routing pass). This replaces the old adapter-owned m_byRootBodyId erase.
+    // The has<> guard is preserved: if the character was never fully registered into
+    // storage there is no system-map entry to drop, and the hook's view.get<>(id) would
+    // be unsafe. Wiring the notify AND dropping the adapter erase land in the SAME commit
+    // (SB-5).
     if (m_storage.has<SimulatableBrawler>(id))
     {
-        const SimulatableBrawler* removed = &m_storage.get<SimulatableBrawler>(id);
-        for (auto mapIt = m_byRootBodyId.begin(); mapIt != m_byRootBodyId.end(); )
-        {
-            if (mapIt->second == removed)
-                mapIt = m_byRootBodyId.erase(mapIt);
-            else
-                ++mapIt;
-        }
+        m_manager->notifyCharacterUnregistered(id);
     }
 
     unregisterSimulatable<SimulatableBrawler>(
@@ -697,23 +691,6 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
         /*predictionOwner=*/&owner,
         /*authorityOwner=*/isAuthority ? &owner : nullptr);
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
-}
-
-void ASimulationManagerUImpl::routeInboundHits()
-{
-    // [T16] UE-adapter wrapper. All the actual game-logic — the reset step, the four
-    // routing branches (radial hits, projectile damage, projectile guard-blocks), the
-    // D4 deterministic sort, the D5 self-hit filter — lives in OGBrawler core at
-    // Plugins/OGBrawler/.../BrawlerHitRouter.h. This method's only job is to wire the
-    // adapter-owned storage + registration map + current tick into the game-agnostic-
-    // of-engine router. When the Godot adapter arrives, its equivalent method will
-    // have the same three-line shape.
-    if (!m_manager.has_value())
-        return;
-    brawlerHitRouter::routeInboundHitsAll(
-        m_storage,
-        m_byRootBodyId,
-        m_manager->currentIntegratedTick());
 }
 
 void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)
