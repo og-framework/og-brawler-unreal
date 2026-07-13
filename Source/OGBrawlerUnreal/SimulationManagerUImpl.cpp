@@ -353,8 +353,10 @@ void ASimulationManagerUImpl::BeginPlay()
 			// distinguished at the sim layer.
 			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
 		});
-		m_integrationLayer.emplace(*m_physAdapter, *m_queryAdapter, m_storage);
-		m_manager.emplace(false, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec, std::function<void(const char*)>(pctmloggerServer));
+		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
+		m_manager.emplace(false, solver->GetAsyncDeltaTime(), ManagerType::Params{
+			*m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec,
+			m_storage, m_staticData, std::function<void(const char*)>(pctmloggerServer) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		// Process-global sinks for deeply-nested simulation templates that don't
@@ -401,8 +403,10 @@ void ASimulationManagerUImpl::BeginPlay()
 			// distinguished at the sim layer.
 			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
 		});
-		m_integrationLayer.emplace(*m_physAdapter, *m_queryAdapter, m_storage);
-		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), *m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec, std::function<void(const char*)>(pctmlogger));
+		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
+		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), ManagerType::Params{
+			*m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec,
+			m_storage, m_staticData, std::function<void(const char*)>(pctmlogger) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmlogger));
 		// Process-global sinks for deeply-nested simulation templates that don't

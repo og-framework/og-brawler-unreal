@@ -246,11 +246,27 @@ private:
     using BrawlerNetSync        = apply_t<SimulationNetSync,        BrawlerSimulatables>;
     using BrawlerReconciliation = apply_t<SimulationReconciliation, BrawlerSimulatables>;
 
-    // Simulation peers — construction order: storage → reconciliation → netSync.
-    // (Concrete types are identical to the aliases above — Brawler*{Storage,…}.)
-    SimulationObjectStorage<SimulatableBrawler>  m_storage;
-    SimulationReconciliation<SimulatableBrawler> m_reconciliation{ m_storage };
-    SimulationNetSync<SimulatableBrawler>        m_netSync{ m_storage, m_reconciliation };
+    // Owned simulation resources + peers — construction order matters:
+    // storage → staticData → reconciliation → netSync, all top-to-bottom BEFORE
+    // m_integrationLayer / m_manager (emplaced in BeginPlay) bind references to
+    // them. Types come straight from the alias chain above (single source of
+    // truth) — retyped in T12 so a BrawlerSimulatables widening cascades here.
+    BrawlerStorage m_storage;
+
+    // Game static data — the ownership ROOT for StaticData across the whole tree.
+    // It MUST be constructed in place here and NEVER copied or moved: its nested
+    // sub-StaticData members (m_attackSimulationStaticData, m_guardSimulationStaticData)
+    // hold references bound to sibling members (m_attackSequences, m_attackCircle).
+    // Copying/moving StaticData would silently leave those internal references
+    // dangling (pointing into the moved-from original). Every downstream consumer
+    // — the integration executor and the SimulationManager — therefore takes it
+    // by const& only; there is NO by-value StaticData path anywhere in the tree.
+    // (Invariant doc migrated from the now-deleted
+    // SimulationIntegrationExecutor::getStaticData() site — T12.)
+    simulatableBrawler::StaticData m_staticData;
+
+    BrawlerReconciliation m_reconciliation{ m_storage };
+    BrawlerNetSync        m_netSync{ m_storage, m_reconciliation };
 
     // SimulationIntegrationExecutor's leading three params are engine-specific
     // (StaticData is game-specific; the adapters are Chaos/UE), so apply_t can't
@@ -279,7 +295,8 @@ private:
     std::optional<IntegrationLayerType> m_integrationLayer;
 
     using ManagerType = SimulationManager<
-        BrawlerIntegrationExec, BrawlerNetSync, BrawlerReconciliation, BrawlerSystemsExec>;
+        BrawlerIntegrationExec, BrawlerNetSync, BrawlerReconciliation, BrawlerSystemsExec,
+        BrawlerStorage, simulatableBrawler::StaticData>;
     std::optional<ManagerType> m_manager;
 
     static ASimulationManagerUImpl* s_instances[2];
