@@ -17,6 +17,7 @@
 #include "OGBrawler/DAttackTargetVisualization.h"
 #include "OGBrawler/DAttackTargetVisualizationTwo.h"
 #include "OGBrawler/DAttackAimVisualization.h"
+#include "OGBrawler/DAttackBlockPredictionVisualization.h"
 
 #include <functional>
 #include <optional>
@@ -187,6 +188,8 @@ private:
 	std::optional<dAttackTargetVisualizationTwo::State> m_attackTargetVisualizationState;
 	
 	std::optional<dAttackAimVisualization::State> m_attackAimVisualizationState;
+
+	std::optional<dAttackBlockPredictionVisualization::State> m_attackBlockPredictionVisualizationState;
 
 	std::optional<simulatableBrawler::StaticData> m_staticData;
 

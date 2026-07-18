@@ -40,6 +40,12 @@ public:
 		return glm::vec3(inertia(0, 0), inertia(1, 1), inertia(2, 2));
 	}
 
+	// Mirror of ChaosPhysicsBodyReaderAdapter::isBodyResolvable for type-level
+	// consistency (keeps PhysicsBodyReaderAdapter satisfied cross-engine). Jolt's
+	// BodyInterface has no proxy-registry lookup; a body added to the interface is
+	// always addressable, so this is unconditionally true.
+	bool isBodyResolvable(BodyId /*bodyId*/) const { return true; }
+
 	PhysicsBodyState captureBodyState(BodyId bodyId) const
 	{
 		JPH::BodyID joltId(bodyId.value);

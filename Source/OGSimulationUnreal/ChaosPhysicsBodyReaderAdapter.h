@@ -49,6 +49,8 @@ public:
 		return glm::vec3(0.f);
 	}
 
+	bool isBodyResolvable(BodyId bodyId) const { return resolveProxy(bodyId) != nullptr; }
+
 	PhysicsBodyState captureBodyState(BodyId bodyId) const
 	{
 		if (auto* proxy = resolveProxy(bodyId))
@@ -65,9 +67,27 @@ public:
 	}
 
 private:
+	// GT-safe proxy lookup: go through the game-thread-owned UniqueIdxToGTParticles
+	// registry (written by GT-side RegisterObject / UnregisterObject), then follow
+	// the particle's GetProxy() pointer to arrive at the same FSingleParticlePhysicsProxy
+	// the PT-side SingleParticlePhysicsProxies_PT array holds.
+	//
+	// The earlier implementation used FPBDRigidsSolver::GetParticleProxy_PT directly,
+	// which is a physics-thread accessor by both naming convention (`_PT` suffix)
+	// and implementation — its backing sparse array is written on the PT during
+	// ProcessSinglePushedData_Internal. Reading from the game thread was a data
+	// race, most dangerous during a character spawn: the PT could be mid-emplace
+	// on the sparse array's bitmap / element storage, causing torn reads with
+	// null Handle fields (matching the ~0x48-offset null-deref crash seen 2026-07-17).
+	//
+	// The current path (UniqueIdxToGTParticle_External → GetProxy) reads a GT-owned
+	// structure, so no synchronization with the physics thread is required.
+	// Downstream (proxy->GetGameThreadAPI().GetR/GetX/GetV/GetW) is unchanged.
 	Chaos::FSingleParticlePhysicsProxy* resolveProxy(BodyId bodyId) const
 	{
-		return m_solver.GetParticleProxy_PT(Chaos::FUniqueIdx{static_cast<int32>(bodyId.value)});
+		Chaos::FGeometryParticle* particle =
+			m_solver.UniqueIdxToGTParticle_External(Chaos::FUniqueIdx{static_cast<int32>(bodyId.value)});
+		return particle ? static_cast<Chaos::FSingleParticlePhysicsProxy*>(particle->GetProxy()) : nullptr;
 	}
 
 	Chaos::FPBDRigidsSolver& m_solver;

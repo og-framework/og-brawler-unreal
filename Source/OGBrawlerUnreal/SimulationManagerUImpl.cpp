@@ -343,6 +343,7 @@ void ASimulationManagerUImpl::BeginPlay()
 		// Authority never runs prediction — it IS the truth.
 		Chaos::FPBDRigidsSolver& rigidsSolverS = solver->CastChecked();
 		m_physAdapter.emplace(rigidsSolverS);
+		m_physReaderAdapter.emplace(rigidsSolverS);
 		m_queryAdapter.emplace(uWorld, std::initializer_list<ChaosCategoryMapping>{
 			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
 			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
@@ -393,6 +394,7 @@ void ASimulationManagerUImpl::BeginPlay()
 		// Non-authority branch = pure client — always runs prediction.
 		Chaos::FPBDRigidsSolver& rigidsSolverC = solver->CastChecked();
 		m_physAdapter.emplace(rigidsSolverC);
+		m_physReaderAdapter.emplace(rigidsSolverC);
 		m_queryAdapter.emplace(uWorld, std::initializer_list<ChaosCategoryMapping>{
 			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
 			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },

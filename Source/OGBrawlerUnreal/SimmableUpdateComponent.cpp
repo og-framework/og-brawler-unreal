@@ -132,6 +132,16 @@ namespace DAttackRadialVisualizationCVars
 		ECVF_Default);
 }
 
+namespace DAttackTargetVisualizationCVars
+{
+	bool legacyEnemyRangeArcsEnabled = false;   // OFF by default — new block-prediction viz is primary
+	static FAutoConsoleVariableRef legacyEnemyRangeArcsEnabledCVar(
+		TEXT("DAttackTargetVisualization.legacyEnemyRangeArcsEnabled"),
+		legacyEnemyRangeArcsEnabled,
+		TEXT("Enable the legacy per-enemy inner-circle arc segments (outlined + solid). Off by default; enable for A/B comparison against the new block-prediction viz. Slated for removal once the new viz is confirmed as an improvement."),
+		ECVF_Default);
+}
+
 //Component
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -221,6 +231,8 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 	}
 	m_attackTargetVisualizationState.emplace(m_targetVisualizationVolumeIds);
 	m_attackAimVisualizationState.emplace();
+	// Block-prediction viz shares the same target-viz query-volume list.
+	m_attackBlockPredictionVisualizationState.emplace(m_targetVisualizationVolumeIds);
 
 	// Kick off body creation + resolvability polling via manager->tryRegister.
 	if (UWorld* world = GetWorld())
@@ -495,21 +507,33 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 		}
 
-		if (m_ownerInputCollection != nullptr && m_ownerInputCollection->hasInputComponent())
+		// Attack aim visualization — attack-direction indicator (red L / 3-point path)
+		// and reference arcs. Sourced per-character via the reconciliation prediction-slot
+		// input, matching the block-prediction viz idiom below (live for the local
+		// character, held-constant server correction ~1 RTT behind for remote simulated
+		// proxies). On the authority (no correction caches), getLatestInput returns
+		// nullopt and the viz is skipped for that tick — same limitation as the
+		// block-prediction viz on listen-server.
 		{
-			dAttackAimVisualization::Input aimInput(DeltaTime,
-				aimDirection,
-				rendererFunctorImpl,
-				loggingFunctor,
-				moveStick,
-				moveDirectionWorld);
+			const auto lastAimInput = vizManager->editReconciliation()
+			                                    .getLatestInput<SimulatableBrawler>((unsigned int)GetUniqueID());
+			if (lastAimInput.has_value())
+			{
+				const auto& machineInput = lastAimInput->get<dAttackMachineSimulation::PlayerInput>();
+				dAttackAimVisualization::Input aimInput(DeltaTime,
+					machineInput.aimDirection,
+					rendererFunctorImpl,
+					loggingFunctor,
+					machineInput.moveDirection,
+					machineInput.moveDirectionWorld);
 
-			dAttackAimVisualization::visualize(aimInput,
-				(*attackSimState).get<dAttackRadialSimulation::State>(),
-				(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-				attackSimAllState.getDerivedState().m_attackDerivedState,
-				m_staticData->m_attackSimulationStaticData,
-				m_attackAimVisualizationState.value());
+				dAttackAimVisualization::visualize(aimInput,
+					(*attackSimState).get<dAttackRadialSimulation::State>(),
+					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
+					attackSimAllState.getDerivedState().m_attackDerivedState,
+					m_staticData->m_attackSimulationStaticData,
+					m_attackAimVisualizationState.value());
+			}
 		}
 
 		// Projectile visualization — debug sphere per alive (flying) projectile slot,
@@ -536,13 +560,40 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			dAttackTargetVisualizationTwo::Input attackTargetVisualizationInput(DeltaTime,
 				tmpAimInput,
 				vizManager->editQueryAdapter(),
-				rendererFunctorImpl);
+				rendererFunctorImpl,
+				DAttackTargetVisualizationCVars::legacyEnemyRangeArcsEnabled);
 			dAttackTargetVisualizationTwo::visualize(attackTargetVisualizationInput,
 				m_attackTargetVisualizationState.value(),
 				m_staticData->m_attackSimulationStaticData,
 				(*attackSimState).get<dAttackMachineSimulation::State>(),
 				(*attackSimState).get<dAttackRadialSimulation::State>(),
 				(*attackSimState).get<dAttackGuardSimulation::State>());
+		}
+
+		// Attacker-side block-prediction viz. NO local-player gate: sourced per-character
+		// via the reconciliation prediction-slot input (live for the local character,
+		// held-constant server correction ~1 RTT behind for remote simulated proxies).
+		// getLatestInput routes through findInputCache, so on the authority (no caches)
+		// it returns nullopt and the viz is skipped for that tick — known limitation
+		// called out in Task 8's PIE matrix.
+		{
+			const auto lastInput = vizManager->editReconciliation()
+			                                  .getLatestInput<SimulatableBrawler>((unsigned int)GetUniqueID());
+			if (lastInput.has_value())
+			{
+				const auto& machineInput = lastInput->get<dAttackMachineSimulation::PlayerInput>();
+				dAttackBlockPredictionVisualization::Input blockPredInput(DeltaTime,
+					machineInput.aimDirection,
+					machineInput.moveDirection,
+					machineInput.moveDirectionWorld,
+					vizManager->getPhysicsBodyReaderAdapter(),
+					vizManager->editQueryAdapter(),
+					rendererFunctorImpl);
+				dAttackBlockPredictionVisualization::visualize(blockPredInput,
+					m_attackBlockPredictionVisualizationState.value(),
+					m_staticData->m_attackSimulationStaticData,
+					(*attackSimState).get<dAttackRadialSimulation::State>());
+			}
 		}
 	}
 

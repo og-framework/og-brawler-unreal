@@ -32,7 +32,32 @@ public:
 		return BodyId{nativeId};
 	}
 
-	bool isBodyResolvable(BodyId bodyId) const { return resolveProxy(bodyId) != nullptr; }
+	// NOTE: this method is called from the GAME THREAD by
+	// SimulationManagerUImpl::tryRegister during the register-with-Chaos
+	// polling loop (SimulationManagerUImpl.cpp ~lines 630/635). All other
+	// methods on this adapter are called from the physics thread by the sim
+	// and can use the private resolveProxy() (PT-side proxy registry) safely.
+	//
+	// For isBodyResolvable specifically, use the GT-owned UniqueIdxToGTParticles
+	// registry instead — GetParticleProxy_PT would race with PT-side
+	// registration writes to SingleParticlePhysicsProxies_PT during
+	// ProcessSinglePushedData_Internal, same class of bug that motivated
+	// the ChaosPhysicsBodyReaderAdapter GT-safe rework (2026-07-17). A torn
+	// read of the sparse array could return a non-null proxy pointer whose
+	// underlying Handle field is still null, tricking tryRegister into
+	// declaring the body ready one push-cycle too early.
+	//
+	// Semantic note: this returns true as soon as GT registration completes,
+	// which precedes the PT-side proxy Handle assignment by one push cycle.
+	// Since tryRegister runs on GT and the sim runs on PT, by the time the
+	// sim first touches the body on PT, ProcessSinglePushedData_Internal
+	// will have run (it drains queued pushes at the top of every PT tick
+	// before the sim step) and SetHandle will have populated the PT side.
+	bool isBodyResolvable(BodyId bodyId) const
+	{
+		return m_solver.UniqueIdxToGTParticle_External(
+			Chaos::FUniqueIdx{static_cast<int32>(bodyId.value)}) != nullptr;
+	}
 
 	glm::mat4 getBodyTransform(BodyId bodyId) const
 	{

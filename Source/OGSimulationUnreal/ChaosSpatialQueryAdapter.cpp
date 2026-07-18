@@ -130,7 +130,17 @@ SpatialQueryReport ChaosSpatialQueryAdapter::overlap(const std::vector<QueryVolu
 		{
 			FHitResult& hit = results[i];
 			auto* proxy = hit.GetComponent()->GetBodyInstance()->GetBodyInstanceAsyncPhysicsTickHandle().Proxy;
-			if (!proxy->GetPhysicsThreadAPI()->ShapesArray()[0]->GetQueryEnabled())
+			// Variant-A spawn-window bandaid: during a character spawn, Chaos's
+			// FPBDRigidsSolver::RegisterObject synchronously inserts the new proxy
+			// into the external acceleration structure on the game thread, but
+			// Proxy->Handle stays null on the PT side until ProcessSinglePushedData_Internal
+			// runs on the next physics tick (SceneQuery.cpp:454 documents that Chaos
+			// itself doesn't detect PT-context queries reliably during this window).
+			// GetPhysicsThreadAPI() returns null when Handle is null — dereferencing it
+			// crashes at ~offset 0x48. Drop unready hits silently; their shapes
+			// couldn't have participated in gameplay collisions anyway.
+			auto* ptApi = proxy ? proxy->GetPhysicsThreadAPI() : nullptr;
+			if (!ptApi || !ptApi->ShapesArray()[0]->GetQueryEnabled())
 				results.RemoveAt(i);
 		}
 	}

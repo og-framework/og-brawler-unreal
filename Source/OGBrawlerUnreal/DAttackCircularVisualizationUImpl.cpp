@@ -100,7 +100,7 @@ void DAttackRendererFunctorUImpl::drawSolidBox(glm::vec3 position, const glm::ma
 	DrawDebugSolidBox(m_world, uglm::toFVector(position), uglm::toFVector(extents), uRotation, idToColor(colorId), false, -1.f, 0);
 }
 
-void DAttackRendererFunctorUImpl::drawMesh(const std::vector<glm::vec3>& vertices, const std::vector<unsigned int>& indicies, unsigned int colorId) const
+void DAttackRendererFunctorUImpl::drawMesh(const std::vector<glm::vec3>& vertices, const std::vector<unsigned int>& indicies, unsigned int colorId, unsigned int alpha) const
 {
 	TArray<FVector> uVertices;
 	TArray<int32> uIndices;
@@ -112,7 +112,7 @@ void DAttackRendererFunctorUImpl::drawMesh(const std::vector<glm::vec3>& vertice
 		uIndices.Add(index);
 
 	FColor color = idToColor(colorId);
-	color.A = 150;
+	color.A = static_cast<uint8>(alpha);
 	DrawDebugMesh(m_world, uVertices, uIndices, color, false, -1.f, 4.f);
 }
 

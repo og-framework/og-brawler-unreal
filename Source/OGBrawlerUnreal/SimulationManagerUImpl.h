@@ -33,6 +33,7 @@
 
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
+#include "OGSimulationUnreal/ChaosPhysicsBodyReaderAdapter.h"
 #include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
 
@@ -211,6 +212,11 @@ public:
 
     ChaosPhysicsBodyAdapter&  editPhysicsBodyAdapter() { return m_physAdapter.value(); }
     ChaosSpatialQueryAdapter& editQueryAdapter()       { return m_queryAdapter.value(); }
+
+    // Read-only, game-thread-safe body adapter (reads GT-interpolated state).
+    // First runtime consumer is the block-prediction viz. Const-return because the
+    // PhysicsBodyReaderAdapter concept only requires const methods.
+    const ChaosPhysicsBodyReaderAdapter& getPhysicsBodyReaderAdapter() const { return m_physReaderAdapter.value(); }
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
 
     SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
@@ -229,6 +235,7 @@ private:
 
     // Adapters require the Chaos solver — emplaced in BeginPlay.
     std::optional<ChaosPhysicsBodyAdapter>   m_physAdapter;
+    std::optional<ChaosPhysicsBodyReaderAdapter> m_physReaderAdapter;
     std::optional<ChaosSpatialQueryAdapter>  m_queryAdapter;
 
     // ---- ogsim-system-api alias chain (design §4.3) -----------------------
