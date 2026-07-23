@@ -55,10 +55,46 @@ public:
 	glm::vec3 buildMoveDirectionWorld() const;
 	static glm::vec3 getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection);
 
+	// --- The three PlayerInput sources, and how they relate (D5.4 / og-netcode-v2 T12) ---
+	//
+	// There are three ways a PlayerInput reaches a consumer in this project. They are NOT
+	// interchangeable; picking the wrong one is a correctness bug, not a style choice.
+	//
+	//  1. buildPlayerInput(step, componentId, manager)   — THE SIM PATH.
+	//     Called once per simulation tick from the inputProvider lambda on the physics
+	//     thread. Continuous fields + discrete fields (attack buttons) + the tick-stateful
+	//     motion-sequence matcher (Hadouken and friends), which needs the correction cache
+	//     and the tick number to do rising-edge detection against the previous tick's input.
+	//     This is the ONLY input that is simulated and replicated. Rate: sim tick (60 Hz).
+	//
+	//  2. buildLatestVisualizationInput()                — THE RENDER ECHO (visualization only).
+	//     A live re-sample of the CONTINUOUS fields only, safe to call at render-frame rate.
+	//     Shares the continuous read with (1) via simulatableBrawler::readContinuousInputFields,
+	//     so the two provably cannot drift; differs only in that it calls
+	//     makeVisualizationPlayerInput instead of makeSimPlayerInput, leaving every discrete
+	//     field neutral (triggeredActionId == inputSequence::kNoMatch, attacks false).
+	//     The motion matcher is NEVER invoked here — running it at render rate would misfire
+	//     it, since many render frames share one "previous tick". Rate: render frame.
+	//     Cosmetic only: never feed this to the simulation or to the input RPC.
+	//
+	//  3. CorrectionCache::getLatestInput<SimulatableBrawler>() — THE CACHE READ-BACK.
+	//     The tick-quantized input the reconciliation last committed. Returns nullopt on the
+	//     authority (no caches there). This is the correct — and only — source for REMOTE
+	//     simulated proxies, which have no live local input to echo. Rate: sim tick.
+	//
+	// T13 swaps the LOCAL character's visualization input source from (3) to (2); remote
+	// proxies keep (3).
+
 	// Builds the full sim-tick PlayerInput. Called from the inputProvider lambda on the physics thread.
 	// `manager` gives the matcher read access to the recent-input correction cache (may be null on
 	// paths where no cache exists, e.g. the authority — matching is then skipped).
 	simulatableBrawler::PlayerInput buildPlayerInput(const SimulationTimeStep& step, uint32 componentId, const ASimulationManagerUImpl* manager) const;
+
+	// Render-frame-callable live sample of the CONTINUOUS input fields only. See the block
+	// comment above for how this relates to buildPlayerInput and to getLatestInput. Takes no
+	// SimulationTimeStep, no componentId and no manager precisely because it touches none of
+	// the tick/cache context the motion matcher would need — the matcher is not run.
+	simulatableBrawler::PlayerInput buildLatestVisualizationInput() const;
 
 	// Logical stick accessors. Both raw members end up with the same "stick-up = -Y in
 	// storage" convention but get there differently: onMove explicitly negates v.Y (left

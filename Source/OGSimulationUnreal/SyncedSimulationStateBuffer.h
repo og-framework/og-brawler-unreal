@@ -34,12 +34,20 @@
 // 3 at 60 Hz target (post-Stage-2 ship). Hard upper bound = kMaxSlots = 8 for
 // wire safety; the runtime depth is min(redundancyDepthTicks, kMaxSlots).
 //
-// INVARIANT (R-T5): inputs in this bundle are append-only / immutable per
-// capture-tick. The client never revises an already-sent tick's input. The
-// server's dedup-by-capture-tick logic (RemoteMoveQueue, Task 10) silently
-// drops a duplicate capture_tick — that is correct ONLY under this invariant,
-// so appendSlot() OG_CHECK-fails on a duplicate capture_tick to catch a
-// producer that would violate it.
+// INVARIANT (R-T5 / D3.11): inputs written into this bundle are append-only and
+// immutable per capture-tick. The client MUST NOT revise the input value for a
+// previously-emitted capture-tick; any producer that does so silently loses the
+// corrected value at the dedup-by-capture-tick step on the server. If a future
+// feature requires input revision post-capture, the wire format needs an
+// explicit revision-number field and the dedup contract must be re-designed.
+//
+// The server's dedup-by-capture-tick logic (RemoteMoveQueue, Task 10) silently
+// drops a duplicate capture_tick — that is correct ONLY under this invariant.
+// appendSlot() therefore OG_CHECK-fails on a duplicate capture_tick in checked
+// builds, and silently drops it (first arrival wins) in shipping builds where
+// the OG_CHECK compiles out. The kMaxSlots wire budget is enforced the same two
+// ways (T16), so no build config can emit a bundle above the budget. See the
+// ENFORCEMENT block in OGSimulation/InputRedundancyBundleCodec.h.
 //
 // The version byte exists so pre/post-Stage-1 builds refuse to interop loudly
 // (wire-format compat fence per risks_and_plan.md §5.2; the mismatch check
@@ -101,14 +109,27 @@ public:
 		return Value;
 	}
 
-	// Producer-side append of one (capture_tick, input) slot. ENFORCES R-T5
-	// (OG_CHECK on duplicate capture_tick) and the kMaxSlots wire-safety guard.
-	// Thin delegation to the engine-agnostic codec (Task 12) so the production
-	// path and the pure-C++ Low-Level-Tests exercise the same logic.
+	// Producer-side append of one (capture_tick, input) slot. ENFORCES R-T5 and
+	// the kMaxSlots wire-safety bound: OG_CHECK on a duplicate capture_tick or an
+	// overflow in checked builds, silent drop in shipping. Thin delegation to the
+	// engine-agnostic codec (Task 12) so the production path and the pure-C++
+	// Low-Level-Tests exercise the same logic.
 	template <typename InputType>
 	void appendSlot(uint32 capture_tick, const InputType& input)
 	{
 		inputRedundancyBundle::appendSlot<InputType>(*this, capture_tick, input);
+	}
+
+	// Append variant that reports whether the slot was actually written. Returns
+	// false when `capture_tick` was already emitted (the R-T5 silent drop; the
+	// first-arrival input is preserved) or when the bundle is already at kMaxSlots
+	// (the T16 wire-budget drop). In both cases the buffer is left byte-for-byte
+	// untouched. Use this instead of appendSlot() only where such a drop is an
+	// expected outcome rather than a producer bug.
+	template <typename InputType>
+	[[nodiscard]] bool tryAppendSlot(uint32 capture_tick, const InputType& input)
+	{
+		return inputRedundancyBundle::tryAppendSlot<InputType>(*this, capture_tick, input);
 	}
 
 	// Consumer-side iteration: invokes callback(uint32 capture_tick, const

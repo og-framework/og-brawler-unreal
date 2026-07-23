@@ -17,6 +17,7 @@
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/BrawlerProjectileSimulation.h"
+#include "OGBrawler/BrawlerInputPackaging.h"
 #include "OGBrawler/InputSequence/InputSequence.h"
 #include "OGBrawler/InputSequence/GameMotions.h"
 
@@ -343,9 +344,13 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	if (!hasInputComponent())
 		return simulatableBrawler::getZeroPlayerInput();
 
-	const glm::vec3 aimDirection = buildAimDirection();
-	const glm::vec2 moveStick = getMoveStick();
-	const glm::vec3 moveDirectionWorld = buildMoveDirectionWorld();
+	// Continuous fields via the shared core reader — the ONE source of truth, also used by
+	// buildLatestVisualizationInput(). Do not re-read the accessors directly here.
+	const simulatableBrawler::ContinuousInputFields continuous =
+		simulatableBrawler::readContinuousInputFields(*this);
+
+	const glm::vec3 aimDirection = continuous.aimDirection;
+	const glm::vec2 moveStick = continuous.moveStick;
 	const bool leftAttack  = getLeftAttack();
 	const bool rightAttack = getRightAttack();
 
@@ -401,9 +406,19 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u"),
 		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId);
 
-	return simulatableBrawler::PlayerInput(
-		dAttackRadialSimulation::PlayerInput(aimDirection, leftAttack, rightAttack),
-		dAttackMachineSimulation::PlayerInput(aimDirection, leftAttack, rightAttack, moveStick, moveDirectionWorld, triggeredActionId),
-		dAttackGuardSimulation::PlayerInput(aimDirection),
-		brawlerProjectileSimulation::PlayerInput{aimDirection});
+	return simulatableBrawler::makeSimPlayerInput(continuous, leftAttack, rightAttack, triggeredActionId);
+}
+
+simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildLatestVisualizationInput() const
+{
+	// Same cold-path guard as buildPlayerInput: with no input component bound there is nothing
+	// live to sample, and the neutral input is the honest answer.
+	if (!hasInputComponent())
+		return simulatableBrawler::getZeroPlayerInput();
+
+	// Continuous read shared with buildPlayerInput; visualization packer leaves every discrete
+	// field neutral. The motion matcher is deliberately not reachable from here — there is no
+	// step, no componentId and no manager in scope to run it with.
+	return simulatableBrawler::makeVisualizationPlayerInput(
+		simulatableBrawler::readContinuousInputFields(*this));
 }

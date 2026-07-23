@@ -30,6 +30,7 @@
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGSimulation/SimulationQueues.h"
+#include "OGSimulation/Network/ReplicatedTierConsumer.h"
 
 #include "SimmableUpdateComponent.generated.h"
 
@@ -120,6 +121,113 @@ public:
 		m_onRemoteMoveReceivedCallback = nullptr;
 	}
 
+	// [C.2 / T10 part 4] Delivery entry point for an input released from the
+	// server's ServerInputDelayQueue. Called on the GAME THREAD by
+	// ASimulationManagerUImpl::releaseDelayedInputsForStep, immediately before
+	// the authority physics step.
+	//
+	// This deliberately routes through the SAME callback the RPC handler uses,
+	// with the ORIGINAL captureTick — so from RemoteMoveQueue onwards a delayed
+	// input is indistinguishable from an undelayed one, and its capture-tick
+	// dedup and too-far-future guard keep working unchanged. The delay is
+	// expressed purely as WHEN this is called, never as a modified tick number.
+	void deliverDelayedRemoteInput(uint32 captureTick,
+	                               const simulatableBrawler::PlayerInput& input)
+	{
+		if (m_onRemoteMoveReceivedCallback)
+			m_onRemoteMoveReceivedCallback(captureTick, input);
+	}
+
+	// --- C.2 server-authoritative RTT tier (T10, Option A) -------------------
+	//
+	// Server → owning-client transport for the authoritative connection tier.
+	// The SERVER derives the tier from its own per-connection FNetPing RoundTrip
+	// (ServerReceiveRemoteMove resolves the RTT primitive and forwards it to
+	// ServerReceptionCoordinator::noteRttSample) and publishes it here; the client
+	// only ever READS it. That is the whole point of Option A:
+	// with one producer there is no second estimator to disagree with, so the
+	// boundary-RTT tier split — and the recurring one-tick corrections it caused
+	// — cannot happen.
+	//
+	// WHY THIS COMPONENT AND NOT THE PAWN OR THE TIMING RELAY:
+	//  - ASimulationTimingRelay is a single bAlwaysRelevant actor with ONE shared
+	//    buffer. It is structurally incapable of carrying per-connection data.
+	//  - The pawn (AOGBrawlerUECharacter) carries no netcode surface at all.
+	//    This component already owns every other per-connection replicated
+	//    channel (correction state, correction input) and already receives the
+	//    client's input RPC, so the tier rides the channel its producer and its
+	//    consumer both already touch.
+	// The correction sync-buffer WIRE FORMAT is deliberately untouched — that is
+	// Stage 4 territory. This is a separate, additive property.
+
+	// The component's `ConnectionTierSink` implementation (T23). PURE TRANSPORT:
+	// it just writes the owner-only replicated `m_replicatedConnectionTier`. The
+	// core (`ServerReceptionCoordinator::noteRttSample`) now owns the "no reading"
+	// (rttMs < 0) skip AND the publish-only-on-change dedup, and calls this ONLY
+	// when the tier for this owner actually changed — so there is no sentinel check
+	// and no changed-vs-current test left here. `id` is the sink target; this
+	// component is its own target, so it asserts `id == GetUniqueID()` (a second
+	// engine whose sink is a central manager would route on `id` instead).
+	void sendConnectionTierToOwningClient(unsigned int id, uint8_t tier);
+
+	// Client-side read (also valid on the server, where it mirrors what was
+	// published). T9 consumes this at the integrator offset-read.
+	uint8 getReplicatedConnectionTier() const { return m_replicatedConnectionTier; }
+
+	// The tier value observed BEFORE the most recent OnRep. T11 keys its
+	// upward-transition rollback off (previous → current); it is captured here
+	// rather than recomputed because OnRep is the only place the pre-change
+	// value still exists.
+	uint8 getPreviousReplicatedConnectionTier() const { return m_previousReplicatedConnectionTier; }
+
+	// --- C.2 client-side consumption (T9, Option A) --------------------------
+	//
+	// The client's ENTIRE share of the tier system. It holds the replicated tier
+	// and derives behaviour from it through the shared lookups in
+	// ConnectionTierTable.h — the same functions the server's table delegates to,
+	// so both ends turn the identical tier value into the identical delay. The
+	// client owns NO ConnectionTierTable and never calls onRttSample.
+	//
+	// std::nullopt until tryInitializeWithManager has resolved a manager: the
+	// consumer binds `const TimeConfig&` from the manager and cannot be built
+	// before one exists. Every accessor below therefore degrades to the no-tier
+	// baseline while unbound, which is the same answer it would give pre-OnRep.
+
+	// Effective Layer-1 input delay in ticks for this connection, per the
+	// C2-locked formula: `rttTierInputDelays[tier]` once a tier has arrived
+	// (REPLACES the baseline, never added to it), `forcedInputLatencyTicks`
+	// before then. Returns 0 when neither a manager nor a config is available,
+	// which is the correct un-delayed legacy behaviour for that state.
+	int32 getEffectiveInputDelayTicks() const;
+
+	// True once at least one authoritative tier has actually landed. Keyed on
+	// ARRIVAL, not on the tier value — the replicated property defaults to 0,
+	// which is also a legal tier, so a value test cannot tell the two apart.
+	bool hasReceivedAuthoritativeTier() const;
+
+	// [T9 part 3] Push getEffectiveInputDelayTicks() across to the simulation's
+	// collect path (game thread -> a single std::atomic<int32> read once per tick
+	// on the physics thread). Called from OnRep_ConnectionTier and once at
+	// registration so the pre-arrival baseline is applied even if no tier ever
+	// lands. No-ops when no manager has spawned yet — BeginPlay publishes the
+	// baseline on its own, so nothing is lost by the early return.
+	void publishEffectiveInputDelayToSimulation();
+
+	// [T11] Turn one replicated-tier transition into a client prediction
+	// rollback. Under Option A the client runs no RTT sampling of its own, so
+	// the OnRep `oldTier -> newTier` delta IS the transition signal. Computes
+	// the effective-delay delta through the shared `tierDelayDeltaTicks` lookup
+	// (never off the raw config array — `lanZeroDelayOverride` makes those
+	// disagree for every transition touching tier 0) and forwards a POSITIVE
+	// delta to the client clock. Non-positive deltas are dropped by the clock.
+	void applyTierTransitionRollback(uint8 oldTier, uint8 newTier);
+
+	// Read-only handle for T11's transition logic and for tests.
+	const ReplicatedTierConsumer* getReplicatedTierConsumer() const
+	{
+		return m_replicatedTierConsumer.has_value() ? &(*m_replicatedTierConsumer) : nullptr;
+	}
+
 	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
 	FSimulationInputSyncBuffer& getSyncedCorrectionInputBuffer() { return m_replicatedInputSyncedBuffer; }
 
@@ -172,6 +280,39 @@ private:
 	FSimulationInputSyncBuffer m_replicatedInputSyncedBuffer;
 	UFUNCTION()
 	void OnRep_CorrectionInput();
+
+	// [T10] Authoritative connection tier, replicated COND_OwnerOnly (see
+	// GetLifetimeReplicatedProps) — a tier is a property of ONE client's wire and
+	// is meaningless to every other client, so sending it to anyone else would be
+	// pure bandwidth waste. uint8 because the tier index is bounded by
+	// ConnectionTierTable::kTierCount (4 today), so a byte is the natural width.
+	// Tier 0 is the correct pre-arrival default: it is the lowest-latency tier,
+	// and T9's consumer additionally falls back to forcedInputLatencyTicks until
+	// the first OnRep actually lands, so a client that has not heard from the
+	// server yet does not silently adopt tier-0 timing.
+	UPROPERTY(ReplicatedUsing = OnRep_ConnectionTier)
+	uint8 m_replicatedConnectionTier = 0;
+	// Takes the OldValue overload UE offers for non-array replicated properties:
+	// by the time OnRep runs the property already holds the NEW value, so the
+	// engine-supplied previous value is the only place the transition delta can
+	// be read without shadowing the property by hand.
+	UFUNCTION()
+	void OnRep_ConnectionTier(uint8 OldTier);
+
+	// Pre-OnRep value, latched from OldTier so T11 can compute the transition
+	// delta outside the OnRep call frame.
+	uint8 m_previousReplicatedConnectionTier = 0;
+
+	// [T9 part 3] True once OnRep_ConnectionTier has fired at least once, even if
+	// that happened before the tier consumer was bound. Distinguishes "the server
+	// sent tier 0" from "the property is still at its default 0", which the value
+	// alone cannot.
+	bool m_connectionTierOnRepObserved = false;
+
+	// [T9] Client-side consumer of the replicated tier. Emplaced in
+	// tryInitializeWithManager, bound to the manager's TimeConfig by reference.
+	// Fed ONLY from OnRep_ConnectionTier (game thread) — it never samples.
+	std::optional<ReplicatedTierConsumer> m_replicatedTierConsumer;
 
 	UOGBrawlerInputCollectionComponent* m_ownerInputCollection = nullptr;
 

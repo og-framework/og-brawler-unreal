@@ -38,6 +38,10 @@ DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 namespace
 {
+// [T20] The per-connection reap deadline (kTierReapDeadlineDwellPeriods) moved
+// into the core ServerReceptionCoordinator header alongside the reap logic it
+// governs; it is no longer a UE file-local constant.
+
 	// Matches any brawlerProjectileSimulation::PhysicsDeclaration<I> (one instantiation
 	// per pool slot) so the tryRegister sub-StaticData selector can route all projectile
 	// slot declarations to staticData.m_projectileStaticData. A partial specialization is
@@ -56,13 +60,23 @@ namespace
 
 		// Severity meta-prefix (rare; framework defaults to Log).
 		ELogVerbosity::Type severity = ELogVerbosity::Log;
+		// The category is chosen from the [Tag] that follows any severity prefix,
+		// so tag-matching runs against `body` (fmsg minus the leading
+		// [Verbose]/[Warning] token — both are 9 chars) while the full fmsg,
+		// severity token included, is what actually gets logged. This lets a
+		// message carry BOTH a severity escalation and a routable tag, e.g. the
+		// T25 input-path diagnostics ([Warning][InputGap], [Warning][InputDrop], …)
+		// route to LogOGNet AND show at Warning.
+		FString body = fmsg;
 		if (fmsg.StartsWith(TEXT("[Verbose]")))
 		{
 			severity = ELogVerbosity::Verbose;
+			body = fmsg.RightChop(9);
 		}
 		else if (fmsg.StartsWith(TEXT("[Warning]")))
 		{
 			severity = ELogVerbosity::Warning;
+			body = fmsg.RightChop(9);
 		}
 
 #define EMIT_OG(cat) \
@@ -75,34 +89,44 @@ namespace
 		} while (0)
 
 		// LogOGSim: rare simulation lifecycle events.
-		if (fmsg.StartsWith(TEXT("[TimeResync.")))           { EMIT_OG(LogOGSim); }
-		else if (fmsg.StartsWith(TEXT("[Resim.")))           { EMIT_OG(LogOGSim); }
-		else if (fmsg.StartsWith(TEXT("[ResimCheck.Divergence]")))     { EMIT_OG(LogOGSim); }
-		else if (fmsg.StartsWith(TEXT("[ResimCheck.PrepareRestore]"))) { EMIT_OG(LogOGSim); }
+		if (body.StartsWith(TEXT("[TimeResync.")))           { EMIT_OG(LogOGSim); }
+		else if (body.StartsWith(TEXT("[Resim.")))           { EMIT_OG(LogOGSim); }
+		else if (body.StartsWith(TEXT("[ResimCheck.Divergence]")))     { EMIT_OG(LogOGSim); }
+		else if (body.StartsWith(TEXT("[ResimCheck.PrepareRestore]"))) { EMIT_OG(LogOGSim); }
 		// LogOGSimTick: per-tick simulation chatter, dominates log volume.
-		else if (fmsg.StartsWith(TEXT("[ResimCheck.Check]")))      { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[ResimCheck.IsSimilar]")))  { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[ResimCheck.TriggerRewind]"))) { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[AuthoritySimulation]")))   { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[ClientPrediction]")))      { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[PredictionSimulation]")))  { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[PostPrediction]")))        { EMIT_OG(LogOGSimTick); }
-		else if (fmsg.StartsWith(TEXT("[CollectInput]")))          { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[ResimCheck.Check]")))      { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[ResimCheck.IsSimilar]")))  { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[ResimCheck.TriggerRewind]"))) { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[AuthoritySimulation]")))   { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[ClientPrediction]")))      { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[PredictionSimulation]")))  { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[PostPrediction]")))        { EMIT_OG(LogOGSimTick); }
+		else if (body.StartsWith(TEXT("[CollectInput]")))          { EMIT_OG(LogOGSimTick); }
 		// LogOGNet: replication-channel events.
-		else if (fmsg.StartsWith(TEXT("[ServerReceive]")))              { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[ReceiveLocalInput]")))          { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[SendCorrectionStateToClients]"))) { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[SendRemoteInputToClients]")))   { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[SendLocalInputToServer]")))     { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[ReceiveCorrectionState]")))     { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[ReceiveCorrectionInput]")))     { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[InjectCorrectionState]")))      { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[InjectCorrectionInput]")))      { EMIT_OG(LogOGNet); }
-		else if (fmsg.StartsWith(TEXT("[DrainOutOfOrder]")))            { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[ServerReceive]")))              { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[ReceiveLocalInput]")))          { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[SendCorrectionStateToClients]"))) { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[SendRemoteInputToClients]")))   { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[SendLocalInputToServer]")))     { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[ReceiveCorrectionState]")))     { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[ReceiveCorrectionInput]")))     { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[InjectCorrectionState]")))      { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[InjectCorrectionInput]")))      { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[DrainOutOfOrder]")))            { EMIT_OG(LogOGNet); }
+		// LogOGNet: input-path diagnostics (T25). [InputGap]/[InputDrop]/
+		// [DelayShift]/[InputStats] carry a [Warning] severity prefix so they show
+		// under the default LogOGNet=Warning; [Park]/[Release] are Log severity
+		// (on-demand under LogOGNet Verbose). All route here off `body`.
+		else if (body.StartsWith(TEXT("[InputGap]")))                   { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[InputDrop]")))                  { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[DelayShift]")))                 { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[InputStats]")))                 { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[Park]")))                       { EMIT_OG(LogOGNet); }
+		else if (body.StartsWith(TEXT("[Release]")))                    { EMIT_OG(LogOGNet); }
 		// LogOGMgmt: manager / simulatable lifecycle.
-		else if (fmsg.StartsWith(TEXT("SimulationManager:"))) { EMIT_OG(LogOGMgmt); }
-		else if (fmsg.StartsWith(TEXT("tryRegister:")))       { EMIT_OG(LogOGMgmt); }
-		else if (fmsg.StartsWith(TEXT("NewFramework:")))      { EMIT_OG(LogOGMgmt); }
+		else if (body.StartsWith(TEXT("SimulationManager:"))) { EMIT_OG(LogOGMgmt); }
+		else if (body.StartsWith(TEXT("tryRegister:")))       { EMIT_OG(LogOGMgmt); }
+		else if (body.StartsWith(TEXT("NewFramework:")))      { EMIT_OG(LogOGMgmt); }
 		// LogOG: fallback for unrecognized prefixes.
 		else                                                  { EMIT_OG(LogOG); }
 
@@ -360,6 +384,26 @@ void ASimulationManagerUImpl::BeginPlay()
 			m_storage, m_staticData, std::function<void(const char*)>(pctmloggerServer) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmloggerServer));
+
+		// [T9 part 4] Inject the game's zero input for the client input delay
+		// line. Set on the AUTHORITY branch too, even though a dedicated server
+		// never reads it (its effective client delay stays 0, so the line is
+		// never consulted): a listen-server host runs the provider branch on this
+		// manager, and leaving the neutral at a value-initialised PlayerInput
+		// would put a (0,0,0) forward vector one config change away from reaching
+		// normalisation. Uniform on both roles is cheaper than a latent trap.
+		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
+
+		// ---- [T20] server reception coordinator (relocated from T10 wiring) --
+		// AUTHORITY BRANCH ONLY. The coordinator owns the tier table + delay
+		// queue + claim map internally; it borrows the manager's own TimeConfig by
+		// reference, so it must be emplaced after m_manager and must never outlive
+		// it (reset in EndPlay). Construction order of the owned table/queue (table
+		// first, queue binding it) is enforced inside the coordinator; the C2
+		// REPLACES semantics (effectiveDelay -> rttTierInputDelays[tier]) come with
+		// the queue being given the tier table there.
+		m_receptionCoordinator.emplace(m_manager->getTimeConfig());
+		m_receptionCoordinator->setLogger(std::function<void(const char*)>(pctmloggerServer));
 		// Process-global sinks for deeply-nested simulation templates that don't
 		// have a logger parameter plumbed in.
 		// simlog -> LogOG* categories (framework: tick/sync/reconciliation messages).
@@ -411,6 +455,23 @@ void ASimulationManagerUImpl::BeginPlay()
 			m_storage, m_staticData, std::function<void(const char*)>(pctmlogger) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmlogger));
+
+		// [T9 part 4] The game's zero input fills the [0, effectiveDelay) window
+		// at session start and after a hard resync. It is NOT PlayerInput{} —
+		// getZeroPlayerInput builds (0,0,1) forward vectors — so this injection
+		// is load-bearing, not defensive.
+		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
+
+		// [T9 part 3] Establish the PRE-ARRIVAL baseline delay before any tier
+		// has replicated. `forcedInputLatencyTicks` is the documented "no
+		// per-connection tier is available" value and is exactly what the
+		// server's ServerInputDelayQueue::effectiveDelay falls back to for a
+		// connection it has not yet tiered — so publishing it here is what keeps
+		// the two ends delaying by the same amount during the pre-tier window
+		// instead of the client running 0 against the server's 2.
+		// OnRep_ConnectionTier overwrites this the moment a tier lands.
+		m_netSync.setClientEffectiveInputDelayTicks(
+			m_manager->getTimeConfig().forcedInputLatencyTicks);
 		// Process-global sinks for deeply-nested simulation templates that don't
 		// have a logger parameter plumbed in.
 		// simlog -> LogOG* categories (framework: tick/sync/reconciliation messages).
@@ -436,6 +497,13 @@ void ASimulationManagerUImpl::BeginPlay()
 
 void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// [T20] The coordinator borrows `const TimeConfig&` from m_manager, so it may
+	// not outlive it — reset here, before the manager is destroyed. Its owned
+	// table/queue tear down in reverse construction order internally. The
+	// adapter-side id->component map is cleared alongside it.
+	m_delayedInputComponentsById.clear();
+	m_receptionCoordinator.reset();
+
 	// Clear the singleton slot before teardown so a subsequent PIE session
 	// (which may BeginPlay before this actor is GC'd) doesn't hit the guard.
 	if (s_instances[0] == this)
@@ -673,6 +741,145 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     return TryRegisterStatus::Ready;
 }
 
+// [T21] sampleAndDeriveConnectionTier and tryEnqueueDelayedRemoteInput are GONE.
+// Their engine-primitive acquisition (wire-handle resolve, RTT read, player-slot
+// derivation, owner id) moved UP to the RPC boundary
+// (USimmableUpdateComponent::ServerReceiveRemoteMove), which now forwards straight
+// into ServerReceptionCoordinator::noteRttSample (once per bundle) and
+// receiveInputBundle (the whole per-slot loop, T24). Nothing of the RPC per-slot
+// path remains manager-side; noteDelayedInputComponent below is a delivery-routing
+// buffer accessor called once at register-time, not per slot, and deliverRemoteInput
+// is this manager's RemoteInputDeliverySink terminus. No netcode policy either.
+
+void ASimulationManagerUImpl::noteDelayedInputComponent(
+    unsigned int id, USimmableUpdateComponent& component)
+{
+    // Delivery-routing registration for the coordinator's per-id `deliver` callback
+    // (built in releaseDelayedInputsForStep) and the deliverRemoteInput fallback.
+    // Plain overwrite: re-registering the same id is a no-op, and an id legitimately
+    // replacing a dead one takes the slot over. [T24] Called ONCE at register-time
+    // (tryRegisterWithNewFramework, authority), not per parked slot.
+    m_delayedInputComponentsById[id] = &component;
+}
+
+// [T24] This manager satisfies the core RemoteInputDeliverySink concept — the
+// delivery target the ServerReceptionCoordinator drives on the deliver-now path
+// (a malformed slot in receiveInputBundle) and that the drain lambda above routes
+// through. Compile-checked at the receiveInputBundle call site, but asserted here
+// too so a breaking signature change surfaces legibly (mirrors the ConnectionTierSink
+// assert on USimmableUpdateComponent).
+static_assert(
+    RemoteInputDeliverySink<ASimulationManagerUImpl, simulatableBrawler::PlayerInput>,
+    "ASimulationManagerUImpl must satisfy RemoteInputDeliverySink so "
+    "ServerReceptionCoordinator can drive remote-input delivery through it");
+
+void ASimulationManagerUImpl::deliverRemoteInput(
+    unsigned int id, uint32 captureTick, const simulatableBrawler::PlayerInput& input)
+{
+    // Resolve id -> owning component and hand the input to the SAME inbound path
+    // the RPC uses (deliverDelayedRemoteInput -> m_onRemoteMoveReceivedCallback),
+    // with the ORIGINAL captureTick. A stale weak handle means the owner was GC'd
+    // without an unregister: drop the map entry and discard the input (a dead
+    // component has nothing to receive it). GAME THREAD only.
+    const auto it = m_delayedInputComponentsById.find(id);
+    if (it == m_delayedInputComponentsById.end())
+        return;
+
+    USimmableUpdateComponent* target = it->second.Get();
+    if (target == nullptr)
+    {
+        m_delayedInputComponentsById.erase(it);
+        return;
+    }
+
+    target->deliverDelayedRemoteInput(captureTick, input);
+}
+
+// ---------------------------------------------------------------------------
+// TICK ALIGNMENT — verified, and load-bearing. An off-by-one here shifts EVERY
+// player's input by one tick, silently and uniformly.
+//
+// `physicsStep` is the UPCOMING solver step: Chaos passes
+// MarshallingManager.GetInternalStep_External(), documented as "the internal
+// step that the current PushData will be associated with once it is marshalled
+// over" (ChaosMarshallingManager.h), and the solver's frame counter is only
+// incremented at the END of a tick (`GetCurrentFrame()++`, PBDRigidsSolver.cpp),
+// so step N's OnPreSimulate_Internal observes GetCurrentFrame() == N.
+//
+// ChaosTickMapper's offset is written in OnPreSimulate_Internal as
+// `chaosTick - simulationTick`. Crucially it is written BEFORE
+// onGameSimulation() runs, and onGameSimulationAuthority() advances the server
+// clock as its FIRST action. So the `simulationTick` captured at step K is the
+// tick simulated at step K-1, not at K:
+//
+//     offset = K - S(K-1)          where S(K) is the sim tick simulated at step K
+//     S(K)   = S(K-1) + 1          authority advanceTick() is unconditional —
+//                                  no Stall/Skip/resim exists on the server
+//  => offset = K - (S(K) - 1) = (K - S(K)) + 1
+//  => toSimulationTick(X) = X - offset = S(X) - 1
+//
+// `toSimulationTick(physicsStep)` therefore names the tick BEFORE the one that
+// step will simulate, and the upcoming tick is that value PLUS ONE. Hence the
+// `+ 1` below — it is a derived correction, not a fudge factor.
+//
+// Why not cross-check against the server clock at runtime: the clock is written
+// on the physics thread and reading it here would introduce exactly the kind of
+// unsynchronized cross-thread read this whole design exists to avoid. The
+// mapper's offset is a std::atomic and is the only tick source safe to read from
+// the game thread — which is why the resolution specifies it.
+//
+// Sub-stepping: with NumSteps > 1 the physics frame runs several sim ticks back
+// to back, so this releases input for each of them. The normal fixed-tick case
+// is NumSteps == 1 and collapses to a single drain.
+// ---------------------------------------------------------------------------
+void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps)
+{
+    // [T20] Thin transport adapter over ServerReceptionCoordinator::releaseDelayedInputs
+    // (the drain) + reapConnections. The drain body — iterate the claim map,
+    // resolve per-wire effectiveDelay, dequeue at captureTick+delay, purge stale —
+    // now lives in the core coordinator; this side supplies only the game-thread-
+    // safe upcoming sim tick and the per-id `deliver` callback.
+    if (!m_receptionCoordinator.has_value())
+        return;
+
+    const int32 firstUpcomingSimTick =
+        static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(physicsStep))) + 1;
+
+    // The per-id delivery callback for the core drain. It answers "is this owner
+    // still alive" (false => the coordinator drops the stale claim, mirroring the
+    // old drain's `target.Get()==nullptr` prune) and, when alive, routes the actual
+    // delivery through deliverRemoteInput — the SAME RemoteInputDeliverySink method
+    // the core receive-loop fallback uses (T24 unification). The liveness check
+    // stays HERE because the core drain's prune contract is a bool return, while
+    // the sink method itself returns void per the concept.
+    auto deliver = [this](unsigned int id, uint32 captureTick,
+                          const simulatableBrawler::PlayerInput& input) -> bool
+    {
+        const auto it = m_delayedInputComponentsById.find(id);
+        if (it == m_delayedInputComponentsById.end())
+            return false;
+
+        if (it->second.Get() == nullptr)
+        {
+            m_delayedInputComponentsById.erase(it);
+            return false;
+        }
+
+        deliverRemoteInput(id, captureTick, input);
+        return true;
+    };
+
+    m_receptionCoordinator->releaseDelayedInputs<SimulatableBrawler>(
+        firstUpcomingSimTick, numSteps, deliver);
+
+    // [T20] Reap relocated here from the (former arrival-gated) RTT sample path.
+    // It now runs once per physics frame regardless of traffic — the documented
+    // benign cadence change (idle server now reaps). The coordinator gates it on
+    // the dwell boundary internally. The tick is sourced from the game-thread-safe
+    // mapper (same as the drain), NOT the physics-thread-written server clock.
+    m_receptionCoordinator->reapConnections(firstUpcomingSimTick);
+}
+
 void ASimulationManagerUImpl::unregisterFromNewFramework(
     unsigned int id, USimmableUpdateComponent& owner, bool isAuthority)
 {
@@ -696,6 +903,18 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
         id,
         /*predictionOwner=*/&owner,
         /*authorityOwner=*/isAuthority ? &owner : nullptr);
+
+    // [T20] The unregister contract that replaces the core's former GC-liveness
+    // read (the coordinator's claim map is id-keyed, not a TWeakObjectPtr). Drop
+    // this owner's claim + dedup watermark from the coordinator and its
+    // id->component mapping here, promptly, rather than waiting for GC to make an
+    // engine handle stale. No-op on a pure client (coordinator is nullopt).
+    if (m_receptionCoordinator.has_value())
+    {
+        m_receptionCoordinator->forgetOwner(id);
+    }
+    m_delayedInputComponentsById.erase(id);
+
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
 }
 
@@ -706,6 +925,13 @@ void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 Num
 	asyncInput->bInitialized = true;
 	asyncInput->m_world = GetWorld();
 	asyncInput->m_manager = this;
+
+	// [C.2 / T10 part 4] Release tier-delayed input for the tick(s) the upcoming
+	// physics step will simulate. GAME THREAD — this callback is Chaos's
+	// game-thread hook immediately preceding the step (see the tick-alignment
+	// derivation on releaseDelayedInputsForStep). No-op on a client and on a
+	// server with nothing parked.
+	releaseDelayedInputsForStep(PhysicsStep, NumSteps);
 }
 
 #pragma optimize( "", on )

@@ -27,6 +27,11 @@
 #include "OGSimulation/SimulationReconciliation.h"
 #include "OGSimulation/SimulationNetSync.h"
 #include "OGSimulation/SimulationIntegrationExecutor.h"
+#include "OGSimulation/Network/ConnectionSlotKey.h"
+#include "OGSimulation/Network/ConnectionTierTable.h"
+#include "OGSimulation/Network/ServerInputDelayQueue.h"
+#include "OGSimulation/Network/ServerReceptionCoordinator.h"
+#include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/BrawlerHitRoutingSystem.h"   // brawlerHitRouting::System (fourth-peer system)
@@ -149,6 +154,31 @@ public:
     ServerTickClock& editServerClock()             { return m_manager->editServerClock(); }
     const ClientPredictionClock& getClientClock() const { return m_manager->getClientClock(); }
     bool runsPrediction() const { return m_manager->runsPrediction(); }
+
+    // [T11] Client tier-transition rollback (D5.3).
+    //
+    // Called from USimmableUpdateComponent::OnRep_ConnectionTier (GAME THREAD)
+    // with the delay delta of an authoritative tier transition. Positive deltas
+    // register rollback debt on the client clock; the clock itself ignores
+    // non-positive ones.
+    //
+    // Deliberately a NARROW passthrough rather than an `editClientClock()`
+    // accessor, for the same reason publishClientEffectiveInputDelayTicks is:
+    // the client clock is otherwise driven exclusively by the core
+    // SimulationManager's tick loop, and handing game-thread UObject code a
+    // general mutable handle to it would invite exactly the cross-thread reach
+    // this one-scalar entry point exists to bound.
+    //
+    // Guarded on runsPrediction(): a server/standalone manager has no client
+    // clock at all (getClientClock() would std::terminate), and the whole
+    // rollback concept is client-only.
+    void requestTierTransitionRollback(int32 deltaDelayTicks)
+    {
+        if (!m_manager.has_value() || !m_manager->runsPrediction())
+            return;
+
+        m_manager->editClientClock().requestTierTransitionRollback(deltaDelayTicks);
+    }
     void onGameSimulation(const SimulationUpdateInfo& info)
     {
         // [ogsim-system-api] Cross-character inbound-hit routing runs INSIDE
@@ -222,7 +252,158 @@ public:
     SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
     const SimulationReconciliation<SimulatableBrawler>& editReconciliation() const { return m_reconciliation; }
 
+    // [T9] The one shared TimeConfig, for game-thread consumers that must BIND to
+    // it by reference rather than copy it (a copy could silently diverge from the
+    // instance the clocks read). Returns nullptr until the core manager has been
+    // constructed — callers emplace lazily and retry, exactly as the T10 tier
+    // table does. Pointer rather than reference precisely so that pre-construction
+    // state is representable instead of being undefined behaviour.
+    const TimeConfig* getTimeConfigPtr() const
+    {
+        return m_manager.has_value() ? &m_manager->getTimeConfig() : nullptr;
+    }
+
+    // [T9 part 3] Publish the client's effective Layer-1 input delay to the
+    // collect path.
+    //
+    // GAME THREAD -> PHYSICS THREAD. Called from
+    // USimmableUpdateComponent::OnRep_ConnectionTier (and once at registration,
+    // to establish the pre-arrival baseline). The value lands in a lone
+    // std::atomic<int32> that SimulationNetSync::collectInputAll loads once per
+    // tick on the physics thread — see setClientEffectiveInputDelayTicks for why
+    // a bare atomic is sufficient here and why this is NOT the same problem as
+    // T10's queue.
+    //
+    // Deliberately a NARROW passthrough rather than an editNetSync() accessor:
+    // the net sync is otherwise driven exclusively by the core SimulationManager,
+    // and handing game-thread UObject code a general handle to it would invite
+    // exactly the cross-thread reach this method exists to keep to one scalar.
+    void publishClientEffectiveInputDelayTicks(int32 delayTicks)
+    {
+        m_netSync.setClientEffectiveInputDelayTicks(delayTicks);
+    }
+
+    int32 getClientEffectiveInputDelayTicks() const
+    {
+        return m_netSync.getClientEffectiveInputDelayTicks();
+    }
+
+    // ---- C.2 server-authoritative RTT tier + input delay (T10) -------------
+    //
+    // OPTION A (C1 decision, 2026-07-19): the SERVER is the sole owner of the
+    // RTT tier. It derives each connection's tier from its OWN per-connection
+    // FNetPing RoundTrip reading and replicates the result to the owning client
+    // (USimmableUpdateComponent::m_replicatedConnectionTier). The client never
+    // computes a tier and never samples RTT for tier purposes — that is what
+    // makes client/server tier disagreement impossible by construction rather
+    // than merely unlikely.
+    //
+    // [T20] The whole reception subsystem — tier table, delay queue, claim map,
+    // and the orchestration over them — now lives in the engine-agnostic core
+    // ServerReceptionCoordinator. This manager owns ONE instance of it and has
+    // shrunk to a thin transport adapter: it acquires engine primitives (Address,
+    // playerSlot, RTT, sim-tick, wire decode) and forwards them in.
+    //
+    // AUTHORITY-role manager only, std::nullopt on a pure client: the coordinator
+    // borrows `const TimeConfig&` from m_manager's owned config, so it can only be
+    // emplaced after the manager is (BeginPlay, authority branch).
+    using BrawlerReceptionCoordinator =
+        ServerReceptionCoordinator<FUEConnectionHandle, SimulatableBrawler>;
+    bool hasServerTierWiring() const { return m_receptionCoordinator.has_value(); }
+
+    // [T21] ENGINE-PRIMITIVE ACCESSORS for the RPC-boundary transport adapter
+    // (USimmableUpdateComponent::ServerReceiveRemoteMove). After T20 relocated the
+    // reception POLICY into the core coordinator, T21 relocated the primitive
+    // ACQUISITION up to the RPC handler (where the bundle and the owning actor
+    // naturally live). These three accessors are all that the manager still
+    // supplies: the coordinator instance it owns, the server sim tick, and the
+    // id->component delivery-routing registration. None carries netcode policy.
+
+    // The reception coordinator this manager owns, or nullptr on a pure client /
+    // pre-BeginPlay. The RPC adapter resolves engine primitives and forwards them
+    // straight into it; this manager owns the instance + its TimeConfig borrow.
+    BrawlerReceptionCoordinator* getReceptionCoordinator()
+    {
+        return m_receptionCoordinator.has_value() ? &*m_receptionCoordinator : nullptr;
+    }
+
+    // The current server SIM TICK the coordinator stamps RTT samples with. This is
+    // the sim-tick engine primitive (Godot must supply its own). NOTE (wart,
+    // behaviour-preserved from the pre-T21 sample path): the server clock is
+    // written on the physics thread and read here on the game thread; the sample
+    // path has always tolerated this unsynchronized read, and the tier EMA is
+    // insensitive to a one-tick skew. Left as-is to keep this refactor a pure
+    // relocation; a follow-up may source it mapper-derived like the drain does.
+    int32 getServerReceptionTick() const
+    {
+        return static_cast<int32>(getServerClock().getSimulationStep().getTick());
+    }
+
+    // Register the id->component mapping the coordinator's per-id `deliver` callback
+    // (built in releaseDelayedInputsForStep) and the deliver-now fallback
+    // (deliverRemoteInput) resolve against. [T24] Called ONCE at register-time
+    // (USimmableUpdateComponent::tryRegisterWithNewFramework, authority), not per
+    // parked slot — paired with the forgetOwner()/erase at unregisterFromNewFramework.
+    // A plain overwrite: re-registering the same id is a no-op, and an id
+    // legitimately replacing a dead one takes the slot over. `id ==
+    // component.GetUniqueID()`. This is the delivery-routing BUFFER ACCESSOR engine
+    // primitive (Godot supplies its own id->owner resolution).
+    void noteDelayedInputComponent(unsigned int id, USimmableUpdateComponent& component);
+
+    // [T24] This manager IS the ServerReceptionCoordinator's RemoteInputDeliverySink.
+    // It routes a released/undelayed remote input to its owning component by id via
+    // the id->component map — the ONE delivery method both the drain (per-id, in
+    // releaseDelayedInputsForStep) and the core receive-loop fallback (malformed
+    // slot, in ServerReceptionCoordinator::receiveInputBundle) go through. Resolves
+    // id->component; a stale weak handle is dropped and the input discarded (the
+    // owner was GC'd without an unregister). GAME THREAD only. The static_assert
+    // that this manager satisfies RemoteInputDeliverySink lives beside the
+    // definition in the .cpp.
+    void deliverRemoteInput(unsigned int id, uint32 captureTick,
+                            const simulatableBrawler::PlayerInput& input);
+
 private:
+    // ---- C.2 tier input delay: release (part 4) --------------------------
+    //
+    // The drain half of the transport adapter: pure engine-primitive acquisition
+    // plus the core call. Computes the game-thread-safe upcoming sim tick
+    // (ChaosTickMapper `+1` — the sim-tick mapping primitive), builds the per-id
+    // `deliver` callback (the id->component routing primitive), and forwards to
+    // ServerReceptionCoordinator::releaseDelayedInputs; it also drives
+    // reapConnections on the same game-thread hook. GAME THREAD only — called from
+    // InjectInputs_External. This is the tick-path counterpart to the RPC-path
+    // adapter in USimmableUpdateComponent::ServerReceiveRemoteMove; both carry NO
+    // netcode policy after the T20/T21 relocation.
+    void releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps);
+
+    // [T20] THE reception subsystem, relocated whole into the core. Authority-only
+    // (std::nullopt on a pure client); borrows m_manager's TimeConfig, so emplaced
+    // AFTER the manager in BeginPlay and reset BEFORE it in EndPlay.
+    //
+    // THREADING (load-bearing): every method on it is touched ONLY from the game
+    // thread — fed in USimmableUpdateComponent::ServerReceiveRemoteMove (the RPC
+    // receive path), drained + reaped in releaseDelayedInputsForStep
+    // (InjectInputs_External).
+    // Its owned containers have no internal synchronization, so none may be
+    // touched from the physics thread, where onGameSimulationAuthority runs under
+    // bTickPhysicsAsync=True. The game->physics transition stays where it always
+    // was: the drain hands each released input to RemoteMoveQueue via the deliver
+    // callback below — the seam the server input path already crosses (lead
+    // resolution R2, 2026-07-20).
+    std::optional<BrawlerReceptionCoordinator> m_receptionCoordinator;
+
+    // Adapter-side delivery resolution: the core claim map is id-keyed (it cannot
+    // hold a TWeakObjectPtr), so the coordinator's `deliver` callback hands back an
+    // id and THIS map resolves it to the owning component. Populated via
+    // noteDelayedInputComponent from the RPC adapter (which has both the id and
+    // the component), pruned in the deliver callback when a weak handle goes stale,
+    // and erased in
+    // unregisterFromNewFramework (the unregister contract that replaces the core's
+    // former GC-liveness read). `id == component GetUniqueID()`.
+    std::unordered_map<unsigned int, TWeakObjectPtr<USimmableUpdateComponent>>
+        m_delayedInputComponentsById;
+
+
     FSimulationManagerAsyncCallback* m_asyncCallback;
 
     FDelegateHandle m_injectInputsExternalCallbackHandle;
