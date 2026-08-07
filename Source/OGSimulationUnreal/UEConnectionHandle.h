@@ -134,39 +134,146 @@ inline uint8 GetPlayerSlotForActor(AActor* actor)
 }
 
 // ---------------------------------------------------------------------------
+// LogOGRtt — the RTT-source diagnostic channel, shared by the two read sites
+// (readRoundTripMs below, feeding the TIER; ASimulationTimingRelay::OnRep_Buffer,
+// feeding the client prediction OFFSET). Declared here because this header is
+// where the RTT engine primitive lives, and because a category owned by
+// OGSimulationUnreal keeps the log off the OGBrawlerUnreal LogOG* family — this
+// module must not depend on the game module.
+//
+// Default verbosity Log, so the one-shot Warnings below are visible with NO
+// DefaultEngine.ini entry. That is deliberate: the failure these report is
+// exactly the kind that must not need a config opt-in to be seen.
+// ---------------------------------------------------------------------------
+OGSIMULATIONUNREAL_API DECLARE_LOG_CATEGORY_EXTERN(LogOGRtt, Log, All);
+
+// The "no reading" sentinel, in each site's own unit. NEGATIVE by design and
+// shared by both RTT read sites, because both consumers already reject negatives:
+// ServerReceptionCoordinator::noteRttSample skips `rttMs < 0.0` (publishing no
+// tier), and NetworkTimeEstimator::updateRTT rejects and counts it (latching
+// nothing). Zero must never be used — it is indistinguishable from a genuine
+// 0 ms LAN ping, which is what made the pre-T21 silent-zero defect invisible.
+inline constexpr double kNoRttReadingMs      = -1.0;
+inline constexpr double kNoRttReadingSeconds = -1.0;
+
+// ---------------------------------------------------------------------------
 // readRoundTripMs — a connection's RAW round-trip RTT in MILLISECONDS.
-// (T21; the RTT-source engine primitive of the transport adapter.)
+// (arch-latency T21; the RTT-source engine primitive of the transport adapter.)
 //
-// Returns -1.0 when there is no reading yet (null connection, or no FNetPing on
-// it). That sentinel is passed straight into
-// ServerReceptionCoordinator::noteRttSample, which skips the sample and returns
-// tier -1 so the adapter publishes nothing — matching the pre-T21 behaviour.
+// Returns kNoRttReadingMs when there is no reading — null connection, no
+// FNetPing, the ping type not enabled, or its accumulator still empty. That
+// sentinel is passed straight into ServerReceptionCoordinator::noteRttSample,
+// which skips the sample so the adapter publishes no tier.
 //
-// SINGLE-SMOOTHING (Option A, load-bearing): this returns the engine's RAW
-// RoundTrip value with NO NetworkTimeEstimator EMA on top; the tier table's own
-// rttSmoothingAlpha EMA is the only smoothing in this path. Double-smoothing
-// would reintroduce exactly the client/server asymmetry Option A removes.
+// SINGLE-SMOOTHING (Option A, load-bearing — UNCHANGED by the T21 edit): this
+// returns the engine's RAW RoundTrip value with NO NetworkTimeEstimator EMA on
+// top; the tier table's own rttSmoothingAlpha EMA is the only smoothing in this
+// path. Double-smoothing would reintroduce exactly the client/server asymmetry
+// Option A removes. The T21 change added only a validity gate in front of the
+// value; nothing was inserted between the read and the return.
 //
-// Uses EPingType::RoundTrip (not RoundTripExclFrame) to match the source the
-// client already reads in SimulationTimingRelay.cpp. FPingValues are in SECONDS
-// (NetPing.h); the tier table and TimeConfig::rttTierBoundariesMs are in
-// MILLISECONDS, hence the *1000.
+// FPingValues are in SECONDS (NetPing.h); the tier table and
+// TimeConfig::rttTierBoundariesMs are in MILLISECONDS, hence the *1000.
+//
+// ===========================================================================
+// READ THIS BEFORE "FIXING" THE PING TYPE. The enum names are INVERTED
+// relative to what the engine feeds them. Verified against UE 5.6.1 source
+// (unmodified in this tree) by og-netcode-v2-input-relay T21, whose entire
+// stated purpose was to switch these reads to EPingType::RoundTripExclFrame
+// and which was reversed by this finding.
+//
+// UNetConnection::ReadPacketInfo (Engine/Private/NetConnection.cpp) does:
+//
+//     const double RTT          = (CurrentTime - OutLagTime[Index]);
+//     const double RTTExclFrame = RTT - (bExcludeFrameTime ? ServerFrameTime : 0.0);
+//     const double NewLag       = FMath::Max(RTTExclFrame, 0.0);
+//     NetPing->UpdatePing(EPingType::RoundTrip,          CurrentTime, NewLag);
+//     NetPing->UpdatePing(EPingType::RoundTripExclFrame, CurrentTime, FMath::Max(RTT, 0.0));
+//
+// NewLag IS the frame-time-subtracted value, and it goes to `RoundTrip`. The
+// raw, frame-time-INCLUSIVE RTT goes to `RoundTripExclFrame`. So the type whose
+// name promises exclusion is the one that never excludes anything.
+//
+// AND TODAY THEY ARE THE SAME NUMBER ANYWAY. `bExcludeFrameTime` reads
+// net.PingExcludeFrameTime, which defaults to 0 and is set nowhere in this
+// project's config, so the subtraction is a no-op and both types receive
+// max(RTT, 0.0) — identical samples. Switching the ping type here would change
+// NOTHING about frame time; it would only swap the averaging configured in
+// DefaultEngine.ini (RoundTrip=PlayerStateAvg vs RoundTripExclFrame=MovingAverage),
+// i.e. a pure smoothing change with no evidence behind it.
+//
+// AND ON THIS SITE SPECIFICALLY IT COULD NOT MATTER EVEN IF ENABLED. This read
+// runs SERVER-side. ServerFrameTime is parsed under `if (!Driver->IsServer())`
+// and is therefore structurally 0.0 on the server, so the subtracted term is
+// zero here by construction regardless of any cvar.
+//
+// WHAT ACTUALLY INFLATES RTT DURING A LOCAL FRAME HITCH — the effect T21 set
+// out to kill — is neither ping type. CurrentTime is FApp::GetCurrentTime()
+// (frame-start), so a local hitch delays ack processing and inflates the
+// measurement, and the only frame time either type can ever subtract is the
+// REMOTE's. The lever that excludes local frame time is
+// net.PingUsePacketRecvTime; it is NOT enabled here, carries threading
+// prerequisites, and is scoped as its own backlog task rather than folded in.
+// ===========================================================================
 //
 // ENGINE PRIMITIVE: a second engine (Godot) must supply its own RTT source here.
 inline double readRoundTripMs(UNetConnection* conn)
 {
+    // ONE-SHOT diagnostic. Shares the rationale of the client-side twin in
+    // SimulationTimingRelay.cpp: the silent-zero class of failure is defined by
+    // being unobservable, so it has to announce itself — but this runs on the
+    // per-bundle input-RPC receive path, once per connection per datagram, so
+    // an unthrottled warning would be a firehose. Function-local static in an
+    // inline function is one object across the module (game-thread only, per
+    // the ServerReceptionCoordinator threading contract).
+    auto warnOnce = [](const TCHAR* cause)
+    {
+        static bool bWarned = false;
+        if (bWarned)
+        {
+            return;
+        }
+        bWarned = true;
+        UE_LOG(LogOGRtt, Warning,
+            TEXT("[RttSample] SERVER tier RTT source unavailable (%s). No tier will be ")
+            TEXT("derived or published for this connection, so it stays on the default ")
+            TEXT("tier 0. One-shot warning."),
+            cause);
+    };
+
     if (conn == nullptr)
     {
-        return -1.0;
+        // Routine and self-resolving (an actor with no wire identity, or a
+        // connection not yet established) — the documented sentinel path, not a
+        // fault. Deliberately NOT warned, so the one-shot budget above is spent
+        // on the failures that never resolve on their own.
+        return kNoRttReadingMs;
     }
 
     UE::Net::FNetPing* netPing = conn->GetNetPing();
     if (netPing == nullptr)
     {
-        return -1.0;
+        warnOnce(TEXT("no FNetPing on the connection - check net.NetPingEnabled"));
+        return kNoRttReadingMs;
+    }
+
+    if (!EnumHasAnyFlags(netPing->GetPingTypes(), EPingType::RoundTrip))
+    {
+        warnOnce(TEXT("EPingType::RoundTrip not enabled - check net.NetPingTypes"));
+        return kNoRttReadingMs;
     }
 
     const UE::Net::FPingValues pingVals = netPing->GetPingValues(EPingType::RoundTrip);
+    if (pingVals.Current < 0.0)
+    {
+        // GetPingValues documents Current = -1.0 for "not set". Before T21 this
+        // fell through and returned -1000.0, which happened to be negative and
+        // so happened to be skipped downstream — correct behaviour by accident.
+        // Made explicit so it survives any future edit to the units.
+        warnOnce(TEXT("EPingType::RoundTrip enabled but its accumulator is empty (no ack sampled yet)"));
+        return kNoRttReadingMs;
+    }
+
     return pingVals.Current * 1000.0;
 }
 

@@ -27,10 +27,10 @@
 #include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
 #include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
+#include "OGSimulationUnreal/RelayedInputRing.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGSimulation/SimulationQueues.h"
-#include "OGSimulation/Network/ReplicatedTierConsumer.h"
 
 #include "SimmableUpdateComponent.generated.h"
 
@@ -65,10 +65,18 @@ public:
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
 	// --- PredictionSyncedBufferOwnerConcept ---
-	// Correction-STATE role stays FSimulationStateSyncBuffer; the input role
-	// (remote input + correction input) is now FSimulationInputSyncBuffer per the
+	// Correction-STATE role stays FSimulationStateSyncBuffer.
+	// [og-netcode-v2-input-relay T8] SyncedRemoteInputBufferType now names ONE
+	// role, not two: the CLIENT->SERVER buffer below. Its server->client twin
+	// (correction input) is retired.
 	using SyncedCorrectionBufferType  = FSimulationStateSyncBuffer;
 	using SyncedRemoteInputBufferType = FSimulationInputSyncBuffer;
+	// [og-netcode-v2-input-relay / T5] The relay ring — the third replicated
+	// channel when T5 landed, and post-T8 the second of two. Named through a
+	// typedef for the same reason the ones above are: SimulationNetSync binds the
+	// arrival callback and reads the ring at registration, and it must do so
+	// without ever naming a UE type.
+	using RelayedInputRingType        = FRelayedInputRing;
 
 	void setOnCorrectionStateReceivedCallback(
 		std::function<void(const FSimulationStateSyncBuffer&)> fn)
@@ -81,16 +89,10 @@ public:
 		m_onCorrectionStateReceivedCallback = nullptr;
 	}
 
-	void setOnCorrectionInputReceivedCallback(
-		std::function<void(const FSimulationInputSyncBuffer&)> fn)
-	{
-		m_onCorrectionInputReceivedCallback = std::move(fn);
-	}
-
-	void clearOnCorrectionInputReceivedCallback()
-	{
-		m_onCorrectionInputReceivedCallback = nullptr;
-	}
+	// [og-netcode-v2-input-relay T8] set/clearOnCorrectionInputReceivedCallback are
+	// GONE with the SERVER->CLIENT correction-input channel. The two inbound
+	// bindings a prediction owner still exposes are the correction STATE (above)
+	// and the relay ring (below).
 
 	FSimulationInputSyncBuffer* getClientToServerInputSyncedBuffer()
 	{
@@ -143,93 +145,73 @@ public:
 	// Server → owning-client transport for the authoritative connection tier.
 	// The SERVER derives the tier from its own per-connection FNetPing RoundTrip
 	// (ServerReceiveRemoteMove resolves the RTT primitive and forwards it to
-	// ServerReceptionCoordinator::noteRttSample) and publishes it here; the client
+	// ServerReceptionCoordinator::noteRttSample) and publishes it; the client
 	// only ever READS it. That is the whole point of Option A:
 	// with one producer there is no second estimator to disagree with, so the
 	// boundary-RTT tier split — and the recurring one-tick corrections it caused
 	// — cannot happen.
 	//
-	// WHY THIS COMPONENT AND NOT THE PAWN OR THE TIMING RELAY:
-	//  - ASimulationTimingRelay is a single bAlwaysRelevant actor with ONE shared
-	//    buffer. It is structurally incapable of carrying per-connection data.
-	//  - The pawn (AOGBrawlerUECharacter) carries no netcode surface at all.
-	//    This component already owns every other per-connection replicated
-	//    channel (correction state, correction input) and already receives the
-	//    client's input RPC, so the tier rides the channel its producer and its
-	//    consumer both already touch.
-	// The correction sync-buffer WIRE FORMAT is deliberately untouched — that is
-	// Stage 4 territory. This is a separate, additive property.
+	// [og-netcode-v2-input-relay / T10] THE TIER NO LONGER RIDES THIS COMPONENT.
+	// The replicated property, its OnRep, and the whole client-side consumption
+	// path moved off this per-CHARACTER vehicle onto the per-CONNECTION
+	// ASimulationConnectionRelay (RelayDelaySpectrumDesign.md §12): a tier is a
+	// property of a WIRE, and one actor per wire makes "one wire = one tier"
+	// structural rather than dedup-guarded. What survives here is the SINK — the
+	// send boundary the core drives — because this is the object that can resolve
+	// the wire (it owns the pawn whose net connection identifies it).
 
-	// The component's `ConnectionTierSink` implementation (T23). PURE TRANSPORT:
-	// it just writes the owner-only replicated `m_replicatedConnectionTier`. The
-	// core (`ServerReceptionCoordinator::noteRttSample`) now owns the "no reading"
+	// The component's `ConnectionTierSink` implementation (T23, re-routed by T10).
+	// PURE TRANSPORT: resolve this character's ROOT connection, find-or-spawn that
+	// wire's ASimulationConnectionRelay, write the tier there. The core
+	// (`ServerReceptionCoordinator::noteRttSample`) owns the "no reading"
 	// (rttMs < 0) skip AND the publish-only-on-change dedup, and calls this ONLY
 	// when the tier for this owner actually changed — so there is no sentinel check
-	// and no changed-vs-current test left here. `id` is the sink target; this
-	// component is its own target, so it asserts `id == GetUniqueID()` (a second
-	// engine whose sink is a central manager would route on `id` instead).
+	// and no changed-vs-current test here. `id` is the sink target; this
+	// component is its own target, so it asserts `id == GetUniqueID()`.
+	//
+	// WHY THE SINK STAYED ON THE COMPONENT (and did not move to the manager with
+	// the rest of the channel): the sink must resolve id → owning wire, and this
+	// object holds that link unconditionally. The manager's id→component map is
+	// populated at REGISTER time, several frames after the first input RPC can
+	// arrive — and because the core marks a tier published before calling the
+	// sink, a publish the sink cannot route is never retried. Routing through a
+	// map that may not be populated yet would turn a benign ordering race into a
+	// permanently wrong tier.
 	void sendConnectionTierToOwningClient(unsigned int id, uint8_t tier);
 
-	// Client-side read (also valid on the server, where it mirrors what was
-	// published). T9 consumes this at the integrator offset-read.
-	uint8 getReplicatedConnectionTier() const { return m_replicatedConnectionTier; }
+	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
+	// [og-netcode-v2-input-relay T8] `getSyncedCorrectionInputBuffer` was here,
+	// returning the retired `m_replicatedInputSyncedBuffer`. The authority's
+	// outbound surface is now the correction STATE buffer above (carrying T4's
+	// applied-capture-tick ref) plus the relay ring below.
 
-	// The tier value observed BEFORE the most recent OnRep. T11 keys its
-	// upward-transition rollback off (previous → current); it is captured here
-	// rather than recomputed because OnRep is the only place the pre-change
-	// value still exists.
-	uint8 getPreviousReplicatedConnectionTier() const { return m_previousReplicatedConnectionTier; }
-
-	// --- C.2 client-side consumption (T9, Option A) --------------------------
+	// --- [og-netcode-v2-input-relay / T1] outbound input relay ----------------
 	//
-	// The client's ENTIRE share of the tier system. It holds the replicated tier
-	// and derives behaviour from it through the shared lookups in
-	// ConnectionTierTable.h — the same functions the server's table delegates to,
-	// so both ends turn the identical tier value into the identical delay. The
-	// client owns NO ConnectionTierTable and never calls onRttSample.
+	// The relay ring was added BESIDE the correction-input buffer, deliberately as
+	// its own property, so that T3 could dual-write without disturbing the old
+	// channel. [T8] The old channel is now gone and this is the only path by which
+	// a character's input reaches other clients.
 	//
-	// std::nullopt until tryInitializeWithManager has resolved a manager: the
-	// consumer binds `const TimeConfig&` from the manager and cannot be built
-	// before one exists. Every accessor below therefore degrades to the no-tier
-	// baseline while unbound, which is the same answer it would give pre-OnRep.
+	// Server-side write handle. The T3 relay sink writes
+	// (captureTick, dA, input) here at RECEIPT of each newer capture tick, with
+	// `depth` read from TimeConfig::relayRedundancyDepthTicks.
+	FRelayedInputRing& getRelayedInputRing() { return m_relayedInputRing; }
+	const FRelayedInputRing& getRelayedInputRing() const { return m_relayedInputRing; }
 
-	// Effective Layer-1 input delay in ticks for this connection, per the
-	// C2-locked formula: `rttTierInputDelays[tier]` once a tier has arrived
-	// (REPLACES the baseline, never added to it), `forcedInputLatencyTicks`
-	// before then. Returns 0 when neither a manager nor a config is available,
-	// which is the correct un-delayed legacy behaviour for that state.
-	int32 getEffectiveInputDelayTicks() const;
-
-	// True once at least one authoritative tier has actually landed. Keyed on
-	// ARRIVAL, not on the tier value — the replicated property defaults to 0,
-	// which is also a legal tier, so a value test cannot tell the two apart.
-	bool hasReceivedAuthoritativeTier() const;
-
-	// [T9 part 3] Push getEffectiveInputDelayTicks() across to the simulation's
-	// collect path (game thread -> a single std::atomic<int32> read once per tick
-	// on the physics thread). Called from OnRep_ConnectionTier and once at
-	// registration so the pre-arrival baseline is applied even if no tier ever
-	// lands. No-ops when no manager has spawned yet — BeginPlay publishes the
-	// baseline on its own, so nothing is lost by the early return.
-	void publishEffectiveInputDelayToSimulation();
-
-	// [T11] Turn one replicated-tier transition into a client prediction
-	// rollback. Under Option A the client runs no RTT sampling of its own, so
-	// the OnRep `oldTier -> newTier` delta IS the transition signal. Computes
-	// the effective-delay delta through the shared `tierDelayDeltaTicks` lookup
-	// (never off the raw config array — `lanZeroDelayOverride` makes those
-	// disagree for every transition touching tier 0) and forwards a POSITIVE
-	// delta to the client clock. Non-positive deltas are dropped by the clock.
-	void applyTierTransitionRollback(uint8 oldTier, uint8 newTier);
-
-	// Read-only handle for T11's transition logic and for tests.
-	const ReplicatedTierConsumer* getReplicatedTierConsumer() const
+	// Client-side arrival hook. Invoked from OnRep_RelayedInputRing with the
+	// freshly-replicated ring; T5 binds this to populate its per-remote-character
+	// capture-tick store. Null until then — an unbound OnRep is a no-op, matching
+	// the correction-buffer callbacks above.
+	void setOnRelayedInputReceivedCallback(
+		std::function<void(const FRelayedInputRing&)> fn)
 	{
-		return m_replicatedTierConsumer.has_value() ? &(*m_replicatedTierConsumer) : nullptr;
+		m_onRelayedInputReceivedCallback = std::move(fn);
 	}
 
-	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
-	FSimulationInputSyncBuffer& getSyncedCorrectionInputBuffer() { return m_replicatedInputSyncedBuffer; }
+	void clearOnRelayedInputReceivedCallback()
+	{
+		m_onRelayedInputReceivedCallback = nullptr;
+	}
 
 	// [hit-resolution T12] Game-thread-safe read of the character's machine sim
 	// state via the viz-state snapshot the composite refreshes each physics tick
@@ -276,43 +258,36 @@ private:
 	void ServerReceiveRemoteMove(const FInputRedundancyBundle& bundle);
 	FSimulationInputSyncBuffer m_clientToServerInputSyncedBuffer;
 
-	UPROPERTY(ReplicatedUsing = OnRep_CorrectionInput)
-	FSimulationInputSyncBuffer m_replicatedInputSyncedBuffer;
+	// [og-netcode-v2-input-relay T8] THE REPLICATED CORRECTION-INPUT PROPERTY IS
+	// GONE. `UPROPERTY(ReplicatedUsing = OnRep_CorrectionInput)
+	// FSimulationInputSyncBuffer m_replicatedInputSyncedBuffer;` and its
+	// `OnRep_CorrectionInput()` UFUNCTION stood here, registered in
+	// GetLifetimeReplicatedProps beside the state buffer. The server->client echo
+	// of "the input I applied for you" is retired; a remote character's input
+	// reaches peers on the relay ring below, and the correction state names which
+	// capture it applied via T4's ref.
+	//
+	// NOTE the surviving `m_clientToServerInputSyncedBuffer` above is a DIFFERENT
+	// member with the same type and the opposite direction — it is not replicated
+	// and it is not affected.
+
+	// [og-netcode-v2-input-relay / T1] The outbound input relay ring — this
+	// character's recent (captureTick, dA, input) entries, replicated to ALL
+	// clients (registered with a plain DOREPLIFETIME, no COND_: a non-owning peer
+	// is exactly who needs this). Written by T3's relay sink at receipt; read by
+	// T5's client store. [T8] It was deliberately kept independent of the
+	// correction-input buffer through the T3..T8 dual-write window, which is what
+	// made retiring that buffer a pure deletion here.
+	UPROPERTY(ReplicatedUsing = OnRep_RelayedInputRing)
+	FRelayedInputRing m_relayedInputRing;
 	UFUNCTION()
-	void OnRep_CorrectionInput();
+	void OnRep_RelayedInputRing();
 
-	// [T10] Authoritative connection tier, replicated COND_OwnerOnly (see
-	// GetLifetimeReplicatedProps) — a tier is a property of ONE client's wire and
-	// is meaningless to every other client, so sending it to anyone else would be
-	// pure bandwidth waste. uint8 because the tier index is bounded by
-	// ConnectionTierTable::kTierCount (4 today), so a byte is the natural width.
-	// Tier 0 is the correct pre-arrival default: it is the lowest-latency tier,
-	// and T9's consumer additionally falls back to forcedInputLatencyTicks until
-	// the first OnRep actually lands, so a client that has not heard from the
-	// server yet does not silently adopt tier-0 timing.
-	UPROPERTY(ReplicatedUsing = OnRep_ConnectionTier)
-	uint8 m_replicatedConnectionTier = 0;
-	// Takes the OldValue overload UE offers for non-array replicated properties:
-	// by the time OnRep runs the property already holds the NEW value, so the
-	// engine-supplied previous value is the only place the transition delta can
-	// be read without shadowing the property by hand.
-	UFUNCTION()
-	void OnRep_ConnectionTier(uint8 OldTier);
-
-	// Pre-OnRep value, latched from OldTier so T11 can compute the transition
-	// delta outside the OnRep call frame.
-	uint8 m_previousReplicatedConnectionTier = 0;
-
-	// [T9 part 3] True once OnRep_ConnectionTier has fired at least once, even if
-	// that happened before the tier consumer was bound. Distinguishes "the server
-	// sent tier 0" from "the property is still at its default 0", which the value
-	// alone cannot.
-	bool m_connectionTierOnRepObserved = false;
-
-	// [T9] Client-side consumer of the replicated tier. Emplaced in
-	// tryInitializeWithManager, bound to the manager's TimeConfig by reference.
-	// Fed ONLY from OnRep_ConnectionTier (game thread) — it never samples.
-	std::optional<ReplicatedTierConsumer> m_replicatedTierConsumer;
+	// [T10 / og-netcode-v2-input-relay] The replicated tier property, its OnRep,
+	// the pre-OnRep latch, the observed-OnRep flag and the ReplicatedTierConsumer
+	// that used to live here are GONE — the channel is ASimulationConnectionRelay
+	// and the consumer is owned by ASimulationManagerUImpl. Only the send-side
+	// sink (above) remains on this component.
 
 	UOGBrawlerInputCollectionComponent* m_ownerInputCollection = nullptr;
 
@@ -337,9 +312,11 @@ private:
 	// Callbacks registered by SimulationNetSync at registerSimulatable time.
 	// Null until Task 7 wires the new path; OnRep_ handlers fall through to old logic when null.
 	std::function<void(const FSimulationStateSyncBuffer&)> m_onCorrectionStateReceivedCallback;
-	std::function<void(const FSimulationInputSyncBuffer&)> m_onCorrectionInputReceivedCallback;
+	// [T8] m_onCorrectionInputReceivedCallback removed with its channel.
 	// Per-slot (capture_tick, input) � invoked once per FInputRedundancyBundle slot.
 	std::function<void(uint32, const simulatableBrawler::PlayerInput&)> m_onRemoteMoveReceivedCallback;
+	// [T1] Relay-ring arrival hook; bound by T5's client store.
+	std::function<void(const FRelayedInputRing&)> m_onRelayedInputReceivedCallback;
 
 };
 

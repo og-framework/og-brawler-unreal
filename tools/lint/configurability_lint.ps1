@@ -89,6 +89,45 @@ $Blacklist = @(
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
         Message = 'predOffsetFloorTicks default (4) must live only in TimeConfig; read config.predOffsetFloorTicks instead of re-declaring it (R-P1)'
     },
+    # -----------------------------------------------------------------------
+    # Outlier RTT rejection (og-netcode-v2-input-relay T26b). Five knobs on the
+    # NetworkTimeEstimator plausibility gate. Every consumer reads them via
+    # member access on the stored `const TimeConfig&` (m_config.rttOutlier*),
+    # which the (?<![\w.>]) lookbehind auto-excludes — these entries guard
+    # against a NEW non-member re-declaration of the tuning value, which is
+    # exactly the shape a future "just hardcode the bound at the call site"
+    # change would take.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'rttOutlierMultiplier'
+        Pattern = '(?<![\w.>])rttOutlierMultiplier\s*=\s*4\.0\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'rttOutlierMultiplier default (4.0) must live only in TimeConfig; read config.rttOutlierMultiplier instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttOutlierMarginSeconds'
+        Pattern = '(?<![\w.>])rttOutlierMarginSeconds\s*=\s*0\.030\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'rttOutlierMarginSeconds default (0.030 s) must live only in TimeConfig; read config.rttOutlierMarginSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttOutlierColdStartCeilingSeconds'
+        Pattern = '(?<![\w.>])rttOutlierColdStartCeilingSeconds\s*=\s*0\.5\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'rttOutlierColdStartCeilingSeconds default (0.5 s) must live only in TimeConfig; read config.rttOutlierColdStartCeilingSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttOutlierConsecutiveLimit'
+        Pattern = '(?<![\w.>])rttOutlierConsecutiveLimit\s*=\s*30\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'rttOutlierConsecutiveLimit default (30 — the escape hatch that lets a genuine RTT step through) must live only in TimeConfig; read config.rttOutlierConsecutiveLimit instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttOutlierLogWindowSamples'
+        Pattern = '(?<![\w.>])rttOutlierLogWindowSamples\s*=\s*600\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'rttOutlierLogWindowSamples default (600) must live only in TimeConfig; read config.rttOutlierLogWindowSamples instead of re-declaring it (R-P1)'
+    },
     @{
         Field   = 'rollbackWindowTicks'
         Pattern = '(?<![\w.>])rollbackWindowTicks\s*=\s*12\b'
@@ -109,6 +148,39 @@ $Blacklist = @(
         # (a dedicated header vs. SyncedSimulationStateBuffer.h) until T7 fixes the name.
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'InputRedundancyBundle.h', 'FInputRedundancyBundle.h')
         Message = 'redundancyDepthTicks default (5 @100Hz interim / 3 @60Hz target) must live only in TimeConfig; read config.redundancyDepthTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'relayRedundancyDepthTicks'
+        # og-netcode-v2-input-relay T1: entry count of the OUTBOUND relay ring
+        # (FRelayedInputRing). A SEPARATE knob from redundancyDepthTicks above —
+        # that entry's `redundancyDepth\w*` pattern cannot match this field because
+        # the (?<![\w.>]) lookbehind rejects the mid-identifier position after
+        # "relay", so this field needs (and gets) its own entry.
+        # The value 1 is generic, but the pattern is field-anchored, so only a
+        # non-member `relayRedundancyDepthTicks = 1` is flagged; every consumer
+        # reads it as cfg.relayRedundancyDepthTicks (member access, auto-excluded).
+        # The wire-safety CAP (relayedInputRing::kMaxDepth = 8) is intentionally not
+        # guarded here — R-P1 guards tuning values, not payload capacities.
+        Pattern = '(?<![\w.>])relayRedundancyDepthTicks\s*=\s*1\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'relayRedundancyDepthTicks default (1 — degenerate until the T9 cadence probe) must live only in TimeConfig; read config.relayRedundancyDepthTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'relayDelayFloorTicks'
+        # og-netcode-v2-input-relay T11: the session-scoped minimum effective input
+        # delay (RelayDelaySpectrumDesign.md §6/§10). Ships at 0 (degenerate), tuned
+        # by playtest — exactly the shape R-P1 exists to keep out of call sites.
+        # Field-anchored, so only a non-member `relayDelayFloorTicks = 0` is flagged;
+        # every consumer reads it as cfg.relayDelayFloorTicks (member access,
+        # auto-excluded by the (?<![\w.>]) lookbehind), and the composition root's
+        # ini override writes it through SimulationManager::setRelayDelayFloorTicks
+        # rather than re-declaring a default.
+        # The A5 CEILING (44 = ClientInputDelayLine capacity - rollbackWindowHardCap)
+        # is intentionally not guarded here: it is derived from two other config
+        # quantities at the clamp site, not written as a tuning literal anywhere.
+        Pattern = '(?<![\w.>])relayDelayFloorTicks\s*=\s*0\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'relayDelayFloorTicks default (0 — degenerate, the floor lever ships off) must live only in TimeConfig; read config.relayDelayFloorTicks instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'tickFrequency'

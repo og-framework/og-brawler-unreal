@@ -85,3 +85,19 @@ Content/StarterContent/
 /Android.zip
 /WinClient.zip
 /WinServer.zip
+
+# Throwaway build/verification logs written to the repo root by agents and by
+# Build.bat runs: _build_*.log, _rev*_build_*.log, _t29rw_build_*.log and so on.
+# They are per-run diagnostics, they churn on every build, and they carry no
+# history worth keeping. Verified 2026-08-07: every such file in this tree is
+# root-level and underscore-prefixed, and no other repo in the submodule set
+# produces any.
+#
+# NOTE: _build_brawlertests.log, _build_editor.log, _build_server.log and
+# _build_simtests.log were TRACKED before this rule. Ignoring a tracked file has
+# no effect — they must be untracked once, by hand:
+#     git rm --cached _build_brawlertests.log _build_editor.log \
+#                     _build_server.log _build_simtests.log
+# (--cached keeps them on disk.) Until that runs they will keep showing as
+# modified on every build.
+/_*.log

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGSimulationUnreal/ISimulationTimingRelayListener.h"
+#include "OGSimulationUnreal/ISimulationConnectionRelayListener.h"
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
@@ -31,6 +32,7 @@
 #include "OGSimulation/Network/ConnectionTierTable.h"
 #include "OGSimulation/Network/ServerInputDelayQueue.h"
 #include "OGSimulation/Network/ServerReceptionCoordinator.h"
+#include "OGSimulation/Network/ReplicatedTierConsumer.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
@@ -54,14 +56,43 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGMgmt, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGNet, Log, All);
 // Fallback for unrecognized prefixes
 DECLARE_LOG_CATEGORY_EXTERN(LogOG, Log, All);
+// [og-netcode-v2-input-relay T19] Client-side relay telemetry: RelayProbe.Read,
+// RelayProbe.Arrival, RelayProbe.Stale. Its OWN category, following the
+// LogOGConnRelay precedent, so the channel can be traced (or silenced) without
+// touching a noisy neighbour — which is also the only way the per-window Warning
+// summaries and the per-event Verbose detail can be silenced independently of each
+// other. See the ini block in Config/DefaultEngine.ini.
+DECLARE_LOG_CATEGORY_EXTERN(LogOGRelayProbe, Log, All);
+// [og-netcode-v2-input-relay T24] Client-side prediction-vs-authority telemetry:
+// DivergenceProbe.Correction (per correction, at Verbose) and
+// DivergenceProbe.Window (per class per window, at Warning). Its OWN category for
+// the same reason LogOGRelayProbe has one — it is the only way the per-window
+// summaries and the per-event detail can be silenced independently of each other
+// and of every other channel. Deliberately NOT filed under a `Resim.` tag, which
+// would inherit LogOGSim=Verbose and recreate the volume defect T19 fixed.
+DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
 // Game-rule logging (DAttackMachine/Radial/Guard via OGBLOG_G)
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
 enum class TryRegisterStatus { Pending, Ready };
 
+// [T15 / input relay] The local-input provider signature, named once so the four
+// UE-side sites that pass one around cannot drift apart.
+//
+// The second parameter is the character's own raw-capture history. It arrives as
+// a PARAMETER rather than being reached for through the manager because the
+// motion-sequence matcher runs inside the provider and needs it — see the
+// InputProviderMapFor comment in OGSimulation/SimulationNetSync.h for the
+// read-before-push ordering this shape makes visible. NetSync binds the argument;
+// nothing on this side ever constructs one.
+using BrawlerInputProviderFn = std::function<simulatableBrawler::PlayerInput(
+	const SimulationTimeStep&,
+	const ClientInputDelayLine<simulatableBrawler::PlayerInput>&)>;
+
 class USimmableUpdateComponent;
 class ASimulationManagerUImpl;
 class ASimulationTimingRelay;
+class ASimulationConnectionRelay;
 
 struct FSimulationState2 : public Chaos::FSimCallbackOutput
 {
@@ -133,7 +164,9 @@ private:
 };
 
 UCLASS()
-class ASimulationManagerUImpl : public AActor, public ISimulationTimingRelayListener
+class ASimulationManagerUImpl : public AActor,
+                                public ISimulationTimingRelayListener,
+                                public ISimulationConnectionRelayListener
 {
     GENERATED_BODY()
 
@@ -155,11 +188,13 @@ public:
     const ClientPredictionClock& getClientClock() const { return m_manager->getClientClock(); }
     bool runsPrediction() const { return m_manager->runsPrediction(); }
 
-    // [T11] Client tier-transition rollback (D5.3).
+    // [T11] Client tier-transition stall (D5.3).
     //
-    // Called from USimmableUpdateComponent::OnRep_ConnectionTier (GAME THREAD)
-    // with the delay delta of an authoritative tier transition. Positive deltas
-    // register rollback debt on the client clock; the clock itself ignores
+    // Called from this manager's own applyTierTransitionStall (GAME THREAD),
+    // driven by ASimulationConnectionRelay's OnRep since the T10 tier-channel
+    // migration, with the delay delta of an authoritative tier transition.
+    // Positive deltas
+    // register stall debt on the client clock; the clock itself ignores
     // non-positive ones.
     //
     // Deliberately a NARROW passthrough rather than an `editClientClock()`
@@ -171,13 +206,13 @@ public:
     //
     // Guarded on runsPrediction(): a server/standalone manager has no client
     // clock at all (getClientClock() would std::terminate), and the whole
-    // rollback concept is client-only.
-    void requestTierTransitionRollback(int32 deltaDelayTicks)
+    // stall concept is client-only.
+    void requestInputDelayIncreaseStall(int32 deltaDelayTicks)
     {
         if (!m_manager.has_value() || !m_manager->runsPrediction())
             return;
 
-        m_manager->editClientClock().requestTierTransitionRollback(deltaDelayTicks);
+        m_manager->editClientClock().requestInputDelayIncreaseStall(deltaDelayTicks);
     }
     void onGameSimulation(const SimulationUpdateInfo& info)
     {
@@ -230,7 +265,7 @@ public:
         unsigned int id,
         SimulatableBrawler simulatable,
         USimmableUpdateComponent& owner,
-        std::function<simulatableBrawler::PlayerInput(const SimulationTimeStep&)> inputProvider,
+        BrawlerInputProviderFn inputProvider,
         bool isAuthority);
 
     void unregisterFromNewFramework(unsigned int id, USimmableUpdateComponent& owner, bool isAuthority);
@@ -252,6 +287,35 @@ public:
     SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
     const SimulationReconciliation<SimulatableBrawler>& editReconciliation() const { return m_reconciliation; }
 
+    // [og-netcode-v2-input-relay T7] THE REMOTE-PROXY VISUALIZATION INPUT SOURCE.
+    //
+    // The newest input the server has RELAYED for character `id`, or nullopt when
+    // there is none to have: no relay store exists (a locally-controlled character,
+    // or any character on the AUTHORITY — a listen server allocates no stores), or
+    // one exists but nothing has arrived on it yet.
+    //
+    // WHAT IT REPLACES. The input-carrying viz sites used to read the correction
+    // cache's input column through `editReconciliation().getLatestInput(...)`, fed
+    // by the SERVER->CLIENT correction-input channel. [T8] THAT CHANNEL IS NOW
+    // DELETED, so this is not merely the preferred remote source — it is the only
+    // one. [T16] The COLUMN is deleted too, `getLatestInput` with it. The nullopt
+    // contract here was deliberately modelled on getLatestInput's, so the "cold
+    // source => skip the viz this frame" behaviour at the call site is preserved
+    // rather than re-specified: see BrawlerVisualizationInputSource.h.
+    //
+    // Deliberately a NARROW passthrough rather than an editNetSync() accessor, for
+    // exactly the reason publishClientEffectiveInputDelayTicks below states: the
+    // net sync is otherwise driven only by the core SimulationManager, and this
+    // keeps the game thread's reach into it to one read-only query.
+    //
+    // GAME THREAD. The store's writer (OnRep_RelayedInputRing) is game-thread too,
+    // so this reader is same-thread with the writer — see the threading note on
+    // SimulationNetSync::getLastRelayedInput.
+    std::optional<simulatableBrawler::PlayerInput> getLastRelayedInput(unsigned int id) const
+    {
+        return m_netSync.getLastRelayedInput<SimulatableBrawler>(id);
+    }
+
     // [T9] The one shared TimeConfig, for game-thread consumers that must BIND to
     // it by reference rather than copy it (a copy could silently diverge from the
     // instance the clocks read). Returns nullptr until the core manager has been
@@ -267,8 +331,9 @@ public:
     // collect path.
     //
     // GAME THREAD -> PHYSICS THREAD. Called from
-    // USimmableUpdateComponent::OnRep_ConnectionTier (and once at registration,
-    // to establish the pre-arrival baseline). The value lands in a lone
+    // recomputeAndPublishEffectiveInputDelay — on every relay tier OnRep, on every
+    // relay delay floor OnRep, and
+    // once in BeginPlay to establish the pre-arrival baseline. The value lands in a lone
     // std::atomic<int32> that SimulationNetSync::collectInputAll loads once per
     // tick on the physics thread — see setClientEffectiveInputDelayTicks for why
     // a bare atomic is sufficient here and why this is NOT the same problem as
@@ -288,12 +353,77 @@ public:
         return m_netSync.getClientEffectiveInputDelayTicks();
     }
 
+    // ---- [T10 / og-netcode-v2-input-relay] CLIENT TIER CONSUMPTION ---------
+    //
+    // The client half of the tier system used to live on USimmableUpdateComponent
+    // (one ReplicatedTierConsumer per CHARACTER, fed by that character's own
+    // OnRep). It lives here now, one per WORLD, fed by the per-connection
+    // ASimulationConnectionRelay through ISimulationConnectionRelayListener.
+    //
+    // WHY THAT IS THE RIGHT SHAPE: a tier is a property of the wire, and every
+    // character on a machine shares one wire. The old shape had N characters each
+    // driving the SAME single `m_clientEffectiveInputDelayTicks` atomic and each
+    // requesting its own tier-transition stall — for a couch co-op client that
+    // meant one wire transition producing TWO stall requests against a clock
+    // that ACCUMULATES debt. One listener per world makes the request count match
+    // the transition count. (Documented as an intended consequence of the
+    // migration; single-character clients are unaffected.)
+
+    // A tier TRANSITION arrived on the wire (relay OnRep). Applies the new tier to
+    // the cache, republishes the effective delay, and converts (old -> new) into a
+    // prediction stall.
+    virtual void onConnectionTierReceived(uint8_t oldTier, uint8_t newTier) override;
+
+    // A latched tier is being replayed because it landed before this listener
+    // bound. Applies + republishes but does NOT stall — this is the FIRST tier
+    // ever applied, so there are no ticks predicted against a previous tier's
+    // delay to give back, and its "previous" state is the pre-arrival
+    // forcedInputLatencyTicks baseline rather than a tier at all.
+    virtual void onConnectionTierReplayed(uint8_t tier) override;
+
+    // Read-only handle on the client tier cache (nullptr before BeginPlay has
+    // built the core manager). It is the TIER half of the T11 shared recompute.
+    const ReplicatedTierConsumer* getReplicatedTierConsumer() const
+    {
+        return m_replicatedTierConsumer.has_value() ? &(*m_replicatedTierConsumer) : nullptr;
+    }
+
+    // ---- [T11 / og-netcode-v2-input-relay] THE RELAY DELAY FLOOR -----------
+    //
+    // The floor is the SECOND input to the client's effective-delay recompute,
+    // and it arrives on a DIFFERENT channel from the tier: session-scoped, over
+    // ASimulationTimingRelay, versus wire-scoped over ASimulationConnectionRelay.
+    // The two OnReps can land in either order, which is exactly why both of them
+    // call ONE recompute holding BOTH cached inputs rather than each writing the
+    // effective-delay atomic on its own:
+    //
+    //     effective = max(floor, tierKnown ? tierInputDelayTicks(tier) : forced)
+    //
+    // The floor half of that formula lives in the manager's TimeConfig (written
+    // by the two methods below); the tier half lives in m_replicatedTierConsumer.
+    // Both arms are evaluated inside ReplicatedTierConsumer::effectiveInputDelayTicks,
+    // which is the single derivation the server's ServerInputDelayQueue mirrors.
+
+    // A floor CHANGE arrived on the session channel. Stamps it into the shared
+    // TimeConfig, re-derives + republishes the effective delay, and pays for an
+    // INCREASE with a prediction stall (the same debt an upward tier transition
+    // incurs — to the client the two are indistinguishable).
+    virtual void onRelayDelayFloorReceived(uint8_t floorTicks) override;
+
+    // A latched floor is being replayed because it landed before this listener
+    // bound. Applies + republishes but does NOT stall: the pull happens inside
+    // BeginPlay, before the first prediction tick, so no tick was predicted at
+    // the pre-floor delay. Mirrors onConnectionTierReplayed exactly.
+    virtual void onRelayDelayFloorReplayed(uint8_t floorTicks) override;
+
     // ---- C.2 server-authoritative RTT tier + input delay (T10) -------------
     //
     // OPTION A (C1 decision, 2026-07-19): the SERVER is the sole owner of the
     // RTT tier. It derives each connection's tier from its OWN per-connection
     // FNetPing RoundTrip reading and replicates the result to the owning client
-    // (USimmableUpdateComponent::m_replicatedConnectionTier). The client never
+    // (ASimulationConnectionRelay::m_connectionTier since the T10 tier-channel
+    // migration; formerly a COND_OwnerOnly property on the character component).
+    // The client never
     // computes a tier and never samples RTT for tier purposes — that is what
     // makes client/server tier disagreement impossible by construction rather
     // than merely unlikely.
@@ -362,6 +492,24 @@ public:
     void deliverRemoteInput(unsigned int id, uint32 captureTick,
                             const simulatableBrawler::PlayerInput& input);
 
+    // [T3 / og-netcode-v2-input-relay] This manager is ALSO the coordinator's
+    // RemoteInputRelaySink — the OUTBOUND half of the receipt path. Where
+    // deliverRemoteInput routes an input INTO the simulation for the character that
+    // sent it, this writes the same (captureTick, dA, input) into that character's
+    // replicated relay ring (FRelayedInputRing on USimmableUpdateComponent,
+    // DOREPLIFETIME with NO COND_), which carries it to the OTHER clients so each
+    // peer can simulate that character with its real input instead of extrapolating.
+    // `dA` is the SCHEDULE STAMP: the effective input delay the authority held for
+    // that wire at receipt, so a peer can derive the application tick as
+    // `captureTick + dA` (RelayDelaySpectrumDesign.md §5).
+    //
+    // Resolves id->component through the SAME register-time map deliverRemoteInput
+    // uses, with the same stale-handle pruning. GAME THREAD only. The static_assert
+    // that this manager satisfies RemoteInputRelaySink lives beside the definition
+    // in the .cpp, mirroring the delivery sink.
+    void relayRemoteInput(unsigned int id, uint32 captureTick, uint8 dA,
+                          const simulatableBrawler::PlayerInput& input);
+
 private:
     // ---- C.2 tier input delay: release (part 4) --------------------------
     //
@@ -375,6 +523,70 @@ private:
     // adapter in USimmableUpdateComponent::ServerReceiveRemoteMove; both carry NO
     // netcode policy after the T20/T21 relocation.
     void releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps);
+
+    // ---- [T10] client tier cache internals --------------------------------
+    //
+    // Feed one authoritative tier into the cache and republish the resulting
+    // effective input delay through the shared recompute below.
+    void applyReplicatedConnectionTier(uint8 tier);
+
+    // [T11] Feed one authoritative FLOOR into the shared TimeConfig and republish
+    // through the same recompute. `payForIncrease` distinguishes the two listener
+    // entry points (a genuine OnRep pays a prediction stall for a rise in the
+    // effective delay; a latch replay does not — see the interface header).
+    void applyReplicatedRelayDelayFloor(uint8 floorTicks, bool payForIncrease);
+
+    // THE SHARED TWO-INPUT RECOMPUTE (T11, review amendment A2b). Derives
+    //
+    //     effective = max(floor, tierKnown ? tierInputDelayTicks(tier) : forced)
+    //
+    // from the two cached inputs — the floor in m_manager's TimeConfig and the
+    // tier in m_replicatedTierConsumer — and pushes the result across to the
+    // collect path (game thread -> the lone std::atomic<int32> collectInputAll
+    // reads once per tick).
+    //
+    // ONE SITE, BOTH CHANNELS. T10 wired the tier OnRep straight to the atomic;
+    // adding a second, independent input made that shape untenable — two writers
+    // each holding half the formula would answer with a stale other-half whenever
+    // their OnReps interleaved. Both OnReps (and the composition root's baseline
+    // publish) now go through here.
+    //
+    // RETURNS the change in published effective delay (new - previous), so a
+    // caller that must pay for an increase can. Callers that publish a baseline
+    // rather than react to a transition (the composition root) ignore it.
+    int32 recomputeAndPublishEffectiveInputDelay();
+
+    // Turn one tier transition into a client prediction stall. Computes the
+    // delta through the shared `tierDelayDeltaTicks` lookup (never off the raw
+    // config array — `lanZeroDelayOverride` makes those disagree for every
+    // transition touching tier 0) and forwards a POSITIVE delta to the client
+    // clock; non-positive deltas are dropped by the clock.
+    void applyTierTransitionStall(uint8 oldTier, uint8 newTier);
+
+    // [T9, relocated by T10] The client's ENTIRE share of the tier system: it
+    // stores the replicated tier and turns it into behaviour through the SHARED
+    // ConnectionTierTable lookups the server's table also delegates to. Borrows
+    // m_manager's TimeConfig by reference, so it is emplaced AFTER m_manager in
+    // BeginPlay and reset BEFORE it in EndPlay.
+    //
+    // Emplaced on BOTH roles deliberately: a pure client is the obvious consumer,
+    // but a listen-server host runs client-side code paths on an AUTHORITY
+    // manager, and an unbound cache there would answer 0 delay where the
+    // pre-arrival baseline (forcedInputLatencyTicks) is correct. No tier ever
+    // reaches an authority world — the server writes the relay property, it never
+    // receives an OnRep for it — so the authority cache stays at that baseline
+    // for the whole session, which is exactly what the retired per-character
+    // path also converged on.
+    std::optional<ReplicatedTierConsumer> m_replicatedTierConsumer;
+
+    // [T11] The last value recomputeAndPublishEffectiveInputDelay() pushed into
+    // the collect path. Kept here rather than read back out of the net sync
+    // because the delta is a GAME-thread bookkeeping quantity: the atomic exists
+    // to hand one scalar to the physics thread, not to be used as shared state.
+    // Seeded to the pre-publish 0 so the composition root's first publish reports
+    // its full value as the delta — which that caller deliberately ignores, since
+    // nothing has been predicted yet.
+    int32 m_lastPublishedEffectiveInputDelayTicks = 0;
 
     // [T20] THE reception subsystem, relocated whole into the core. Authority-only
     // (std::nullopt on a pure client); borrows m_manager's TimeConfig, so emplaced
@@ -391,6 +603,21 @@ private:
     // callback below — the seam the server input path already crosses (lead
     // resolution R2, 2026-07-20).
     std::optional<BrawlerReceptionCoordinator> m_receptionCoordinator;
+
+    // [og-netcode-v2-input-relay T20] PROBE A — server sim ticks per game-thread
+    // FRAME. Purely diagnostic; nothing reads it but the log line it feeds.
+    //
+    // WHY IT SITS HERE AND NOT IN SimulationNetSync, where the other three probes
+    // live: this one is measured on the SERVER's game thread, from the Chaos
+    // pre-step hook, and the only tick source that is legal to read there is the
+    // ChaosTickMapper's atomic offset — which this actor owns and SimulationNetSync
+    // has no access to. Fed from releaseDelayedInputsForStep, which is server-only by
+    // construction (it returns immediately without a reception coordinator, and a
+    // client never has one).
+    //
+    // GAME THREAD ONLY. Same rule as m_receptionCoordinator above and for the same
+    // reason: it has no internal synchronization.
+    ServerFrameProbe m_serverFrameProbe;
 
     // Adapter-side delivery resolution: the core claim map is id-keyed (it cannot
     // hold a TWeakObjectPtr), so the coordinator's `deliver` callback hands back an
@@ -496,7 +723,7 @@ private:
         std::optional<SimulatableBrawler> simulatable;
         bool bodiesCreated = false;
         BodyId parentBodyId;
-        std::function<simulatableBrawler::PlayerInput(const SimulationTimeStep&)> inputProvider;
+        BrawlerInputProviderFn inputProvider;
         bool isAuthority = false;
     };
     std::unordered_map<unsigned int, PendingRegistration> m_pendingRegistrations;

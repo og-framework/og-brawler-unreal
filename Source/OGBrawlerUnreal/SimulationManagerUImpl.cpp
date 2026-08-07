@@ -5,6 +5,7 @@
 #include "EngineUtils.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
+#include "OGSimulationUnreal/SimulationConnectionRelay.h"
 #include "Runtime/PhysicsCore/Public/Chaos/ChaosScene.h"
 #include "Runtime/Engine/Public/Physics/NetworkPhysicsComponent.h"
 #include "Runtime/Experimental/Chaos/Public/PBDRigidsSolver.h"
@@ -24,6 +25,9 @@
 #include "Runtime/Engine/Public/Net/NetPing.h"
 #include "Runtime/Engine/Classes/Engine/NetConnection.h"
 #include "Runtime/Engine/Classes/Engine/NetDriver.h"
+// [T11] GConfig — the ini override for the relay delay floor. FIRST GConfig use
+// in this codebase, and deliberately confined to this composition root.
+#include "Misc/ConfigCacheIni.h"
 
 #include <algorithm>
 #include <utility>
@@ -34,6 +38,8 @@ DEFINE_LOG_CATEGORY(LogOGSimTick);
 DEFINE_LOG_CATEGORY(LogOGMgmt);
 DEFINE_LOG_CATEGORY(LogOGNet);
 DEFINE_LOG_CATEGORY(LogOG);
+DEFINE_LOG_CATEGORY(LogOGRelayProbe);
+DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 namespace
@@ -88,8 +94,29 @@ namespace
 			} \
 		} while (0)
 
+		// [og-netcode-v2-input-relay T19] ORDER IS LOAD-BEARING: this branch MUST
+		// stay AHEAD of the `[Resim.` catch-all below, because it is a prefix of it.
+		//
+		// THE DEFECT IT FIXES. `[Resim.Input]` (T6's resim resolution table) is a
+		// PER-CHARACTER-PER-RESIM-TICK line — the same volume class as
+		// `[CollectInput]`, which is routed to LogOGSimTick=Warning two blocks down
+		// under the comment "dominates log volume" and is correctly silent. It
+		// landed in the rare-lifecycle bucket purely because it inherited the
+		// `[Resim.` prefix from `[Resim.Pre]`/`[Resim.Post]`, which really are rare,
+		// and `LogOGSim` ships at Verbose. So the highest-frequency line in the
+		// system was filed as a lifecycle event and printed by default.
+		//
+		// RE-ROUTED RATHER THAN RENAMED — both were offered and this is the one
+		// that does not break anything. Renaming the tag would have silenced it just
+		// as well, but `[Resim.Input]` is the name T6's impl notes, the T9 PIE
+		// script and the spectrum doc all use when they tell an operator what to
+		// grep for; a rename invalidates every one of those instructions for a
+		// cosmetic gain. Re-routing keeps the string an operator already knows and
+		// changes only which knob controls it: `LogOGSimTick=Verbose` now shows the
+		// resim table, exactly as it shows `[CollectInput]`.
+		if (body.StartsWith(TEXT("[Resim.Input]")))          { EMIT_OG(LogOGSimTick); }
 		// LogOGSim: rare simulation lifecycle events.
-		if (body.StartsWith(TEXT("[TimeResync.")))           { EMIT_OG(LogOGSim); }
+		else if (body.StartsWith(TEXT("[TimeResync.")))      { EMIT_OG(LogOGSim); }
 		else if (body.StartsWith(TEXT("[Resim.")))           { EMIT_OG(LogOGSim); }
 		else if (body.StartsWith(TEXT("[ResimCheck.Divergence]")))     { EMIT_OG(LogOGSim); }
 		else if (body.StartsWith(TEXT("[ResimCheck.PrepareRestore]"))) { EMIT_OG(LogOGSim); }
@@ -123,6 +150,70 @@ namespace
 		else if (body.StartsWith(TEXT("[InputStats]")))                 { EMIT_OG(LogOGNet); }
 		else if (body.StartsWith(TEXT("[Park]")))                       { EMIT_OG(LogOGNet); }
 		else if (body.StartsWith(TEXT("[Release]")))                    { EMIT_OG(LogOGNet); }
+		// LogOGNet: the out-of-domain receipt gate (T12). One [Warning][InputDomain]
+		// line per rejection burst (rate-limited on the same server-tick window as
+		// [InputStats]); it names a client whose capture ticks are outside this
+		// server's tick domain — the warm-up / free-running case.
+		else if (body.StartsWith(TEXT("[InputDomain]")))                { EMIT_OG(LogOGNet); }
+		// LogOGNet: the relay tap (T3). Two severities under ONE tag — a [Verbose]
+		// line per out-of-order-older capture tick the monotonic relay stream skipped,
+		// and a [Warning] per-window total riding the same [InputStats] window. Both
+		// are the evidence T9's probe reads for the depth>1 gate decision.
+		else if (body.StartsWith(TEXT("[RelaySkip]")))                  { EMIT_OG(LogOGNet); }
+		// LogOGRelayProbe: the relay telemetry family (T19, extended by T20) —
+		// [RelayProbe.Read] (hit / miss / verify-fail / rung-0 per window, one line
+		// per call site), [RelayProbe.Arrival] (replication cadence in CAPTURE
+		// ticks), [RelayProbe.Stale] (the max consecutive fallback run) and, added by
+		// T20, [RelayProbe.Miss] (why each miss missed — in-span coverage hole vs
+		// asking above the newest arrival vs below the oldest), [RelayProbe.Delta]
+		// (the signed probeTick-to-newest distribution) and [RelayProbe.Frame].
+		//
+		// [RelayProbe.Frame] IS THE ONE SERVER-SIDE MEMBER OF THE FAMILY, so the
+		// "nothing fires on a dedicated server" note that used to sit here and in the
+		// ini is no longer true and has been corrected in both places. It shares the
+		// category deliberately: it measures the CAUSE of the cadence
+		// [RelayProbe.Arrival] measures the EFFECT of, and the two are only
+		// interpretable together, so one knob should turn both on.
+		//
+		// ITS OWN CATEGORY IS WHAT MAKES INDEPENDENT SILENCING POSSIBLE. Both
+		// severities ride this one tag family: per-window summaries at Warning,
+		// per-event detail at Verbose. So `LogOGRelayProbe=Warning` (the shipped
+		// default) keeps the summaries and drops the per-event lines, and
+		// `LogOGRelayProbe=NoLogging` drops both — neither of which disturbs any
+		// other channel. Routed to LogOGNet instead, this would have been
+		// inseparable from the whole replication bucket; left unrouted it would
+		// have fallen through to LogOG=Warning and the Verbose half would have been
+		// invisible with no way to turn it on.
+		//
+		// ONE StartsWith COVERS THE FAMILY: the sub-tags share the `[RelayProbe`
+		// prefix by design, so a future probe needs no router edit — T20 added three
+		// sub-tags and this branch is the reason none of them required a new one. And the
+		// prefix deliberately does NOT begin with `[Resim.`, which would have
+		// inherited LogOGSim=Verbose and recreated the very defect the branch at the
+		// top of this function exists to fix.
+		else if (body.StartsWith(TEXT("[RelayProbe")))                  { EMIT_OG(LogOGRelayProbe); }
+		// [og-netcode-v2-input-relay T24] LogOGDivergenceProbe: the
+		// prediction-vs-authority family — [DivergenceProbe.Correction] (one line
+		// per LANDED correction, at Verbose, carrying the character id and its
+		// class) and [DivergenceProbe.Window] (one line per class per 120
+		// corrections, at Warning, carrying the disagreement rate).
+		//
+		// THE SIGNAL IS NOT NEW — the verdict has been computed inside
+		// StateCorrectionCache::tryInsertingCorrectState on every correction for as
+		// long as that method has existed. What was missing was a route: the cache's
+		// own line carries no tag, so it lands on the LogOG fallback at Log severity
+		// and LogOG=Warning suppresses it. Zero occurrences in the clean floor-0 run.
+		// This branch is the fix, and it is the whole of T24's routing change.
+		//
+		// ONE StartsWith COVERS THE FAMILY, same as [RelayProbe above: a future
+		// sub-tag (T28's magnitude column is the obvious one) needs no router edit.
+		// And the prefix deliberately does NOT begin with `[Resim.` — that would
+		// inherit LogOGSim=Verbose and recreate the exact defect the branch at the
+		// top of this function exists to fix. Its own category is what lets
+		// LogOGDivergenceProbe=Warning keep the per-window summaries while dropping
+		// the per-correction detail, and =NoLogging drop both, with no other channel
+		// disturbed.
+		else if (body.StartsWith(TEXT("[DivergenceProbe")))             { EMIT_OG(LogOGDivergenceProbe); }
 		// LogOGMgmt: manager / simulatable lifecycle.
 		else if (body.StartsWith(TEXT("SimulationManager:"))) { EMIT_OG(LogOGMgmt); }
 		else if (body.StartsWith(TEXT("tryRegister:")))       { EMIT_OG(LogOGMgmt); }
@@ -312,8 +403,18 @@ ASimulationManagerUImpl::~ASimulationManagerUImpl()
 
 	// Null whichever slot points at us — avoids re-querying role during teardown,
 	// where NetDriver state may already be gone.
-	if (s_instances[0] == this) { s_instances[0] = nullptr; ISimulationTimingRelayListener::unregisterInstance(true); }
-	if (s_instances[1] == this) { s_instances[1] = nullptr; ISimulationTimingRelayListener::unregisterInstance(false); }
+	if (s_instances[0] == this)
+	{
+		s_instances[0] = nullptr;
+		ISimulationTimingRelayListener::unregisterInstance(true);
+		ISimulationConnectionRelayListener::unregisterInstance(true);
+	}
+	if (s_instances[1] == this)
+	{
+		s_instances[1] = nullptr;
+		ISimulationTimingRelayListener::unregisterInstance(false);
+		ISimulationConnectionRelayListener::unregisterInstance(false);
+	}
 }
 
 void ASimulationManagerUImpl::BeginPlay()
@@ -339,6 +440,35 @@ void ASimulationManagerUImpl::BeginPlay()
 	// the world's net mode.
 	const ENetMode worldNetMode = GetNetMode();
 	const bool worldIsAuthority = (worldNetMode != NM_Client);
+
+	// ---- [T11 / og-netcode-v2-input-relay] the relay delay floor ini override --
+	//
+	// Read BEFORE the core manager is constructed, so the floor is in place for the
+	// very first effective-delay publish below rather than arriving as a change the
+	// session then has to absorb.
+	//
+	// AUTHORITY ONLY, and that is a correctness requirement, not an optimisation:
+	// the floor is server-owned session state replicated to clients (§11 Q1). A
+	// client reading its own ini could disagree with the server's value, which is
+	// precisely the two-ends-diverge failure the whole C2 ruling exists to avoid.
+	//
+	// ABSENT => the compiled default (0 = degenerate, today's behaviour). This is
+	// the FIRST GConfig read in this codebase — deliberately adapter-side only,
+	// with nothing in the engine-agnostic core aware that an ini exists.
+	// Both ini homes are accepted: DefaultGame.ini is the conventional place for a
+	// gameplay-tuning value, DefaultEngine.ini is where this project's other
+	// netcode-adjacent settings already live. Game wins if both carry the key.
+	int32 configuredRelayDelayFloorTicks = -1;      // -1 = "not present in the ini"
+	if (worldIsAuthority && GConfig != nullptr)
+	{
+		int32 iniFloorTicks = 0;
+		if (GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayDelayFloorTicks"), iniFloorTicks, GGameIni) ||
+			GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayDelayFloorTicks"), iniFloorTicks, GEngineIni))
+		{
+			configuredRelayDelayFloorTicks = iniFloorTicks;
+		}
+	}
+
 	if (worldIsAuthority)
 	{
 		if (s_instances[0] != nullptr)
@@ -386,13 +516,84 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_netSync.setLogger(std::function<void(const char*)>(pctmloggerServer));
 
 		// [T9 part 4] Inject the game's zero input for the client input delay
-		// line. Set on the AUTHORITY branch too, even though a dedicated server
-		// never reads it (its effective client delay stays 0, so the line is
-		// never consulted): a listen-server host runs the provider branch on this
-		// manager, and leaving the neutral at a value-initialised PlayerInput
-		// would put a (0,0,0) forward vector one config change away from reaching
-		// normalisation. Uniform on both roles is cheaper than a latent trap.
+		// line. Set on the AUTHORITY branch too — originally because a
+		// listen-server host runs the provider branch on this manager and leaving
+		// the neutral at a value-initialised PlayerInput would put a (0,0,0)
+		// forward vector one config change away from normalisation.
+		//
+		// [og-netcode-v2-input-relay T17] THAT IS NO LONGER A PRECAUTION: a
+		// DEDICATED server reads this value on every tick it substitutes an input
+		// for a remote character (SimulationNetSync::collectInputAll's remote
+		// branch on a queue underrun) and seeds each character's replicated
+		// applied-input with it at registerAuthorityOwner. Deleting this call now
+		// makes the authority simulate — and publish to every peer — the (0,0,0)
+		// input for the whole of every join window. netSync warns at registration
+		// if this line ever stops running before it.
+		//
+		// ORDER IS LOAD-BEARING: this must precede every registerAuthorityOwner
+		// call (registration happens per character, later).
 		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
+
+		// [T11] THE SESSION FLOOR, established before anything reads an effective
+		// delay. Two steps, in this order:
+		//   1. stamp the (clamped) value into the manager's TimeConfig, so every
+		//      server-side derivation — the delay queue's park schedule included —
+		//      is floored from the first parked input onward;
+		//   2. publish it on the session timing relay, which is how every client
+		//      learns it (initial bunch on join; an OnRep if it ever changes).
+		// INTAKE POINT 1 OF 2 for the A5 clamp. Out-of-range config is reported
+		// rather than silently corrected, because a floor that big is a sizing
+		// mistake the operator needs to see (see clampRelayDelayFloorTicks).
+		if (configuredRelayDelayFloorTicks >= 0)
+		{
+			const int32 clampedFloor = clampRelayDelayFloorTicks(
+				configuredRelayDelayFloorTicks, m_manager->getTimeConfig());
+			if (clampedFloor != configuredRelayDelayFloorTicks)
+			{
+				UE_LOG(LogOGNet, Warning,
+					TEXT("[RelayDelayFloor] ini [OGNetcode] RelayDelayFloorTicks=%d out of range, clamped to %d ticks"),
+					configuredRelayDelayFloorTicks, clampedFloor);
+			}
+			m_manager->setRelayDelayFloorTicks(clampedFloor);
+			UE_LOG(LogOGNet, Log,
+				TEXT("[RelayDelayFloor] session floor = %d ticks (ini override)"), clampedFloor);
+		}
+
+		const int32 sessionRelayDelayFloorTicks = m_manager->getTimeConfig().relayDelayFloorTicks;
+		if (ASimulationTimingRelay* timingRelay = findTimingRelay())
+		{
+			timingRelay->setRelayDelayFloorTicks((uint8)sessionRelayDelayFloorTicks);
+		}
+		else
+		{
+			// The composition root (USimulationManagerSubsystem::OnWorldBeginPlay)
+			// spawns the timing relay BEFORE this manager precisely so this write
+			// has somewhere to land. Reaching here means that order was broken:
+			// clients would never learn a nonzero floor and would silently predict
+			// against a delay the server is not applying.
+			UE_LOG(LogOGNet, Warning,
+				TEXT("[RelayDelayFloor] no timing relay at manager BeginPlay — session floor %d NOT published"),
+				sessionRelayDelayFloorTicks);
+		}
+
+		// [T10 / og-netcode-v2-input-relay] Client tier cache on the AUTHORITY
+		// world too. A dedicated server never reads the value it publishes here
+		// (it runs no provider branch), but a listen-server host does — its local
+		// player's input delay comes from this cache. No tier ever arrives on an
+		// authority world (the server WRITES the relay property; OnRep is a
+		// non-authority callback), so this stays at the pre-arrival
+		// forcedInputLatencyTicks baseline for the session — floored, since T11,
+		// by the value stamped in just above, which is exactly what a listen-server
+		// host's local player must feel to stay in step with its own authority.
+		//
+		// BEHAVIOUR-PRESERVING, and deliberately EARLIER than before: the retired
+		// per-character path reached this same steady state a few frames later,
+		// when the first component resolved a manager and published. Nothing reads
+		// the atomic in between (no character is registered yet), so the observable
+		// end state is identical.
+		m_replicatedTierConsumer.emplace(m_manager->getTimeConfig());
+		recomputeAndPublishEffectiveInputDelay();
+		ISimulationConnectionRelayListener::registerInstance(/*isAuthority=*/true, this);
 
 		// ---- [T20] server reception coordinator (relocated from T10 wiring) --
 		// AUTHORITY BRANCH ONLY. The coordinator owns the tier table + delay
@@ -462,16 +663,58 @@ void ASimulationManagerUImpl::BeginPlay()
 		// is load-bearing, not defensive.
 		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
 
-		// [T9 part 3] Establish the PRE-ARRIVAL baseline delay before any tier
-		// has replicated. `forcedInputLatencyTicks` is the documented "no
-		// per-connection tier is available" value and is exactly what the
-		// server's ServerInputDelayQueue::effectiveDelay falls back to for a
-		// connection it has not yet tiered — so publishing it here is what keeps
-		// the two ends delaying by the same amount during the pre-tier window
-		// instead of the client running 0 against the server's 2.
-		// OnRep_ConnectionTier overwrites this the moment a tier lands.
-		m_netSync.setClientEffectiveInputDelayTicks(
-			m_manager->getTimeConfig().forcedInputLatencyTicks);
+		// [T9 part 3, rewired by T10] Establish the PRE-ARRIVAL baseline delay
+		// before any tier has replicated. `forcedInputLatencyTicks` is the
+		// documented "no per-connection tier is available" value and is exactly
+		// what the server's ServerInputDelayQueue::effectiveDelay falls back to
+		// for a connection it has not yet tiered — so publishing it here is what
+		// keeps the two ends delaying by the same amount during the pre-tier
+		// window instead of the client running 0 against the server's 2.
+		//
+		// It is now published THROUGH the tier cache rather than read off the
+		// config directly, so the baseline and the post-arrival value come from
+		// one derivation site (`ReplicatedTierConsumer::effectiveInputDelayTicks`)
+		// — which T11 widened with the relay delay floor, so this baseline is
+		// `max(floor, forcedInputLatencyTicks)` and this call site derives nothing
+		// of its own (it is "site 4" of the four only in the sense that it
+		// publishes site 3's answer). At the shipped floor of 0 the value is
+		// unchanged: an unarrived cache answers forcedInputLatencyTicks.
+		//
+		// A client's floor is still 0 here — it arrives by OnRep, either in the
+		// initial bunch (pulled two blocks below) or later. That pre-OnRep window
+		// inherits the pre-tier convention and is milder than it: the floor rides
+		// the initial bunch of an always-relevant actor, with no character
+		// registration to wait for.
+		// The relay OnReps overwrite this the moment a tier or a floor lands.
+		m_replicatedTierConsumer.emplace(m_manager->getTimeConfig());
+		recomputeAndPublishEffectiveInputDelay();
+
+		// [T10 / A3a] Bind the per-connection tier listener, then PULL. The tier
+		// property dirties only on change, so an OnRep that fired before this bind
+		// would never be re-notified; the relay latches it and hands it over here.
+		// Normally a no-op (the relay is a replicated actor and cannot arrive
+		// before the world begins play, which is when this manager is spawned) —
+		// it exists so a late bind cannot silently strand the channel.
+		ISimulationConnectionRelayListener::registerInstance(/*isAuthority=*/false, this);
+		if (ASimulationConnectionRelay* connectionRelay =
+				ASimulationConnectionRelay::findLocalClientRelay(uWorld))
+		{
+			connectionRelay->replayLatchedTier();
+		}
+
+		// [T11 / A3a] Same treatment for the FLOOR, and it needs it for the same
+		// reason: its property dirties only on change, so the single OnRep it
+		// produces can land before this listener binds and would then never be
+		// re-notified. The timing relay is bAlwaysRelevant, so on a client it can
+		// legitimately already exist here (initial bunch) or not exist yet — a
+		// missing relay simply means no floor has arrived, and the relay's own
+		// client BeginPlay replays it if it turns up after this bind.
+		// NOTE the timing listener was registered at the top of this branch, so a
+		// floor arriving in between went straight through and this pull is a no-op.
+		if (ASimulationTimingRelay* timingRelay = findTimingRelay())
+		{
+			timingRelay->replayLatchedRelayDelayFloor();
+		}
 		// Process-global sinks for deeply-nested simulation templates that don't
 		// have a logger parameter plumbed in.
 		// simlog -> LogOG* categories (framework: tick/sync/reconciliation messages).
@@ -504,17 +747,23 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	m_delayedInputComponentsById.clear();
 	m_receptionCoordinator.reset();
 
+	// [T10] Same borrow rule as the coordinator: the tier cache holds
+	// `const TimeConfig&` from m_manager, so it may not outlive it.
+	m_replicatedTierConsumer.reset();
+
 	// Clear the singleton slot before teardown so a subsequent PIE session
 	// (which may BeginPlay before this actor is GC'd) doesn't hit the guard.
 	if (s_instances[0] == this)
 	{
 		s_instances[0] = nullptr;
 		ISimulationTimingRelayListener::unregisterInstance(/*isAuthority=*/true);
+		ISimulationConnectionRelayListener::unregisterInstance(/*isAuthority=*/true);
 	}
 	if (s_instances[1] == this)
 	{
 		s_instances[1] = nullptr;
 		ISimulationTimingRelayListener::unregisterInstance(/*isAuthority=*/false);
+		ISimulationConnectionRelayListener::unregisterInstance(/*isAuthority=*/false);
 	}
 
 	if (UWorld* World = GetWorld())
@@ -548,6 +797,187 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 }
 
+
+// ---------------------------------------------------------------------------
+// [T10 / og-netcode-v2-input-relay] Client tier consumption.
+//
+// This is the receive end of the per-connection tier channel
+// (ASimulationConnectionRelay -> ISimulationConnectionRelayListener). It
+// reproduces the behaviour the retired per-character component channel had,
+// with one deliberate difference recorded in the header: one listener per world
+// means one stall request per wire transition, where N characters on one wire
+// previously produced N.
+//
+// PRESERVED QUIRK (review A3c, og-netcode-v2-input-relay backlog T10): the core
+// never publishes tier 0 as a FIRST value (`m_lastPublishedTier` baseline 0), so
+// a wire that never leaves tier 0 produces no publish, no relay actor, and no
+// call into here at all — the client sits on the pre-arrival
+// forcedInputLatencyTicks (2) while the server parks at tier-0 delay (1). That
+// standing 1-tick divergence is TODAY'S behaviour and is preserved deliberately;
+// changing it changes felt input lag and belongs to the floor work (T11), not to
+// a transport migration.
+// ---------------------------------------------------------------------------
+
+void ASimulationManagerUImpl::onConnectionTierReceived(uint8_t oldTier, uint8_t newTier)
+{
+    applyReplicatedConnectionTier(newTier);
+
+    // The (old -> new) delta IS the transition signal: under Option A the client
+    // runs no RTT sampling of its own. Note the first real OnRep on a fresh
+    // connection reports oldTier = 0 (the property default) even though the
+    // client was actually running the pre-arrival forced baseline — preserved
+    // from the component channel verbatim, quirk and all.
+    applyTierTransitionStall(oldTier, newTier);
+}
+
+void ASimulationManagerUImpl::onConnectionTierReplayed(uint8_t tier)
+{
+    // NO stall here — see ISimulationConnectionRelayListener's header. This is
+    // the first tier ever applied, so nothing was predicted against a previous
+    // tier's delay.
+    applyReplicatedConnectionTier(tier);
+}
+
+void ASimulationManagerUImpl::applyReplicatedConnectionTier(uint8 tier)
+{
+    if (!m_replicatedTierConsumer.has_value())
+        return;     // pre-BeginPlay ordering; the relay latches and replays at bind
+
+    // GAME THREAD, matching the cache's single-threaded contract: the relay's
+    // OnRep and the replay pull are both game-thread UObject callbacks.
+    m_replicatedTierConsumer->onReplicatedTierReceived((int32)tier);
+    recomputeAndPublishEffectiveInputDelay();
+}
+
+// ---------------------------------------------------------------------------
+// [T11 / og-netcode-v2-input-relay] The relay delay floor, client side.
+//
+// The floor rides the SESSION relay (ASimulationTimingRelay) while the tier
+// rides the PER-WIRE one, so the two OnReps are genuinely independent and can
+// land in either order. Both funnel into the one recompute below.
+// ---------------------------------------------------------------------------
+
+void ASimulationManagerUImpl::onRelayDelayFloorReceived(uint8_t floorTicks)
+{
+    applyReplicatedRelayDelayFloor((uint8)floorTicks, /*payForIncrease=*/true);
+}
+
+void ASimulationManagerUImpl::onRelayDelayFloorReplayed(uint8_t floorTicks)
+{
+    // NO stall here — see ISimulationTimingRelayListener's header. The pull runs
+    // inside this manager's own BeginPlay, before the first prediction tick, so
+    // nothing has been predicted against the pre-floor delay to give back.
+    applyReplicatedRelayDelayFloor((uint8)floorTicks, /*payForIncrease=*/false);
+}
+
+void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, bool payForIncrease)
+{
+    if (!m_manager.has_value())
+        return;     // pre-BeginPlay ordering; the relay latches and replays at bind
+
+    // INTAKE POINT 2 OF 2 for the A5 clamp (the ini override is the other). The
+    // value arrived off the wire as a uint8, so it is clamped rather than
+    // trusted — a corrupt or version-mismatched byte must not push scheduled
+    // reads past the point where the delay line has already evicted the capture.
+    // The setter clamps again; this call site exists so an out-of-range value is
+    // VISIBLE in the log rather than silently corrected.
+    const TimeConfig& cfg = m_manager->getTimeConfig();
+    const int32 clampedFloor = clampRelayDelayFloorTicks((int32)floorTicks, cfg);
+    if (clampedFloor != (int32)floorTicks)
+    {
+        UE_LOG(LogOGNet, Warning,
+            TEXT("[RelayDelayFloor] received floor %u out of range, clamped to %d ticks"),
+            (unsigned int)floorTicks, clampedFloor);
+    }
+
+    // Stamp it into the ONE shared TimeConfig. Everything downstream — the
+    // recompute below, the shared tierInputDelayTicks lookup, tierDelayDeltaTicks
+    // — reads the floor from there, so this write is what keeps every derivation
+    // site on this client consistent with the server's.
+    m_manager->setRelayDelayFloorTicks(clampedFloor);
+
+    const int32 deltaDelayTicks = recomputeAndPublishEffectiveInputDelay();
+
+    if (!payForIncrease || deltaDelayTicks <= 0)
+    {
+        UE_LOG(LogOGNet, Log,
+            TEXT("[RelayDelayFloor] floor = %d ticks, effective delay delta=%d, no stall"),
+            clampedFloor, deltaDelayTicks);
+        return;
+    }
+
+    // A floor RISE is indistinguishable from an upward tier transition to the
+    // client: the frontier must fall back by the difference, which the clock
+    // pays down as Stall ticks. No-ops on an authority manager (no client clock).
+    requestInputDelayIncreaseStall(deltaDelayTicks);
+
+    UE_LOG(LogOGNet, Warning,
+        TEXT("[RelayDelayFloor] floor = %d ticks, UPWARD, requesting %d-tick prediction stall"),
+        clampedFloor, deltaDelayTicks);
+}
+
+int32 ASimulationManagerUImpl::recomputeAndPublishEffectiveInputDelay()
+{
+    if (!m_replicatedTierConsumer.has_value())
+        return 0;
+
+    // THE FORMULA, in one place, over both cached inputs:
+    //   effective = max(floor, tierKnown ? tierInputDelayTicks(tier) : forced)
+    // The tier arm and the no-tier arm both live inside effectiveInputDelayTicks,
+    // and the floor is applied to BOTH of them there through applyRelayDelayFloor
+    // — the same shared helper the server's ServerInputDelayQueue::effectiveDelay
+    // routes through, which is what makes the two ends agree by construction.
+    //
+    // GAME -> PHYSICS crossing, deliberately ONE scalar: the value lands in a
+    // std::atomic<int32> that collectInputAll loads once per tick, so the worst a
+    // race can do is apply the new delay one tick late.
+    const int32 delayTicks = (int32)m_replicatedTierConsumer->effectiveInputDelayTicks();
+    const int32 deltaDelayTicks = delayTicks - m_lastPublishedEffectiveInputDelayTicks;
+
+    m_lastPublishedEffectiveInputDelayTicks = delayTicks;
+    publishClientEffectiveInputDelayTicks(delayTicks);
+
+    UE_LOG(LogOGNet, Log,
+        TEXT("[ConnectionTier] applied client input delay = %d ticks (tier %d, arrived=%d, floor %d)"),
+        delayTicks,
+        (int)m_replicatedTierConsumer->currentTierIndex(),
+        m_replicatedTierConsumer->hasReceivedTier() ? 1 : 0,
+        m_manager.has_value() ? (int)m_manager->getTimeConfig().relayDelayFloorTicks : 0);
+
+    return deltaDelayTicks;
+}
+
+void ASimulationManagerUImpl::applyTierTransitionStall(uint8 oldTier, uint8 newTier)
+{
+    if (oldTier == newTier)
+        return;     // an OnRep can fire for an unchanged value; nothing transitioned
+
+    if (!m_manager.has_value())
+        return;     // core manager not constructed yet; no clock to stall
+
+    const TimeConfig& cfg = m_manager->getTimeConfig();
+    const int32 deltaDelayTicks =
+        (int32)tierDelayDeltaTicks((int32)oldTier, (int32)newTier, cfg);
+
+    if (deltaDelayTicks <= 0)
+    {
+        // Downward (or delay-neutral) transition — no stall. The client may now
+        // predict FURTHER ahead, which the ordinary drift path reaches by advancing
+        // normally; that is a natural extension, not a stall.
+        UE_LOG(LogOGNet, Log,
+            TEXT("[ConnectionTier] tier %u -> %u delayDelta=%d, no stall"),
+            (unsigned int)oldTier, (unsigned int)newTier, deltaDelayTicks);
+        return;
+    }
+
+    // No-ops on an authority manager (it runs no prediction), which is also the
+    // only role that can reach here without a client clock.
+    requestInputDelayIncreaseStall(deltaDelayTicks);
+
+    UE_LOG(LogOGNet, Warning,
+        TEXT("[ConnectionTier] tier %u -> %u UPWARD, requesting %d-tick prediction stall"),
+        (unsigned int)oldTier, (unsigned int)newTier, deltaDelayTicks);
+}
 
 ASimulationTimingRelay* ASimulationManagerUImpl::findTimingRelay()
 {
@@ -601,7 +1031,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     unsigned int id,
     SimulatableBrawler simulatable,
     USimmableUpdateComponent& owner,
-    std::function<simulatableBrawler::PlayerInput(const SimulationTimeStep&)> inputProvider,
+    BrawlerInputProviderFn inputProvider,
     bool isAuthority)
 {
     // Look up or insert the per-id pending record.
@@ -795,6 +1225,59 @@ void ASimulationManagerUImpl::deliverRemoteInput(
     target->deliverDelayedRemoteInput(captureTick, input);
 }
 
+// [T3 / og-netcode-v2-input-relay] This manager ALSO satisfies the core
+// RemoteInputRelaySink concept — the outbound tap the ServerReceptionCoordinator
+// fires at receipt of each newer capture tick. Compile-checked at the
+// receiveInputBundle call site, but asserted here too so a breaking signature
+// change surfaces legibly (mirrors the RemoteInputDeliverySink assert above).
+static_assert(
+    RemoteInputRelaySink<ASimulationManagerUImpl, simulatableBrawler::PlayerInput>,
+    "ASimulationManagerUImpl must satisfy RemoteInputRelaySink so "
+    "ServerReceptionCoordinator can drive the input relay through it");
+
+void ASimulationManagerUImpl::relayRemoteInput(
+    unsigned int id, uint32 captureTick, uint8 dA,
+    const simulatableBrawler::PlayerInput& input)
+{
+    // Resolve id -> owning component through the SAME register-time route the
+    // delivery sink uses, with the same stale-handle prune (a dead component has
+    // nothing to replicate). GAME THREAD only.
+    const auto it = m_delayedInputComponentsById.find(id);
+    if (it == m_delayedInputComponentsById.end())
+        return;
+
+    USimmableUpdateComponent* target = it->second.Get();
+    if (target == nullptr)
+    {
+        m_delayedInputComponentsById.erase(it);
+        return;
+    }
+
+    // Depth is the CONFIGURED relay redundancy (T1: `relayRedundancyDepthTicks`,
+    // shipped at 1 = pure replace-latest). Read per write rather than cached: it is
+    // one indirection off the config the coordinator already borrows, and caching it
+    // would make an ini-driven change silently ineffective. The compiled default is
+    // the fallback if the core manager is somehow absent (it cannot be on this path
+    // — the coordinator that called us is owned by the same manager).
+    const TimeConfig* cfg = getTimeConfigPtr();
+    const int32 depth = (cfg != nullptr) ? cfg->relayRedundancyDepthTicks : 1;
+
+    // writeLatest returns false ONLY for a stale write the ring refused (older than
+    // every resident entry at depth). Deliberately unchecked: the relay tap is
+    // already gated on the coordinator's monotonic `acceptedNew`, so that arm is
+    // unreachable from here, and a refused write is a benign no-op either way.
+    //
+    // THE DUAL-WRITE FENCE (expand/contract, fable B3) HELD, AND IS NOW
+    // DISCHARGED. T3 wrote ONLY the relay ring here and deliberately left
+    // `SimulationNetSync::sendCorrectionAll`'s input write into
+    // m_replicatedInputSyncedBuffer running every frame beside it, so no reader had
+    // to move and be moved back. T5/T6/T7 switched the readers; [T8] removed that
+    // second write and the whole correction-input channel with it. This tap is now
+    // the ONLY path by which a character's input reaches other clients.
+    target->getRelayedInputRing().writeLatest<simulatableBrawler::PlayerInput>(
+        captureTick, dA, input, depth);
+}
+
 // ---------------------------------------------------------------------------
 // TICK ALIGNMENT — verified, and load-bearing. An off-by-one here shifts EVERY
 // player's input by one tick, silently and uniformly.
@@ -844,6 +1327,82 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
 
     const int32 firstUpcomingSimTick =
         static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(physicsStep))) + 1;
+
+    // -----------------------------------------------------------------------
+    // [og-netcode-v2-input-relay T20] PROBE A — SERVER SIM TICKS PER GAME FRAME.
+    // -----------------------------------------------------------------------
+    //
+    // WHAT IT SETTLES. The clients measure a relay-ring arrival gap of ~2 capture
+    // ticks where the design expects ~1. UE property replication runs once per
+    // server GAME-THREAD FRAME and NetServerMaxTickRate=60 is a CAP on that, not a
+    // floor — so a 60 Hz sim on a 30 fps server advances two sim ticks per
+    // replication and a depth-1 replace-latest ring can only carry the newer one.
+    // If this ratio equals the clients' measured gap, the gap is a HOST performance
+    // artefact (those sessions ran a dedicated server, two clients and the editor on
+    // one machine) rather than a netcode defect. Diagnostic only — nothing here
+    // feeds back into anything.
+    //
+    // WHY HERE AND NOT OnPostPhysicsStep, which the task named as the candidate.
+    // OnPostPhysicsStep is game-thread and does run the server publish, but it is
+    // handed only an FChaosScene — it has NO physics step number, and therefore no
+    // way to reach a sim tick through the ONLY source that is safe to read on this
+    // thread (the mapper's atomic offset; see the tick-alignment block above, which
+    // states in terms why the server clock must not be read from the game thread).
+    // Sampling there would have required either reading the physics-thread-written
+    // clock or inventing a second counter. This hook has both numbers already: the
+    // step, and Chaos's own sub-step count.
+    //
+    // THE RATIO IS HOOK-INDEPENDENT ANYWAY, which is exactly why the metric is
+    // defined against GFrameCounter rather than against an invocation count. The
+    // probe additionally reports how ITS OWN invocations distributed over frames —
+    // once per frame, more than once (i.e. per sub-step), or less often — so this
+    // hook's cadence is MEASURED and reported, never assumed. If the readings show
+    // it is not once per frame, the ratio is still correct and the cadence counters
+    // say so out loud.
+    //
+    // SERVER-ONLY BY CONSTRUCTION: this function has already returned above if there
+    // is no reception coordinator, and a client never has one.
+    {
+        ServerFrameWindowSummary frameSummary;
+        const bool frameWindowClosed = m_serverFrameProbe.noteFrame(
+            static_cast<uint64>(GFrameCounter),
+            static_cast<uint32>(firstUpcomingSimTick),
+            static_cast<uint32>(numSteps),
+            static_cast<uint64>(FPlatformTime::Seconds() * 1000000.0),
+            frameSummary);
+
+        if (frameWindowClosed)
+        {
+            char line[256];
+
+            // Line 1 — THE RATIO. `meanX100` is the cadence-independent aggregate
+            // (window tick delta over window frame delta); p50/p99/max come from the
+            // samples where exactly one frame elapsed.
+            std::snprintf(line, sizeof(line),
+                "[Warning][RelayProbe.Frame] simTicks=%u frames=%u meanTicksPerFrameX100=%u "
+                "p50=%u p99=%u max=%u meanFrameUs=%u",
+                frameSummary.totalSimTicks, frameSummary.totalFrames,
+                frameSummary.meanTicksPerFrameX100, frameSummary.p50,
+                frameSummary.p99, frameSummary.maxTicksPerFrame,
+                frameSummary.meanFrameMicros);
+            RouteOGMessage(line);
+
+            // Line 2 — THE HOOK CADENCE and THE SUB-STEP CROSS-CHECK, which are two
+            // different routes to a ratio above 1 and must not be collapsed.
+            // `numStepsGt1 > 0` means Chaos sub-stepped inside a frame; `numStepsGt1
+            // == 0` with a ratio above 1 means the game thread simply ran slow.
+            // dFrame1/dFrame0/dFrameGt1 are the verification that this hook fires
+            // once per frame (dFrame1 should be ~everything).
+            std::snprintf(line, sizeof(line),
+                "[Warning][RelayProbe.Frame] cadence dFrame1=%u dFrame0=%u dFrameGt1=%u "
+                "discont=%u numSteps total=%u max=%u gt1=%u",
+                frameSummary.oncePerFrameSamples, frameSummary.sameFrameSamples,
+                frameSummary.skippedFrameSamples, frameSummary.discontinuities,
+                frameSummary.totalNumSteps, frameSummary.maxNumSteps,
+                frameSummary.numStepsAboveOne);
+            RouteOGMessage(line);
+        }
+    }
 
     // The per-id delivery callback for the core drain. It answers "is this owner
     // still alive" (false => the coordinator drops the stale claim, mirroring the
