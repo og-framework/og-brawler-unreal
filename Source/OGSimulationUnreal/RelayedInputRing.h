@@ -100,6 +100,27 @@ public:
 			wireBytes[ByteIndex + i] = ValueAsBytes[i];
 	}
 
+	// [og-netcode-v2-input-relay T34] THE FIFTH BUFFER-CONCEPT METHOD, required only
+	// by the flush path (`relayedInputRing::resetEntries` / `flushStagedInto`); the
+	// four above are still the whole surface every read/write operation needs, so
+	// InputRedundancyBundleCodec.h's shared concept is untouched. See the BUFFER
+	// CONCEPT block in the codec for why a shrink is unavoidable here: NetSerialize
+	// ships `wireBytes.Num()` bytes, so a ring whose entry count fell without its
+	// array shrinking would send stale trailing entries every round.
+	//
+	// `EAllowShrinking::No` KEEPS THE ALLOCATION while lowering Num(), so the next
+	// flush's `bundleAddZeroedBytes` reuses the slack and the per-frame flush does
+	// not reallocate. Grows nothing — a request above the current size is ignored,
+	// because every caller here is shrinking and a silent grow would hand the codec
+	// uninitialized bytes.
+	void bundleTruncateTo(int32 ByteCount)
+	{
+		if (ByteCount < 0)
+			ByteCount = 0;
+		if (ByteCount < wireBytes.Num())
+			wireBytes.SetNum(ByteCount, EAllowShrinking::No);
+	}
+
 	template <typename T>
 	T readFromBuffer(uint32 ByteIndex) const
 	{
@@ -116,14 +137,31 @@ public:
 
 	// --- Ring surface (thin delegation to the core codec) ---------------------
 
-	// Server-side write. `depth` comes from TimeConfig::relayRedundancyDepthTicks
-	// and is clamped to [1, kMaxDepth] by the codec. Returns false only when the
-	// ring is at depth and `captureTick` is older than every resident entry — a
-	// benign stale-write drop, not an error (see the codec's writeLatest doc).
+	// Depth-parameterised write. `depth` is clamped to [1, kMaxDepth] by the codec.
+	// Returns false only when the ring is at depth and `captureTick` is older than
+	// every resident entry — a benign stale-write drop, not an error (see the
+	// codec's writeLatest doc).
+	//
+	// ⚠ [T34] NOT THE PRODUCTION RELAY PATH ANY MORE. The relay tap stages through
+	// `stageArrival` below, whose capacity is `kMaxDepth` and which takes no depth
+	// at all. This overload remains because `stageArrival` is built on it and
+	// because the tests drive the depth arms directly; a production caller that
+	// passes `TimeConfig::relayRedundancyDepthTicks` here would cap the ring at one
+	// entry per round and silently reproduce replace-latest.
 	template <typename InputType>
 	bool writeLatest(uint32 captureTick, uint8 dA, const InputType& input, int32 depth)
 	{
 		return relayedInputRing::writeLatest<InputType>(*this, captureTick, dA, input, depth);
+	}
+
+	// [T34] THE SERVER-SIDE RELAY WRITE. Stage one arrival for the next flush; the
+	// staged burst is published into the replicated ring by
+	// `ASimulationInputRelay::PreReplication`. No depth parameter exists, by design.
+	template <typename InputType>
+	relayedInputRing::StageArrivalOutcome stageArrival(uint32 captureTick, uint8 dA,
+	                                                   const InputType& input)
+	{
+		return relayedInputRing::stageArrival<InputType>(*this, captureTick, dA, input);
 	}
 
 	// Capture-tick lookup. On a hit fills `outDA` + `outInput` and returns true.
@@ -194,10 +232,15 @@ public:
 		// while building the class descriptor — has an EMPTY wireBytes (the codec's
 		// initHeaderIfEmpty is deliberately lazy so an unwritten ring costs zero wire
 		// bytes, not an empty header), so used == 0 and the acceptance latch is not
-		// consumed. A header-only ring (used == 2, entryCount == 0) is not reachable:
-		// writeLatest calls initHeaderIfEmpty and grows the first entry in the same
-		// call, so any ring that has a header has at least one entry. See the
-		// LIVE-PAYLOAD GATE block in IrisNetSerializerProof.h.
+		// consumed. A header-only ring (used == 2, entryCount == 0) is still not
+		// reachable, though [T34] CHANGED WHY: it used to be that writeLatest called
+		// initHeaderIfEmpty and grew the first entry in the same call. Under
+		// flush-on-poll the replicated ring is written ONLY by
+		// `relayedInputRing::flushStagedInto`, which returns early and touches
+		// nothing when the stage is empty (suppress-clear-on-empty), so it can never
+		// leave a header with zero entries either. `resetEntries` DOES produce that
+		// shape — but only on the STAGE, which is Transient and never replicated.
+		// See the LIVE-PAYLOAD GATE block in IrisNetSerializerProof.h.
 		{
 			static ogIrisNetSerializerProof::FNetSerializeReportLatch reportLatch;
 			ogIrisNetSerializerProof::reportNetSerializeOnce(

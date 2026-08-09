@@ -11,6 +11,9 @@
 #include "OGBrawler/BrawlerVisualizationInputSource.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
+// [T39] The relay ring's new carrier — forward-declared in the header, needed
+// whole here (spawn, find, the ring accessors, the callback install).
+#include "OGSimulationUnreal/SimulationInputRelay.h"
 
 //#include "Runtime/Core/Public/Logging/StructeredLog.h"
 //#include "Logging/StructeredLogFormat.h"
@@ -320,6 +323,50 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		return;
 	}
 
+	// [T39] Latch the provider decision. This is the client half of the owner-skip
+	// precondition (see onRelayedInputRingArrived): a ring arriving for a
+	// provider-PRESENT character means COND_SkipOwner and provider-presence have
+	// diverged. Latched here rather than recomputed at arrival so the two decisions
+	// are literally the same evaluation, taken once.
+	m_hasLocalInputProvider = isLocallyPredicted;
+
+	// ⭐ [T39] THE RELAY RING'S HOST — created here, on the authority, at the
+	// moment registration completes.
+	//
+	// ORDER IS LOAD-BEARING AND IS THE REASON THIS SITS ABOVE THE ROUTE BELOW.
+	// `noteDelayedInputComponent` is what makes `relayRemoteInput` able to find
+	// this component and write the ring. If the host did not exist by then, the
+	// first writes would land in `m_detachedRelayRing` and be invisible to every
+	// client, with nothing logged. Spawning first closes that window by
+	// construction rather than by timing.
+	//
+	// This is also why the host is NOT spawned on demand from the write path the
+	// way ASimulationConnectionRelay is: that actor has no always-reached creation
+	// point earlier than its first write (and PostLogin misses seamless travel),
+	// whereas this one does.
+	if (isAuthority)
+	{
+		if (UWorld* world = GetWorld())
+		{
+			if (AActor* ownerActor2 = GetOwner())
+			{
+				attachInputRelayHost(
+					ASimulationInputRelay::spawnForCharacter(*world, *ownerActor2));
+			}
+		}
+	}
+	else
+	{
+		// CLIENT: the PULL half of the link. The host may already have replicated
+		// in and pushed at the manager's listener before this component registered
+		// (in which case attachInputRelayHost already ran and this is a no-op), or
+		// it may not have arrived yet (in which case this finds nothing and the
+		// listener's push does the linking later). Both paths are idempotent; the
+		// pair exists because neither ordering can be relied on.
+		attachInputRelayHost(
+			ASimulationInputRelay::findForOwner(GetWorld(), GetOwner()));
+	}
+
 	// [T24] Register the id -> component delivery route ONCE, at register-time,
 	// paired with the forgetOwner()/erase at unregisterFromNewFramework. This
 	// replaces the former per-park noteDelayedInputComponent call inside the receive
@@ -343,6 +390,27 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(isAuthority);
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework((unsigned int)GetUniqueID(), *this, isAuthority);
+
+	// [T39] The ring host dies with the character it carries input for.
+	//
+	// AUTHORITY DESTROYS; a client only drops its reference. A replicated actor is
+	// removed on clients by the destruction bunch, and destroying it locally would
+	// race that. This mirrors the split every other replicated actor in this
+	// codebase uses, and is the reason ASimulationConnectionRelay's self-reap is
+	// authority-gated too.
+	//
+	// EXPLICIT, NOT SELF-REAPING. The connection relay polls a 1 Hz timer because
+	// its owning PlayerController's death does not destroy it and there is no other
+	// reliable signal. This host has one: the component whose character it belongs
+	// to is ending play, right here, synchronously.
+	if (ASimulationInputRelay* host = m_inputRelayHost.Get())
+	{
+		if (isAuthority)
+			host->detachFromParentAndDestroy();      // RemoveDependentActor, then Destroy
+		else
+			host->clearOnRelayedInputReceivedCallback();
+	}
+	m_inputRelayHost = nullptr;
 
 	UActorComponent::EndPlay(EndPlayReason);
 }
@@ -403,10 +471,150 @@ void USimmableUpdateComponent::OnRep_CorrectionState()
 // handler — decides what to do with them (T5 stores them per remote character; T7
 // reads them through the schedule). [T8] It is now the ONLY inbound input channel
 // a peer has for a character it does not control.
-void USimmableUpdateComponent::OnRep_RelayedInputRing()
+//
+// [T39] `OnRep_RelayedInputRing()` stood here. The OnRep moved to
+// ASimulationInputRelay with the property it notifies; what arrives here now is
+// onRelayedInputRingArrived, routed from that actor through the callback
+// attachInputRelayHost installs. The BODY is unchanged in substance — forward the
+// ring to the core if anything is bound — with the owner-skip divergence check
+// added, because this is the first build in which a ring arriving at a
+// locally-predicted character is a detectable fault rather than the norm.
+
+// --- [T39] Relay-ring forwarders --------------------------------------------
+//
+// The three functions below are the whole of what "the component stays the
+// concept surface" means in code: og-simulation still sees an accessor pair and a
+// callback pair on this object, and never learns that the ring is carried by a
+// different UObject entirely.
+
+FRelayedInputRing& USimmableUpdateComponent::getRelayedInputRing()
 {
+	if (ASimulationInputRelay* host = m_inputRelayHost.Get())
+		return host->editRelayedInputRing();
+	return m_detachedRelayRing;
+}
+
+const FRelayedInputRing& USimmableUpdateComponent::getRelayedInputRing() const
+{
+	if (const ASimulationInputRelay* host = m_inputRelayHost.Get())
+		return host->getRelayedInputRing();
+	return m_detachedRelayRing;
+}
+
+// ⭐ [T34] THE STAGED RELAY WRITE. See the declaration for why there is no depth
+// parameter. The host resolution is the same pair the read accessors use, so a
+// component that is somehow unlinked degrades identically on both paths.
+relayedInputRing::StageArrivalOutcome USimmableUpdateComponent::stageRelayedInput(
+	uint32 captureTick, uint8 dA, const simulatableBrawler::PlayerInput& input)
+{
+	ASimulationInputRelay* host = m_inputRelayHost.Get();
+	FRelayedInputRing& stage = (host != nullptr)
+		? host->editRelayedInputStagingRing()
+		: m_detachedRelayStagingRing;
+
+	const relayedInputRing::StageArrivalOutcome outcome =
+		stage.stageArrival<simulatableBrawler::PlayerInput>(captureTick, dA, input);
+
+	// A burst longer than the stage is the ONE input loss this side of R = 0 can
+	// see, so it is counted rather than absorbed. Counted on the HOST because the
+	// host is what a run inspects, and because a drop against the detached fallback
+	// is already covered by the louder fault that no host exists.
+	if (outcome.droppedOldest && host != nullptr)
+		host->noteStageOverflowDrop();
+
+	return outcome;
+}
+
+void USimmableUpdateComponent::setOnRelayedInputReceivedCallback(
+	std::function<void(const FRelayedInputRing&)> fn)
+{
+	m_onRelayedInputReceivedCallback = std::move(fn);
+
+	// If the host is ALREADY linked, the core has just bound after an arrival may
+	// have been dropped. The ring is a persistent property, so re-reading it is a
+	// complete recovery — the same argument registerPredictionOwner's bind-time
+	// populate rests on, applied to the other ordering.
+	if (const ASimulationInputRelay* host = m_inputRelayHost.Get())
+	{
+		if (m_onRelayedInputReceivedCallback)
+			m_onRelayedInputReceivedCallback(host->getRelayedInputRing());
+	}
+}
+
+void USimmableUpdateComponent::clearOnRelayedInputReceivedCallback()
+{
+	m_onRelayedInputReceivedCallback = nullptr;
+}
+
+void USimmableUpdateComponent::attachInputRelayHost(ASimulationInputRelay* host)
+{
+	if (host == nullptr || m_inputRelayHost.Get() == host)
+		return;     // idempotent — three independent link paths can reach here
+
+	m_inputRelayHost = host;
+
+	// Route the host's arrivals at this component. Weak capture: the host outlives
+	// nothing, but it CAN outlive this component by a frame during teardown, and a
+	// raw `this` would then be a dangling call from a replicated OnRep.
+	TWeakObjectPtr<USimmableUpdateComponent> weakSelf(this);
+	host->setOnRelayedInputReceivedCallback(
+		[weakSelf](const FRelayedInputRing& ring)
+		{
+			if (USimmableUpdateComponent* self = weakSelf.Get())
+				self->onRelayedInputRingArrived(ring);
+		});
+
+	// REPLAY THE CURRENT RING. Covers the ordering where the host replicated (and
+	// dropped one or more OnReps) before this link existed. A never-written ring
+	// reads as version 0 and the ingest no-ops, so this is free on the authority
+	// and on a freshly spawned host.
 	if (m_onRelayedInputReceivedCallback)
-		m_onRelayedInputReceivedCallback(m_relayedInputRing);
+		m_onRelayedInputReceivedCallback(host->getRelayedInputRing());
+}
+
+void USimmableUpdateComponent::onRelayedInputRingArrived(const FRelayedInputRing& ring)
+{
+	// ⚠ [T39] THE OWNER-SKIP PRECONDITION, ASSERTED FROM THE RECEIVING END.
+	//
+	// The design's owner-echo removal rests on an equivalence nothing checked:
+	// "owning connection" — the set COND_SkipOwner narrows on, decided server-side
+	// from the host's owner chain — and "provider present" — the set that decides
+	// whether `SimulationNetSync::registerPredictionOwner` builds a
+	// RelayedInputStore at all, decided here from the local role. If they ever
+	// name different sets, the failure is silent in BOTH directions: a character
+	// in the first set but not the second still pays the echo, and a character in
+	// the second but not the first loses its relayed input entirely.
+	//
+	// THIS is the observable half. A ring with resident entries arriving for a
+	// character that has a local input provider means the skip did not apply where
+	// this build believes it does — most likely an unset or wrong Owner on the
+	// host (see the producing-end warning in ASimulationInputRelay::
+	// spawnForCharacter). Nothing consumes the payload either way: the core binds
+	// no store for a provider-present id, so this is pure diagnosis.
+	//
+	// GATED ON `num() > 0` DELIBERATELY. An empty ring is not evidence: the host
+	// actor itself is bAlwaysRelevant and DOES replicate to the owning client (only
+	// the property is skipped), so an owner legitimately holds a host carrying a
+	// never-written ring, and asserting on that would fire on every clean run.
+	//
+	// ONE-SHOT, and `ensure` rather than `check`: this is a bandwidth and
+	// correctness regression, not a memory-safety fault, and a session that hits
+	// it should stay playable enough to be diagnosed.
+	if (m_hasLocalInputProvider && ring.num() > 0 && !m_loggedOwnerSkipDivergence)
+	{
+		m_loggedOwnerSkipDivergence = true;
+		UE_LOG(LogOGNet, Error,
+			TEXT("[InputRelay] OWNER-SKIP DIVERGENCE id=%u — a relay ring with %u entries "
+			     "arrived for a character that HAS a local input provider. COND_SkipOwner and "
+			     "provider-presence disagree; check the relay host's Owner."),
+			(unsigned int)GetUniqueID(), (unsigned int)ring.num());
+		ensureMsgf(false,
+			TEXT("[InputRelay] relay ring arrived for a provider-present character (id=%u)"),
+			(unsigned int)GetUniqueID());
+	}
+
+	if (m_onRelayedInputReceivedCallback)
+		m_onRelayedInputReceivedCallback(ring);
 }
 
 void USimmableUpdateComponent::sendLocalInputToAuthority(
@@ -834,13 +1042,25 @@ void USimmableUpdateComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 	// OnRep. FSimulationInputSyncBuffer's own kWireFormatVersion is likewise
 	// untouched; that struct survives in its CLIENT->SERVER role.
 
-	// [og-netcode-v2-input-relay / T1] The outbound input relay ring. NO COND_ —
-	// unlike the retired COND_OwnerOnly tier, the relay exists precisely so
-	// NON-owning clients receive a character's input. Registered as its own
-	// property so that T3's dual-write could not disturb the correction-input
-	// buffer — which is exactly what made T8's removal of that buffer a pure
-	// deletion here.
-	DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing);
+	// [og-netcode-v2-input-relay / T1] The outbound input relay ring's
+	// `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` stood on the
+	// line above, with NO COND_.
+	//
+	// ⭐ [T39] GONE, IN THE SAME EDIT AS THE MEMBER — the rule this block already
+	// states for the T8 removal, applied again. The ring is now
+	// `DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing,
+	// COND_SkipOwner)` on its own per-character Iris dependent object, which is
+	// what lets it be scheduled and prioritised independently of the correction
+	// state above (they used to share one atomic batch and die together under
+	// packet pressure — T37) and what finally lets the owner echo be skipped (the
+	// owning client provably never reads its own ring).
+	//
+	// ⛔ THE COND_ COULD NOT HAVE BEEN ADDED HERE INSTEAD. A condition on this
+	// component would resolve against the CHARACTER's owning connection, which is
+	// the same relationship — but the whole reason for the move is the atomic
+	// batch, not the condition, and adding the condition without the move would
+	// have reclaimed ~85 B/round while leaving the ring dying with the state on
+	// every overflow frame. The saving is the smaller half of this change.
 
 	// [T10 / og-netcode-v2-input-relay] The COND_OwnerOnly connection-tier
 	// registration that used to sit here is GONE. The tier replicates from

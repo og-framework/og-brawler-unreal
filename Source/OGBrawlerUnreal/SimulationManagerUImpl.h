@@ -2,12 +2,14 @@
 
 #include "OGSimulationUnreal/ISimulationTimingRelayListener.h"
 #include "OGSimulationUnreal/ISimulationConnectionRelayListener.h"
+#include "OGSimulationUnreal/ISimulationInputRelayListener.h"
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include <unordered_map>
 #include <functional>
 #include <optional>
+#include <set>
 #include "Engine/World.h"
 #include "PhysicsPublic.h"
 #include "Runtime/PhysicsCore/Public/PhysicsInterfaceDeclaresCore.h"
@@ -32,6 +34,9 @@
 #include "OGSimulation/Network/ConnectionTierTable.h"
 #include "OGSimulation/Network/ServerInputDelayQueue.h"
 #include "OGSimulation/Network/ServerReceptionCoordinator.h"
+// [og-netcode-v2-input-relay T22] Server-side write-path diagnostics. A separable
+// unit with a stated end date — see the header's own banner.
+#include "OGSimulation/Network/RelayWritePathProbe.h"
 #include "OGSimulation/Network/ReplicatedTierConsumer.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
@@ -166,7 +171,8 @@ private:
 UCLASS()
 class ASimulationManagerUImpl : public AActor,
                                 public ISimulationTimingRelayListener,
-                                public ISimulationConnectionRelayListener
+                                public ISimulationConnectionRelayListener,
+                                public ISimulationInputRelayListener
 {
     GENERATED_BODY()
 
@@ -381,6 +387,26 @@ public:
     // forcedInputLatencyTicks baseline rather than a tier at all.
     virtual void onConnectionTierReplayed(uint8_t tier) override;
 
+    // ---- [T39 / og-netcode-v2-input-relay] THE RELAY-RING HOST BOUNDARY -----
+    //
+    // A per-character ASimulationInputRelay has become resolvable on this client
+    // (it replicated in, or its Owner pointer just landed). This manager is the
+    // BRIDGE and nothing more: OGSimulationUnreal must not depend on
+    // OGBrawlerUnreal, so the host cannot name AOGBrawlerUECharacter or
+    // USimmableUpdateComponent and needs something on this side of the module
+    // boundary to resolve owner -> component for it.
+    //
+    // NO MAP, DELIBERATELY. The resolution is host -> GetOwner() -> character ->
+    // component, three lookups on data that already exists — AActor::Owner
+    // replicates, and the authority spawns the host with SetOwner(character). A
+    // registry keyed by character would be a second structure to keep in step
+    // with every spawn, death and travel, for nothing.
+    //
+    // IDEMPOTENT: the host calls this from BeginPlay, from OnRep_Owner, and again
+    // from any ring OnRep that arrives while still unlinked. attachInputRelayHost
+    // absorbs the repeats.
+    virtual void onInputRelayHostReady(ASimulationInputRelay& host) override;
+
     // Read-only handle on the client tier cache (nullptr before BeginPlay has
     // built the core manager). It is the TIER half of the T11 shared recompute.
     const ReplicatedTierConsumer* getReplicatedTierConsumer() const
@@ -510,7 +536,50 @@ public:
     void relayRemoteInput(unsigned int id, uint32 captureTick, uint8 dA,
                           const simulatableBrawler::PlayerInput& input);
 
+    // -----------------------------------------------------------------------
+    // ⭐ [og-netcode-v2-input-relay T34] THE PRE-DIET CHARACTER CAP.
+    //
+    // ⛔ THIS CONSTANT AND ITS CHECK ARE DELETED BY ITEM 40 (the wire diet). Their
+    // ABSENCE after that item is the "cap lifted" statement — there is no flag to
+    // flip and no value to raise, which is deliberate: a cap you can quietly widen
+    // is not a cap.
+    //
+    // WHY 4, DERIVED (T38 §16.1, and the same arithmetic is asserted from inside
+    // the suite by og-brawler-tests/RoundVsPacketBudgetTest.cpp's pre-diet table).
+    // The binding constraint is the INPUT GUARANTEE: all the remote characters'
+    // relay rings must fit one packet by themselves, because a ring that gets
+    // scheduled out under R = 0 loses its whole staged burst with no recovery path.
+    // Pre-diet that bound is `81*SumE + 13.1*(N-1) <= 943 B`. Modelling a join as
+    // "the joiner's ring at the measured settling burst of 8, everyone else at the
+    // measured average", N = 4 clears it with about nine tenths of one entry to
+    // spare and N = 5 does NOT — at five characters an ORDINARY join crosses the
+    // bound, with no server hitch required. Item 40's diet cuts the entry from 81 B
+    // to ~45 B, which is what buys the 6-character target back.
+    //
+    // The second half of the pre-diet configuration is `correctionRotationK = 1`
+    // (TimeConfig's compiled default, lowered by this same item): at K = 2 with
+    // un-dieted 316 B states the second state's batch fails INSIDE Iris's
+    // huge-object window on roughly a third of frames at N = 4, which chunks it and
+    // blocks that character's newer snapshots for ~1 RTT. See that field's block.
+    //
+    // CHECKED AT CHARACTER REGISTRATION ON THE AUTHORITY — a path that provably
+    // runs every session, once per character. A cap that depends on nobody spawning
+    // a fifth character is not a fence, and this initiative has shipped three things
+    // that were silently inert already (item 33's unread ini key, item 36's
+    // invisible Log line, T43 finding 1's degenerate flush).
+    static constexpr int32 kPreDietCharacterCap = 4;
+
 private:
+    // [T34] The pre-diet cap's denominator: the ids that completed AUTHORITY
+    // registration and have not unregistered. A SET rather than a counter, and the
+    // reason is that the two ends are not symmetric — `tryRegister` increments only
+    // on the Ready path, while `unregisterFromNewFramework` runs for any component
+    // ending play including one abandoned mid-Pending, so a bare counter would
+    // silently drift downwards and disarm the cap. Bounded by live characters, and
+    // reaped by the same unregister contract that reaps the coordinator's claim map.
+    std::set<unsigned int> m_authorityRegisteredIds;
+
+
     // ---- C.2 tier input delay: release (part 4) --------------------------
     //
     // The drain half of the transport adapter: pure engine-primitive acquisition
@@ -618,6 +687,41 @@ private:
     // GAME THREAD ONLY. Same rule as m_receptionCoordinator above and for the same
     // reason: it has no internal synchronization.
     ServerFrameProbe m_serverFrameProbe;
+
+    // [og-netcode-v2-input-relay T22] PROBES 5 + 6 — the SERVER WRITE PATH. Purely
+    // diagnostic, like the one above; nothing reads them but the lines they feed.
+    //
+    // ⭐ WHAT THEY EXIST TO CLOSE. `RelayDepthCoverageHypothesis.md` §9.11a
+    // eliminates every upstream stage and concludes the ~41 % relay loss is in
+    // Iris's send path. Its elimination of the SERVER'S OWN WRITE is
+    // "writes on every accepted receipt, and receipts are complete", plus
+    // "1.003 sim ticks per frame". Both are true and neither covers the case that
+    // matters: the ring is written from the RPC RECEIPT path, so its writes are
+    // paced by PACKET ARRIVAL, not by the sim — and at
+    // `relayRedundancyDepthTicks = 1` the ring is REPLACE-LATEST while Iris polls
+    // once per game-thread frame. Two writes in one frame therefore lose the first
+    // one in server memory, before replication ever sees it, and the client
+    // observes that as exactly the same `gapCaptureTicks > 1` a send-path drop
+    // produces. Nobody has measured writes-per-frame. m_relayWriteProbe does.
+    //
+    // m_connectionBudgetProbe replaces the derived half of the budget model with a
+    // measured one: the connection's actual negotiated `CurrentNetSpeed`, its real
+    // bytes/packets per tick, its ack-derived outgoing loss, and whether
+    // `IsNetReady()` was ever false — the state in which Iris's
+    // UDataStreamChannel::Tick returns without writing anything at all.
+    //
+    // BOTH ARE FED FROM THE GAME THREAD, SERVER ONLY. The write probe from
+    // relayRemoteInput (the relay tap, which runs on the RPC receive path); the
+    // budget probe from releaseDelayedInputsForStep, which is server-only by
+    // construction. Neither has internal synchronization, and neither needs any.
+    // [T34] The stage capacity is INJECTED, because it is what `observableX1000`
+    // means: under flush-on-poll a frame's whole staged burst is published, so the
+    // ceiling is `min(writesThisFrame, kMaxDepth)` rather than 1. Passing the codec
+    // constant here keeps the probe STL-only and keeps the two in step by
+    // construction.
+    RelayWriteProbe       m_relayWriteProbe{
+        RelayStageCapacity{ static_cast<uint32>(relayedInputRing::kMaxDepth) } };
+    ConnectionBudgetProbe m_connectionBudgetProbe;
 
     // Adapter-side delivery resolution: the core claim map is id-keyed (it cannot
     // hold a TWeakObjectPtr), so the coordinator's `deliver` callback hands back an

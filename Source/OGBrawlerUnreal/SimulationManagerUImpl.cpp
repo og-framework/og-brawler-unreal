@@ -4,8 +4,12 @@
 #include "Runtime/Engine/Public/Net/UnrealNetwork.h"
 #include "EngineUtils.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
 #include "OGSimulationUnreal/SimulationConnectionRelay.h"
+// [T39] The relay-ring host — this manager is the module boundary that resolves
+// its owner to the consuming component (onInputRelayHostReady).
+#include "OGSimulationUnreal/SimulationInputRelay.h"
 #include "Runtime/PhysicsCore/Public/Chaos/ChaosScene.h"
 #include "Runtime/Engine/Public/Physics/NetworkPhysicsComponent.h"
 #include "Runtime/Experimental/Chaos/Public/PBDRigidsSolver.h"
@@ -26,8 +30,13 @@
 #include "Runtime/Engine/Classes/Engine/NetConnection.h"
 #include "Runtime/Engine/Classes/Engine/NetDriver.h"
 // [T11] GConfig — the ini override for the relay delay floor. FIRST GConfig use
-// in this codebase, and deliberately confined to this composition root.
+// in this codebase, and deliberately confined to this composition root. [T35] the
+// relay ring depth reads through the same door.
 #include "Misc/ConfigCacheIni.h"
+// [T35] relayedInputRing::clampDepth — the shared depth guard the intake below
+// calls before it logs the effective depth. Reached transitively through
+// SimulationManager.h; named here because this TU uses it directly.
+#include "OGSimulation/RelayedInputRingCodec.h"
 
 #include <algorithm>
 #include <utility>
@@ -408,12 +417,14 @@ ASimulationManagerUImpl::~ASimulationManagerUImpl()
 		s_instances[0] = nullptr;
 		ISimulationTimingRelayListener::unregisterInstance(true);
 		ISimulationConnectionRelayListener::unregisterInstance(true);
+		ISimulationInputRelayListener::unregisterInstance(true);
 	}
 	if (s_instances[1] == this)
 	{
 		s_instances[1] = nullptr;
 		ISimulationTimingRelayListener::unregisterInstance(false);
 		ISimulationConnectionRelayListener::unregisterInstance(false);
+		ISimulationInputRelayListener::unregisterInstance(false);
 	}
 }
 
@@ -466,6 +477,97 @@ void ASimulationManagerUImpl::BeginPlay()
 			GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayDelayFloorTicks"), iniFloorTicks, GEngineIni))
 		{
 			configuredRelayDelayFloorTicks = iniFloorTicks;
+		}
+	}
+
+	// ---- [T35 / og-netcode-v2-input-relay] the relay ring DEPTH ini override ---
+	//
+	// Same door, same gating, same absent-sentinel as the floor above — and the
+	// same reason for reading it BEFORE the manager exists: the depth must be in
+	// TimeConfig before the first relay write, not arrive as a mid-session change.
+	//
+	// AUTHORITY ONLY, for a DIFFERENT reason than the floor's. The floor is
+	// server-owned state that is replicated, so a client reading its own ini could
+	// disagree with the server. The depth is never replicated at all — it is passed
+	// per write into the ring codec and deliberately kept off the wire, because a
+	// receiver never needs it, it just iterates whatever entries arrived (the DEPTH
+	// IS SESSION-FIXED note in RelayedInputRingCodec.h). The only consumer is the
+	// relay tap, which is authority-side, so a client read would have no reader.
+	//
+	// ⛔ ONE-SHOT, and that is load-bearing, not tidiness: the same codec note
+	// records that SHRINKING the depth mid-session does not reclaim already-
+	// allocated ring entries (it degenerates to replace-oldest at the larger size)
+	// and calls that a documented non-scenario, safe ONLY because TimeConfig is
+	// built once per session. A cvar or console command here would make that
+	// unsupported path reachable. There must not be one.
+	//
+	// ABSENT => the compiled default (1 = replace-latest, the degenerate behaviour
+	// the initiative shipped with). Both ini homes accepted, Game before Engine,
+	// exactly as above.
+	//
+	// ONE VALUE COLLIDES WITH THE SENTINEL, harmlessly and knowingly: an ini that
+	// literally reads `RelayRedundancyDepthTicks=-1` is indistinguishable from an
+	// absent key. Nothing observable differs — clampDepth(-1) is 1, which is also
+	// the compiled default, so the session depth and the line logged below are
+	// identical on both paths; only the redundant "that value was out of range"
+	// warning is skipped. Every OTHER out-of-range value (0, -5, 99) still takes
+	// the clamp path and still warns.
+	int32 configuredRelayRedundancyDepth = -1;      // -1 = "not present in the ini"
+	if (worldIsAuthority && GConfig != nullptr)
+	{
+		int32 iniDepth = 0;
+		if (GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayRedundancyDepthTicks"), iniDepth, GGameIni) ||
+			GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayRedundancyDepthTicks"), iniDepth, GEngineIni))
+		{
+			configuredRelayRedundancyDepth = iniDepth;
+		}
+	}
+
+	// ---- [T39 / og-netcode-v2-input-relay] the STATE ROTATION WIDTH override ---
+	//
+	// Third knob through the same door as the floor (T11) and the depth (T35), and
+	// deliberately the same four steps: intake here, the ONE shared clamp, the
+	// setter on the core manager, then an unconditional Warning-level proof line.
+	//
+	// WHAT IT CONTROLS. How many characters' correction-state buffers
+	// `SimulationNetSync::sendCorrectionAll` writes per tick, round-robin. Each
+	// character's state then replicates at `60 * K / N` Hz. This is the OTHER half
+	// of Stage 1: the ring moves onto its own ranked Iris object so it can never be
+	// displaced by the state, and the state stops being written unconditionally so
+	// its cost is a DECIDED number rather than whatever the packet happened to
+	// allow. "Emergent cadence" is the thing T39 exists to remove.
+	//
+	// AUTHORITY ONLY, for the same reason as the depth and NOT the floor: the floor
+	// is server-owned state that is REPLICATED, so a client reading its own ini
+	// could disagree with the server. K is never replicated at all — only the
+	// authority runs sendCorrectionAll, and a receiver reconciles against whatever
+	// corrections arrive without needing to know the sender's cadence. A client
+	// read would have no reader.
+	//
+	// ⛔ ONE-SHOT, like the depth. K holds no allocated state, so unlike the depth
+	// a mid-session change would merely re-phase the schedule rather than corrupt
+	// anything — but the cadence is a number that a run's probe output is READ
+	// AGAINST, and a value that can move mid-run makes those readings
+	// unattributable. There must not be a cvar.
+	//
+	// ABSENT => the compiled default (2 — every-frame at two characters, which is
+	// what keeps the archived two-character baselines comparable across this
+	// change). Both ini homes accepted, Game before Engine, exactly as above.
+	//
+	// SENTINEL COLLISION, harmless and knowingly, exactly as for the depth: an ini
+	// that literally reads `CorrectionRotationK=-1` is indistinguishable from an
+	// absent key. clampK(-1) is 1, which is NOT the compiled default, so unlike the
+	// depth's case this one would silently take the compiled 2 instead of clamping
+	// to 1 — a difference that only exists for a value no operator would write, and
+	// the proof line reports the effective number either way.
+	int32 configuredCorrectionRotationK = -1;       // -1 = "not present in the ini"
+	if (worldIsAuthority && GConfig != nullptr)
+	{
+		int32 iniK = 0;
+		if (GConfig->GetInt(TEXT("OGNetcode"), TEXT("CorrectionRotationK"), iniK, GGameIni) ||
+			GConfig->GetInt(TEXT("OGNetcode"), TEXT("CorrectionRotationK"), iniK, GEngineIni))
+		{
+			configuredCorrectionRotationK = iniK;
 		}
 	}
 
@@ -559,6 +661,103 @@ void ASimulationManagerUImpl::BeginPlay()
 				TEXT("[RelayDelayFloor] session floor = %d ticks (ini override)"), clampedFloor);
 		}
 
+		// [T35] THE SESSION RING DEPTH. One step, not two — unlike the floor there
+		// is nothing to publish: the depth never rides the wire (see the intake
+		// comment above). The path ends at this manager's TimeConfig, which the
+		// relay tap reads per write.
+		//
+		// INTAKE CLAMP, and it is not redundant with the setter's or the codec's.
+		// The setter would clamp the stored value anyway; clamping HERE is what
+		// stops the log line below from lying about a depth the ring would never
+		// use — which is the whole deliverable, since the depth-2 validation pack's
+		// first gate is "did the value take". Out-of-range config is REPORTED, not
+		// silently absorbed: an operator typo is a sizing mistake they need to see.
+		if (configuredRelayRedundancyDepth != -1)
+		{
+			const int32 clampedDepth =
+				static_cast<int32>(relayedInputRing::clampDepth(configuredRelayRedundancyDepth));
+			if (clampedDepth != configuredRelayRedundancyDepth)
+			{
+				UE_LOG(LogOGNet, Warning,
+					TEXT("[RelayDepth] ini [OGNetcode] RelayRedundancyDepthTicks=%d out of range, clamped to %d entries"),
+					configuredRelayRedundancyDepth, clampedDepth);
+			}
+			m_manager->setRelayRedundancyDepthTicks(clampedDepth);
+		}
+
+		// THE PROOF LINE, and the reason it is unconditional and at Warning.
+		//
+		// UNCONDITIONAL: it states the depth the ring will actually use whether or
+		// not an ini key was found, so a run can tell "the override took" apart from
+		// "the key was never read" — which is exactly the distinction the depth-2
+		// validation pack's Gate 1 has to make, and it cannot make it from a line
+		// that is absent in both cases.
+		//
+		// ⚠ WARNING, NOT Log, and DELIBERATELY unlike the floor's session line
+		// four lines up. `Config/DefaultEngine.ini` sets `LogOGNet=Warning`, so a
+		// `UE_LOG(LogOGNet, Log, ...)` here would be suppressed on the very
+		// dedicated server this line has to be greppable on. That is not a
+		// prediction: the archived T22 server log contains ZERO `[RelayDelayFloor]`
+		// lines for that reason, while the clients' Warning-level floor line came
+		// through. The validation pack additionally FORBIDS raising the category to
+		// Verbose (T19 measured that flag as 98.4 % of a 10 MB server log), so
+		// Warning is the only verbosity that makes this observable under the
+		// configuration the run is required to use. Volume is a non-issue: this is
+		// one line per session, emitted once at composition on the authority only.
+		//
+		// ⛔ [T34] `(inert under flush)`, AND THE SUFFIX IS NOT COSMETIC. Item 34
+		// replaced the replace-latest write path with flush-on-poll, whose stage
+		// capacity is `relayedInputRing::kMaxDepth` taken as a constant. Nothing on
+		// the live relay path reads this value any more. The line is kept — intake,
+		// clamp and all — because item 35's Gate-1 tooling greps for it and because
+		// deleting a proof line is how a knob silently comes back; the suffix is
+		// what stops the surviving line from LYING about what the session will do.
+		// The prefix `[RelayDepth] session depth = N entries` is unchanged, so the
+		// existing greps still match.
+		const int32 sessionRelayRedundancyDepth =
+			m_manager->getTimeConfig().relayRedundancyDepthTicks;
+		UE_LOG(LogOGNet, Warning,
+			TEXT("[RelayDepth] session depth = %d entries (%s) (inert under flush; stage capacity = %d)"),
+			sessionRelayRedundancyDepth,
+			configuredRelayRedundancyDepth != -1 ? TEXT("ini override") : TEXT("compiled default"),
+			static_cast<int32>(relayedInputRing::kMaxDepth));
+
+		// [T39] THE SESSION STATE-ROTATION WIDTH. Same shape as the depth above —
+		// one step, nothing to publish, and the intake clamp is what stops the proof
+		// line below from reporting a cadence the send path would never run.
+		if (configuredCorrectionRotationK != -1)
+		{
+			const int32 clampedK = correctionRotation::clampK(configuredCorrectionRotationK);
+			if (clampedK != configuredCorrectionRotationK)
+			{
+				UE_LOG(LogOGNet, Warning,
+					TEXT("[StateRotation] ini [OGNetcode] CorrectionRotationK=%d out of range, clamped to %d"),
+					configuredCorrectionRotationK, clampedK);
+			}
+			m_manager->setCorrectionRotationK(clampedK);
+		}
+
+		// THE PROOF LINE. Unconditional and at Warning, for exactly the reasons
+		// spelled out on the [RelayDepth] line above — a `Log` line here would not
+		// exist on the dedicated server this has to be greppable on
+		// (`Config/DefaultEngine.ini` sets `LogOGNet=Warning`; item 36 exists solely
+		// because that lesson was learned twice).
+		//
+		// UNCONDITIONAL because the distinction it has to support is "the override
+		// took" versus "the key was never read", and a line that is absent in both
+		// cases cannot make it. This is the line item 39 AC 5 requires present at
+		// shipped verbosity, and it is what turns the state cadence from an
+		// emergent consequence into a stated, checkable number: at N characters the
+		// per-character correction rate should read 60*K/N in
+		// `[DivergenceProbe.Window]`.
+		//
+		// Volume: one line per session, authority only, at composition.
+		const int32 sessionCorrectionRotationK = m_manager->getTimeConfig().correctionRotationK;
+		UE_LOG(LogOGNet, Warning,
+			TEXT("[StateRotation] session K = %d (%s)"),
+			sessionCorrectionRotationK,
+			configuredCorrectionRotationK != -1 ? TEXT("ini override") : TEXT("compiled default"));
+
 		const int32 sessionRelayDelayFloorTicks = m_manager->getTimeConfig().relayDelayFloorTicks;
 		if (ASimulationTimingRelay* timingRelay = findTimingRelay())
 		{
@@ -594,6 +793,7 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_replicatedTierConsumer.emplace(m_manager->getTimeConfig());
 		recomputeAndPublishEffectiveInputDelay();
 		ISimulationConnectionRelayListener::registerInstance(/*isAuthority=*/true, this);
+			ISimulationInputRelayListener::registerInstance(/*isAuthority=*/true, this);
 
 		// ---- [T20] server reception coordinator (relocated from T10 wiring) --
 		// AUTHORITY BRANCH ONLY. The coordinator owns the tier table + delay
@@ -696,6 +896,7 @@ void ASimulationManagerUImpl::BeginPlay()
 		// before the world begins play, which is when this manager is spawned) —
 		// it exists so a late bind cannot silently strand the channel.
 		ISimulationConnectionRelayListener::registerInstance(/*isAuthority=*/false, this);
+		ISimulationInputRelayListener::registerInstance(/*isAuthority=*/false, this);
 		if (ASimulationConnectionRelay* connectionRelay =
 				ASimulationConnectionRelay::findLocalClientRelay(uWorld))
 		{
@@ -758,12 +959,14 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		s_instances[0] = nullptr;
 		ISimulationTimingRelayListener::unregisterInstance(/*isAuthority=*/true);
 		ISimulationConnectionRelayListener::unregisterInstance(/*isAuthority=*/true);
+		ISimulationInputRelayListener::unregisterInstance(/*isAuthority=*/true);
 	}
 	if (s_instances[1] == this)
 	{
 		s_instances[1] = nullptr;
 		ISimulationTimingRelayListener::unregisterInstance(/*isAuthority=*/false);
 		ISimulationConnectionRelayListener::unregisterInstance(/*isAuthority=*/false);
+		ISimulationInputRelayListener::unregisterInstance(/*isAuthority=*/false);
 	}
 
 	if (UWorld* World = GetWorld())
@@ -847,6 +1050,41 @@ void ASimulationManagerUImpl::applyReplicatedConnectionTier(uint8 tier)
     // OnRep and the replay pull are both game-thread UObject callbacks.
     m_replicatedTierConsumer->onReplicatedTierReceived((int32)tier);
     recomputeAndPublishEffectiveInputDelay();
+}
+
+// ---------------------------------------------------------------------------
+// [T39 / og-netcode-v2-input-relay] THE RELAY-RING HOST BOUNDARY, client side.
+//
+// ASimulationInputRelay lives in OGSimulationUnreal, which must not depend on
+// OGBrawlerUnreal, so it cannot resolve its own owner to the component that
+// consumes relayed input. This manager is the bridge — and it is ONLY a bridge:
+// it holds no state for this channel, and no per-arrival traffic passes through
+// it. Once the two objects are linked, ring OnReps go straight from the host to
+// the component's callback.
+// ---------------------------------------------------------------------------
+
+void ASimulationManagerUImpl::onInputRelayHostReady(ASimulationInputRelay& host)
+{
+    // host -> owner -> character -> component. Every hop can legitimately fail
+    // during the join window (AActor::Owner is itself replicated and can land
+    // after the host does), and every failure is a plain "not yet": the host
+    // re-asks from OnRep_Owner and from any unrouted ring OnRep, so there is
+    // nothing to latch or retry here.
+    AActor* ownerActor = host.GetOwner();
+    if (ownerActor == nullptr)
+        return;
+
+    AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(ownerActor);
+    if (character == nullptr)
+        return;
+
+    if (USimmableUpdateComponent* component =
+            character->FindComponentByClass<USimmableUpdateComponent>())
+    {
+        // Idempotent on the component's side — this can fire several times for
+        // the same pair, by design (three independent link paths).
+        component->attachInputRelayHost(&host);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,6 +1395,37 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     }
     UE_LOG(LogOGMgmt, Log, TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, isAuthority ? 1 : 0);
 
+    // -----------------------------------------------------------------------
+    // ⭐ [og-netcode-v2-input-relay T34] THE PRE-DIET CAP FENCE (runtime half).
+    //
+    // Deleted by item 40 together with kPreDietCharacterCap — see that constant for
+    // why the cap is 4 and why its ABSENCE is the cap-lifted statement.
+    //
+    // ONCE PER OVER-CAP CHARACTER, not per frame and not per session: registration
+    // runs exactly once per character, so the emission site is its own throttle. No
+    // memoization is needed and none is used — a per-session latch would report the
+    // fifth character and stay silent about the sixth.
+    //
+    // WARNING, not Log, and not an ensure/check. Warning because
+    // `Config/DefaultEngine.ini` runs `LogOGNet=Warning` on the dedicated server,
+    // where a Log line does not exist (items 35 and 36 each cost this initiative a
+    // proof line for exactly that). Not an assert because an over-cap session still
+    // RUNS — it runs with input-loss margins the design has not underwritten, which
+    // is a thing an operator must be told, not a thing that should take the server
+    // down mid-brawl.
+    if (record.isAuthority)
+    {
+        m_authorityRegisteredIds.insert(id);
+        const int32 registered = static_cast<int32>(m_authorityRegisteredIds.size());
+        if (registered > kPreDietCharacterCap)
+        {
+            UE_LOG(LogOGNet, Warning,
+                TEXT("[PreDietCap] character %d exceeds pre-diet cap %d — input-loss margins "
+                     "unsafe (T44/T38 §16); land item 40"),
+                registered, kPreDietCharacterCap);
+        }
+    }
+
     // [ogsim-system-api T8] Notify the systems executor that the character is now in
     // storage, so brawlerHitRouting::System::onCharacterRegistered indexes it for
     // inbound-hit routing (§3.11 timing: the character IS in storage at this point, so
@@ -1253,19 +1522,25 @@ void ASimulationManagerUImpl::relayRemoteInput(
         return;
     }
 
-    // Depth is the CONFIGURED relay redundancy (T1: `relayRedundancyDepthTicks`,
-    // shipped at 1 = pure replace-latest). Read per write rather than cached: it is
-    // one indirection off the config the coordinator already borrows, and caching it
-    // would make an ini-driven change silently ineffective. The compiled default is
-    // the fallback if the core manager is somehow absent (it cannot be on this path
-    // — the coordinator that called us is owned by the same manager).
-    const TimeConfig* cfg = getTimeConfigPtr();
-    const int32 depth = (cfg != nullptr) ? cfg->relayRedundancyDepthTicks : 1;
-
-    // writeLatest returns false ONLY for a stale write the ring refused (older than
-    // every resident entry at depth). Deliberately unchecked: the relay tap is
-    // already gated on the coordinator's monotonic `acceptedNew`, so that arm is
-    // unreachable from here, and a refused write is a benign no-op either way.
+    // ⭐ [T34] STAGE, DO NOT WRITE THE RING. Under bare C1 flush-on-poll the arrival
+    // is staged here and the host actor's PreReplication publishes the whole staged
+    // burst once per Iris poll, so two arrivals in one server frame both reach the
+    // wire instead of the second overwriting the first.
+    //
+    // ⛔ NO DEPTH IS READ HERE ANY MORE, AND THAT IS THE POINT. This site used to
+    // pass `TimeConfig::relayRedundancyDepthTicks` — session value 1 — into
+    // `writeLatest`. On the flush path that same value would make every staged entry
+    // after the first supersede its predecessor, the ring would carry exactly one
+    // entry per round, and bare C1 would silently become replace-latest again with
+    // no compile error and no warning (T43 finding 1). `stageRelayedInput` has no
+    // depth parameter; the capacity is `relayedInputRing::kMaxDepth`, taken as a
+    // constant inside the codec. The knob keeps its old meaning for the write path
+    // that no longer runs, and is now INERT — the `[RelayDepth]` line below says so.
+    //
+    // The outcome is deliberately unchecked here: `accepted` can only be false on
+    // the stale-write arm, which the coordinator's monotonic `acceptedNew` gate
+    // makes unreachable from this call site, and `droppedOldest` is already counted
+    // on the host by stageRelayedInput.
     //
     // THE DUAL-WRITE FENCE (expand/contract, fable B3) HELD, AND IS NOW
     // DISCHARGED. T3 wrote ONLY the relay ring here and deliberately left
@@ -1274,8 +1549,86 @@ void ASimulationManagerUImpl::relayRemoteInput(
     // to move and be moved back. T5/T6/T7 switched the readers; [T8] removed that
     // second write and the whole correction-input channel with it. This tap is now
     // the ONLY path by which a character's input reaches other clients.
-    target->getRelayedInputRing().writeLatest<simulatableBrawler::PlayerInput>(
-        captureTick, dA, input, depth);
+    target->stageRelayedInput(captureTick, dA, input);
+
+    // -----------------------------------------------------------------------
+    // [og-netcode-v2-input-relay T22] PROBE 5 — RELAY WRITES PER GAME-THREAD FRAME.
+    // -----------------------------------------------------------------------
+    //
+    // WHAT IT SETTLES. Iris polls a replicated property once per server
+    // game-thread frame and compares the LIVE value against its shadow (T20 §4.4
+    // for the cadence, §4.5 for "three writes produce one compare against the
+    // third"). This ring ships at depth 1, i.e. replace-latest. So a second write
+    // inside the same frame OVERWRITES the first in server memory, and no client
+    // and no client-side probe can tell that apart from a send-path drop — both
+    // surface as `[RelayProbe.Arrival] gapCaptureTicks > 1`.
+    //
+    // §9.11a's elimination chain does not cover this. It eliminated the server
+    // write with "receipts are complete" (true: nothing is lost on the wire INTO
+    // the server) and the server frame rate with "1.003 sim ticks per frame"
+    // (true, and about a different clock — these writes are paced by PACKET
+    // ARRIVAL, not by the sim). The quantity that decides it has never been
+    // measured, and it is measured here.
+    //
+    // THE PREDICTION, STATED BEFORE THE RUN. §9.11 measured 35.6 arrivals/s
+    // against 60 captures/s = 593‰ delivered. If coalescing is the mechanism,
+    // `deliverableX1000` must read ~593 and the run-length histogram must match
+    // the client's gap histogram shape for shape (p50 = 1, p99 = 3-7, max = 8). If
+    // it reads ~1000, coalescing contributes nothing and the loss is genuinely
+    // downstream. The interpretation table for both outcomes is in
+    // impl/pie_script_t22.md, written before the run.
+    //
+    // GFrameCounter, NOT AN INVOCATION COUNT. The frame is the unit Iris polls on,
+    // so the engine's own frame identity is the only correct key; a local counter
+    // incremented here would measure this function's call rate instead.
+    //
+    // THREE FRACTIONS, NEVER COLLAPSED. `receivedX1000` is upstream completeness
+    // (only input redundancy raises it). `observableX1000` is the coalescing
+    // ceiling (depth raises exactly this one). `deliverableX1000` is their product
+    // and is the one comparable to the client's arrival rate. A single "loss"
+    // number would decide the remedy on merged evidence — the same reason
+    // [RelayProbe.Frame] reports sub-steps beside the ratio instead of one number.
+    //
+    // VOLUME: two Warning lines per 120 WRITING FRAMES per relayed character —
+    // ~2 lines every 2-3.5 s per character. Nothing per-write is emitted at any
+    // verbosity, deliberately: a per-write line is a per-tick line.
+    {
+        RelayWriteWindowSummary w;
+        if (m_relayWriteProbe.noteWrite(
+                id, static_cast<uint64>(GFrameCounter), captureTick, w))
+        {
+            char line[256];
+
+            // Line 1 — THE THREE FRACTIONS. `deliverableX1000` is the headline and
+            // is read against the client's `[RelayProbe.Arrival]` samples/gap.
+            // [T34] `observableX1000` now reports the FLUSH ceiling and is item
+            // 34's acceptance gate (pass = >= 990). `replaceLatestObservableX1000`
+            // is the same window computed the way the retired write path imposed
+            // it, so the improvement is two numbers on one line rather than a claim
+            // — and so archived T22/T33/T39 windows stay directly comparable.
+            std::snprintf(line, sizeof(line),
+                "[Warning][RelayProbe.Write] id=%u runs=%u writes=%u observableWrites=%u "
+                "captureSpan=%u receivedX1000=%u observableX1000=%u deliverableX1000=%u "
+                "replaceLatestObservableX1000=%u",
+                w.ownerId, w.runs, w.writes, w.observableWrites, w.captureSpan,
+                w.receivedX1000, w.observableX1000, w.deliverableX1000,
+                w.replaceLatestObservableX1000);
+            RouteOGMessage(line);
+
+            // Line 2 — THE SHAPE, which is what a depth would have to cover, plus
+            // the capture-tick range so a server window can be aligned against a
+            // client window (owner ids are per-PROCESS and do not match across
+            // logs; capture ticks do).
+            std::snprintf(line, sizeof(line),
+                "[Warning][RelayProbe.Write] id=%u writesPerFrame p50=%u p99=%u%s "
+                "max=%u emptyFrames=%u nonConsecutive=%u missedCaptureTicks=%u "
+                "captures=[%u,%u] discont=%u",
+                w.ownerId, w.p50, w.p99, w.p99Saturated ? "+" : "", w.maxRun,
+                w.emptyFrames, w.nonConsecutiveWrites, w.missedCaptureTicks,
+                w.firstCaptureTick, w.lastCaptureTick, w.discontinuities);
+            RouteOGMessage(line);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1404,6 +1757,143 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
         }
     }
 
+    // -----------------------------------------------------------------------
+    // [og-netcode-v2-input-relay T22] PROBE 6 — PER-CONNECTION SEND BUDGET.
+    // -----------------------------------------------------------------------
+    //
+    // WHAT IT SETTLES, AND WHY ARITHMETIC WAS NOT ENOUGH. The budget model this
+    // whole task now rests on is
+    // `allowance = CurrentNetSpeed / DesiredTickRate` bytes per tick, with up to
+    // two ticks of bankable credit. Both halves are read from engine source
+    // (`UNetConnection::Tick`: `DeltaBits = CurrentNetSpeed * clamp(DeltaTime, 0,
+    // 1/DesiredTickRate) * 8`, then `QueuedBits` floored at `-2 * DeltaBits`), and
+    // at MaxClientRate=250000 / 60 Hz that is 4166 B/tick — against which a
+    // modelled 1414 B three-character round is ~34 %.
+    //
+    // EVERY TERM IN THAT IS DERIVED. `CurrentNetSpeed` is what the server clamped
+    // the client's request to at runtime, on a path nobody here has watched
+    // execute; and 1414 B counts TWO properties out of an unknown total. This
+    // probe measures all of them: the negotiated net speed, the real bytes and
+    // packets on the wire, the ack-derived outgoing loss, and `notReady` — frames
+    // on which `QueuedBits + SendBuffer > 0`, which is exactly the state in which
+    // Iris's `UDataStreamChannel::Tick` returns having written NOTHING.
+    //
+    // READ BEFORE TickFlush, WHICH IS THE RIGHT PLACE. `QueuedBits` is updated at
+    // the END of `UNetConnection::Tick`, so the value sampled here is the credit
+    // this frame's replication write will actually be judged against.
+    //
+    // WHY THE CUMULATIVE COUNTERS AND NOT `OutBytes`/`OutPackets`: the latter are
+    // StatPeriod accumulators the engine zeroes on its own schedule, so
+    // differencing them across our window would silently drop whatever it reset
+    // mid-window.
+    //
+    // VOLUME: two Warning lines per 120 server frames per client connection —
+    // ~1 line/s at two clients. Nothing per-frame is emitted.
+    if (const UWorld* world = GetWorld())
+    {
+        if (const UNetDriver* netDriver = world->GetNetDriver())
+        {
+            // The allowance denominator. NetServerMaxTickRate is what
+            // GameEngine::GetMaxTickRate clamps a dedicated server to, and
+            // therefore what DesiredTickRate resolves to when MaxNetTickRate
+            // (BaseEngine.ini: 120) does not bind. Read from the driver rather
+            // than hardcoded so a config change cannot silently invalidate the
+            // occupancy figure.
+            const uint32 tickRateHz =
+                static_cast<uint32>(FMath::Max(1, netDriver->GetNetServerMaxTickRate()));
+            const uint64 nowMicros =
+                static_cast<uint64>(FPlatformTime::Seconds() * 1000000.0);
+
+            for (UNetConnection* conn : netDriver->ClientConnections)
+            {
+                if (conn == nullptr)
+                    continue;
+
+                // -----------------------------------------------------------
+                // ⭐ [T39] THE CAPACITY PIN — the packet budget, measured.
+                // -----------------------------------------------------------
+                //
+                // WHY THIS EXISTS. Every byte table in this initiative now budgets
+                // against a DERIVED number: 952 B usable single-bunch capacity,
+                // computed from `UNetConnection::GetMaxSingleBunchSizeBits()`'s
+                // formula at MAX_PACKET_SIZE = 1024 with a zero-reservation packet
+                // handler, word-rounded by `UDataStreamChannel::WriteData`. T37
+                // published ~975 B for the same quantity and it does not reproduce
+                // from the formula. Budgeting against an unverified derived
+                // constant is precisely how item 33 happened, so the running engine
+                // gets to be the referee — once, cheaply, from the real connection.
+                //
+                // `MaxPacketHandlerBits` is the term that can move it, and it can
+                // only move it DOWN (encryption or any registered packet handler
+                // reserves bits out of the same budget). So the pinned literal in
+                // the round-vs-packet LLT (og-brawler-tests,
+                // RoundVsPacketBudgetTest.cpp) is an upper bound: if the value
+                // logged here is ever smaller than that literal, the literal is
+                // optimistic and must be lowered there.
+                //
+                // ONE-SHOT PER SESSION, ON THE FIRST CONNECTION, AT WARNING. The
+                // value is a property of the build and the handler stack, not of
+                // the connection, so one sample answers it; Warning because
+                // `LogOGNet=Warning` on the dedicated server would swallow a `Log`
+                // line, which is the same defect item 36 exists for.
+                {
+                    static bool s_loggedPacketBudget = false;
+                    if (!s_loggedPacketBudget)
+                    {
+                        s_loggedPacketBudget = true;
+                        const int32 usableBits = conn->GetMaxSingleBunchSizeBits();
+                        UE_LOG(LogOGNet, Warning,
+                            TEXT("[PacketBudget] usableSingleBunchBytes = %d, handlerBits = %d "
+                                 "(maxPacket=%d, usableBits=%d)"),
+                            (usableBits / 32) * 4, conn->MaxPacketHandlerBits,
+                            conn->MaxPacket, usableBits);
+                    }
+                }
+
+                ConnectionBudgetWindowSummary budget;
+                const bool budgetWindowClosed = m_connectionBudgetProbe.noteSample(
+                    static_cast<uint32>(conn->GetUniqueID()),
+                    conn->CurrentNetSpeed,
+                    conn->QueuedBits,
+                    static_cast<uint64>(FMath::Max(0, conn->OutTotalBytes)),
+                    static_cast<uint64>(FMath::Max(0, conn->OutTotalPackets)),
+                    static_cast<uint64>(FMath::Max(0, conn->OutTotalPacketsLost)),
+                    tickRateHz, nowMicros, budget);
+
+                if (!budgetWindowClosed)
+                    continue;
+
+                char line[256];
+
+                // Line 1 — THE THROUGHPUT. `occupancyPctX10=340` reads 34.0 %.
+                // If `netSpeedBps` is not 250000 the derivation this task rests on
+                // is wrong and Protocol B's prediction inverts — which is why it
+                // is printed rather than assumed.
+                std::snprintf(line, sizeof(line),
+                    "[Warning][RelayProbe.Budget] conn=%u frames=%u elapsedMs=%u "
+                    "netSpeedBps=%d allowanceBytesPerTick=%u outBytes=%u "
+                    "bytesPerTick=%u occupancyPctX10=%u",
+                    budget.connectionId, budget.samples, budget.elapsedMs,
+                    budget.netSpeedBps, budget.allowanceBytesPerTick,
+                    budget.outBytes, budget.bytesPerSample, budget.occupancyPctX10);
+                RouteOGMessage(line);
+
+                // Line 2 — THE SATURATION STATE and the REAL loss. QueuedBits is a
+                // debt counter, so `min` is the MOST headroom and `max` is the
+                // closest to saturation; `notReady` counts frames Iris wrote
+                // nothing on. `lost` is ack-derived, i.e. the emulation's actual
+                // outgoing loss rather than the configured PktLoss percentage.
+                std::snprintf(line, sizeof(line),
+                    "[Warning][RelayProbe.Budget] conn=%u queuedBits min=%d max=%d "
+                    "mean=%d notReadyFrames=%u outPackets=%u bytesPerPacket=%u lost=%u",
+                    budget.connectionId, budget.queuedBitsMin, budget.queuedBitsMax,
+                    budget.queuedBitsMean, budget.notReadySamples,
+                    budget.outPackets, budget.bytesPerPacket, budget.outPacketsLost);
+                RouteOGMessage(line);
+            }
+        }
+    }
+
     // The per-id delivery callback for the core drain. It answers "is this owner
     // still alive" (false => the coordinator drops the stale claim, mirroring the
     // old drain's `target.Get()==nullptr` prune) and, when alive, routes the actual
@@ -1473,6 +1963,18 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
         m_receptionCoordinator->forgetOwner(id);
     }
     m_delayedInputComponentsById.erase(id);
+
+    // [T22] Same unregister contract for the write probe's per-owner state, so its
+    // map stays bounded by live ids exactly as the coordinator's does. A half-open
+    // run belonging to a dead owner is discarded rather than reported, which is
+    // correct: its length is unknowable.
+    m_relayWriteProbe.forgetOwner(id);
+
+    // [T34] The pre-diet cap's denominator. Reaped here so a session that churns
+    // characters (a player leaving and another joining) is judged on the roster that
+    // is actually resident, not on a high-water mark. Erasing an id that never
+    // completed registration is a no-op, which is exactly why this is a set.
+    m_authorityRegisteredIds.erase(id);
 
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
 }

@@ -183,6 +183,28 @@ $Blacklist = @(
         Message = 'relayDelayFloorTicks default (0 — degenerate, the floor lever ships off) must live only in TimeConfig; read config.relayDelayFloorTicks instead of re-declaring it (R-P1)'
     },
     @{
+        Field   = 'correctionRotationK'
+        # og-netcode-v2-input-relay T39: how many characters' correction-state
+        # buffers SimulationNetSync::sendCorrectionAll writes per tick, round-robin
+        # (design_task38_input_first_replication.md §5.4). Ships at 2 — every-frame
+        # at two characters, 20 Hz at six — and is exactly the shape R-P1 exists to
+        # keep out of call sites: a cadence number that a future "just write two of
+        # them here" edit would re-declare locally.
+        # Field-anchored, so only a NON-member `correctionRotationK = 2` is flagged;
+        # every consumer reads it as cfg.correctionRotationK / m_timeConfig
+        # .correctionRotationK (member access, auto-excluded by the (?<![\w.>])
+        # lookbehind), and the composition root's ini override writes it through
+        # SimulationManager::setCorrectionRotationK rather than re-declaring a
+        # default.
+        # The CLAMP BOUNDS (correctionRotation::kMinK/kMaxK = 1/16) are
+        # intentionally not guarded here — R-P1 guards tuning values, not the
+        # guard rails around them, the same call already made for
+        # relayedInputRing::kMaxDepth.
+        Pattern = '(?<![\w.>])correctionRotationK\s*=\s*2\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'correctionRotationK default (2 — every-frame at two characters, the archived-baseline-preserving choice) must live only in TimeConfig; read config.correctionRotationK instead of re-declaring it (R-P1)'
+    },
+    @{
         Field   = 'tickFrequency'
         Pattern = '(?<![\w.>])tickFrequency\s*=\s*(60|100)\b'
         # NetworkTimeEstimator.cpp legitimately consumes the configured value. The
