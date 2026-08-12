@@ -76,6 +76,20 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGRelayProbe, Log, All);
 // and of every other channel. Deliberately NOT filed under a `Resim.` tag, which
 // would inherit LogOGSim=Verbose and recreate the volume defect T19 fixed.
 DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
+// [og-netcode-v2-input-relay item 42] Client-side RESIM-GATE telemetry:
+// ResimProbe.Gate / .Chaos / .Apply / .Landing (per window, at Warning) and
+// ResimProbe.Request / .Landing / .Stranded (per event, at Verbose). Its OWN
+// category for the third time and for the third identical reason — it is the only
+// way the per-window summaries and the per-event detail can be silenced
+// independently of each other and of every other channel.
+//
+// ⛔ THE `[ResimProbe` PREFIX IS NOT `[Resim.` AND NOT `[ResimCheck.`, AND THAT IS
+// THE POINT. `[Resim.` inherits LogOGSim=Verbose (T19's 10 MB defect); `[ResimCheck.`
+// is split across LogOGSim and LogOGSimTick, so a family filed under it could not
+// be turned on or off as one thing. Item 42 exists partly because item 31's own
+// denominator, `[ResimCheck.IsSimilar]`, has ZERO occurrences in every log on disk
+// for exactly that reason. Do not "tidy" this family under either of them.
+DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
 // Game-rule logging (DAttackMachine/Radial/Guard via OGBLOG_G)
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
@@ -236,6 +250,44 @@ public:
     void onPostGameSimulation(const SimulationUpdateInfo& info) { m_manager->onPostGameSimulation(info); }
     unsigned int onCheckIsSimilar() { return m_manager->onCheckIsSimilar(); }
     void prepareResimulation(int32_t chaosStep, uint32_t simTick) { m_manager->prepareResimulation(chaosStep, simTick); }
+
+    // [og-netcode-v2-input-relay item 42] THE TWO CHAOS-SIDE PROBE FEEDS (I3, I4).
+    //
+    // NARROW NAMED PASSTHROUGHS rather than an `editResimGateProbe()` handle, for
+    // exactly the reason `requestInputDelayIncreaseStall` above is narrow: the
+    // probe is a physics-thread-only object whose whole correctness rests on
+    // nobody else touching it, and handing the adapter a general mutable handle
+    // would invite precisely the cross-thread reach these two entry points exist
+    // to bound. Both are called from FSimulationManagerAsyncCallback, on the
+    // physics thread, which is the same thread every other feeder runs on.
+    //
+    // WHY THE ENGINE'S OWN NUMBERS ARE NOT AN OPTION. `FRewindData::
+    // FindValidResimFrame` and `FPBDRigidsSolver::ConditionalApplyRewind_Internal`
+    // log every refusal and every silent frame-skip behind `DEBUG_REWIND_DATA` /
+    // `DEBUG_NETWORK_PHYSICS`, which are compiled out of any normal build. A
+    // refused rewind is therefore COMPLETELY SILENT today, and our side simply
+    // retries next frame because nothing cleared needsResimulation(). These two
+    // calls are the only way that second gate becomes countable.
+    // ([item 45] the retry property is now structural rather than incidental: only
+    // the resim-completion edge can consume a pending anchor, so a refusal cannot
+    // clear the gate even by accident. The counters' meaning is unchanged.)
+    //
+    // Guarded on manager presence + runsPrediction so a server or a
+    // pre-composition frame is a no-op rather than a null deref.
+    void noteResimRequest(unsigned int anchorTick, int32 lastCompletedStep, int32 requestedChaosFrame)
+    {
+        if (!m_manager.has_value() || !m_manager->runsPrediction())
+            return;
+        m_manager->editResimGateProbe().noteRequest(
+            static_cast<std::uint32_t>(anchorTick), lastCompletedStep, requestedChaosFrame);
+    }
+
+    void noteResimGrant(int32 grantedChaosFrame)
+    {
+        if (!m_manager.has_value() || !m_manager->runsPrediction())
+            return;
+        m_manager->editResimGateProbe().noteGrant(grantedChaosFrame);
+    }
     // Defined in .cpp — requires full USimmableUpdateComponent definition for NetSync template instantiation.
     void onPostSimulationGameThread();
 
@@ -673,20 +725,27 @@ private:
     // resolution R2, 2026-07-20).
     std::optional<BrawlerReceptionCoordinator> m_receptionCoordinator;
 
-    // [og-netcode-v2-input-relay T20] PROBE A — server sim ticks per game-thread
-    // FRAME. Purely diagnostic; nothing reads it but the log line it feeds.
+    // [og-netcode-v2-input-relay T20; extended to the client + renamed T49] PROBE A
+    // — sim ticks per game-thread frame, i.e. FRAME HEALTH. Purely diagnostic;
+    // nothing reads it but the log lines it feeds.
     //
     // WHY IT SITS HERE AND NOT IN SimulationNetSync, where the other three probes
-    // live: this one is measured on the SERVER's game thread, from the Chaos
+    // live: this one is measured on THIS actor's game thread, from the Chaos
     // pre-step hook, and the only tick source that is legal to read there is the
     // ChaosTickMapper's atomic offset — which this actor owns and SimulationNetSync
-    // has no access to. Fed from releaseDelayedInputsForStep, which is server-only by
-    // construction (it returns immediately without a reception coordinator, and a
-    // client never has one).
+    // has no access to. Fed from releaseDelayedInputsForStep (called from
+    // InjectInputs_External), which now samples on BOTH roles — see that function's
+    // banner in the .cpp for the T49 argument (same atomic, same hook, both proven
+    // safe already for the server side) and for how the two roles are told apart in
+    // the log.
+    //
+    // ONE INSTANCE PER ACTOR, one actor per role (see `instanceFor`), so a
+    // server-role and a client-role actor in the same PIE process each own their
+    // own probe — never shared, so no cross-role synchronization question arises.
     //
     // GAME THREAD ONLY. Same rule as m_receptionCoordinator above and for the same
     // reason: it has no internal synchronization.
-    ServerFrameProbe m_serverFrameProbe;
+    FrameHealthProbe m_frameHealthProbe;
 
     // [og-netcode-v2-input-relay T22] PROBES 5 + 6 — the SERVER WRITE PATH. Purely
     // diagnostic, like the one above; nothing reads them but the lines they feed.

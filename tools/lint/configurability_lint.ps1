@@ -205,6 +205,27 @@ $Blacklist = @(
         Message = 'correctionRotationK default (2 — every-frame at two characters, the archived-baseline-preserving choice) must live only in TimeConfig; read config.correctionRotationK instead of re-declaring it (R-P1)'
     },
     @{
+        Field   = 'resimTriggerPolicy'
+        # og-netcode-v2-input-relay item 45: which landed corrections open the resim
+        # gate (design_task43_resim_gate_fix.md §3 candidate D). Enum-valued, so the
+        # pattern anchors on the ENUMERATOR PREFIX rather than on a literal — the
+        # harnessMode / sn1BroadcastPolicy shape — which also means it catches a
+        # re-declaration of EITHER value rather than only of the shipped default.
+        # That is the right strength here: this field's contract is "the default is
+        # the legacy gate", and a local `resimTriggerPolicy = OnDisagreement` outside
+        # TimeConfig would enable item 46's storm scenario in a build nobody thinks
+        # they changed.
+        # Field-anchored, so only a NON-member assignment is flagged; every consumer
+        # reads it as cfg.resimTriggerPolicy / m_timeConfig.resimTriggerPolicy (member
+        # access, auto-excluded by the (?<![\w.>]) lookbehind), the caches hold a
+        # pushed copy in `m_resimTriggerPolicy` (underscore-prefixed, also excluded)
+        # seeded from `TimeConfig{}.resimTriggerPolicy`, and the composition root's
+        # ini override writes it through SimulationManager::setResimTriggerPolicy.
+        Pattern = '(?<![\w.>])resimTriggerPolicy\s*=\s*(TimeConfig::)?ResimTriggerPolicy::'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'resimTriggerPolicy default (ResimTriggerPolicy::FrontierExact — the LEGACY gate, item 46 owns the flip) must live only in TimeConfig; read config.resimTriggerPolicy instead of re-declaring it (R-P1)'
+    },
+    @{
         Field   = 'tickFrequency'
         Pattern = '(?<![\w.>])tickFrequency\s*=\s*(60|100)\b'
         # NetworkTimeEstimator.cpp legitimately consumes the configured value. The

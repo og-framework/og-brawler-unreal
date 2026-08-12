@@ -37,6 +37,11 @@
 // calls before it logs the effective depth. Reached transitively through
 // SimulationManager.h; named here because this TU uses it directly.
 #include "OGSimulation/RelayedInputRingCodec.h"
+// [item 45] resimGate:: — the resim-gate policy kernel. This TU only names the
+// TimeConfig enum today (the cooldown clamp it used to call was removed with the
+// cooldown itself), but the include is kept explicit rather than relying on
+// SimulationManager.h's, for the same reason the line above is.
+#include "OGSimulation/ResimGatePolicy.h"
 
 #include <algorithm>
 #include <utility>
@@ -49,6 +54,7 @@ DEFINE_LOG_CATEGORY(LogOGNet);
 DEFINE_LOG_CATEGORY(LogOG);
 DEFINE_LOG_CATEGORY(LogOGRelayProbe);
 DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
+DEFINE_LOG_CATEGORY(LogOGResimProbe);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 namespace
@@ -124,6 +130,28 @@ namespace
 		// changes only which knob controls it: `LogOGSimTick=Verbose` now shows the
 		// resim table, exactly as it shows `[CollectInput]`.
 		if (body.StartsWith(TEXT("[Resim.Input]")))          { EMIT_OG(LogOGSimTick); }
+		// [og-netcode-v2-input-relay item 42] LogOGResimProbe: the RESIM-GATE
+		// family — [ResimProbe.Gate] (I1, the divergence-check denominator),
+		// [ResimProbe.Chaos] (I3+I4, the request/grant/refusal ledger and the
+		// requested-vs-granted frame pin — constant 0 live, an
+		// engine-behaviour-change alarm), [ResimProbe.Apply] (I5+I6, the apply
+		// edge and the replay span) at Warning once per 120 physics frames; plus
+		// [ResimProbe.Landing] (I2, the frontier-landing split — one Warning line
+		// per class per 120 corrections, and a Verbose line per correction),
+		// [ResimProbe.Request] and [ResimProbe.Stranded] at Verbose.
+		//
+		// ⛔ POSITIONED AHEAD OF THE `[Resim.` CATCH-ALL BELOW, DEFENSIVELY. It does
+		// not strictly need to be: `[Resim.` requires the DOT, and `[ResimProbe`
+		// has a `P` there, so the two cannot collide today. It sits here anyway
+		// because the ONE thing that would make them collide is somebody widening
+		// the catch-all to `[Resim`, and the consequence would be silent — this
+		// whole family would inherit LogOGSim=Verbose and become the T19 volume
+		// defect on the instrument built to measure the very mechanism T19's
+		// neighbours describe. Costs nothing; removes a footgun.
+		//
+		// ONE StartsWith COVERS THE FAMILY, same as [RelayProbe and [DivergenceProbe:
+		// a future sub-tag needs no router edit.
+		else if (body.StartsWith(TEXT("[ResimProbe")))       { EMIT_OG(LogOGResimProbe); }
 		// LogOGSim: rare simulation lifecycle events.
 		else if (body.StartsWith(TEXT("[TimeResync.")))      { EMIT_OG(LogOGSim); }
 		else if (body.StartsWith(TEXT("[Resim.")))           { EMIT_OG(LogOGSim); }
@@ -337,6 +365,31 @@ int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 Last
 	const int32 unrealTickDifferenceAdjustedTick = manager->getChaosTickMapper().toChaosTick(static_cast<int32_t>(correctionTick));
 	UE_LOG(LogOGSimTick, Log, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d correctionTick=%u chaosTick=%d rewind=1"),
 		LastCompletedStep, correctionTick, unrealTickDifferenceAdjustedTick);
+
+	// [og-netcode-v2-input-relay item 42 / I3 + I4] THE REQUEST, COUNTED AT THE
+	// POINT IT CROSSES INTO THE ENGINE — after the conversion, so the chaos frame
+	// recorded is exactly the one Chaos receives and `clampedGrants` compares a
+	// grant against the number that was actually asked for.
+	//
+	// Everything downstream of this `return` is engine-side and silent in a normal
+	// build (finding §3 enumerates five distinct refusal points, all behind
+	// DEBUG_REWIND_DATA). So this line and `noteResimGrant` in
+	// FirstPreResimStep_Internal below are the entire visibility the second gate
+	// has, and `requests - grants` is the refusal count.
+	manager->noteResimRequest(correctionTick, LastCompletedStep, unrealTickDifferenceAdjustedTick);
+
+	// PER-EVENT DETAIL AT VERBOSE — off under the shipped LogOGResimProbe=Warning.
+	// Carries the mapper OFFSET, which is the discriminator finding §3 asks for:
+	// the offset legitimately moves ±1 across Stall/Skip steps, and a ±1 skew at
+	// trigger time converts directly into a request landing on Chaos's
+	// BlockResimFrame (refused) or a replay one frame short of the clock's
+	// catch-up need (the missed apply edge). Read as `toChaosTick(0)` rather than
+	// through a new accessor — it is the mapper's whole state.
+	UE_LOG(LogOGResimProbe, Verbose,
+		TEXT("[ResimProbe.Request] requestedSimTick=%u requestedChaosFrame=%d lastCompletedStep=%d mapperOffset=%d"),
+		correctionTick, unrealTickDifferenceAdjustedTick, LastCompletedStep,
+		manager->getChaosTickMapper().toChaosTick(0));
+
 	return unrealTickDifferenceAdjustedTick;
 }
 
@@ -350,6 +403,27 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 	// Server authority never resims — no rewind timeline exists there.
 	if (m_manager == nullptr || !m_manager->runsPrediction())
 		return;
+
+	// [og-netcode-v2-input-relay item 42 / I3 + I4] THE GRANT. Chaos accepted a
+	// rewind and is starting it HERE, at `PhysicsStep` — which can differ from
+	// the frame we asked for only by being DEEPER: an engine-side requester
+	// merged in via FMath::Min (physics replication's GetResimFrame, or
+	// CompareTargetsToLastFrame), or FindValidResimFrame's validation walking
+	// DOWN. A LATER frame — a shallow clamp — is structurally impossible on this
+	// wiring: FindValidResimFrame walks downward (return ≤ requested), the Min
+	// merge can only deepen, and the replay-loop push-data skip that could start
+	// a replay late is dead code on this engine, so this `PhysicsStep` always
+	// equals the solver's ResimStep ≤ the requested frame (item 42 review §2).
+	// The probe charges any requested-vs-granted mismatch to `clampedGrants` —
+	// live it reads a constant 0 by construction, and a nonzero is an
+	// engine-behaviour-change alarm. The engine may also rewind on its own
+	// initiative with no request of ours on record; that stays uncharged. See
+	// ResimGateProbe::noteGrant.
+	//
+	// BEFORE prepareResimulation, so a grant is recorded even if anything below
+	// early-returns — `grants` and `prepares` are counted on opposite sides of this
+	// boundary on purpose, and their agreement is the wiring check.
+	m_manager->noteResimGrant(PhysicsStep);
 
 	// Convert Chaos physics step back to simulation tick for prepareResimulation.
 	const uint32_t simTick = static_cast<uint32_t>(
@@ -568,6 +642,60 @@ void ASimulationManagerUImpl::BeginPlay()
 			GConfig->GetInt(TEXT("OGNetcode"), TEXT("CorrectionRotationK"), iniK, GEngineIni))
 		{
 			configuredCorrectionRotationK = iniK;
+		}
+	}
+
+	// ---- [item 45 / og-netcode-v2-input-relay] the RESIM-GATE POLICY override ----
+	//
+	// Fourth knob through the same door as the floor (T11), the depth (T35) and the
+	// rotation width (T39), and deliberately the same four steps: intake here, the
+	// parse/validate, the setter on the core manager, then an unconditional
+	// Warning-level proof line.
+	//
+	// WHAT IT CONTROLS. `ResimTriggerPolicy` decides which landed corrections open
+	// the resim gate — `FrontierExact` (the compiled default, reproducing the legacy
+	// gate) or `OnDisagreement` (the designed trigger, whose enablement is backlog
+	// item 46 and is hard-blocked on item 30's non-degenerate verdict). It lives on
+	// TimeConfig; the mechanism is in OGSimulation/ResimGatePolicy.h and
+	// StateCorrectionCache.
+	//
+	// ⛔ THERE IS DELIBERATELY NO `ResimCooldownTicks` KEY. A trigger-rate ceiling
+	// was built here and REMOVED on a user ruling (2026-08-11): it defers acting on
+	// a correction already known to disagree, which is the defect item 45 repairs.
+	// The throttle is structural instead. See the ruling block on
+	// `TimeConfig::resimTriggerPolicy`. If you are here because design §4 or backlog
+	// item 46 names that key, the code is right and those documents predate the
+	// ruling.
+	//
+	// ⚠ NOT AUTHORITY-GATED, unlike the three knobs above, and that is the point
+	// rather than an oversight: the resim gate exists ONLY on a predicting client (an
+	// authority allocates no correction caches and never rewinds). Gating this intake
+	// on `worldIsAuthority` would read the ini on the one role that cannot use it and
+	// skip it on the role that can. Applying it on both roles keeps one TimeConfig
+	// shape for both and costs nothing — on a server the value simply has no reader.
+	//
+	// ⛔ ONE-SHOT, and here that is a THREAD-SAFETY requirement, not just a
+	// measurement-attribution one as it is for K. The trigger policy is pushed down
+	// into every StateCorrectionCache and read on the GAME thread at the
+	// correction-landing site with no synchronization, which is sound precisely
+	// because it is written once at composition before any correction can land. A
+	// cvar would make it writable while landings are in flight. There must not be one.
+	//
+	// PRESENCE IS A BOOL, NOT A SENTINEL VALUE, and this block deliberately does not
+	// copy the `-1 == absent` shape of its three predecessors: the value is a STRING,
+	// so there is no numeric sentinel to collide with in the first place, and
+	// `GetString` already reports presence. The older blocks' documented
+	// sentinel collisions simply cannot arise here.
+	bool    hasIniResimTriggerPolicy = false;
+	FString configuredResimTriggerPolicy;
+	if (GConfig != nullptr)
+	{
+		FString iniPolicy;
+		if (GConfig->GetString(TEXT("OGNetcode"), TEXT("ResimTriggerPolicy"), iniPolicy, GGameIni) ||
+			GConfig->GetString(TEXT("OGNetcode"), TEXT("ResimTriggerPolicy"), iniPolicy, GEngineIni))
+		{
+			hasIniResimTriggerPolicy = true;
+			configuredResimTriggerPolicy = iniPolicy.TrimStartAndEnd();
 		}
 	}
 
@@ -922,6 +1050,121 @@ void ASimulationManagerUImpl::BeginPlay()
 		// ogblog -> LogOGBrawler (game rules: DAttackMachine/Radial/Guard).
 		simlog::setGlobal(std::function<void(const char*)>(pctmlogger));
 		ogblog::setGlobal(std::function<void(const char*)>(ogblogClient));
+
+		// [og-netcode-v2-input-relay item 42] THE RESIM-GATE PROBE'S STARTUP PROOF
+		// LINE. Fourth step of the four-step category path (declaration ->
+		// RouteOGMessage branch -> ini block -> this), and the one that makes the
+		// other three checkable from a log instead of from the source.
+		//
+		// WHY A PROOF LINE AT ALL — three separate lessons, all learned the hard way
+		// in this initiative:
+		//   * item 33: an ini block can be entirely INERT and look identical to one
+		//     that took. Nothing else in a run distinguishes "LogOGResimProbe=Warning
+		//     was read" from "the key was never parsed and the category is sitting on
+		//     its compiled default".
+		//   * item 36: a proof line emitted at `Log` DOES NOT EXIST on a dedicated
+		//     server. This one is at Warning for that reason; it is client-only, but
+		//     PIE clients inherit the same category config and the same trap.
+		//   * item 31: the entire reason item 42 exists is an instrument that emitted
+		//     into a suppressed severity and produced zero occurrences in every log
+		//     on disk while looking, from the source, perfectly wired.
+		//
+		// SO IT REPORTS THE EFFECTIVE RUNTIME VERBOSITY, not a constant. `verbosity`
+		// is what the ini actually produced; `verboseDetail` says whether the
+		// per-event half (ResimProbe.Request / .Landing / .Stranded) will emit at
+		// all, which is the single most likely thing to be silently off when
+		// somebody goes looking for it. `windowSamples` states the denominator every
+		// per-window line below is divided by, taken from the constant rather than
+		// re-typed.
+		//
+		// ITS OWN ABSENCE IS ALSO INFORMATION: no `[ResimProbe.Session]` line in a
+		// client log means either the category was set to NoLogging or this branch
+		// never ran (i.e. the process is not a client). Both are worth knowing
+		// before reading a zero off any counter below.
+		//
+		// Volume: one line per session, client only, at composition.
+		UE_LOG(LogOGResimProbe, Warning,
+			TEXT("[ResimProbe.Session] resim-gate probe LIVE — verbosity=%s verboseDetail=%s windowSamples=%u"),
+			ToString(LogOGResimProbe.GetVerbosity()),
+			LogOGResimProbe.IsSuppressed(ELogVerbosity::Verbose) ? TEXT("off") : TEXT("on"),
+			static_cast<uint32>(kResimGateProbeWindowSamples));
+	}
+
+	// ---- [item 45 / og-netcode-v2-input-relay] APPLY the resim-gate policy -------
+	//
+	// AFTER BOTH ROLE BRANCHES, which is why it is one block rather than two: the
+	// manager exists on both paths by here, the knob is role-agnostic (see the intake
+	// comment), and duplicating an apply-plus-proof-line inside each branch is how the
+	// two roles drift apart. Everything it needs was parsed before the branch.
+	//
+	// STEPS 2-4 OF THE FOUR: parse/validate, the setter, the proof line. Step 1 (the
+	// intake) is above.
+	{
+		// STEP 2 — PARSE + VALIDATE. An unrecognised policy string is REPORTED and the
+		// compiled default kept, rather than being silently read as one of the two
+		// values: this knob's whole contract is "the default is legacy", and a typo
+		// that quietly selected `OnDisagreement` would enable the item-46 storm on a
+		// build nobody thinks they changed. The comparison is case-insensitive because
+		// an ini is hand-written; the accepted spellings are the enumerator names.
+		if (hasIniResimTriggerPolicy)
+		{
+			if (configuredResimTriggerPolicy.Equals(TEXT("OnDisagreement"), ESearchCase::IgnoreCase))
+			{
+				m_manager->setResimTriggerPolicy(TimeConfig::ResimTriggerPolicy::OnDisagreement);
+			}
+			else if (configuredResimTriggerPolicy.Equals(TEXT("FrontierExact"), ESearchCase::IgnoreCase))
+			{
+				m_manager->setResimTriggerPolicy(TimeConfig::ResimTriggerPolicy::FrontierExact);
+			}
+			else
+			{
+				UE_LOG(LogOGNet, Warning,
+					TEXT("[ResimGate] ini [OGNetcode] ResimTriggerPolicy='%s' unrecognised ")
+					TEXT("(expected FrontierExact or OnDisagreement) — keeping the compiled default"),
+					*configuredResimTriggerPolicy);
+				hasIniResimTriggerPolicy = false;
+			}
+		}
+
+		// STEP 4 — THE PROOF LINE. Unconditional and at Warning, for exactly the
+		// reasons spelled out on the `[RelayDepth]` and `[StateRotation]` lines above:
+		// `Config/DefaultEngine.ini` sets `LogOGNet=Warning`, so a `Log` line here
+		// would not exist on the dedicated server (item 36 exists because that lesson
+		// was learned twice), and a line that is ABSENT when no key was read cannot
+		// distinguish "the override took" from "the key was never parsed".
+		//
+		// ⭐ AND FOR THIS KNOB THE LINE IS THE BEHAVIOUR-NEUTRALITY RECEIPT. Item 45
+		// ships a new gate mechanism defaulted to reproduce the old one; every claim
+		// made from a run afterwards — "the ratios are indistinguishable from the item
+		// 43 baseline" — is a claim about WHICH POLICY WAS LIVE. Without this line in
+		// the log, that is an assertion about the source rather than an observation
+		// about the run, which is precisely the class of mistake this initiative has
+		// paid for four times.
+		//
+		// It reports the effective values read back from TimeConfig, never the parsed
+		// request, so it cannot claim a setting the manager did not store.
+		// `depthPolicy` carries `(inert under FrontierExact)` when the live policy does
+		// not consult it — a suffix, not a silence, for the same reason `[RelayDepth]`
+		// carries `(inert under flush)`: a surviving line that lies by omission is
+		// worse than no line.
+		//
+		// `rateLimit = none (structural)` is stated rather than omitted, because the
+		// absence of a cooldown is a RULING (see TimeConfig::resimTriggerPolicy) and a
+		// reader comparing this line against design §4 must be able to tell "the
+		// ceiling is off" from "this build predates the ceiling".
+		//
+		// Volume: one line per session per role, at composition.
+		const TimeConfig& sessionTimeConfig = m_manager->getTimeConfig();
+		const bool policyIsOnDisagreement =
+			sessionTimeConfig.resimTriggerPolicy == TimeConfig::ResimTriggerPolicy::OnDisagreement;
+		const FString depthPolicyText = policyIsOnDisagreement
+			? FString::Printf(TEXT("skip beyond %d ticks"), sessionTimeConfig.rollbackWindowTicks)
+			: FString(TEXT("off (inert under FrontierExact)"));
+		UE_LOG(LogOGNet, Warning,
+			TEXT("[ResimGate] session policy = %s (%s), depthPolicy = %s, rateLimit = none (structural: one resim in flight, one pending)"),
+			policyIsOnDisagreement ? TEXT("OnDisagreement") : TEXT("FrontierExact"),
+			hasIniResimTriggerPolicy ? TEXT("ini override") : TEXT("compiled default"),
+			*depthPolicyText);
 	}
 
 	physScene->OnPhysScenePreTick.AddUObject(this, &ASimulationManagerUImpl::OnPhysicsPreTick);
@@ -1674,50 +1917,118 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
     // (the drain) + reapConnections. The drain body — iterate the claim map,
     // resolve per-wire effectiveDelay, dequeue at captureTick+delay, purge stale —
     // now lives in the core coordinator; this side supplies only the game-thread-
-    // safe upcoming sim tick and the per-id `deliver` callback.
-    if (!m_receptionCoordinator.has_value())
-        return;
+    // safe upcoming sim tick and the per-id `deliver` callback. [T49] The
+    // reception-coordinator early return used to guard the WHOLE function,
+    // including PROBE A below; it now guards only the coordinator drain, because
+    // PROBE A runs on both roles and a pure client never has a coordinator.
 
     const int32 firstUpcomingSimTick =
         static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(physicsStep))) + 1;
 
     // -----------------------------------------------------------------------
-    // [og-netcode-v2-input-relay T20] PROBE A — SERVER SIM TICKS PER GAME FRAME.
+    // [og-netcode-v2-input-relay T20; extended to the client + renamed T49]
+    // PROBE A — SIM TICKS PER GAME-THREAD FRAME, i.e. FRAME HEALTH. RUNS ON BOTH
+    // ROLES.
     // -----------------------------------------------------------------------
     //
-    // WHAT IT SETTLES. The clients measure a relay-ring arrival gap of ~2 capture
-    // ticks where the design expects ~1. UE property replication runs once per
-    // server GAME-THREAD FRAME and NetServerMaxTickRate=60 is a CAP on that, not a
-    // floor — so a 60 Hz sim on a 30 fps server advances two sim ticks per
-    // replication and a depth-1 replace-latest ring can only carry the newer one.
-    // If this ratio equals the clients' measured gap, the gap is a HOST performance
-    // artefact (those sessions ran a dedicated server, two clients and the editor on
-    // one machine) rather than a netcode defect. Diagnostic only — nothing here
-    // feeds back into anything.
+    // ORIGIN, SERVER-ONLY (T20). WHAT IT SETTLED THERE. The clients measure a
+    // relay-ring arrival gap of ~2 capture ticks where the design expects ~1. UE
+    // property replication runs once per server GAME-THREAD FRAME and
+    // NetServerMaxTickRate=60 is a CAP on that, not a floor — so a 60 Hz sim on a
+    // 30 fps server advances two sim ticks per replication and a depth-1
+    // replace-latest ring can only carry the newer one. If this ratio equals the
+    // clients' measured gap, the gap is a HOST performance artefact rather than a
+    // netcode defect.
     //
-    // WHY HERE AND NOT OnPostPhysicsStep, which the task named as the candidate.
-    // OnPostPhysicsStep is game-thread and does run the server publish, but it is
-    // handed only an FChaosScene — it has NO physics step number, and therefore no
-    // way to reach a sim tick through the ONLY source that is safe to read on this
-    // thread (the mapper's atomic offset; see the tick-alignment block above, which
-    // states in terms why the server clock must not be read from the game thread).
-    // Sampling there would have required either reading the physics-thread-written
-    // clock or inventing a second counter. This hook has both numbers already: the
-    // step, and Chaos's own sub-step count.
+    // [item 49] WHY THE CLIENT NEEDED THIS TOO, STATED SO THE GAP IS NOT MISSED
+    // AGAIN. `[RelayProbe.Frame]` was, until this change, THE ONLY wall-clock
+    // timing instrument anywhere in the netcode surface, and it was server-only by
+    // construction — yet the server never resims. Every client cost figure backing
+    // the shipped `ResimTriggerPolicy=OnDisagreement`
+    // (finding_task43_resim_gate_live.md §4.1) was DERIVED from `ResimGateProbe`
+    // window cadence, which sees only the physics tick and is blind to game-thread
+    // or render hitching — precisely where a resim-driven cost would show up. This
+    // probe closes that hole by sampling on whichever role owns this actor, not
+    // only the server's.
+    //
+    // WHY HERE AND NOT OnPostPhysicsStep, ON EITHER ROLE. OnPostPhysicsStep is
+    // game-thread on both roles too, but it is handed only an FChaosScene — it has
+    // NO physics step number, and therefore no way to reach a sim tick through the
+    // ONLY source that is safe to read on this thread (the mapper's atomic offset;
+    // see the tick-alignment block above, which states in terms why the underlying
+    // clock must not be read from the game thread on EITHER role — the server
+    // clock on the server, the client's prediction clock on the client). Sampling
+    // there would have required either reading the physics-thread-written clock or
+    // inventing a second counter, both ruled out by item 49's own fence. This hook
+    // has both numbers already, on both roles: the step, and Chaos's own sub-step
+    // count.
+    //
+    // WHY REUSING `firstUpcomingSimTick` FOR THE PROBE IS SAFE ON THE CLIENT, EVEN
+    // THOUGH ITS "+1" DERIVATION ABOVE THIS FUNCTION IS PROVED UNDER AN
+    // AUTHORITY-ONLY ASSUMPTION (`S(K) = S(K-1) + 1`, no stall/skip/resim — see the
+    // tick-alignment block). The probe never consumes this value directly, only
+    // DELTAS between consecutive samples (the ratio, its percentiles, the cadence
+    // counters), and a constant additive skew cancels under subtraction. A
+    // client-side departure from the authority's unconditional-advance assumption
+    // (a resim replay, a stall) does not need that proof to hold — it surfaces
+    // EITHER as an ordinary ratio/numSteps sample, if the tick delta stays
+    // plausible, OR as a counted discontinuity (`kFrameHealthDiscontinuityTicks`)
+    // if it does not. Neither corrupts the measurement; that is exactly what the
+    // discontinuity guard and cadence counters exist to make safe. What WOULD be
+    // unsafe is a DIFFERENT tick source (e.g. reading the prediction clock straight
+    // off the physics thread) — this reuses the identical atomic read the server
+    // call site already relied on, so no new thread-safety question is introduced.
     //
     // THE RATIO IS HOOK-INDEPENDENT ANYWAY, which is exactly why the metric is
-    // defined against GFrameCounter rather than against an invocation count. The
-    // probe additionally reports how ITS OWN invocations distributed over frames —
-    // once per frame, more than once (i.e. per sub-step), or less often — so this
-    // hook's cadence is MEASURED and reported, never assumed. If the readings show
-    // it is not once per frame, the ratio is still correct and the cadence counters
-    // say so out loud.
+    // defined against GFrameCounter rather than against an invocation count — the
+    // same property that let this probe gain a second role without a second
+    // implementation. The probe additionally reports how ITS OWN invocations
+    // distributed over frames — once per frame, more than once (i.e. per
+    // sub-step), or less often — so this hook's cadence is MEASURED and reported,
+    // never assumed, on EITHER role. ON A RESIMMING CLIENT THE SUB-STEP CROSS-CHECK
+    // IS THE WHOLE POINT: `numStepsAboveOne > 0` reads as "resim/sub-stepping ran",
+    // `== 0` with a ratio above 1 reads as "the game thread simply hitched" — the
+    // two client-cost questions item 49 exists to keep apart.
     //
-    // SERVER-ONLY BY CONSTRUCTION: this function has already returned above if there
-    // is no reception coordinator, and a client never has one.
+    // CATEGORY, DECIDED PER ROLE, NOT INHERITED. The server line keeps riding
+    // `LogOGRelayProbe` under the unchanged tag `[RelayProbe.Frame]`, for T20's
+    // original reason: it measures the CAUSE of the cadence `[RelayProbe.Arrival]`
+    // measures the EFFECT of, and the two are only interpretable together. THAT
+    // REASON DOES NOT TRANSFER TO THE CLIENT — a client never emits
+    // `[RelayProbe.Arrival]` against its own frame rate the way the server's write
+    // cadence pairs with it. On the client the natural pairing is frame health
+    // against RESIM COST, so the client line rides `LogOGResimProbe` under a NEW
+    // tag, `[ResimProbe.Frame]` — it inherits routing for free from the existing
+    // `body.StartsWith("[ResimProbe")` catch-all in RouteOGMessage (no router edit
+    // needed) and ships at that family's existing default, `LogOGResimProbe=Warning`.
+    //
+    // THE TWO TAGS ARE DELIBERATELY DIFFERENT FAMILIES, not the same tag with a
+    // role suffix — this initiative's own review of
+    // `finding_task43_resim_gate_live.md` mis-assigned which process emitted
+    // `[RelayProbe.Frame]` and had to re-derive roles from other receipts; a client
+    // line that merely LOOKED like the server's would repeat that mistake. Both
+    // lines additionally carry an explicit `role=` field, belt-and-suspenders, so a
+    // reader does not have to already know the tag convention to tell them apart.
+    //
+    // WINDOW COMPARABILITY WITH ResimGateProbe, THE CHEAP ROUTE. This probe's
+    // window (`kFrameHealthProbeWindowSamples`) and `ResimGateProbe`'s
+    // (`kResimGateProbeWindowSamples`) are both 120 samples, so a reader CAN line up
+    // one `[ResimProbe.Frame]` window against the surrounding `[ResimProbe.Gate]`
+    // windows to ask "did frame time move when resim depth moved?" without a
+    // resim-tick count carried on this line. They are COMPARABLE, NOT IDENTICAL:
+    // this window closes on `noteFrame`'s GFrameCounter cadence (one game-thread
+    // frame per sample), `ResimGateProbe`'s closes on `noteCheck` — one call per
+    // `checkDivergenceAll`, which also runs once per physics frame but is a
+    // logically different event. The two windows will drift apart over a session
+    // exactly as far as their emitters' own cadences drift, which is itself
+    // diagnostic (via each family's own cadence counters) rather than a defect to
+    // fix.
+    //
+    // VOLUME UNCHANGED: window summaries at Warning, nothing per-frame at any
+    // verbosity — ~2 lines per 120 game-thread frames, on EACH role now sampling.
     {
-        ServerFrameWindowSummary frameSummary;
-        const bool frameWindowClosed = m_serverFrameProbe.noteFrame(
+        FrameHealthWindowSummary frameSummary;
+        const bool frameWindowClosed = m_frameHealthProbe.noteFrame(
             static_cast<uint64>(GFrameCounter),
             static_cast<uint32>(firstUpcomingSimTick),
             static_cast<uint32>(numSteps),
@@ -1726,36 +2037,68 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
 
         if (frameWindowClosed)
         {
+            // [T49] `runsPrediction()` is this codebase's established role check
+            // (see OnPostPhysicsStep above: "HasAuthority() is unreliable on
+            // non-replicated actors"). false covers BOTH the server and a
+            // standalone/listen-server-host manager — consistent with every other
+            // role branch in this file — so a standalone session's frame-health
+            // line rides the SERVER tag/category, matching how its tick clock is
+            // already treated everywhere else here.
+            const bool isClient = m_manager.has_value() && m_manager->runsPrediction();
             char line[256];
 
-            // Line 1 — THE RATIO. `meanX100` is the cadence-independent aggregate
-            // (window tick delta over window frame delta); p50/p99/max come from the
-            // samples where exactly one frame elapsed.
-            std::snprintf(line, sizeof(line),
-                "[Warning][RelayProbe.Frame] simTicks=%u frames=%u meanTicksPerFrameX100=%u "
-                "p50=%u p99=%u max=%u meanFrameUs=%u",
-                frameSummary.totalSimTicks, frameSummary.totalFrames,
-                frameSummary.meanTicksPerFrameX100, frameSummary.p50,
-                frameSummary.p99, frameSummary.maxTicksPerFrame,
-                frameSummary.meanFrameMicros);
-            RouteOGMessage(line);
+            if (isClient)
+            {
+                // Line 1 — THE RATIO, client role. Full field parity with the
+                // server line: p99/max are the reason this item exists — a mean
+                // alone cannot show a hitch.
+                std::snprintf(line, sizeof(line),
+                    "[Warning][ResimProbe.Frame] role=Client simTicks=%u frames=%u "
+                    "meanTicksPerFrameX100=%u p50=%u p99=%u max=%u meanFrameUs=%u",
+                    frameSummary.totalSimTicks, frameSummary.totalFrames,
+                    frameSummary.meanTicksPerFrameX100, frameSummary.p50,
+                    frameSummary.p99, frameSummary.maxTicksPerFrame,
+                    frameSummary.meanFrameMicros);
+                RouteOGMessage(line);
 
-            // Line 2 — THE HOOK CADENCE and THE SUB-STEP CROSS-CHECK, which are two
-            // different routes to a ratio above 1 and must not be collapsed.
-            // `numStepsGt1 > 0` means Chaos sub-stepped inside a frame; `numStepsGt1
-            // == 0` with a ratio above 1 means the game thread simply ran slow.
-            // dFrame1/dFrame0/dFrameGt1 are the verification that this hook fires
-            // once per frame (dFrame1 should be ~everything).
-            std::snprintf(line, sizeof(line),
-                "[Warning][RelayProbe.Frame] cadence dFrame1=%u dFrame0=%u dFrameGt1=%u "
-                "discont=%u numSteps total=%u max=%u gt1=%u",
-                frameSummary.oncePerFrameSamples, frameSummary.sameFrameSamples,
-                frameSummary.skippedFrameSamples, frameSummary.discontinuities,
-                frameSummary.totalNumSteps, frameSummary.maxNumSteps,
-                frameSummary.numStepsAboveOne);
-            RouteOGMessage(line);
+                // Line 2 — cadence + sub-step cross-check, client role.
+                std::snprintf(line, sizeof(line),
+                    "[Warning][ResimProbe.Frame] role=Client cadence dFrame1=%u dFrame0=%u "
+                    "dFrameGt1=%u discont=%u numSteps total=%u max=%u gt1=%u",
+                    frameSummary.oncePerFrameSamples, frameSummary.sameFrameSamples,
+                    frameSummary.skippedFrameSamples, frameSummary.discontinuities,
+                    frameSummary.totalNumSteps, frameSummary.maxNumSteps,
+                    frameSummary.numStepsAboveOne);
+                RouteOGMessage(line);
+            }
+            else
+            {
+                // Line 1 — THE RATIO, server role. Tag/category unchanged from
+                // T20 so existing tooling and archived-run greps keep working.
+                std::snprintf(line, sizeof(line),
+                    "[Warning][RelayProbe.Frame] role=Server simTicks=%u frames=%u "
+                    "meanTicksPerFrameX100=%u p50=%u p99=%u max=%u meanFrameUs=%u",
+                    frameSummary.totalSimTicks, frameSummary.totalFrames,
+                    frameSummary.meanTicksPerFrameX100, frameSummary.p50,
+                    frameSummary.p99, frameSummary.maxTicksPerFrame,
+                    frameSummary.meanFrameMicros);
+                RouteOGMessage(line);
+
+                // Line 2 — cadence + sub-step cross-check, server role.
+                std::snprintf(line, sizeof(line),
+                    "[Warning][RelayProbe.Frame] role=Server cadence dFrame1=%u dFrame0=%u "
+                    "dFrameGt1=%u discont=%u numSteps total=%u max=%u gt1=%u",
+                    frameSummary.oncePerFrameSamples, frameSummary.sameFrameSamples,
+                    frameSummary.skippedFrameSamples, frameSummary.discontinuities,
+                    frameSummary.totalNumSteps, frameSummary.maxNumSteps,
+                    frameSummary.numStepsAboveOne);
+                RouteOGMessage(line);
+            }
         }
     }
+
+    if (!m_receptionCoordinator.has_value())
+        return;
 
     // -----------------------------------------------------------------------
     // [og-netcode-v2-input-relay T22] PROBE 6 — PER-CONNECTION SEND BUDGET.
@@ -1990,8 +2333,10 @@ void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 Num
 	// [C.2 / T10 part 4] Release tier-delayed input for the tick(s) the upcoming
 	// physics step will simulate. GAME THREAD — this callback is Chaos's
 	// game-thread hook immediately preceding the step (see the tick-alignment
-	// derivation on releaseDelayedInputsForStep). No-op on a client and on a
-	// server with nothing parked.
+	// derivation on releaseDelayedInputsForStep). The delayed-input DRAIN is a
+	// no-op on a client and on a server with nothing parked; [T49] the frame-health
+	// probe inside releaseDelayedInputsForStep is NOT a no-op on either role
+	// anymore — see that function's banner.
 	releaseDelayedInputsForStep(PhysicsStep, NumSteps);
 }
 

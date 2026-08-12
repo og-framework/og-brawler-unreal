@@ -73,7 +73,7 @@ def percentile(counter, q):
     seen = 0
     for value in sorted(counter):
         seen += counter[value]
-            # nearest-rank, the same definition ServerFrameProbe uses
+            # nearest-rank, the same definition FrameHealthProbe (T20's ServerFrameProbe, renamed T49) uses
         if seen >= rank:
             return value
     return max(counter)
