@@ -7,6 +7,7 @@
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGSimulation/SimulationTimeContext.h"
+#include "OGSimulation/Network/ClientInputDelayLine.h"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
 
@@ -14,7 +15,8 @@
 
 class UEnhancedInputComponent;
 struct FInputActionValue;
-class ASimulationManagerUImpl;
+// [T15] The ASimulationManagerUImpl forward declaration is gone with the manager
+// argument on buildPlayerInput — this component no longer names the manager at all.
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class UOGBrawlerInputCollectionComponent : public UActorComponent
@@ -55,10 +57,73 @@ public:
 	glm::vec3 buildMoveDirectionWorld() const;
 	static glm::vec3 getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection);
 
+	// --- The three PlayerInput sources, and how they relate (D5.4 / og-netcode-v2 T12) ---
+	//
+	// There are three ways a PlayerInput reaches a consumer in this project. They are NOT
+	// interchangeable; picking the wrong one is a correctness bug, not a style choice.
+	//
+	//  1. buildPlayerInput(step, componentId, delayLine)   — THE SIM PATH.
+	//     Called once per simulation tick from the inputProvider lambda on the physics
+	//     thread. Continuous fields + discrete fields (attack buttons) + the tick-stateful
+	//     motion-sequence matcher (Hadouken and friends), which needs a RAW CAPTURE history
+	//     and the tick number to do rising-edge detection against the previous tick's input.
+	//     This is the ONLY input that is simulated and replicated. Rate: sim tick (60 Hz).
+	//
+	//  2. buildLatestVisualizationInput()                — THE RENDER ECHO (visualization only).
+	//     A live re-sample of the CONTINUOUS fields only, safe to call at render-frame rate.
+	//     Shares the continuous read with (1) via simulatableBrawler::readContinuousInputFields,
+	//     so the two provably cannot drift; differs only in that it calls
+	//     makeVisualizationPlayerInput instead of makeSimPlayerInput, leaving every discrete
+	//     field neutral (triggeredActionId == inputSequence::kNoMatch, attacks false).
+	//     The motion matcher is NEVER invoked here — running it at render rate would misfire
+	//     it, since many render frames share one "previous tick". Rate: render frame.
+	//     Cosmetic only: never feed this to the simulation or to the input RPC.
+	//
+	//  3. SimulationNetSync::getLastRelayedInput<SimulatableBrawler>() — THE REMOTE SOURCE.
+	//     The newest input RELAYED for a remote character, or nullopt if none has arrived.
+	//     Returns nullopt on the authority too (relay stores exist only for remote,
+	//     provider-absent ids on a predicting client). Rate: sim tick.
+	//
+	// T13 swaps the LOCAL character's visualization input source from (3) to (2); remote
+	// proxies keep (3).
+	//
+	// [og-netcode-v2-input-relay T7/T8] (3) USED TO BE `CorrectionCache::getLatestInput`,
+	// described here as "the correct — and only — source for REMOTE simulated proxies".
+	// T7 re-pointed the viz to the relay store; T8 made that permanent by retiring the
+	// server->client correction-input channel. The cache's input column is no longer fed by
+	// the authority at all, so for a remote character it now holds only this client's own
+	// prediction — reading it would silently hand back a guess dressed as authority. The
+	// nullopt contract of (3) is deliberately unchanged, which is why the selector rule in
+	// OGBrawler/BrawlerVisualizationInputSource.h needed no logic change.
+	// [og-netcode-v2-input-relay T16] THE COLUMN ITSELF IS NOW GONE — `m_inputBuffer`,
+	// `getInput`, `getLatestInput` and `pushPredictionInput` no longer exist on
+	// StateCorrectionCache. The hazard above is therefore no longer a hazard to be
+	// careful about; it is unreachable. A correction-cache slot carries state plus the
+	// applied-capture-tick ref and nothing else.
+
 	// Builds the full sim-tick PlayerInput. Called from the inputProvider lambda on the physics thread.
-	// `manager` gives the matcher read access to the recent-input correction cache (may be null on
-	// paths where no cache exists, e.g. the authority — matching is then skipped).
-	simulatableBrawler::PlayerInput buildPlayerInput(const SimulationTimeStep& step, uint32 componentId, const ASimulationManagerUImpl* manager) const;
+	//
+	// [T15] `delayLine` is this character's OWN raw capture history, keyed by capture tick, and is
+	// the motion matcher's history source. It is a parameter, not something reached for: NetSync
+	// binds it in collectInputAll and calls this BEFORE pushing the current tick's capture, so the
+	// line holds ticks <= step.getTick() - 1 and the current sample is what this function returns.
+	//
+	// It replaces the old `const ASimulationManagerUImpl*` argument, which existed only so the
+	// matcher could reach manager -> reconciliation -> correction cache. That cache stores the
+	// APPLIED input keyed by APPLICATION tick, so under an input delay `d` every history read was
+	// displaced by `d` — see OGBrawler/BrawlerMotionMatching.h for the full statement of the defect
+	// and its exact bound. There is also no longer a "no history available" arm: the delay line
+	// exists iff an input provider is registered, and this method's only caller IS that provider.
+	simulatableBrawler::PlayerInput buildPlayerInput(
+		const SimulationTimeStep& step,
+		uint32 componentId,
+		const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) const;
+
+	// Render-frame-callable live sample of the CONTINUOUS input fields only. See the block
+	// comment above for how this relates to buildPlayerInput and to source (3). Takes no
+	// SimulationTimeStep, no componentId and no history precisely because it touches none of
+	// the tick/history context the motion matcher would need — the matcher is not run.
+	simulatableBrawler::PlayerInput buildLatestVisualizationInput() const;
 
 	// Logical stick accessors. Both raw members end up with the same "stick-up = -Y in
 	// storage" convention but get there differently: onMove explicitly negates v.Y (left

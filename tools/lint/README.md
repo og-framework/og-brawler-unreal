@@ -173,24 +173,75 @@ default-drift updated."*
 
 ## CI integration
 
-There is **no active CI** wiring yet. `.github/workflows/standalone-tests.yml` is
-parked as `.disabled` because the default `GITHUB_TOKEN` cannot fetch the private
-sibling submodules (see that file's header). Until that is resolved, this lint runs
-**manually** / as a local pre-commit step — run it before any PR that touches
-`TimeConfig` or its consumers.
-
-When CI is re-enabled (a later stage), add a step **before** the build (it needs no
-submodules or compiler — just the source tree):
+Both lints in this directory — R-P1 configurability and R-UE1 visualization
+isolation (see next section) — are wired into a **single CI step**, `Lint (R-P1
+configurability + R-UE1 visualization isolation)`, placed **before** the build:
+neither needs submodules fetched or a compiler, just the source tree.
 
 ```yaml
-      - name: Configurability lint (R-P1)
+      - name: Lint (R-P1 configurability + R-UE1 visualization isolation)
         shell: pwsh
-        run: pwsh tools/lint/configurability_lint.ps1
+        run: |
+          $failed = 0
+          pwsh tools/lint/configurability_lint.ps1
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          pwsh tools/lint/visualization_hitbox_isolation.ps1
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          exit $failed
 ```
+
+> The `$failed` accumulator is load-bearing. A bare two-line `run:` block exits with
+> the status of the **last** command, so a configurability failure followed by a
+> clean visualization run would pass the step silently. Both lints always run (so
+> one report shows every violation), and the step fails if either did.
 
 `windows-latest` ships PowerShell 7 (`pwsh`) by default. On a Linux runner, install
 PowerShell first or run via the `mcr.microsoft.com/powershell` container. The step
 fails the job on exit code `1`, surfacing the offending `file:line` in the CI log.
+
+> ⚠ **CI is currently PARKED.** `.github/workflows/standalone-tests.yml` is renamed
+> `.disabled` because the default `GITHUB_TOKEN` cannot fetch the private sibling
+> submodules (see that file's header). The step above **is already present in the
+> parked workflow** and becomes live the moment the file is renamed back — but until
+> then both lints run **manually** / as a local pre-commit step. Run them before any
+> PR touching `TimeConfig`, its consumers, or a visualization component.
+
+---
+
+# Visualization/hitbox isolation lint (R-UE1)
+
+`visualization_hitbox_isolation.ps1` is the Stage 5 / D5.5 automated arm of risk
+**R-UE1** — *"presentation-only invariant" code-discipline leak into hitbox
+calculation* (`risks_and_plan.md` R-UE1; proposal §7.4).
+
+> **The rule:** visualization code never contributes to hitbox math. Hit resolution
+> runs against server-authoritative sim state on the server only.
+
+```pwsh
+pwsh tools/lint/visualization_hitbox_isolation.ps1
+```
+
+It globs `*Visualization*.h|.cpp` under
+`Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/` (the headers are **not**
+isolated in a `Visualization/` directory — a filename pattern is the available
+handle) and fails on any `#include` of a hitbox-**resolution** header.
+
+Like R-P1, this is one of three mitigation arms, and the lint is the weakest:
+
+| Arm | What it catches | Where |
+|---|---|---|
+| **`const&` signature** (structural) | Direct mutation of sim state from `visualize(...)` | the type system, at compile time |
+| **This lint** (structural) | A visualization TU including the hit resolver | `tools/lint/visualization_hitbox_isolation.ps1` |
+| **Review checklist** (procedural) | Side channels — statics, singletons, injected functors | `VISUALIZATION_DISCIPLINE.md` §3 |
+
+The lint sees `#include` lines only, so **a green run is not proof the invariant
+holds**. The full invariant, the For Honor precedent, the permitted-vs-forbidden
+boundary, and the review checklist live in
+`Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/VISUALIZATION_DISCIPLINE.md`.
+
+**Contract:** a new header that **resolves** hits gets a blacklist entry in the same
+change; a new header that merely **declares** sim state types does not — visualization
+reading post-sim state through a `const&` is the design, not an exception.
 
 ---
 

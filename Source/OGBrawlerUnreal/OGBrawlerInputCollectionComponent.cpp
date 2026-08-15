@@ -17,6 +17,8 @@
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/BrawlerProjectileSimulation.h"
+#include "OGBrawler/BrawlerInputPackaging.h"
+#include "OGBrawler/BrawlerMotionMatching.h"
 #include "OGBrawler/InputSequence/InputSequence.h"
 #include "OGBrawler/InputSequence/GameMotions.h"
 
@@ -338,72 +340,56 @@ void UOGBrawlerInputCollectionComponent::onRightAttack(const FInputActionValue& 
 }
 
 simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(
-    const SimulationTimeStep& step, uint32 componentId, const ASimulationManagerUImpl* manager) const
+    const SimulationTimeStep& step, uint32 componentId,
+    const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) const
 {
 	if (!hasInputComponent())
 		return simulatableBrawler::getZeroPlayerInput();
 
-	const glm::vec3 aimDirection = buildAimDirection();
-	const glm::vec2 moveStick = getMoveStick();
-	const glm::vec3 moveDirectionWorld = buildMoveDirectionWorld();
+	// Continuous fields via the shared core reader — the ONE source of truth, also used by
+	// buildLatestVisualizationInput(). Do not re-read the accessors directly here.
+	const simulatableBrawler::ContinuousInputFields continuous =
+		simulatableBrawler::readContinuousInputFields(*this);
+
 	const bool leftAttack  = getLeftAttack();
 	const bool rightAttack = getRightAttack();
 
 	// --- Motion-sequence matching (predicting client only) ---
-	// Runs over the recent input history kept in StateCorrectionCache and produces a
-	// triggeredActionId carried on the machine PlayerInput. The result replicates to the
-	// server through the normal PlayerInput RPC path — same trust model as attackLeft.
-	using BrawlerCache = StateCorrectionCache<simulatableBrawler::State, simulatableBrawler::PlayerInput>;
-	const uint8_t currentButtonsHeld = (leftAttack ? 0b01 : 0) | (rightAttack ? 0b10 : 0);
-	uint32_t triggeredActionId = inputSequence::kNoMatch;
-
-	const BrawlerCache* cache = (manager != nullptr)
-		? manager->editReconciliation().findInputCache<SimulatableBrawler>(componentId)
-		: nullptr;
-
-	if (cache != nullptr)
-	{
-		// tick -> machine sub-input from the composite cache entry, or nullptr if the
-		// tick is outside the retained window.
-		auto accessor = [cache](uint32_t tick) -> const dAttackMachineSimulation::PlayerInput*
-		{
-			const uint32 idx = cache->getCacheIndex(tick);
-			if (idx == BrawlerCache::InvalidCacheIndex)
-				return nullptr;
-			return &cache->getInput(idx).get<dAttackMachineSimulation::PlayerInput>();
-		};
-
-		// Rising-edge mask: current held & ~previous held. The previous tick's input is
-		// the most-recently-cached entry (step.getTick() - 1). If it is not in the cache
-		// (cold start), treat the whole held mask as an edge.
-		uint8_t currentButtonsEdge = currentButtonsHeld;
-		if (step.getTick() > 0)
-		{
-			if (const dAttackMachineSimulation::PlayerInput* prev = accessor(step.getTick() - 1))
-			{
-				const uint8_t prevHeld = (prev->attackLeft ? 0b01 : 0) | (prev->attackRight ? 0b10 : 0);
-				currentButtonsEdge = static_cast<uint8_t>(currentButtonsHeld & ~prevHeld);
-			}
-		}
-
-		triggeredActionId = inputSequence::matchSequence(
-			accessor,
-			step.getTick(),
-			moveStick,
-			glm::vec3(aimDirection.x, aimDirection.y, 0.f),
-			currentButtonsHeld,
-			currentButtonsEdge,
-			dAttackMachineSimulation::g_moveStickDeadzone.load(),
-			kGameMotions);
-	}
+	// Runs over the client's RAW CAPTURE history and produces a triggeredActionId carried on
+	// the machine PlayerInput. The result replicates to the server through the normal
+	// PlayerInput RPC path — same trust model as attackLeft.
+	//
+	// [T15] Everything below the argument list is engine-free and lives in
+	// OGBrawler/BrawlerMotionMatching.h, so it is reachable from OGBrawlerTests (which links
+	// OGBrawler but not this module). This function is now purely: read live fields, adapt the
+	// history, call the core. DelayLineMotionHistory is the has()-gated adapter — the delay
+	// line answers an absent tick with the NEUTRAL input, and matchSequence needs a nullptr.
+	const uint32_t triggeredActionId = simulatableBrawler::resolveTriggeredActionId(
+		simulatableBrawler::DelayLineMotionHistory(delayLine),
+		step.getTick(),
+		continuous,
+		leftAttack,
+		rightAttack,
+		dAttackMachineSimulation::g_moveStickDeadzone.load(),
+		kGameMotions);
 
 	UE_LOG(LogOGSimTick, Log,
 		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u"),
 		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId);
 
-	return simulatableBrawler::PlayerInput(
-		dAttackRadialSimulation::PlayerInput(aimDirection, leftAttack, rightAttack),
-		dAttackMachineSimulation::PlayerInput(aimDirection, leftAttack, rightAttack, moveStick, moveDirectionWorld, triggeredActionId),
-		dAttackGuardSimulation::PlayerInput(aimDirection),
-		brawlerProjectileSimulation::PlayerInput{aimDirection});
+	return simulatableBrawler::makeSimPlayerInput(continuous, leftAttack, rightAttack, triggeredActionId);
+}
+
+simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildLatestVisualizationInput() const
+{
+	// Same cold-path guard as buildPlayerInput: with no input component bound there is nothing
+	// live to sample, and the neutral input is the honest answer.
+	if (!hasInputComponent())
+		return simulatableBrawler::getZeroPlayerInput();
+
+	// Continuous read shared with buildPlayerInput; visualization packer leaves every discrete
+	// field neutral. The motion matcher is deliberately not reachable from here — there is no
+	// step, no componentId and no manager in scope to run it with.
+	return simulatableBrawler::makeVisualizationPlayerInput(
+		simulatableBrawler::readContinuousInputFields(*this));
 }

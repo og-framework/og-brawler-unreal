@@ -30,23 +30,48 @@ concept CompositeSyncedBufferConceptLocal =
         { cb.readInto(out) } -> std::same_as<uint32_t>;
     };
 
+// [og-netcode-v2-input-relay T4] Mirrors CorrectionStateSyncedBufferConcept —
+// the correction-state buffer additionally carries the per-tick applied-capture-
+// tick reference (the join key between the state and relayed-input channels).
+template <typename BufferT, typename StateT>
+concept CorrectionStateSyncedBufferConceptLocal =
+    CompositeSyncedBufferConceptLocal<BufferT, StateT> &&
+    requires(std::remove_reference_t<BufferT>& b,
+             const std::remove_reference_t<BufferT>& cb,
+             const StateT& in,
+             uint32 tick,
+             uint32 appliedCaptureTick)
+    {
+        { b.write(in, tick, appliedCaptureTick) };
+        { cb.getAppliedCaptureTick() } -> std::same_as<uint32>;
+    };
+
+// [og-netcode-v2-input-relay T5] Mirrors the relay-ring half added to
+// PredictionSyncedBufferOwnerConcept: the arrival callback pair plus the const
+// ring accessor SimulationNetSync reads once at bind.
 template <typename OwnerT, typename StateT, typename InputT>
 concept PredictionSyncedBufferOwnerConceptLocal =
     requires(OwnerT& owner,
+             const OwnerT& constOwner,
              std::function<void(const typename OwnerT::SyncedCorrectionBufferType&)> corrFn,
-             std::function<void(const typename OwnerT::SyncedRemoteInputBufferType&)> inputFn,
+             std::function<void(const typename OwnerT::RelayedInputRingType&)> relayFn,
              const PendingInputQueue<InputT>& pendingQueue,
              uint32 currentTick,
              uint32 redundancyDepth)
     {
         typename OwnerT::SyncedCorrectionBufferType;
         typename OwnerT::SyncedRemoteInputBufferType;
-        requires CompositeSyncedBufferConceptLocal<typename OwnerT::SyncedCorrectionBufferType, StateT>;
+        typename OwnerT::RelayedInputRingType;
+        requires CorrectionStateSyncedBufferConceptLocal<typename OwnerT::SyncedCorrectionBufferType, StateT>;
         requires CompositeSyncedBufferConceptLocal<typename OwnerT::SyncedRemoteInputBufferType, InputT>;
+        // [T8] The correction-INPUT callback pair that sat between these two lines
+        // is retired with its channel. SyncedRemoteInputBufferType stays required —
+        // it still types getClientToServerInputSyncedBuffer below.
         { owner.setOnCorrectionStateReceivedCallback(corrFn) };
-        { owner.setOnCorrectionInputReceivedCallback(inputFn) };
         { owner.clearOnCorrectionStateReceivedCallback() };
-        { owner.clearOnCorrectionInputReceivedCallback() };
+        { owner.setOnRelayedInputReceivedCallback(relayFn) };
+        { owner.clearOnRelayedInputReceivedCallback() };
+        { constOwner.getRelayedInputRing() } -> std::same_as<const typename OwnerT::RelayedInputRingType&>;
         { owner.getClientToServerInputSyncedBuffer() } -> std::same_as<typename OwnerT::SyncedRemoteInputBufferType*>;
         { owner.sendLocalInputToAuthority(pendingQueue, currentTick, redundancyDepth) };
     };
@@ -56,10 +81,11 @@ concept AuthoritySyncedBufferOwnerConceptLocal =
     requires(OwnerT& owner,
              std::function<void(uint32, const InputT&)> fn)
     {
-        typename OwnerT::SyncedRemoteInputBufferType;
-        requires CompositeSyncedBufferConceptLocal<typename OwnerT::SyncedRemoteInputBufferType, InputT>;
-        { owner.getSyncedCorrectionStateBuffer() } -> CompositeSyncedBufferConceptLocal<StateT>;
-        { owner.getSyncedCorrectionInputBuffer() } -> CompositeSyncedBufferConceptLocal<InputT>;
+        // [T8] Mirrors the core: the authority owner's outbound INPUT buffer
+        // (getSyncedCorrectionInputBuffer) and the SyncedRemoteInputBufferType
+        // typedef + composite constraint that existed to type it are gone. The
+        // authority publishes state only.
+        { owner.getSyncedCorrectionStateBuffer() } -> CorrectionStateSyncedBufferConceptLocal<StateT>;
         { owner.setOnRemoteMoveReceivedCallback(fn) };
         { owner.clearOnRemoteMoveReceivedCallback() };
     };
