@@ -341,7 +341,7 @@ void UOGBrawlerInputCollectionComponent::onRightAttack(const FInputActionValue& 
 
 simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(
     const SimulationTimeStep& step, uint32 componentId,
-    const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) const
+    const LocalInputCache<simulatableBrawler::PlayerInput>& delayLine) const
 {
 	if (!hasInputComponent())
 		return simulatableBrawler::getZeroPlayerInput();

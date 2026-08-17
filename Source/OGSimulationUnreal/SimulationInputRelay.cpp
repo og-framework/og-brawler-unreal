@@ -77,7 +77,7 @@ void ASimulationInputRelay::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
     // ⭐ COND_SkipOwner — the owner-echo removal (T38 §5.3). The owning client
     // provably never reads its own character's ring: registerPredictionOwner
-    // builds a RelayedInputStore only for provider-ABSENT ids, and collectInputAll
+    // builds a RemoteInputCache only for provider-ABSENT ids, and collectInputAll
     // structurally cannot reach a store for an id that has a provider. Before this
     // change the ring carried a plain DOREPLIFETIME with no COND_, so every client
     // also received an echo of its own inputs — ~85 B per connection per round of
@@ -104,10 +104,12 @@ void ASimulationInputRelay::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 // THE THREE PROPERTIES THAT MAKE IT CORRECT, none of them local to this function:
 //   1. CAPACITY IS `kMaxDepth`, taken as a constant inside
 //      `relayedInputRing::stageArrival` at the staging site. No depth is passed
-//      anywhere on this path, and `TimeConfig::relayRedundancyDepthTicks` (session
-//      value 1) is not read — at 1, every staged entry after the first would have
-//      superseded its predecessor and bare C1 would have silently degenerated back
-//      into replace-latest (T43 finding 1).
+//      anywhere on this path, and the session-configurable field that used to
+//      size the retired replace-latest write path (its old identifier is on
+//      record in RN-13, ReviewNotes.md; item 63 deleted it outright) is not
+//      read — at its former session value of 1, every staged entry after the
+//      first would have superseded its predecessor and bare C1 would have
+//      silently degenerated back into replace-latest (T43 finding 1).
 //   2. SUPPRESS-CLEAR-ON-EMPTY. `flushStagedInto` returns 0 and touches nothing on
 //      an empty stage, so the ring stays byte-identical => not dirty => not
 //      scheduled => zero bytes, AND a round Iris skipped under packet pressure

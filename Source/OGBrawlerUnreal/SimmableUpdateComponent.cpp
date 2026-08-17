@@ -281,7 +281,7 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 	// On a pure client only the locally-controlled character (ROLE_AutonomousProxy)
 	// feeds a live input provider. Simulated proxies of other players must NOT
 	// register a provider — provider-ABSENCE is what gives a character a
-	// RelayedInputStore, and collectInputAll's proxy branch then predicts it from
+	// RemoteInputCache, and collectInputAll's proxy branch then predicts it from
 	// that store via the scheduled read ([T7]; it used to hold the correction
 	// cache's last server-reported input instead).
 	const AActor* ownerActor = GetOwner();
@@ -299,7 +299,7 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		// collectInputAll now hands the character's own raw-capture delay line
 		// straight in, so this lambda reaches for nothing outside its arguments.
 		inputProvider = [ic, id](const SimulationTimeStep& step,
-		                         const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) {
+		                         const LocalInputCache<simulatableBrawler::PlayerInput>& delayLine) {
 			return ic->buildPlayerInput(step, id, delayLine);
 		};
 	}
@@ -580,7 +580,7 @@ void USimmableUpdateComponent::onRelayedInputRingArrived(const FRelayedInputRing
 	// "owning connection" — the set COND_SkipOwner narrows on, decided server-side
 	// from the host's owner chain — and "provider present" — the set that decides
 	// whether `SimulationNetSync::registerPredictionOwner` builds a
-	// RelayedInputStore at all, decided here from the local role. If they ever
+	// RemoteInputCache at all, decided here from the local role. If they ever
 	// name different sets, the failure is silent in BOTH directions: a character
 	// in the first set but not the second still pays the echo, and a character in
 	// the second but not the first loses its relayed input entirely.

@@ -554,54 +554,20 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 	}
 
-	// ---- [T35 / og-netcode-v2-input-relay] the relay ring DEPTH ini override ---
-	//
-	// Same door, same gating, same absent-sentinel as the floor above — and the
-	// same reason for reading it BEFORE the manager exists: the depth must be in
-	// TimeConfig before the first relay write, not arrive as a mid-session change.
-	//
-	// AUTHORITY ONLY, for a DIFFERENT reason than the floor's. The floor is
-	// server-owned state that is replicated, so a client reading its own ini could
-	// disagree with the server. The depth is never replicated at all — it is passed
-	// per write into the ring codec and deliberately kept off the wire, because a
-	// receiver never needs it, it just iterates whatever entries arrived (the DEPTH
-	// IS SESSION-FIXED note in RelayedInputRingCodec.h). The only consumer is the
-	// relay tap, which is authority-side, so a client read would have no reader.
-	//
-	// ⛔ ONE-SHOT, and that is load-bearing, not tidiness: the same codec note
-	// records that SHRINKING the depth mid-session does not reclaim already-
-	// allocated ring entries (it degenerates to replace-oldest at the larger size)
-	// and calls that a documented non-scenario, safe ONLY because TimeConfig is
-	// built once per session. A cvar or console command here would make that
-	// unsupported path reachable. There must not be one.
-	//
-	// ABSENT => the compiled default (1 = replace-latest, the degenerate behaviour
-	// the initiative shipped with). Both ini homes accepted, Game before Engine,
-	// exactly as above.
-	//
-	// ONE VALUE COLLIDES WITH THE SENTINEL, harmlessly and knowingly: an ini that
-	// literally reads `RelayRedundancyDepthTicks=-1` is indistinguishable from an
-	// absent key. Nothing observable differs — clampDepth(-1) is 1, which is also
-	// the compiled default, so the session depth and the line logged below are
-	// identical on both paths; only the redundant "that value was out of range"
-	// warning is skipped. Every OTHER out-of-range value (0, -5, 99) still takes
-	// the clamp path and still warns.
-	int32 configuredRelayRedundancyDepth = -1;      // -1 = "not present in the ini"
-	if (worldIsAuthority && GConfig != nullptr)
-	{
-		int32 iniDepth = 0;
-		if (GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayRedundancyDepthTicks"), iniDepth, GGameIni) ||
-			GConfig->GetInt(TEXT("OGNetcode"), TEXT("RelayRedundancyDepthTicks"), iniDepth, GEngineIni))
-		{
-			configuredRelayRedundancyDepth = iniDepth;
-		}
-	}
+	// ⛔ RETIRED (og-netcode-v2-input-relay item 63 / RN-13, 2026-08-16): there is
+	// deliberately no relay ring depth ini intake here any more (its old ini key
+	// is on record in RN-13, ReviewNotes.md). It read a session-configurable
+	// retention depth for the outbound relay ring's replace-latest write path;
+	// item 34 replaced that write path with bare-C1 flush-on-poll, whose stage
+	// capacity is `relayedInputRing::kMaxDepth` — a compile-time constant with no
+	// ini key to feed — and item 63 removed the now-inert intake, its shared
+	// clamp call, its setter call and its startup proof line together.
 
 	// ---- [T39 / og-netcode-v2-input-relay] the STATE ROTATION WIDTH override ---
 	//
-	// Third knob through the same door as the floor (T11) and the depth (T35), and
-	// deliberately the same four steps: intake here, the ONE shared clamp, the
-	// setter on the core manager, then an unconditional Warning-level proof line.
+	// Second knob through the same door as the floor (T11), and deliberately the
+	// same four steps: intake here, the ONE shared clamp, the setter on the core
+	// manager, then an unconditional Warning-level proof line.
 	//
 	// WHAT IT CONTROLS. How many characters' correction-state buffers
 	// `SimulationNetSync::sendCorrectionAll` writes per tick, round-robin. Each
@@ -611,29 +577,30 @@ void ASimulationManagerUImpl::BeginPlay()
 	// its cost is a DECIDED number rather than whatever the packet happened to
 	// allow. "Emergent cadence" is the thing T39 exists to remove.
 	//
-	// AUTHORITY ONLY, for the same reason as the depth and NOT the floor: the floor
+	// AUTHORITY ONLY, and NOT the floor: the floor
 	// is server-owned state that is REPLICATED, so a client reading its own ini
 	// could disagree with the server. K is never replicated at all — only the
 	// authority runs sendCorrectionAll, and a receiver reconciles against whatever
 	// corrections arrive without needing to know the sender's cadence. A client
 	// read would have no reader.
 	//
-	// ⛔ ONE-SHOT, like the depth. K holds no allocated state, so unlike the depth
-	// a mid-session change would merely re-phase the schedule rather than corrupt
-	// anything — but the cadence is a number that a run's probe output is READ
-	// AGAINST, and a value that can move mid-run makes those readings
-	// unattributable. There must not be a cvar.
+	// ⛔ ONE-SHOT. K holds no allocated state, so a mid-session change could not
+	// corrupt anything structurally — but the cadence is a number that a run's
+	// probe output is READ AGAINST, and a value that can move mid-run makes those
+	// readings unattributable. There must not be a cvar.
 	//
 	// ABSENT => the compiled default (2 — every-frame at two characters, which is
 	// what keeps the archived two-character baselines comparable across this
 	// change). Both ini homes accepted, Game before Engine, exactly as above.
 	//
-	// SENTINEL COLLISION, harmless and knowingly, exactly as for the depth: an ini
-	// that literally reads `CorrectionRotationK=-1` is indistinguishable from an
-	// absent key. clampK(-1) is 1, which is NOT the compiled default, so unlike the
-	// depth's case this one would silently take the compiled 2 instead of clamping
-	// to 1 — a difference that only exists for a value no operator would write, and
-	// the proof line reports the effective number either way.
+	// SENTINEL COLLISION, harmless and knowingly: an ini that literally reads
+	// `CorrectionRotationK=-1` is indistinguishable from an absent key, because -1
+	// is also this variable's own "not present in the ini" sentinel (see
+	// `configuredCorrectionRotationK` below). clampK(-1) would be 1, which is NOT
+	// the compiled default — so a `-1` written on purpose silently takes the
+	// compiled default 2 instead of clamping to 1, a difference that only exists
+	// for a value no operator would write, and the proof line reports the
+	// effective number either way.
 	int32 configuredCorrectionRotationK = -1;       // -1 = "not present in the ini"
 	if (worldIsAuthority && GConfig != nullptr)
 	{
@@ -647,8 +614,8 @@ void ASimulationManagerUImpl::BeginPlay()
 
 	// ---- [item 45 / og-netcode-v2-input-relay] the RESIM-GATE POLICY override ----
 	//
-	// Fourth knob through the same door as the floor (T11), the depth (T35) and the
-	// rotation width (T39), and deliberately the same four steps: intake here, the
+	// Third knob through the same door as the floor (T11) and the rotation width
+	// (T39), and deliberately the same four steps: intake here, the
 	// parse/validate, the setter on the core manager, then an unconditional
 	// Warning-level proof line.
 	//
@@ -667,7 +634,7 @@ void ASimulationManagerUImpl::BeginPlay()
 	// item 46 names that key, the code is right and those documents predate the
 	// ruling.
 	//
-	// ⚠ NOT AUTHORITY-GATED, unlike the three knobs above, and that is the point
+	// ⚠ NOT AUTHORITY-GATED, unlike the two knobs above, and that is the point
 	// rather than an oversight: the resim gate exists ONLY on a predicting client (an
 	// authority allocates no correction caches and never rewinds). Gating this intake
 	// on `worldIsAuthority` would read the ini on the one role that cannot use it and
@@ -787,72 +754,23 @@ void ASimulationManagerUImpl::BeginPlay()
 			m_manager->setRelayDelayFloorTicks(clampedFloor);
 			UE_LOG(LogOGNet, Log,
 				TEXT("[RelayDelayFloor] session floor = %d ticks (ini override)"), clampedFloor);
+
+			// [item 62 / RN-12] Advisory-only — see logRelayDelayFloorAdvisory.
+			logRelayDelayFloorAdvisory(clampedFloor);
 		}
 
-		// [T35] THE SESSION RING DEPTH. One step, not two — unlike the floor there
-		// is nothing to publish: the depth never rides the wire (see the intake
-		// comment above). The path ends at this manager's TimeConfig, which the
-		// relay tap reads per write.
-		//
-		// INTAKE CLAMP, and it is not redundant with the setter's or the codec's.
-		// The setter would clamp the stored value anyway; clamping HERE is what
-		// stops the log line below from lying about a depth the ring would never
-		// use — which is the whole deliverable, since the depth-2 validation pack's
-		// first gate is "did the value take". Out-of-range config is REPORTED, not
-		// silently absorbed: an operator typo is a sizing mistake they need to see.
-		if (configuredRelayRedundancyDepth != -1)
-		{
-			const int32 clampedDepth =
-				static_cast<int32>(relayedInputRing::clampDepth(configuredRelayRedundancyDepth));
-			if (clampedDepth != configuredRelayRedundancyDepth)
-			{
-				UE_LOG(LogOGNet, Warning,
-					TEXT("[RelayDepth] ini [OGNetcode] RelayRedundancyDepthTicks=%d out of range, clamped to %d entries"),
-					configuredRelayRedundancyDepth, clampedDepth);
-			}
-			m_manager->setRelayRedundancyDepthTicks(clampedDepth);
-		}
+		// ⛔ RETIRED (item 63 / RN-13, 2026-08-16): there is deliberately no relay
+		// ring depth clamp/setter/proof-line block here any more (its old
+		// identifier and its former `[RelayDepth]` proof line are on record in
+		// RN-13, ReviewNotes.md). It published a session-configurable retention
+		// depth that item 34's bare-C1 flush-on-poll had already made inert — the
+		// stage capacity is `relayedInputRing::kMaxDepth`, a compile-time constant
+		// — and item 63 removed the whole inert path rather than keep publishing a
+		// number nothing on the live relay path reads.
 
-		// THE PROOF LINE, and the reason it is unconditional and at Warning.
-		//
-		// UNCONDITIONAL: it states the depth the ring will actually use whether or
-		// not an ini key was found, so a run can tell "the override took" apart from
-		// "the key was never read" — which is exactly the distinction the depth-2
-		// validation pack's Gate 1 has to make, and it cannot make it from a line
-		// that is absent in both cases.
-		//
-		// ⚠ WARNING, NOT Log, and DELIBERATELY unlike the floor's session line
-		// four lines up. `Config/DefaultEngine.ini` sets `LogOGNet=Warning`, so a
-		// `UE_LOG(LogOGNet, Log, ...)` here would be suppressed on the very
-		// dedicated server this line has to be greppable on. That is not a
-		// prediction: the archived T22 server log contains ZERO `[RelayDelayFloor]`
-		// lines for that reason, while the clients' Warning-level floor line came
-		// through. The validation pack additionally FORBIDS raising the category to
-		// Verbose (T19 measured that flag as 98.4 % of a 10 MB server log), so
-		// Warning is the only verbosity that makes this observable under the
-		// configuration the run is required to use. Volume is a non-issue: this is
-		// one line per session, emitted once at composition on the authority only.
-		//
-		// ⛔ [T34] `(inert under flush)`, AND THE SUFFIX IS NOT COSMETIC. Item 34
-		// replaced the replace-latest write path with flush-on-poll, whose stage
-		// capacity is `relayedInputRing::kMaxDepth` taken as a constant. Nothing on
-		// the live relay path reads this value any more. The line is kept — intake,
-		// clamp and all — because item 35's Gate-1 tooling greps for it and because
-		// deleting a proof line is how a knob silently comes back; the suffix is
-		// what stops the surviving line from LYING about what the session will do.
-		// The prefix `[RelayDepth] session depth = N entries` is unchanged, so the
-		// existing greps still match.
-		const int32 sessionRelayRedundancyDepth =
-			m_manager->getTimeConfig().relayRedundancyDepthTicks;
-		UE_LOG(LogOGNet, Warning,
-			TEXT("[RelayDepth] session depth = %d entries (%s) (inert under flush; stage capacity = %d)"),
-			sessionRelayRedundancyDepth,
-			configuredRelayRedundancyDepth != -1 ? TEXT("ini override") : TEXT("compiled default"),
-			static_cast<int32>(relayedInputRing::kMaxDepth));
-
-		// [T39] THE SESSION STATE-ROTATION WIDTH. Same shape as the depth above —
-		// one step, nothing to publish, and the intake clamp is what stops the proof
-		// line below from reporting a cadence the send path would never run.
+		// [T39] THE SESSION STATE-ROTATION WIDTH. One step, nothing to publish,
+		// and the intake clamp is what stops the proof line below from reporting a
+		// cadence the send path would never run.
 		if (configuredCorrectionRotationK != -1)
 		{
 			const int32 clampedK = correctionRotation::clampK(configuredCorrectionRotationK);
@@ -865,11 +783,11 @@ void ASimulationManagerUImpl::BeginPlay()
 			m_manager->setCorrectionRotationK(clampedK);
 		}
 
-		// THE PROOF LINE. Unconditional and at Warning, for exactly the reasons
-		// spelled out on the [RelayDepth] line above — a `Log` line here would not
-		// exist on the dedicated server this has to be greppable on
-		// (`Config/DefaultEngine.ini` sets `LogOGNet=Warning`; item 36 exists solely
-		// because that lesson was learned twice).
+		// THE PROOF LINE. Unconditional and at Warning, for exactly the reason the
+		// floor's session line above is Log-not-Warning-sensitive too — a `Log`
+		// line here would not exist on the dedicated server this has to be
+		// greppable on (`Config/DefaultEngine.ini` sets `LogOGNet=Warning`; item 36
+		// exists solely because that lesson was learned twice).
 		//
 		// UNCONDITIONAL because the distinction it has to support is "the override
 		// took" versus "the key was never read", and a line that is absent in both
@@ -908,10 +826,11 @@ void ASimulationManagerUImpl::BeginPlay()
 		// (it runs no provider branch), but a listen-server host does — its local
 		// player's input delay comes from this cache. No tier ever arrives on an
 		// authority world (the server WRITES the relay property; OnRep is a
-		// non-authority callback), so this stays at the pre-arrival
-		// forcedInputLatencyTicks baseline for the session — floored, since T11,
-		// by the value stamped in just above, which is exactly what a listen-server
-		// host's local player must feel to stay in step with its own authority.
+		// non-authority callback), so this stays at the pre-arrival no-tier
+		// fallback (item 62 / RN-12: `rttTierInputDelays[kMaxConnectionTierIndex]`)
+		// for the session — floored, since T11, by the value stamped in just
+		// above, which is exactly what a listen-server host's local player must
+		// feel to stay in step with its own authority.
 		//
 		// BEHAVIOUR-PRESERVING, and deliberately EARLIER than before: the retired
 		// per-character path reached this same steady state a few frames later,
@@ -992,21 +911,23 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
 
 		// [T9 part 3, rewired by T10] Establish the PRE-ARRIVAL baseline delay
-		// before any tier has replicated. `forcedInputLatencyTicks` is the
-		// documented "no per-connection tier is available" value and is exactly
-		// what the server's ServerInputDelayQueue::effectiveDelay falls back to
-		// for a connection it has not yet tiered — so publishing it here is what
-		// keeps the two ends delaying by the same amount during the pre-tier
-		// window instead of the client running 0 against the server's 2.
+		// before any tier has replicated. The no-tier fallback
+		// (`rttTierInputDelays[kMaxConnectionTierIndex]` since item 62 / RN-12
+		// retired the dedicated no-tier-baseline field this used to read) is
+		// exactly what
+		// the server's ServerInputDelayQueue::effectiveDelay falls back to for a
+		// connection it has not yet tiered — so publishing it here is what keeps
+		// the two ends delaying by the same amount during the pre-tier window
+		// instead of the client running 0 against the server's 4.
 		//
 		// It is now published THROUGH the tier cache rather than read off the
 		// config directly, so the baseline and the post-arrival value come from
 		// one derivation site (`ReplicatedTierConsumer::effectiveInputDelayTicks`)
 		// — which T11 widened with the relay delay floor, so this baseline is
-		// `max(floor, forcedInputLatencyTicks)` and this call site derives nothing
-		// of its own (it is "site 4" of the four only in the sense that it
-		// publishes site 3's answer). At the shipped floor of 0 the value is
-		// unchanged: an unarrived cache answers forcedInputLatencyTicks.
+		// `max(floor, rttTierInputDelays[kMaxConnectionTierIndex])` and this call
+		// site derives nothing of its own (it is "site 4" of the four only in the
+		// sense that it publishes site 3's answer). At the shipped floor of 0 the
+		// value is unchanged: an unarrived cache answers the no-tier fallback.
 		//
 		// A client's floor is still 0 here — it arrives by OnRep, either in the
 		// initial bunch (pulled two blocks below) or later. That pre-OnRep window
@@ -1127,7 +1048,7 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 
 		// STEP 4 — THE PROOF LINE. Unconditional and at Warning, for exactly the
-		// reasons spelled out on the `[RelayDepth]` and `[StateRotation]` lines above:
+		// reasons spelled out on the `[StateRotation]` line above:
 		// `Config/DefaultEngine.ini` sets `LogOGNet=Warning`, so a `Log` line here
 		// would not exist on the dedicated server (item 36 exists because that lesson
 		// was learned twice), and a line that is ABSENT when no key was read cannot
@@ -1144,9 +1065,8 @@ void ASimulationManagerUImpl::BeginPlay()
 		// It reports the effective values read back from TimeConfig, never the parsed
 		// request, so it cannot claim a setting the manager did not store.
 		// `depthPolicy` carries `(inert under FrontierExact)` when the live policy does
-		// not consult it — a suffix, not a silence, for the same reason `[RelayDepth]`
-		// carries `(inert under flush)`: a surviving line that lies by omission is
-		// worse than no line.
+		// not consult it — a suffix, not a silence: a surviving line that lies by
+		// omission by staying quiet about an inert value is worse than no line.
 		//
 		// `rateLimit = none (structural)` is stated rather than omitted, because the
 		// absence of a cooldown is a RULING (see TimeConfig::resimTriggerPolicy) and a
@@ -1257,23 +1177,52 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 // PRESERVED QUIRK (review A3c, og-netcode-v2-input-relay backlog T10): the core
 // never publishes tier 0 as a FIRST value (`m_lastPublishedTier` baseline 0), so
 // a wire that never leaves tier 0 produces no publish, no relay actor, and no
-// call into here at all — the client sits on the pre-arrival
-// forcedInputLatencyTicks (2) while the server parks at tier-0 delay (1). That
-// standing 1-tick divergence is TODAY'S behaviour and is preserved deliberately;
-// changing it changes felt input lag and belongs to the floor work (T11), not to
-// a transport migration.
+// call into here at all — the client sits on the pre-arrival no-tier fallback
+// (item 62 / RN-12: `rttTierInputDelays[kMaxConnectionTierIndex]` = 4) while the
+// server parks at tier-0 delay (1). That standing divergence is TODAY'S
+// behaviour and is preserved deliberately; item 62 WIDENED it (1 tick -> 3
+// ticks, since the fallback moved 2 -> 4) as a side effect of the worst-tier
+// ruling, but did not introduce it and did not change its cause — changing the
+// cause itself changes felt input lag and belongs to the floor work (T11), not
+// to a transport migration.
+//
+// SECOND CONSEQUENCE OF THE SAME PRESERVATION (item 69, filed from item 62's
+// review): the "oldTier = 0" quirk this note already describes doesn't only
+// cause the standing divergence above — for the ORDINARY (non-late-joining)
+// client, that same fabricated `oldTier = 0` used to reach
+// `applyTierTransitionStall` as if it were the client's real prior tier,
+// requesting a spurious multi-tick prediction stall on the connection's first
+// real tier resolution, in the WRONG DIRECTION for every newTier except 0 (a
+// worked table is in Backlog.md item 69 and in `shouldStallForTierTransition`'s
+// own doc comment, ConnectionTierTable.h). This was NOT documented here before
+// item 69, only the standing-divergence half was. Fixed by item 69: the stall
+// decision now takes `hadAnyTier` — whether the client had ALREADY received an
+// authoritative tier before this call — as an explicit input rather than
+// inferring "had a tier" from `oldTier`'s value, so a first-ever resolution
+// requests zero stall regardless of which tier arrives. The standing-divergence
+// consequence above is UNCHANGED by this fix: `hadAnyTier` only ever suppresses
+// a stall, it does not touch what tier the client believes it is running.
 // ---------------------------------------------------------------------------
 
 void ASimulationManagerUImpl::onConnectionTierReceived(uint8_t oldTier, uint8_t newTier)
 {
+    // [item 69] MUST be read BEFORE applyReplicatedConnectionTier below: that
+    // call feeds m_replicatedTierConsumer, whose hasReceivedTier() becomes
+    // true unconditionally as a side effect of it. Reading it after would make
+    // every call report "had a tier" — including this very first one.
+    const bool hadAnyTier =
+        m_replicatedTierConsumer.has_value() && m_replicatedTierConsumer->hasReceivedTier();
+
     applyReplicatedConnectionTier(newTier);
 
     // The (old -> new) delta IS the transition signal: under Option A the client
     // runs no RTT sampling of its own. Note the first real OnRep on a fresh
     // connection reports oldTier = 0 (the property default) even though the
-    // client was actually running the pre-arrival forced baseline — preserved
-    // from the component channel verbatim, quirk and all.
-    applyTierTransitionStall(oldTier, newTier);
+    // client was actually running the pre-arrival no-tier fallback — preserved
+    // from the component channel verbatim, quirk and all. `hadAnyTier` (captured
+    // above, not inferred from `oldTier`) is what lets applyTierTransitionStall
+    // tell that case apart from a genuine prior tier 0 (item 69).
+    applyTierTransitionStall(oldTier, newTier, hadAnyTier);
 }
 
 void ASimulationManagerUImpl::onConnectionTierReplayed(uint8_t tier)
@@ -1377,6 +1326,11 @@ void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, b
     // site on this client consistent with the server's.
     m_manager->setRelayDelayFloorTicks(clampedFloor);
 
+    // [item 62 / RN-12] Advisory-only — see logRelayDelayFloorAdvisory. Same
+    // belt-and-braces shape as the A5 clamp above: the ini-intake site logs it
+    // too.
+    logRelayDelayFloorAdvisory(clampedFloor);
+
     const int32 deltaDelayTicks = recomputeAndPublishEffectiveInputDelay();
 
     if (!payForIncrease || deltaDelayTicks <= 0)
@@ -1397,13 +1351,42 @@ void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, b
         clampedFloor, deltaDelayTicks);
 }
 
+// [item 62 / RN-12] ADVISORY ONLY — never an assert. Floor 0 is the documented
+// "scheduled regime OFF" mode (TimeConfig.h::relayDelayFloorTicks), so
+// classifyRelayDelayFloor never flags it; see that function (ConnectionTierTable.h)
+// for the full classification table. Called from BOTH floor intake points (the
+// ini override and the OnRep above), the same belt-and-braces shape the A5 clamp
+// already uses.
+void ASimulationManagerUImpl::logRelayDelayFloorAdvisory(int32 floorTicks)
+{
+    if (!m_manager.has_value())
+        return;
+
+    switch (classifyRelayDelayFloor(m_manager->getTimeConfig()))
+    {
+    case RelayDelayFloorAdvisory::BelowHiccupBaseline:
+        UE_LOG(LogOGNet, Warning,
+            TEXT("[RelayDelayFloor] floor=%d is below the hiccup-absorption baseline (>=2) and above off (0) — the one value that is neither"),
+            floorTicks);
+        break;
+    case RelayDelayFloorAdvisory::UniformDFairnessActive:
+        UE_LOG(LogOGNet, Log,
+            TEXT("[RelayDelayFloor] floor=%d >= max(rttTierInputDelays) — uniform-D fairness mode active; tiers and LAN override are inert"),
+            floorTicks);
+        break;
+    case RelayDelayFloorAdvisory::None:
+        break;
+    }
+}
+
 int32 ASimulationManagerUImpl::recomputeAndPublishEffectiveInputDelay()
 {
     if (!m_replicatedTierConsumer.has_value())
         return 0;
 
     // THE FORMULA, in one place, over both cached inputs:
-    //   effective = max(floor, tierKnown ? tierInputDelayTicks(tier) : forced)
+    //   effective = max(floor, tierKnown ? tierInputDelayTicks(tier)
+    //                                     : rttTierInputDelays[kMaxConnectionTierIndex])
     // The tier arm and the no-tier arm both live inside effectiveInputDelayTicks,
     // and the floor is applied to BOTH of them there through applyRelayDelayFloor
     // — the same shared helper the server's ServerInputDelayQueue::effectiveDelay
@@ -1428,7 +1411,7 @@ int32 ASimulationManagerUImpl::recomputeAndPublishEffectiveInputDelay()
     return deltaDelayTicks;
 }
 
-void ASimulationManagerUImpl::applyTierTransitionStall(uint8 oldTier, uint8 newTier)
+void ASimulationManagerUImpl::applyTierTransitionStall(uint8 oldTier, uint8 newTier, bool hadAnyTier)
 {
     if (oldTier == newTier)
         return;     // an OnRep can fire for an unchanged value; nothing transitioned
@@ -1436,28 +1419,38 @@ void ASimulationManagerUImpl::applyTierTransitionStall(uint8 oldTier, uint8 newT
     if (!m_manager.has_value())
         return;     // core manager not constructed yet; no clock to stall
 
+    // [item 69] THE DECISION lives in core (shouldStallForTierTransition,
+    // ConnectionTierTable.h) so it has LLT coverage this UE-bound class does
+    // not. `hadAnyTier == false` — a fresh connection's first real OnRep —
+    // always requests zero: `oldTier` is the replicated property's compiled
+    // default there, not a tier the client ever actually ran at, so there is
+    // nothing predicted against a previous TIER's delay to give back (only
+    // against the pre-arrival no-tier fallback — see the PRESERVED QUIRK note
+    // above this function's call site).
     const TimeConfig& cfg = m_manager->getTimeConfig();
-    const int32 deltaDelayTicks =
-        (int32)tierDelayDeltaTicks((int32)oldTier, (int32)newTier, cfg);
+    const int32 stallTicks = (int32)shouldStallForTierTransition(
+        (int32)oldTier, (int32)newTier, hadAnyTier, cfg);
 
-    if (deltaDelayTicks <= 0)
+    if (stallTicks <= 0)
     {
-        // Downward (or delay-neutral) transition — no stall. The client may now
-        // predict FURTHER ahead, which the ordinary drift path reaches by advancing
-        // normally; that is a natural extension, not a stall.
+        // Either a downward/delay-neutral transition (the client may now
+        // predict FURTHER ahead, which the ordinary drift path reaches by
+        // advancing normally — a natural extension, not a stall) or a
+        // first-ever resolution (hadAnyTier == false), which always lands
+        // here regardless of newTier.
         UE_LOG(LogOGNet, Log,
-            TEXT("[ConnectionTier] tier %u -> %u delayDelta=%d, no stall"),
-            (unsigned int)oldTier, (unsigned int)newTier, deltaDelayTicks);
+            TEXT("[ConnectionTier] tier %u -> %u hadAnyTier=%d, no stall"),
+            (unsigned int)oldTier, (unsigned int)newTier, hadAnyTier ? 1 : 0);
         return;
     }
 
     // No-ops on an authority manager (it runs no prediction), which is also the
     // only role that can reach here without a client clock.
-    requestInputDelayIncreaseStall(deltaDelayTicks);
+    requestInputDelayIncreaseStall(stallTicks);
 
     UE_LOG(LogOGNet, Warning,
         TEXT("[ConnectionTier] tier %u -> %u UPWARD, requesting %d-tick prediction stall"),
-        (unsigned int)oldTier, (unsigned int)newTier, deltaDelayTicks);
+        (unsigned int)oldTier, (unsigned int)newTier, stallTicks);
 }
 
 ASimulationTimingRelay* ASimulationManagerUImpl::findTimingRelay()
@@ -1771,14 +1764,17 @@ void ASimulationManagerUImpl::relayRemoteInput(
     // wire instead of the second overwriting the first.
     //
     // ⛔ NO DEPTH IS READ HERE ANY MORE, AND THAT IS THE POINT. This site used to
-    // pass `TimeConfig::relayRedundancyDepthTicks` — session value 1 — into
-    // `writeLatest`. On the flush path that same value would make every staged entry
-    // after the first supersede its predecessor, the ring would carry exactly one
-    // entry per round, and bare C1 would silently become replace-latest again with
-    // no compile error and no warning (T43 finding 1). `stageRelayedInput` has no
-    // depth parameter; the capacity is `relayedInputRing::kMaxDepth`, taken as a
-    // constant inside the codec. The knob keeps its old meaning for the write path
-    // that no longer runs, and is now INERT — the `[RelayDepth]` line below says so.
+    // pass a session-configurable retention depth (its old identifier is on
+    // record in RN-13, ReviewNotes.md) into `writeLatest`. On the flush path that
+    // same value would make every staged entry after the first supersede its
+    // predecessor, the ring would carry exactly one entry per round, and bare C1
+    // would silently become replace-latest again with no compile error and no
+    // warning (T43 finding 1). `stageRelayedInput` has no depth parameter; the
+    // capacity is `relayedInputRing::kMaxDepth`, taken as a constant inside the
+    // codec. Item 63 / RN-13 deleted the now-fully-inert knob outright rather
+    // than keep it publishing a number nothing on this path reads any more; the
+    // machine-checked fence that replaces its startup proof line lives in
+    // `Network/RelayRedundancyDepthTest.cpp`.
     //
     // The outcome is deliberately unchecked here: `accepted` can only be false on
     // the stale-write arm, which the coordinator's monotonic `acceptedNew` gate

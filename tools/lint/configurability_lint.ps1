@@ -149,22 +149,12 @@ $Blacklist = @(
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'InputRedundancyBundle.h', 'FInputRedundancyBundle.h')
         Message = 'redundancyDepthTicks default (5 @100Hz interim / 3 @60Hz target) must live only in TimeConfig; read config.redundancyDepthTicks instead of re-declaring it (R-P1)'
     },
-    @{
-        Field   = 'relayRedundancyDepthTicks'
-        # og-netcode-v2-input-relay T1: entry count of the OUTBOUND relay ring
-        # (FRelayedInputRing). A SEPARATE knob from redundancyDepthTicks above —
-        # that entry's `redundancyDepth\w*` pattern cannot match this field because
-        # the (?<![\w.>]) lookbehind rejects the mid-identifier position after
-        # "relay", so this field needs (and gets) its own entry.
-        # The value 1 is generic, but the pattern is field-anchored, so only a
-        # non-member `relayRedundancyDepthTicks = 1` is flagged; every consumer
-        # reads it as cfg.relayRedundancyDepthTicks (member access, auto-excluded).
-        # The wire-safety CAP (relayedInputRing::kMaxDepth = 8) is intentionally not
-        # guarded here — R-P1 guards tuning values, not payload capacities.
-        Pattern = '(?<![\w.>])relayRedundancyDepthTicks\s*=\s*1\b'
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
-        Message = 'relayRedundancyDepthTicks default (1 — degenerate until the T9 cadence probe) must live only in TimeConfig; read config.relayRedundancyDepthTicks instead of re-declaring it (R-P1)'
-    },
+    # ⛔ RETIRED (item 63 / RN-13, 2026-08-16): the relay-ring retention-depth
+    # lint entry that used to live here is gone along with the field it guarded
+    # (its old identifier is on record in RN-13, ReviewNotes.md). Item 34's
+    # bare-C1 flush-on-poll replaced the write path it sized. If a redundancy-
+    # under-flush successor ships (gated on item 40), it is a NEW, differently-
+    # named field and needs its own entry, not this one restored.
     @{
         Field   = 'relayDelayFloorTicks'
         # og-netcode-v2-input-relay T11: the session-scoped minimum effective input
@@ -374,12 +364,11 @@ $Blacklist = @(
     # entry exists so a future in-header default/constant lives somewhere legal
     # rather than being silently forbidden. See Backlog T4 acceptance criteria.
     # -----------------------------------------------------------------------
-    @{
-        Field   = 'forcedInputLatencyTicks'
-        Pattern = '(?<![\w.>])forcedInputLatencyTicks\s*=\s*2\b'
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'ConnectionTierTable.h', 'ServerInputDelayQueue.h')
-        Message = 'forcedInputLatencyTicks default (2) must live only in TimeConfig; read config.forcedInputLatencyTicks instead of re-declaring it (R-P1)'
-    },
+    # The dedicated no-tier-baseline field's lint entry was RETIRED with the
+    # field itself (og-netcode-v2-input-relay item 62 / RN-12, 2026-08-16; its
+    # old identifier is on record in RN-12, ReviewNotes.md): the no-tier
+    # fallback is now `rttTierInputDelays[kMaxConnectionTierIndex]`, already
+    # covered by the entry below — there is no second field to lint.
     @{
         Field   = 'rttTierBoundariesMs'
         # Array field: the declaration carries a [4] extent between the name and

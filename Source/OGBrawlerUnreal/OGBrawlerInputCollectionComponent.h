@@ -7,7 +7,7 @@
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGSimulation/SimulationTimeContext.h"
-#include "OGSimulation/Network/ClientInputDelayLine.h"
+#include "OGSimulation/Network/LocalInputCache.h"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
 
@@ -117,7 +117,7 @@ public:
 	simulatableBrawler::PlayerInput buildPlayerInput(
 		const SimulationTimeStep& step,
 		uint32 componentId,
-		const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) const;
+		const LocalInputCache<simulatableBrawler::PlayerInput>& delayLine) const;
 
 	// Render-frame-callable live sample of the CONTINUOUS input fields only. See the block
 	// comment above for how this relates to buildPlayerInput and to source (3). Takes no

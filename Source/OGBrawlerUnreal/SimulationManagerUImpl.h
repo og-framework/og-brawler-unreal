@@ -106,7 +106,7 @@ enum class TryRegisterStatus { Pending, Ready };
 // nothing on this side ever constructs one.
 using BrawlerInputProviderFn = std::function<simulatableBrawler::PlayerInput(
 	const SimulationTimeStep&,
-	const ClientInputDelayLine<simulatableBrawler::PlayerInput>&)>;
+	const LocalInputCache<simulatableBrawler::PlayerInput>&)>;
 
 class USimmableUpdateComponent;
 class ASimulationManagerUImpl;
@@ -435,8 +435,9 @@ public:
     // A latched tier is being replayed because it landed before this listener
     // bound. Applies + republishes but does NOT stall — this is the FIRST tier
     // ever applied, so there are no ticks predicted against a previous tier's
-    // delay to give back, and its "previous" state is the pre-arrival
-    // forcedInputLatencyTicks baseline rather than a tier at all.
+    // delay to give back, and its "previous" state is the pre-arrival no-tier
+    // fallback (item 62 / RN-12: `rttTierInputDelays[kMaxConnectionTierIndex]`)
+    // rather than a tier at all.
     virtual void onConnectionTierReplayed(uint8_t tier) override;
 
     // ---- [T39 / og-netcode-v2-input-relay] THE RELAY-RING HOST BOUNDARY -----
@@ -657,9 +658,18 @@ private:
     // effective delay; a latch replay does not — see the interface header).
     void applyReplicatedRelayDelayFloor(uint8 floorTicks, bool payForIncrease);
 
+    // [item 62 / RN-12] ADVISORY-ONLY floor classification, logged from BOTH
+    // floor intake points (the ini override at the composition root and this
+    // manager's own OnRep, in `applyReplicatedRelayDelayFloor`) — the same
+    // belt-and-braces shape the A5 clamp already uses. Never an assert: see
+    // `classifyRelayDelayFloor` (ConnectionTierTable.h) for why floor 0 must stay
+    // silent. No-ops if `m_manager` has not been emplaced yet.
+    void logRelayDelayFloorAdvisory(int32 floorTicks);
+
     // THE SHARED TWO-INPUT RECOMPUTE (T11, review amendment A2b). Derives
     //
-    //     effective = max(floor, tierKnown ? tierInputDelayTicks(tier) : forced)
+    //     effective = max(floor, tierKnown ? tierInputDelayTicks(tier)
+    //                                       : rttTierInputDelays[kMaxConnectionTierIndex])
     //
     // from the two cached inputs — the floor in m_manager's TimeConfig and the
     // tier in m_replicatedTierConsumer — and pushes the result across to the
@@ -677,12 +687,17 @@ private:
     // rather than react to a transition (the composition root) ignore it.
     int32 recomputeAndPublishEffectiveInputDelay();
 
-    // Turn one tier transition into a client prediction stall. Computes the
-    // delta through the shared `tierDelayDeltaTicks` lookup (never off the raw
-    // config array — `lanZeroDelayOverride` makes those disagree for every
-    // transition touching tier 0) and forwards a POSITIVE delta to the client
-    // clock; non-positive deltas are dropped by the clock.
-    void applyTierTransitionStall(uint8 oldTier, uint8 newTier);
+    // Turn one tier transition into a client prediction stall. The DECISION
+    // (how many ticks, if any) is `shouldStallForTierTransition`
+    // (ConnectionTierTable.h, item 69 / og-netcode-v2-input-relay) — a pure
+    // function with its own LLT coverage, since this class has none. This
+    // method is the UE plumbing around it: it resolves `hadAnyTier` (whether
+    // the client had ALREADY received an authoritative tier before this call
+    // — see the caller, `onConnectionTierReceived`, for why that must be
+    // captured before this call rather than inferred from `oldTier`) and
+    // forwards a positive result to the client clock; non-positive results are
+    // dropped by the clock too, belt-and-braces.
+    void applyTierTransitionStall(uint8 oldTier, uint8 newTier, bool hadAnyTier);
 
     // [T9, relocated by T10] The client's ENTIRE share of the tier system: it
     // stores the replicated tier and turns it into behaviour through the SHARED
@@ -693,9 +708,10 @@ private:
     // Emplaced on BOTH roles deliberately: a pure client is the obvious consumer,
     // but a listen-server host runs client-side code paths on an AUTHORITY
     // manager, and an unbound cache there would answer 0 delay where the
-    // pre-arrival baseline (forcedInputLatencyTicks) is correct. No tier ever
+    // pre-arrival no-tier fallback (item 62 / RN-12:
+    // `rttTierInputDelays[kMaxConnectionTierIndex]`) is correct. No tier ever
     // reaches an authority world — the server writes the relay property, it never
-    // receives an OnRep for it — so the authority cache stays at that baseline
+    // receives an OnRep for it — so the authority cache stays at that fallback
     // for the whole session, which is exactly what the retired per-character
     // path also converged on.
     std::optional<ReplicatedTierConsumer> m_replicatedTierConsumer;
@@ -756,8 +772,8 @@ private:
     // "writes on every accepted receipt, and receipts are complete", plus
     // "1.003 sim ticks per frame". Both are true and neither covers the case that
     // matters: the ring is written from the RPC RECEIPT path, so its writes are
-    // paced by PACKET ARRIVAL, not by the sim — and at
-    // `relayRedundancyDepthTicks = 1` the ring is REPLACE-LATEST while Iris polls
+    // paced by PACKET ARRIVAL, not by the sim — and at the ring's then-compiled
+    // retention depth of 1 entry, the ring is REPLACE-LATEST while Iris polls
     // once per game-thread frame. Two writes in one frame therefore lose the first
     // one in server memory, before replication ever sees it, and the client
     // observes that as exactly the same `gapCaptureTicks > 1` a send-path drop
