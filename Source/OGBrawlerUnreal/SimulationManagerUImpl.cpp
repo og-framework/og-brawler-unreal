@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "SimulationManagerUImpl.h"
+#include "OGSimulation/CompilerControl.h"
 #include "Runtime/Engine/Public/Net/UnrealNetwork.h"
 #include "EngineUtils.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
@@ -263,7 +264,7 @@ namespace
 
 }
 
-#pragma optimize( "", off )
+OGSIM_OPTIMIZE_OFF
 
 
 void FSimulationState2::Copy(const FSimulationState2& Value)
@@ -2336,4 +2337,4 @@ void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 Num
 	releaseDelayedInputsForStep(PhysicsStep, NumSteps);
 }
 
-#pragma optimize( "", on )
+OGSIM_OPTIMIZE_ON

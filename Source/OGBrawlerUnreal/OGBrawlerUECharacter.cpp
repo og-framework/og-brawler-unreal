@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGBrawlerUECharacter.h"
+#include "OGSimulation/CompilerControl.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -41,7 +42,7 @@ DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 //////////////////////////////////////////////////////////////////////////
 // AOGBrawlerUECharacter
 
-#pragma optimize( "", off )
+OGSIM_OPTIMIZE_OFF
 
 AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	: m_attackTimer(0.f)
@@ -389,3 +390,11 @@ bool AOGBrawlerUECharacter::isCharacterInFlinch() const
 	const DAttackState state = SimmableUpdateComponent->getMachineVizState();
 	return state == DAttackState::HitFlinch || state == DAttackState::GuardFlinch;
 }
+
+// [og-netcode-v2-input-relay item 77] Closes the OGSIM_OPTIMIZE_OFF opened
+// above (AOGBrawlerUECharacter ctor). The file had no closing pragma since its
+// initial commit, so the whole rest of the TU compiled unoptimized in every
+// build — closing the pair here, at true end-of-file, changes nothing (there
+// was no code after this point either), it just makes the always-off scope an
+// explicit pair instead of an implicit "off to EOF".
+OGSIM_OPTIMIZE_ON

@@ -11,7 +11,8 @@
 #include "Runtime/Experimental/Chaos/Public/Chaos/Framework/PhysicsSolverBase.h"
 #include "Runtime/Experimental/Chaos/Public/PBDRigidsSolver.h"
 #include "Physics/Experimental/PhysInterface_Chaos.h"
-#pragma optimize( "", off )
+#include "OGSimulation/CompilerControl.h"
+OGSIM_OPTIMIZE_OFF
 
 ChaosSpatialQueryAdapter::ChaosSpatialQueryAdapter(UWorld* world, std::initializer_list<ChaosCategoryMapping> categoryMappings)
 	: m_world(world)
@@ -243,3 +244,11 @@ FCollisionObjectQueryParams ChaosSpatialQueryAdapter::toObjectQueryParams(Collis
 	}
 	return params;
 }
+
+// [og-netcode-v2-input-relay item 77] Closes the OGSIM_OPTIMIZE_OFF opened
+// above. The file had no closing pragma since its initial commit, so the
+// whole rest of the TU compiled unoptimized in every build — closing the pair
+// here, at true end-of-file, changes nothing (there was no code after this
+// point either), it just makes the always-off scope an explicit pair instead
+// of an implicit "off to EOF".
+OGSIM_OPTIMIZE_ON

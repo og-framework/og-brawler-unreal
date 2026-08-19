@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "SimmableUpdateComponent.h"
+#include "OGSimulation/CompilerControl.h"
 #include "Chaos/ChaosEngineInterface.h"
 #include "Chaos/Declares.h"
 #include "OGBrawler/DAttackRadialSequence.h"
@@ -62,7 +63,7 @@
 
 
 
-#pragma optimize( "", off )
+OGSIM_OPTIMIZE_OFF
 
 namespace DAttackFakeInputCVars
 {
@@ -299,8 +300,8 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		// collectInputAll now hands the character's own raw-capture delay line
 		// straight in, so this lambda reaches for nothing outside its arguments.
 		inputProvider = [ic, id](const SimulationTimeStep& step,
-		                         const LocalInputCache<simulatableBrawler::PlayerInput>& delayLine) {
-			return ic->buildPlayerInput(step, id, delayLine);
+		                         const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) {
+			return ic->buildPlayerInput(step, id, localInputCache);
 		};
 	}
 
@@ -1067,4 +1068,12 @@ void USimmableUpdateComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 	// ASimulationConnectionRelay, whose owner-only RELEVANCY does the narrowing
 	// the condition used to do.
 }
+
+// [og-netcode-v2-input-relay item 77] Closes the OGSIM_OPTIMIZE_OFF opened
+// above. The file had no closing pragma since its initial commit, so the
+// whole rest of the TU (~1000 lines, including TickComponent) compiled
+// unoptimized in every build — closing the pair here, at true end-of-file,
+// changes nothing (there was no code after this point either), it just makes
+// the always-off scope an explicit pair instead of an implicit "off to EOF".
+OGSIM_OPTIMIZE_ON
 
