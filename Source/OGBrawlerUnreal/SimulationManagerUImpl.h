@@ -28,6 +28,10 @@
 #include "OGSimulation/SimulationManagerConcept.h"
 #include "OGSimulation/SimulationObjectStorage.h"
 #include "OGSimulation/SimulationReconciliation.h"
+// [item 87] Explicit — the resolution peer is now a real composition-root
+// sibling (was reachable only transitively via SimulationNetSync.h's own
+// include while it was NetSync's owned scaffold member).
+#include "OGSimulation/SimulationInputResolution.h"
 #include "OGSimulation/SimulationNetSync.h"
 #include "OGSimulation/SimulationIntegrationExecutor.h"
 #include "OGSimulation/Network/ConnectionSlotKey.h"
@@ -361,17 +365,21 @@ public:
     // source => skip the viz this frame" behaviour at the call site is preserved
     // rather than re-specified: see BrawlerVisualizationInputSource.h.
     //
-    // Deliberately a NARROW passthrough rather than an editNetSync() accessor, for
-    // exactly the reason publishClientEffectiveInputDelayTicks below states: the
-    // net sync is otherwise driven only by the core SimulationManager, and this
-    // keeps the game thread's reach into it to one read-only query.
+    // Deliberately a NARROW passthrough rather than an editInputResolution()
+    // accessor, for exactly the reason publishClientEffectiveInputDelayTicks
+    // below states: the resolution peer is otherwise driven only by the core
+    // SimulationManager, and this keeps the game thread's reach into it to
+    // one read-only query.
     //
     // GAME THREAD. The store's writer (OnRep_RelayedInputRing) is game-thread too,
     // so this reader is same-thread with the writer — see the threading note on
-    // SimulationNetSync::getLastRelayedInput.
+    // SimulationInputResolution::getLastRelayedInput.
+    //
+    // [item 87] Re-targeted off `m_netSync` — the accessor moved to the
+    // resolution peer with the promotion (design §C.4).
     std::optional<simulatableBrawler::PlayerInput> getLastRelayedInput(unsigned int id) const
     {
-        return m_netSync.getLastRelayedInput<SimulatableBrawler>(id);
+        return m_inputResolution.getLastRelayedInput<SimulatableBrawler>(id);
     }
 
     // [T9] The one shared TimeConfig, for game-thread consumers that must BIND to
@@ -397,18 +405,22 @@ public:
     // a bare atomic is sufficient here and why this is NOT the same problem as
     // T10's queue.
     //
-    // Deliberately a NARROW passthrough rather than an editNetSync() accessor:
-    // the net sync is otherwise driven exclusively by the core SimulationManager,
-    // and handing game-thread UObject code a general handle to it would invite
-    // exactly the cross-thread reach this method exists to keep to one scalar.
+    // Deliberately a NARROW passthrough rather than an editInputResolution()
+    // accessor: the resolution peer is otherwise driven exclusively by the
+    // core SimulationManager, and handing game-thread UObject code a general
+    // handle to it would invite exactly the cross-thread reach this method
+    // exists to keep to one scalar.
+    //
+    // [item 87] Re-targeted off `m_netSync` onto the resolution peer, which
+    // now owns `m_clientEffectiveInputDelayTicks` (design §C.4).
     void publishClientEffectiveInputDelayTicks(int32 delayTicks)
     {
-        m_netSync.setClientEffectiveInputDelayTicks(delayTicks);
+        m_inputResolution.setClientEffectiveInputDelayTicks(delayTicks);
     }
 
     int32 getClientEffectiveInputDelayTicks() const
     {
-        return m_netSync.getClientEffectiveInputDelayTicks();
+        return m_inputResolution.getClientEffectiveInputDelayTicks();
     }
 
     // ---- [T10 / og-netcode-v2-input-relay] CLIENT TIER CONSUMPTION ---------
@@ -835,16 +847,20 @@ private:
     // depiction, so these names don't leak into the global namespace from a
     // widely-included UE adapter header. OGSim primitives named UNQUALIFIED —
     // the whole OGSim core is in the global namespace (lead D12, 2026-07-07).
-    using BrawlerSimulatables   = SimulatableList<SimulatableBrawler>;
-    using BrawlerStorage        = apply_t<SimulationObjectStorage,  BrawlerSimulatables>;
-    using BrawlerNetSync        = apply_t<SimulationNetSync,        BrawlerSimulatables>;
-    using BrawlerReconciliation = apply_t<SimulationReconciliation, BrawlerSimulatables>;
+    using BrawlerSimulatables    = SimulatableList<SimulatableBrawler>;
+    using BrawlerStorage         = apply_t<SimulationObjectStorage,     BrawlerSimulatables>;
+    using BrawlerNetSync         = apply_t<SimulationNetSync,           BrawlerSimulatables>;
+    // [item 87] The resolution peer's own alias — promoted off NetSync's
+    // scaffold to a real composition-root sibling.
+    using BrawlerInputResolution = apply_t<SimulationInputResolution,   BrawlerSimulatables>;
+    using BrawlerReconciliation  = apply_t<SimulationReconciliation,    BrawlerSimulatables>;
 
-    // Owned simulation resources + peers — construction order matters:
-    // storage → staticData → reconciliation → netSync, all top-to-bottom BEFORE
-    // m_integrationLayer / m_manager (emplaced in BeginPlay) bind references to
-    // them. Types come straight from the alias chain above (single source of
-    // truth) — retyped in T12 so a BrawlerSimulatables widening cascades here.
+    // Owned simulation resources + peers — construction order matters (design
+    // §A.3): storage → staticData → reconciliation → inputResolution →
+    // netSync, all top-to-bottom BEFORE m_integrationLayer / m_manager
+    // (emplaced in BeginPlay) bind references to them. Types come straight
+    // from the alias chain above (single source of truth) — retyped in T12
+    // so a BrawlerSimulatables widening cascades here.
     BrawlerStorage m_storage;
 
     // Game static data — the ownership ROOT for StaticData across the whole tree.
@@ -859,8 +875,38 @@ private:
     // SimulationIntegrationExecutor::getStaticData() site — T12.)
     simulatableBrawler::StaticData m_staticData;
 
-    BrawlerReconciliation m_reconciliation{ m_storage };
-    BrawlerNetSync        m_netSync{ m_storage, m_reconciliation };
+    // [og-netcode-v2-input-relay item 91 part G] THIS ORDERING IS ENFORCED BY
+    // ONE THING ONLY: C++ constructs class members in DECLARATION order
+    // regardless of initializer-list order, so `m_reconciliation` →
+    // `m_inputResolution` → `m_netSync` here IS the construction order —
+    // matching the dependency direction each ctor's reference parameters
+    // require (each peer below takes references to the ones declared above
+    // it). ⛔ NO `static_assert`, NO `-Wreorder`-as-error anywhere in this
+    // tree's `.Build.cs`/`.Target.cs` (verified item 87/91) — a future edit
+    // that reordered these three declarations while leaving the initializer
+    // lists (and therefore the AUTHOR'S intended order) textually unchanged
+    // would compile silently and construct in the NEW, wrong order.
+    //
+    // WHY IT HAS NOT BITTEN: every ctor here is a TRIVIAL REFERENCE STORE —
+    // none of the three peers' constructors call into a sibling peer during
+    // construction, so a reorder today would only leave each reference bound
+    // to a not-yet-fully-constructed-but-not-yet-ACCESSED sibling object,
+    // which is harmless as long as nothing dereferences it before
+    // `BeginPlay`. THE CONDITION UNDER WHICH THIS BECOMES LOAD-BEARING: the
+    // day a future constructor body (not just its initializer list) calls a
+    // method on one of these sibling references — at that point a reorder
+    // would make that call run against a not-yet-constructed object, which
+    // is undefined behaviour C++ gives no compiler diagnostic for. If you are
+    // adding ctor logic to any of the three peers below, or to
+    // `SimulationManager`/`SimulationIntegrationExecutor` further down this
+    // same declaration block, re-read this comment before touching
+    // declaration order.
+    BrawlerReconciliation  m_reconciliation{ m_storage };
+    // [item 87 / design §A.3] Constructed BEFORE m_netSync — netSync's own
+    // ctor now takes a reference to this peer (see the by-id doors it calls
+    // internally, unchanged from the item-86 scaffold).
+    BrawlerInputResolution m_inputResolution{ m_storage, m_reconciliation };
+    BrawlerNetSync         m_netSync{ m_storage, m_reconciliation, m_inputResolution };
 
     // SimulationIntegrationExecutor's leading three params are engine-specific
     // (StaticData is game-specific; the adapters are Chaos/UE), so apply_t can't
@@ -889,8 +935,8 @@ private:
     std::optional<IntegrationLayerType> m_integrationLayer;
 
     using ManagerType = SimulationManager<
-        BrawlerIntegrationExec, BrawlerNetSync, BrawlerReconciliation, BrawlerSystemsExec,
-        BrawlerStorage, simulatableBrawler::StaticData>;
+        BrawlerIntegrationExec, BrawlerNetSync, BrawlerInputResolution, BrawlerReconciliation,
+        BrawlerSystemsExec, BrawlerStorage, simulatableBrawler::StaticData>;
     std::optional<ManagerType> m_manager;
 
     static ASimulationManagerUImpl* s_instances[2];

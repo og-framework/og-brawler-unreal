@@ -708,9 +708,13 @@ void ASimulationManagerUImpl::BeginPlay()
 		});
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_manager.emplace(false, solver->GetAsyncDeltaTime(), ManagerType::Params{
-			*m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec,
+			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmloggerServer) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
+		// [item 87] The resolution peer is a real sibling now, not a
+		// NetSync-owned scaffold — the composition root seeds its logger
+		// directly, same as reconciliation and netSync each already do.
+		m_inputResolution.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmloggerServer));
 
 		// [T9 part 4] Inject the game's zero input for the client input delay
@@ -730,7 +734,9 @@ void ASimulationManagerUImpl::BeginPlay()
 		//
 		// ORDER IS LOAD-BEARING: this must precede every registerAuthorityOwner
 		// call (registration happens per character, later).
-		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
+		// [item 87] Re-targeted off `m_netSync` onto the resolution peer,
+		// which now owns `m_neutralInputs` (design §C.4).
+		m_inputResolution.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
 
 		// [T11] THE SESSION FLOOR, established before anything reads an effective
 		// delay. Two steps, in this order:
@@ -900,16 +906,22 @@ void ASimulationManagerUImpl::BeginPlay()
 		});
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), ManagerType::Params{
-			*m_integrationLayer, m_netSync, m_reconciliation, m_systemsExec,
+			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmlogger) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
+		// [item 87] The resolution peer is a real sibling now, not a
+		// NetSync-owned scaffold — the composition root seeds its logger
+		// directly, same as reconciliation and netSync each already do.
+		m_inputResolution.setLogger(std::function<void(const char*)>(pctmlogger));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmlogger));
 
 		// [T9 part 4] The game's zero input fills the [0, effectiveDelay) window
 		// at session start and after a hard resync. It is NOT PlayerInput{} —
 		// getZeroPlayerInput builds (0,0,1) forward vectors — so this injection
 		// is load-bearing, not defensive.
-		m_netSync.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
+		// [item 87] Re-targeted off `m_netSync` onto the resolution peer,
+		// which now owns `m_neutralInputs` (design §C.4).
+		m_inputResolution.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
 
 		// [T9 part 3, rewired by T10] Establish the PRE-ARRIVAL baseline delay
 		// before any tier has replicated. The no-tier fallback
@@ -1616,8 +1628,10 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     // All resolvable — perform the actual registration.
     if (record.isAuthority)
     {
+        // [item 87] `m_inputResolution` inserted — the facade gained the
+        // parameter with the resolution peer's promotion (design §C.5).
         registerSimulatable<SimulatableBrawler>(
-            m_storage, m_reconciliation, m_netSync,
+            m_storage, m_reconciliation, m_inputResolution, m_netSync,
             id, std::move(*record.simulatable),
             /*predictionOwner=*/owner,
             /*authorityOwner=*/owner);
@@ -1625,7 +1639,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     else
     {
         registerSimulatable<SimulatableBrawler>(
-            m_storage, m_reconciliation, m_netSync,
+            m_storage, m_reconciliation, m_inputResolution, m_netSync,
             id, std::move(*record.simulatable),
             /*owner=*/owner,
             /*inputProvider=*/std::move(record.inputProvider));
@@ -2287,8 +2301,10 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
         m_manager->notifyCharacterUnregistered(id);
     }
 
+    // [item 87] `m_inputResolution` inserted — the facade gained the
+    // parameter with the resolution peer's promotion (design §C.5).
     unregisterSimulatable<SimulatableBrawler>(
-        m_storage, m_reconciliation, m_netSync,
+        m_storage, m_reconciliation, m_inputResolution, m_netSync,
         id,
         /*predictionOwner=*/&owner,
         /*authorityOwner=*/isAuthority ? &owner : nullptr);
