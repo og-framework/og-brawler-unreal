@@ -30,16 +30,19 @@ jobs:
       # job at the same place regardless of which rule caught it.
       #   configurability_lint.ps1        - R-P1, config values must live in TimeConfig
       #   visualization_hitbox_isolation.ps1 - R-UE1, viz must not reach the hit resolver
+      #   doc_anchor_lint.ps1            - M1, every doc anchor must resolve in the tree
       # `exit $LASTEXITCODE` is required: without it the step's exit status is that
       # of the LAST command, so a configurability failure followed by a clean
       # visualization run would pass silently.
-      - name: Lint (R-P1 configurability + R-UE1 visualization isolation)
+      - name: Lint (R-P1 configurability + R-UE1 visualization isolation + M1 doc anchors)
         shell: pwsh
         run: |
           $failed = 0
           pwsh tools/lint/configurability_lint.ps1
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           pwsh tools/lint/visualization_hitbox_isolation.ps1
+          if ($LASTEXITCODE -ne 0) { $failed = 1 }
+          pwsh tools/lint/doc_anchor_lint.ps1
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           exit $failed
 

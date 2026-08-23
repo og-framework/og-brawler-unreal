@@ -116,5 +116,3 @@ void DAttackRendererFunctorUImpl::drawMesh(const std::vector<glm::vec3>& vertice
 	DrawDebugMesh(m_world, uVertices, uIndices, color, false, -1.f, 4.f);
 }
 
-
-#pragma optimize( "", on )

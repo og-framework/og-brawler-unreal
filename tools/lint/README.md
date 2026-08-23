@@ -245,6 +245,138 @@ reading post-sim state through a `const&` is the design, not an exception.
 
 ---
 
+# Doc-anchor lint (M1)
+
+`doc_anchor_lint.ps1` resolves every machine-checkable claim a **docs tier**
+makes about the tree, and reports the ones that do not resolve.
+
+> **The rule:** a document that names a file, a `Class::member`, an `m_member` or
+> an identifier is **asserting that thing exists**. Every such assertion must
+> resolve against the tree, or be **declared** as an intentional exception with a
+> reason.
+
+Ruled in at gate **G2** of the `og-source-doc-extraction` initiative (2026-08-21),
+as mechanism **M1**. It exists because the six recorded staleness defects in
+`og-netcode-v2-input-relay` were all **broken joins**: one fact asserted in two
+places, where the edit that broke it touched one place and could not see the other.
+
+## Running locally
+
+Requires **PowerShell 7+** (`pwsh`).
+
+```pwsh
+pwsh tools/lint/doc_anchor_lint.ps1
+```
+
+With no arguments it lints **every docs tier** against `Plugins`, `Source`,
+`Config`, `docs` and `tools`.
+
+### There is more than one tier, and that is a licence fact
+
+| tier | licence | travels with |
+|---|---|---|
+| `Plugins/OGSimulation/…/OGSimulation/docs` | MPL-2.0 | the `og-simulation` submodule |
+| `Source/OGBrawlerUnreal/docs` | BUSL-1.1 | this repository |
+
+Decision **D9** (2026-08-23) ruled the second tier in: `OGBrawlerUnreal`
+documentation cannot live in the MPL-2.0 tier, because that tier ships with a
+different repository under a different licence.
+
+> **Why they are both in the DEFAULT and not left to the caller.** A tier nobody
+> names on the command line is not reported as unlinted — it is never opened, and
+> the run still prints `RESULT: CLEAN` and exits 0. Silence that reads as success
+> is this project's signature defect. So every defaulted run prints one
+> `present` / `EMPTY` / `ABSENT` line per tier before the counts, and a run where
+> **no** tier holds a document is exit 2, not a clean zero.
+
+| Parameter             | Default                          | Purpose |
+| --------------------- | -------------------------------- | ------- |
+| `-DocPaths`           | every `.md` in every tier below  | Documents to lint. |
+| `-DefaultDocDirs`     | the two tiers above              | Tiers discovered when `-DocPaths` is absent; each one's state is printed. |
+| `-ScanRoots`          | `Plugins Source Config docs tools` | Where files and symbols are resolved. |
+| `-RepoRoot`           | two levels above the script      | Root the relative paths resolve against. |
+| `-PathAlias`          | `<core>` → core headers, `<brawler>` → `Source/OGBrawlerUnreal/` | Prefix aliases used inside anchors. |
+| `-ExternalNamespaces` | `std Chaos FMath UE TArray …`    | Qualified roots skipped **and enumerated**. |
+| `-NoBareIdentifiers`  | off                              | Turns off the identifier/type/snippet rules. |
+| `-NoCommentStrip`     | off                              | **Negative control only** — see below. |
+
+Exit codes: **0** = clean · **1** = an unresolved anchor or an unused escape ·
+**2** = usage/IO error.
+
+## The anchor grammar
+
+| shape | example | resolves when |
+|---|---|---|
+| FILE | `` `Network/RemoteInputCache.h` `` | a file whose path suffix matches exists under a scan root |
+| FILE:LINE | `` `ResimGatePolicy.h:86` `` | …and the line (or `86-92` range) is inside it |
+| PAIR | `` `File.h` :: `symbol` ``, or two adjacent table cells | the symbol occurs in **that** file, on a non-comment line |
+| QSYM | `` `StateCorrectionCache::pushPredictionTick` `` | a file declares that type and carries the member in code |
+| MEMBER | `` `m_pendingResimAnchorTick` `` | it occurs in non-comment code somewhere |
+| IDENT / TYPE | `` `collectInputAll` ``, `` `ResimSweepDiagnostics` `` | same, for lowerCamelCase and PascalCase tokens |
+| SNIPPET | `` `if (!withinDepth) { ++x; }` `` | every identifier inside the fragment resolves |
+
+Everything else inside backticks is **counted and printed as UNCHECKED**. That
+number is part of the output on every run, clean or not: a lint that hides what it
+could not parse is the failure this project keeps repeating, and "clean" must never
+be readable as "verified".
+
+## Comment-stripping is load-bearing
+
+Symbol resolution runs against source text with `//`, `/* */` and (in `.ini`) `;`
+comments removed — the same discipline as `configurability_lint.ps1`.
+
+Measured, not assumed: `SimulationNetSync::collectInputAll` is a **dead owner** —
+the method moved to `SimulationInputResolution` — yet `SimulationNetSync.h` still
+mentions `collectInputAll` four times, **all four in comments**. Without the strip,
+that anchor resolves and the lint silently passes the single defect the initiative
+most wants caught. `-NoCommentStrip` exists **only** to demonstrate that false
+negative; the Pester spec pins it.
+
+## Escapes — a lint reads names, not sentences
+
+A document that says *"`m_isResimulated` was retired at item 45"* is correct
+**precisely because** the name does not resolve. Three markers declare that:
+
+```markdown
+<!-- lint-external-ref: TOKEN -- reason -->            (document-scoped, one token)
+<!-- lint-anchor-ignore: reason -->                    (the line it appears on)
+<!-- lint-anchor-ignore-begin: reason --> … <!-- lint-anchor-ignore-end -->
+```
+
+**Every escape is enumerated with its reason in the output**, and **an escape that
+suppresses nothing is itself a violation** — a pattern matching nothing passes every
+check, and a stale exemption must not rot quietly. The escape is an attack surface
+by construction (a lazy author can silence a real hit with it), which is why the
+reasons are printed rather than merely honoured.
+
+**Contract:** a doc that gains an intentionally unresolvable reference gains its
+declaration in the same change, and the reason says *why* it cannot resolve.
+
+## Known limitations (intentional)
+
+- **It checks that a name EXISTS; it never checks that a sentence is TRUE.** A
+  resolvable anchor on a false claim passes. Live instance on 2026-08-21:
+  `SimulationManager.h:26-37`, every symbol resolving, the sentence wrong.
+- It cannot see an **omission**, a doc **contradicting itself**, or a move that
+  silently **edited** what it copied.
+- **String literals are not stripped**, only comments — a symbol surviving only
+  inside a log format string resolves.
+- A `file:NNN` anchor is checked for **range, not content**: `:371` proves the file
+  has 371 lines, not that line 371 still says what the doc claims.
+
+## Tests
+
+`tools/lint/tests/doc_anchor_lint.Tests.ps1` (Pester 5, pattern per
+`tools/og-tools/tests/*.Tests.ps1`). Every context pairs a must-be-silent case with
+a must-fire case over the same fixture, so the lint's ability to fail is a test
+rather than a claim. The known-bad fixture seeds four real historical defects.
+
+```pwsh
+pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests -Output Detailed"
+```
+
+---
+
 # Bandwidth measurement (`measure_bandwidth.ps1`)
 
 `measure_bandwidth.ps1` is the Phase 2a (`og-netcode-v1-impl` Task 19) measurement

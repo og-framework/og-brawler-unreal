@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <stdexcept>
 
-#pragma optimize( "", off )
+#include "OGSimulation/CompilerControl.h"
+OGSIM_OPTIMIZE_OFF
 
 namespace uglm
 {
@@ -178,4 +179,4 @@ namespace uglm
 	}
 }
 
-#pragma optimize( "", on )
+OGSIM_OPTIMIZE_ON

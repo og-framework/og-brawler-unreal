@@ -8,7 +8,8 @@
 #include <thread>
 #endif
 
-#pragma optimize( "", off )
+#include "OGSimulation/CompilerControl.h"
+OGSIM_OPTIMIZE_OFF
 
 class FOGBrawlerUEModule : public FDefaultGameModuleImpl
 {
@@ -28,4 +29,4 @@ public:
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FOGBrawlerUEModule, OGBrawlerUnreal, "OGBrawlerUnreal");
 
-#pragma optimize( "", on )
+OGSIM_OPTIMIZE_ON

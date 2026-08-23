@@ -341,7 +341,7 @@ void UOGBrawlerInputCollectionComponent::onRightAttack(const FInputActionValue& 
 
 simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(
     const SimulationTimeStep& step, uint32 componentId,
-    const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) const
+    const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) const
 {
 	if (!hasInputComponent())
 		return simulatableBrawler::getZeroPlayerInput();
@@ -365,7 +365,7 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	// history, call the core. DelayLineMotionHistory is the has()-gated adapter — the delay
 	// line answers an absent tick with the NEUTRAL input, and matchSequence needs a nullptr.
 	const uint32_t triggeredActionId = simulatableBrawler::resolveTriggeredActionId(
-		simulatableBrawler::DelayLineMotionHistory(delayLine),
+		simulatableBrawler::DelayLineMotionHistory(localInputCache),
 		step.getTick(),
 		continuous,
 		leftAttack,

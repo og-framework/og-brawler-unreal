@@ -84,7 +84,7 @@ OGSIMULATIONUNREAL_API DECLARE_LOG_CATEGORY_EXTERN(LogOGInputRelay, Warning, All
 //
 // 3. SKIP THE OWNER — `COND_SkipOwner` on the ring property. The owning client
 //    provably never reads its own ring: `SimulationNetSync::registerPrediction
-//    Owner` creates a `RelayedInputStore` only on the provider-ABSENT branch,
+//    Owner` creates a `RemoteInputCache` only on the provider-ABSENT branch,
 //    and `collectInputAll` structurally cannot reach a store for an id that has
 //    a provider. That echo was ~85 B per connection per round of pure waste.
 //    ⚠ `SetOwner(character)` IS REQUIRED FOR THIS, NOT COSMETIC: Iris resolves

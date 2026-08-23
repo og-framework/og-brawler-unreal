@@ -1,0 +1,114 @@
+LogInit: Display: No sandbox specified, assuming ../../Saved/Cooked/WindowsClient/
+LogCsvProfiler: Display: Metadata set : systemresolution.resx="1280"
+LogCsvProfiler: Display: Metadata set : systemresolution.resy="720"
+LogAudio: Display: Pre-Initializing Audio Device Manager...
+LogAudio: Display: AudioInfo: 'OPUS' Registered
+LogAudioDebug: Display: Lib vorbis DLL was dynamically loaded.
+LogAudio: Display: AudioInfo: 'OGG' Registered
+LogAudio: Display: AudioInfo: 'ADPCM' Registered
+LogAudio: Display: AudioInfo: 'PCM' Registered
+LogAudio: Display: AudioInfo: 'BINKA' Registered
+LogAudio: Display: AudioInfo: 'RADA' Registered
+LogAudio: Display: Audio Device Manager Pre-Initialized
+RenderDocPlugin: Display: RenderDoc plugin will not be loaded. Use '-AttachRenderDoc' on the cmd line or enable 'renderdoc.AutoAttach' in the plugin settings.
+LogCsvProfiler: Display: Metadata set : systemresolution.resx="1920"
+LogCsvProfiler: Display: Metadata set : systemresolution.resy="1080"
+LogHAL: Display: Platform has ~ 32 GB [33510694912 / 34359738368 / 32], which maps to Largest [LargestMinGB=32, LargerMinGB=12, DefaultMinGB=8, SmallerMinGB=6, SmallestMinGB=0)
+LogCsvProfiler: Display: Metadata set : extradevelopmentmemorymb="0"
+LogWindowsTouchpad: Display: CacheForceMaxTouchpadSensitivityMode SetMaxTouchpadSensitivity
+LogObj: Display: Attempting to load config data for Default__SlateThemeManager before the Class has been constructed/registered/linked (likely during module loading or early startup). This will result in the load silently failing and should be fixed.
+LogCsvProfiler: Display: Metadata set : verbatimrhiname="Null"
+LogCsvProfiler: Display: Metadata set : rhiname="Null"
+LogCsvProfiler: Display: Metadata set : rhifeaturelevel="SM6"
+LogCsvProfiler: Display: Metadata set : shaderplatform="PCD3D_SM6"
+LogStreaming: Display: FlushAsyncLoading(1): 1 QueuedPackages, 0 AsyncPackages
+LogConfig: Display: Read in platform Android ini files took 0.06 seconds
+LogConfig: Display: Read in platform IOS ini files took 0.05 seconds
+LogConfig: Display: Read in platform Linux ini files took 0.05 seconds
+LogConfig: Display: Read in platform LinuxArm64 ini files took 0.04 seconds
+LogConfig: Display: Read in platform Mac ini files took 0.03 seconds
+LogConfig: Display: Read in platform TVOS ini files took 0.03 seconds
+LogConfig: Display: Read in platform VisionOS ini files took 0.04 seconds
+LogDeviceProfileManager: Display: Deviceprofile LinuxArm64Editor not found.
+LogDeviceProfileManager: Display: Deviceprofile LinuxArm64 not found.
+LogCsvProfiler: Display: Metadata set : deviceprofile="WindowsClient"
+LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+LogMetaSound: Display: MetaSound Page Target Initialized to 'Default'
+LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+LogAudio: Display: Registering Engine Module Parameter Interfaces...
+LogAudio: Display: Initializing Audio Device Manager...
+LogAudio: Display: Loading Default Audio Settings Objects...
+LogAudio: Display: No default SoundConcurrencyObject specified (or failed to load).
+LogAudio: Display: Audio Device Manager Initialized
+LogAudio: Display: Creating Audio Device:                 Id: 1, Scope: Shared, Realtime: True
+LogAudioMixer: Display: Audio Mixer Platform Settings:
+LogAudioMixer: Display: 	Sample Rate:						  48000
+LogAudioMixer: Display: 	Callback Buffer Frame Size Requested: 1024
+LogAudioMixer: Display: 	Callback Buffer Frame Size To Use:	  1024
+LogAudioMixer: Display: 	Number of buffers to queue:			  1
+LogAudioMixer: Display: 	Max Channels (voices):				  32
+LogAudioMixer: Display: 	Number of Async Source Workers:		  4
+LogAudio: Display: AudioDevice MaxSources: 32
+LogAudio: Display: Audio Spatialization Plugin: None (built-in).
+LogAudio: Display: Audio Reverb Plugin: None (built-in).
+LogAudio: Display: Audio Occlusion Plugin: None (built-in).
+LogAudioMixer: Display: Initializing audio mixer using platform API: 'XAudio2'
+LogAudioMixer: Display: Using Audio Hardware Device Headphones (ROG CETRA OPEN WIRELESS)
+LogAudioMixer: Display: Initializing Sound Submixes...
+LogAudioMixer: Display: Creating Master Submix 'MasterSubmixDefault'
+LogAudioMixer: Display: Creating Master Submix 'MasterReverbSubmixDefault'
+LogAudioMixer: Display: Output buffers initialized: Frames=1024, Channels=2, Samples=2048, InstanceID=1
+LogAudioMixer: Display: Starting AudioMixerPlatformInterface::RunInternal(), InstanceID=1
+LogAudioMixer: Display: FMixerPlatformXAudio2::SubmitBuffer() called for the first time. InstanceID=1
+LogCsvProfiler: Display: Metadata set : largeworldcoordinates="1"
+LogAudio: Display: Audio Device (ID: 1) registered with world 'Untitled'.
+LogInit: Display: Game Engine Initialized.
+LogInit: Display: Starting Game.
+LogCsvProfiler: Display: Metadata set : iris="1"
+LogIris: Display: Iris ReplicationSystem[0]: ReplicationSystem_2147482512 (0x0000027B03B6AC00) is created
+LogIris: Display: FInternalNetSerializerDelegates::BroadcastLoadedModulesUpdated() called while there are 0 active ReplicationSystems. This is good. Total loaded modules: 70.
+LogInit: Display: Engine is initialized. Leaving FEngineLoop::Init()
+LogTrace: Display: Control listening on port 38658
+LogIris: Display: Iris ReplicationSystem[0]: ReplicationSystem_2147482512 (0x0000027B03B6AC00) is about to be destroyed
+LogAudio: Display: Audio Device unregistered from world 'None'.
+LogStreaming: Display: FlushAsyncLoading(61): 1 QueuedPackages, 0 AsyncPackages
+LogAudio: Display: Audio Device (ID: 1) registered with world 'ThirdPersonMap'.
+LogWorldPartition: Display: WorldPartition initialize started...
+LogWorldPartition: Display: WorldPartition initialize took 329 us
+LogOGNet: Warning: [StateRotation] session K = 1 (compiled default)
+LogOGNet: Warning: [ResimGate] session policy = OnDisagreement (ini override), depthPolicy = skip beyond 12 ticks, rateLimit = none (structural: one resim in flight, one pending)
+LogViewport: Display: Player bShowMouseCursor Changed, False -> True
+LogIris: Display: FInternalNetSerializerDelegates::BroadcastLoadedModulesUpdated() called while there are 0 active ReplicationSystems. This is good. Total loaded modules: 76.
+LogOGInputRelay: Warning: [InputRelay] host for player-controlled character OGBrawlerUECharacter_2147482367 resolves NO owning connection ? COND_SkipOwner is inert and the owner echo is back
+LogThreadingWindows: Error: Runnable thread Foreground Worker #1 crashed.
+LogWindows: Error: === Critical error: ===
+LogWindows: Error: 
+LogWindows: Error: Fatal error!
+LogWindows: Error: 
+LogWindows: Error: Unhandled Exception: 0xe06d7363
+LogWindows: Error: 
+LogWindows: Error: [Callstack] 0x00007ffa355e187a KERNELBASE.dll!UnknownFunction []
+LogWindows: Error: [Callstack] 0x00007ffa1c9d55a9 VCRUNTIME140.dll!UnknownFunction []
+LogWindows: Error: [Callstack] 0x00007ffa1ca44ef2 MSVCP140.dll!UnknownFunction []
+LogWindows: Error: [Callstack] 0x00007ff69c041733 OGBrawlerUnrealClient.exe!SimulationReconciliation<SimulatableBrawler>::getCacheFor<SimulatableBrawler>() [C:\dev\og-brawler-unreal\Plugins\OGSimulation\Source\OGSimulation\og-simulation\OGSimulation\SimulationReconciliation.h:783]
+LogWindows: Error: [Callstack] 0x00007ff69c0399a9 OGBrawlerUnrealClient.exe!SimulationInputResolution<SimulatableBrawler>::allocateFrontierSlotForCharacter<SimulatableBrawler>() [C:\dev\og-brawler-unreal\Plugins\OGSimulation\Source\OGSimulation\og-simulation\OGSimulation\SimulationInputResolution.h:1673]
+LogWindows: Error: [Callstack] 0x00007ff69c05dea9 OGBrawlerUnrealClient.exe!SimulationManager<SimulationIntegrationExecutor<simulatableBrawler::StaticData,ChaosPhysicsBodyAdapter,ChaosSpatialQueryAdapter,SimulatableBrawler>,SimulationNetSync<SimulatableBrawler>,SimulationInputResolution<SimulatableBrawler>,SimulationReconciliation<SimulatableBrawler>,SimulationSystemsExecutor<SimulatableList<SimulatableBrawler>,simulatableBrawler::StaticData,brawlerHitRouting::System>,SimulationObjectStorage<SimulatableBrawler>,simulatableBrawler::StaticData>::onGameSimulationAuthority() [C:\dev\og-brawler-unreal\Plugins\OGSimulation\Source\OGSimulation\og-simulation\OGSimulation\SimulationManager.h:1006]
+LogWindows: Error: [Callstack] 0x00007ff69c0519d0 OGBrawlerUnrealClient.exe!FSimulationManagerAsyncCallback::OnPreSimulate_Internal() [C:\dev\og-brawler-unreal\Source\OGBrawlerUnreal\SimulationManagerUImpl.cpp:306]
+LogWindows: Error: [Callstack] 0x00007ff695ff5310 OGBrawlerUnrealClient.exe!Chaos::FPhysicsSolverBase::ApplyCallbacks_Internal() [C:\dev\UnrealEngine\Engine\Source\Runtime\Experimental\Chaos\Public\Chaos\Framework\PhysicsSolverBase.h:633]
+LogWindows: Error: [Callstack] 0x00007ff6965bb5fe OGBrawlerUnrealClient.exe!Chaos::FPBDRigidsSolver::ApplyCallbacks_Internal() [C:\dev\UnrealEngine\Engine\Source\Runtime\Experimental\Chaos\Private\PBDRigidsSolver.cpp:819]
+LogWindows: Error: [Callstack] 0x00007ff6965c9d54 OGBrawlerUnrealClient.exe!Chaos::AdvanceOneTimeStepTask::DoWork() [C:\dev\UnrealEngine\Engine\Source\Runtime\Experimental\Chaos\Private\PBDRigidsSolver.cpp:473]
+LogWindows: Error: [Callstack] 0x00007ff6965b7844 OGBrawlerUnrealClient.exe!Chaos::FPBDRigidsSolver::AdvanceSolverBy() [C:\dev\UnrealEngine\Engine\Source\Runtime\Experimental\Chaos\Private\PBDRigidsSolver.cpp:1371]
+LogWindows: Error: [Callstack] 0x00007ff695ff3e54 OGBrawlerUnrealClient.exe!Chaos::FPhysicsSolverAdvanceTask::AdvanceSolver() [C:\dev\UnrealEngine\Engine\Source\Runtime\Experimental\Chaos\Private\Chaos\Framework\PhysicsSolverBase.cpp:180]
+LogWindows: Error: [Callstack] 0x00007ff695ffe384 OGBrawlerUnrealClient.exe!TGraphTask<Chaos::FPhysicsSolverAdvanceTask>::ExecuteTask() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Async\TaskGraphInterfaces.h:706]
+LogWindows: Error: [Callstack] 0x00007ff693776823 OGBrawlerUnrealClient.exe!UE::Tasks::Private::FTaskBase::TryExecuteTask() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Tasks\TaskPrivate.h:528]
+LogWindows: Error: [Callstack] 0x00007ff693746def OGBrawlerUnrealClient.exe!LowLevelTasks::TTaskDelegate<LowLevelTasks::FTask * __cdecl(bool),48>::TTaskDelegateImpl<`LowLevelTasks::FTask::Init<`UE::Tasks::Private::FTaskBase::Init'::`2'::<lambda_1> >'::`13'::<lambda_1>,0>::CallAndMove() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Async\Fundamental\TaskDelegate.h:171]
+LogWindows: Error: [Callstack] 0x00007ff693754d8e OGBrawlerUnrealClient.exe!LowLevelTasks::FTask::ExecuteTask() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Async\Fundamental\Task.h:627]
+LogWindows: Error: [Callstack] 0x00007ff693754b3a OGBrawlerUnrealClient.exe!LowLevelTasks::FScheduler::ExecuteTask() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Private\Async\Fundamental\Scheduler.cpp:364]
+LogWindows: Error: [Callstack] 0x00007ff69377a311 OGBrawlerUnrealClient.exe!LowLevelTasks::FScheduler::WorkerLoop() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Private\Async\Fundamental\Scheduler.cpp:724]
+LogWindows: Error: [Callstack] 0x00007ff69373e8da OGBrawlerUnrealClient.exe!`LowLevelTasks::FScheduler::CreateWorker'::`2'::<lambda_1>::operator()() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Private\Async\Fundamental\Scheduler.cpp:188]
+LogWindows: Error: [Callstack] 0x00007ff69394ca73 OGBrawlerUnrealClient.exe!FThreadImpl::Run() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Private\HAL\Thread.cpp:69]
+LogWindows: Error: [Callstack] 0x00007ff693dac0e8 OGBrawlerUnrealClient.exe!FRunnableThreadWin::Run() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Private\Windows\WindowsRunnableThread.cpp:159]
+LogWindows: Error: [Callstack] 0x00007ff693da4c2f OGBrawlerUnrealClient.exe!FRunnableThreadWin::GuardedRun() [C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Private\Windows\WindowsRunnableThread.cpp:79]
+LogWindows: Error: [Callstack] 0x00007ffa3771ccb7 KERNEL32.DLL!UnknownFunction []
+LogWindows: Error: 
+LogWindows: Error: Crash in runnable thread Foreground Worker #1

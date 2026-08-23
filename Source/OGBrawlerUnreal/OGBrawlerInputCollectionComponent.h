@@ -7,7 +7,7 @@
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGSimulation/SimulationTimeContext.h"
-#include "OGSimulation/Network/ClientInputDelayLine.h"
+#include "OGSimulation/Network/LocalInputCache.h"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
 
@@ -62,7 +62,7 @@ public:
 	// There are three ways a PlayerInput reaches a consumer in this project. They are NOT
 	// interchangeable; picking the wrong one is a correctness bug, not a style choice.
 	//
-	//  1. buildPlayerInput(step, componentId, delayLine)   — THE SIM PATH.
+	//  1. buildPlayerInput(step, componentId, localInputCache)   — THE SIM PATH.
 	//     Called once per simulation tick from the inputProvider lambda on the physics
 	//     thread. Continuous fields + discrete fields (attack buttons) + the tick-stateful
 	//     motion-sequence matcher (Hadouken and friends), which needs a RAW CAPTURE history
@@ -103,7 +103,7 @@ public:
 
 	// Builds the full sim-tick PlayerInput. Called from the inputProvider lambda on the physics thread.
 	//
-	// [T15] `delayLine` is this character's OWN raw capture history, keyed by capture tick, and is
+	// [T15] `localInputCache` is this character's OWN raw capture history, keyed by capture tick, and is
 	// the motion matcher's history source. It is a parameter, not something reached for: NetSync
 	// binds it in collectInputAll and calls this BEFORE pushing the current tick's capture, so the
 	// line holds ticks <= step.getTick() - 1 and the current sample is what this function returns.
@@ -117,7 +117,7 @@ public:
 	simulatableBrawler::PlayerInput buildPlayerInput(
 		const SimulationTimeStep& step,
 		uint32 componentId,
-		const ClientInputDelayLine<simulatableBrawler::PlayerInput>& delayLine) const;
+		const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) const;
 
 	// Render-frame-callable live sample of the CONTINUOUS input fields only. See the block
 	// comment above for how this relates to buildPlayerInput and to source (3). Takes no

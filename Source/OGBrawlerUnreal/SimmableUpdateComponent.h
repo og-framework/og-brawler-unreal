@@ -224,14 +224,15 @@ public:
 	// relay sink calls this at RECEIPT of each newer capture tick; the arrival is
 	// STAGED, and the host actor's PreReplication publishes the whole staged burst
 	// into the replicated ring once per Iris poll. Before this the sink wrote the
-	// replicated ring directly at `TimeConfig::relayRedundancyDepthTicks`, which
-	// meant a second arrival in one server frame overwrote the first in memory
-	// before replication ever compared the property — ~11.6 % of relayed inputs,
-	// measured.
+	// replicated ring directly at a session-configurable retention depth (its old
+	// identifier is on record in RN-13, ReviewNotes.md; item 63 retired the field
+	// outright), which meant a second arrival in one server frame overwrote the
+	// first in memory before replication ever compared the property — ~11.6 % of
+	// relayed inputs, measured.
 	//
 	// NO DEPTH PARAMETER, and that is the fence: the stage's capacity is
-	// `relayedInputRing::kMaxDepth`, taken as a constant inside the codec. Passing
-	// the session depth knob here would cap every round at one entry and reproduce
+	// `relayedInputRing::kMaxDepth`, taken as a constant inside the codec. A
+	// depth parameter here would cap every round at one entry and reproduce
 	// exactly the behaviour this replaces (T43 finding 1).
 	//
 	// Returns what the write did; `droppedOldest` means the burst exceeded

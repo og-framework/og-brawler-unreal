@@ -1,0 +1,816 @@
+LogInit: Display: No sandbox specified, assuming ../../Saved/Cooked/WindowsClient/
+LogCsvProfiler: Display: Metadata set : systemresolution.resx="1280"
+LogCsvProfiler: Display: Metadata set : systemresolution.resy="720"
+LogAudio: Display: Pre-Initializing Audio Device Manager...
+LogAudio: Display: AudioInfo: 'OPUS' Registered
+LogAudioDebug: Display: Lib vorbis DLL was dynamically loaded.
+LogAudio: Display: AudioInfo: 'OGG' Registered
+LogAudio: Display: AudioInfo: 'ADPCM' Registered
+LogAudio: Display: AudioInfo: 'PCM' Registered
+LogAudio: Display: AudioInfo: 'BINKA' Registered
+LogAudio: Display: AudioInfo: 'RADA' Registered
+LogAudio: Display: Audio Device Manager Pre-Initialized
+RenderDocPlugin: Display: RenderDoc plugin will not be loaded. Use '-AttachRenderDoc' on the cmd line or enable 'renderdoc.AutoAttach' in the plugin settings.
+LogCsvProfiler: Display: Metadata set : systemresolution.resx="1920"
+LogCsvProfiler: Display: Metadata set : systemresolution.resy="1080"
+LogHAL: Display: Platform has ~ 32 GB [33510694912 / 34359738368 / 32], which maps to Largest [LargestMinGB=32, LargerMinGB=12, DefaultMinGB=8, SmallerMinGB=6, SmallestMinGB=0)
+LogCsvProfiler: Display: Metadata set : extradevelopmentmemorymb="0"
+LogWindowsTouchpad: Display: CacheForceMaxTouchpadSensitivityMode SetMaxTouchpadSensitivity
+LogObj: Display: Attempting to load config data for Default__SlateThemeManager before the Class has been constructed/registered/linked (likely during module loading or early startup). This will result in the load silently failing and should be fixed.
+LogCsvProfiler: Display: Metadata set : verbatimrhiname="Null"
+LogCsvProfiler: Display: Metadata set : rhiname="Null"
+LogCsvProfiler: Display: Metadata set : rhifeaturelevel="SM6"
+LogCsvProfiler: Display: Metadata set : shaderplatform="PCD3D_SM6"
+LogStreaming: Display: FlushAsyncLoading(1): 1 QueuedPackages, 0 AsyncPackages
+LogConfig: Display: Read in platform Android ini files took 0.02 seconds
+LogConfig: Display: Read in platform IOS ini files took 0.02 seconds
+LogConfig: Display: Read in platform Linux ini files took 0.03 seconds
+LogConfig: Display: Read in platform LinuxArm64 ini files took 0.03 seconds
+LogConfig: Display: Read in platform Mac ini files took 0.02 seconds
+LogConfig: Display: Read in platform TVOS ini files took 0.03 seconds
+LogConfig: Display: Read in platform VisionOS ini files took 0.03 seconds
+LogDeviceProfileManager: Display: Deviceprofile LinuxArm64Editor not found.
+LogDeviceProfileManager: Display: Deviceprofile LinuxArm64 not found.
+LogCsvProfiler: Display: Metadata set : deviceprofile="WindowsClient"
+LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+LogMetaSound: Display: MetaSound Page Target Initialized to 'Default'
+LogAudioCaptureCore: Display: No Audio Capture implementations found. Audio input will be silent.
+LogAudio: Display: Registering Engine Module Parameter Interfaces...
+LogAudio: Display: Initializing Audio Device Manager...
+LogAudio: Display: Loading Default Audio Settings Objects...
+LogAudio: Display: No default SoundConcurrencyObject specified (or failed to load).
+LogAudio: Display: Audio Device Manager Initialized
+LogAudio: Display: Creating Audio Device:                 Id: 1, Scope: Shared, Realtime: True
+LogAudioMixer: Display: Audio Mixer Platform Settings:
+LogAudioMixer: Display: 	Sample Rate:						  48000
+LogAudioMixer: Display: 	Callback Buffer Frame Size Requested: 1024
+LogAudioMixer: Display: 	Callback Buffer Frame Size To Use:	  1024
+LogAudioMixer: Display: 	Number of buffers to queue:			  1
+LogAudioMixer: Display: 	Max Channels (voices):				  32
+LogAudioMixer: Display: 	Number of Async Source Workers:		  4
+LogAudio: Display: AudioDevice MaxSources: 32
+LogAudio: Display: Audio Spatialization Plugin: None (built-in).
+LogAudio: Display: Audio Reverb Plugin: None (built-in).
+LogAudio: Display: Audio Occlusion Plugin: None (built-in).
+LogAudioMixer: Display: Initializing audio mixer using platform API: 'XAudio2'
+LogAudioMixer: Display: Using Audio Hardware Device Headphones (3- Arctis Nova 7)
+LogAudioMixer: Display: Initializing Sound Submixes...
+LogAudioMixer: Display: Creating Master Submix 'MasterSubmixDefault'
+LogAudioMixer: Display: Creating Master Submix 'MasterReverbSubmixDefault'
+LogAudioMixer: Display: Output buffers initialized: Frames=1024, Channels=2, Samples=2048, InstanceID=1
+LogAudioMixer: Display: Starting AudioMixerPlatformInterface::RunInternal(), InstanceID=1
+LogAudioMixer: Display: FMixerPlatformXAudio2::SubmitBuffer() called for the first time. InstanceID=1
+LogCsvProfiler: Display: Metadata set : largeworldcoordinates="1"
+LogAudio: Display: Audio Device (ID: 1) registered with world 'Untitled'.
+LogInit: Display: Game Engine Initialized.
+LogInit: Display: Starting Game.
+LogCsvProfiler: Display: Metadata set : iris="1"
+LogIris: Display: Iris ReplicationSystem[0]: ReplicationSystem_2147482512 (0x000001849CA99F40) is created
+LogIris: Display: FInternalNetSerializerDelegates::BroadcastLoadedModulesUpdated() called while there are 0 active ReplicationSystems. This is good. Total loaded modules: 39.
+LogInit: Display: Engine is initialized. Leaving FEngineLoop::Init()
+LogTrace: Display: Control listening on port 35650
+LogIris: Warning: FInternalNetSerializerDelegates::BroadcastLoadedModulesUpdated() called while there are 1 active ReplicationSystems. If polymorphic types are registered we may have corrupt data. A restart of the ReplicationSystem or NetDriver is recommended. Total loaded modules: 41.
+LogAudio: Display: Audio Device unregistered from world 'None'.
+LogStreaming: Display: FlushAsyncLoading(61): 1 QueuedPackages, 0 AsyncPackages
+LogAudio: Display: Audio Device (ID: 1) registered with world 'ThirdPersonMap'.
+LogWorldPartition: Display: WorldPartition initialize started...
+LogWorldPartition: Display: WorldPartition initialize took 195 us
+LogIris: Warning: FInternalNetSerializerDelegates::BroadcastLoadedModulesUpdated() called while there are 1 active ReplicationSystems. If polymorphic types are registered we may have corrupt data. A restart of the ReplicationSystem or NetDriver is recommended. Total loaded modules: 42.
+LogIris: Warning: Generating descriptor for struct UpdateLevelVisibilityLevelInfo that has custom serialization.
+LogOGResimProbe: Warning: [ResimProbe.Session] resim-gate probe LIVE ? verbosity=Warning verboseDetail=off windowSamples=120
+LogOGNet: Warning: [ResimGate] session policy = OnDisagreement (ini override), depthPolicy = skip beyond 12 ticks, rateLimit = none (structural: one resim in flight, one pending)
+LogOGNet: Warning: [RelayDelayFloor] floor = 6 ticks, UPWARD, requesting 2-tick prediction stall
+LogViewport: Display: Player bShowMouseCursor Changed, False -> True
+LogOG: Warning: [Warning] PCTM CPC: hard resync oldTick=0 -> newTick=863 drift=863
+LogOGIrisNet: Display: [IrisSerializerProof] struct=SimulationStateSyncBuffer dir=Load state=live NetSerialize IS BEING CALLED ON A REAL PAYLOAD. payloadBytes=311 arrayElements=384 | wire bits: memberWise(pre-T29)=3089 lastResort(post-T29)=2508 delta=-581 bits (-72.6 B)
+LogIris: Warning: FInternalNetSerializerDelegates::BroadcastLoadedModulesUpdated() called while there are 1 active ReplicationSystems. If polymorphic types are registered we may have corrupt data. A restart of the ReplicationSystem or NetDriver is recommended. Total loaded modules: 43.
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=20 requested=100 requestedPerMille=833 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=99 grants=99 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=99 finishes=99 abandoned=0 stuck=0 replayTicks=323 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=201 meanTicksPerFrameX100=59 p50=1 p99=1 max=1 meanFrameUs=9998
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=39 dFrame0=0 dFrameGt1=81 discont=1 numSteps total=123 max=2 gt1=1
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=117 atFrontier=0 discarded=3 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=1 requested=119 requestedPerMille=992 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=119 grants=119 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=119 finishes=119 abandoned=0 stuck=0 replayTicks=356 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=3 requested=117 requestedPerMille=975 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=117 grants=117 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=117 finishes=117 abandoned=0 stuck=0 replayTicks=348 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=11 requested=109 requestedPerMille=908 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=110 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=110 finishes=110 abandoned=0 stuck=0 replayTicks=336 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=17 requested=103 requestedPerMille=858 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=103 grants=103 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=103 finishes=103 abandoned=0 stuck=0 replayTicks=311 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=15 requested=105 requestedPerMille=875 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=104 grants=104 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=104 finishes=104 abandoned=0 stuck=0 replayTicks=309 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=0 requested=120 requestedPerMille=1000 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=120 grants=120 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=120 finishes=120 abandoned=0 stuck=0 replayTicks=360 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=3 requested=117 requestedPerMille=975 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=117 grants=117 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=117 finishes=117 abandoned=0 stuck=0 replayTicks=348 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=8 requested=112 requestedPerMille=933 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=113 grants=113 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=113 finishes=113 abandoned=0 stuck=0 replayTicks=346 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=14 requested=106 requestedPerMille=883 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=105 grants=105 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=313 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=0 requested=120 requestedPerMille=1000 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=120 grants=120 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=120 finishes=120 abandoned=0 stuck=0 replayTicks=360 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=3 requested=117 requestedPerMille=975 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=117 grants=117 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=117 finishes=117 abandoned=0 stuck=0 replayTicks=350 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=17 requested=103 requestedPerMille=858 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=103 grants=103 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=103 finishes=103 abandoned=0 stuck=0 replayTicks=316 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=16 requested=104 requestedPerMille=867 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=105 grants=105 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=330 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=110 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=110 finishes=110 abandoned=0 stuck=0 replayTicks=336 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=0 requested=120 requestedPerMille=1000 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=120 grants=120 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=120 finishes=120 abandoned=0 stuck=0 replayTicks=360 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=4 requested=116 requestedPerMille=967 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=116 grants=116 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=116 finishes=116 abandoned=0 stuck=0 replayTicks=351 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=111 grants=111 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=111 finishes=111 abandoned=0 stuck=0 replayTicks=331 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=0 requested=120 requestedPerMille=1000 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=120 grants=120 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=120 finishes=120 abandoned=0 stuck=0 replayTicks=360 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=5 requested=115 requestedPerMille=958 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=115 grants=115 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=115 finishes=115 abandoned=0 stuck=0 replayTicks=347 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=15 requested=105 requestedPerMille=875 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=105 grants=105 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=314 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=11 requested=109 requestedPerMille=908 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=110 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=110 finishes=110 abandoned=0 stuck=0 replayTicks=329 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=106 grants=106 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=106 finishes=106 abandoned=0 stuck=0 replayTicks=318 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=16 requested=104 requestedPerMille=867 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=105 grants=105 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=316 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=106 grants=106 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=106 finishes=106 abandoned=0 stuck=0 replayTicks=322 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=4 requested=116 requestedPerMille=967 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=116 grants=116 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=116 finishes=116 abandoned=0 stuck=0 replayTicks=348 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=12 requested=108 requestedPerMille=900 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=109 grants=109 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=328 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=2 requested=118 requestedPerMille=983 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=117 grants=117 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=117 finishes=117 abandoned=0 stuck=0 replayTicks=351 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=1 requested=119 requestedPerMille=992 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=119 grants=119 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=119 finishes=119 abandoned=0 stuck=0 replayTicks=357 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=8 requested=112 requestedPerMille=933 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=112 grants=112 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=112 finishes=112 abandoned=0 stuck=0 replayTicks=343 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=11 requested=109 requestedPerMille=908 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=109 grants=109 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=328 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=19 requested=101 requestedPerMille=842 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=102 grants=102 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=102 finishes=102 abandoned=0 stuck=0 replayTicks=310 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=20 requested=100 requestedPerMille=833 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=99 grants=99 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=99 finishes=99 abandoned=0 stuck=0 replayTicks=297 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=40 requested=80 requestedPerMille=667 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=81 grants=81 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=81 finishes=81 abandoned=0 stuck=0 replayTicks=246 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=4 requested=116 requestedPerMille=967 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=115 grants=115 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=115 finishes=115 abandoned=0 stuck=0 replayTicks=346 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=23 requested=97 requestedPerMille=808 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=97 grants=97 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=97 finishes=97 abandoned=0 stuck=0 replayTicks=296 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=11 requested=109 requestedPerMille=908 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=110 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=110 finishes=110 abandoned=0 stuck=0 replayTicks=331 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=10 requested=110 requestedPerMille=917 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=109 grants=109 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=330 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=4 requested=116 requestedPerMille=967 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=116 grants=116 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=116 finishes=116 abandoned=0 stuck=0 replayTicks=350 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=7 requested=113 requestedPerMille=942 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=113 grants=113 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=113 finishes=113 abandoned=0 stuck=0 replayTicks=340 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=4 requested=116 requestedPerMille=967 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=116 grants=116 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=116 finishes=116 abandoned=0 stuck=0 replayTicks=344 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=111 grants=111 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=1 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=111 finishes=111 abandoned=0 stuck=0 replayTicks=332 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=0 requested=120 requestedPerMille=1000 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=120 grants=120 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=2
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=120 finishes=120 abandoned=0 stuck=0 replayTicks=360 replayOverruns=0 freshProtects=0 staleProtects=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=120 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=120 disagreed=120 ratePerMille=1000 windowSamples=120
+LogOG: Warning: [Warning] tryInsertingResimulatedState: tick=6074 not in cache window, discarding
+LogOG: Warning: [Warning] tryInsertingResimulatedState: tick=6075 not in cache window, discarding
+LogOGIrisNet: Display: [IrisSerializerProof] struct=RelayedInputRing dir=Load state=live NetSerialize IS BEING CALLED ON A REAL PAYLOAD. payloadBytes=85 arrayElements=83 | wire bits: memberWise(pre-T29)=681 lastResort(post-T29)=700 delta=+19 bits (+2.4 B)
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=107 grants=105 refused=2 refusedPerMille=19 repeat=2 clamped=0 depthMin=2 depthMax=4
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=326 replayOverruns=2 freshProtects=11 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6023,6143] src=Prediction hit=60 miss=6 verifyFail=0 rung0=2 total=68
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6023,6143] src=Resim hit=141 miss=21 verifyFail=0 rung0=1 total=163
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Miss] window=[6023,6143] src=Prediction inSpan=0 aboveNewest=0 belowOldest=6 noProbeTick=0 miss=6
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Miss] window=[6023,6143] src=Resim inSpan=0 aboveNewest=0 belowOldest=21 noProbeTick=0 miss=21
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6023,6143] src=Prediction n=66 p10=-6 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6023,6143] src=Resim n=162 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Stale] window=[6023,6143] maxConsecutiveFallbackRun=6 id=27767
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=78 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=41 atFrontier=0 discarded=1 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=77 disagreed=77 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=43 disagreed=43 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=173 expected=173 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=14 requested=106 requestedPerMille=883 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=106 grants=106 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=106 finishes=106 abandoned=0 stuck=0 replayTicks=331 replayOverruns=0 freshProtects=13 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6143,6263] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6143,6263] src=Resim hit=324 miss=0 verifyFail=0 rung0=0 total=324
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6143,6263] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6143,6263] src=Resim n=324 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10001
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=108 grants=108 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=108 finishes=108 abandoned=0 stuck=0 replayTicks=334 replayOverruns=0 freshProtects=11 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6263,6383] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6263,6383] src=Resim hit=327 miss=0 verifyFail=0 rung0=0 total=327
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6263,6383] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6263,6383] src=Resim n=327 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=2 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=183 expected=183 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=14 requested=106 requestedPerMille=883 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=105 grants=105 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=326 replayOverruns=0 freshProtects=13 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6383,6503] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6383,6503] src=Resim hit=322 miss=0 verifyFail=0 rung0=0 total=322
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6383,6503] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6383,6503] src=Resim n=322 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=2 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=183 expected=183 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=7 requested=113 requestedPerMille=942 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=113 grants=113 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=113 finishes=113 abandoned=0 stuck=0 replayTicks=345 replayOverruns=0 freshProtects=6 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6503,6623] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6503,6623] src=Resim hit=342 miss=0 verifyFail=0 rung0=0 total=342
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6503,6623] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6503,6623] src=Resim n=342 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=12 requested=108 requestedPerMille=900 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=108 grants=108 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=108 finishes=108 abandoned=0 stuck=0 replayTicks=341 replayOverruns=0 freshProtects=11 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6623,6743] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6623,6743] src=Resim hit=336 miss=0 verifyFail=0 rung0=0 total=336
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6623,6743] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6623,6743] src=Resim n=336 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=2 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=185 expected=185 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=108 grants=108 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=108 finishes=108 abandoned=0 stuck=0 replayTicks=333 replayOverruns=0 freshProtects=11 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6743,6863] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6743,6863] src=Resim hit=325 miss=0 verifyFail=0 rung0=0 total=325
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6743,6863] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6743,6863] src=Resim n=325 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=177 expected=177 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=12 requested=108 requestedPerMille=900 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=107 grants=105 refused=2 refusedPerMille=19 repeat=2 clamped=0 depthMin=2 depthMax=4
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=105 finishes=105 abandoned=0 stuck=0 replayTicks=325 replayOverruns=0 freshProtects=12 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6863,6983] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6863,6983] src=Resim hit=320 miss=0 verifyFail=0 rung0=0 total=320
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6863,6983] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6863,6983] src=Resim n=320 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=16 requested=104 requestedPerMille=867 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=104 grants=104 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=104 finishes=104 abandoned=0 stuck=0 replayTicks=324 replayOverruns=0 freshProtects=14 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6983,7103] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[6983,7103] src=Resim hit=318 miss=0 verifyFail=0 rung0=0 total=318
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6983,7103] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[6983,7103] src=Resim n=318 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=179 expected=179 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=11 requested=109 requestedPerMille=908 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=109 grants=109 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=338 replayOverruns=0 freshProtects=10 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7103,7223] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7103,7223] src=Resim hit=333 miss=0 verifyFail=0 rung0=0 total=333
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7103,7223] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-4 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7103,7223] src=Resim n=333 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=2 p99=2 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=182 expected=182 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=12 requested=108 requestedPerMille=900 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=109 grants=109 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=336 replayOverruns=0 freshProtects=10 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7223,7343] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7223,7343] src=Resim hit=328 miss=0 verifyFail=0 rung0=0 total=328
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7223,7343] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7223,7343] src=Resim n=328 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=14 requested=106 requestedPerMille=883 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=106 grants=106 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=106 finishes=106 abandoned=0 stuck=0 replayTicks=333 replayOverruns=0 freshProtects=13 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7343,7463] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7343,7463] src=Resim hit=326 miss=0 verifyFail=0 rung0=0 total=326
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7343,7463] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7343,7463] src=Resim n=326 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=181 expected=181 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=106 grants=106 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=106 finishes=106 abandoned=0 stuck=0 replayTicks=328 replayOverruns=0 freshProtects=12 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7463,7583] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7463,7583] src=Resim hit=325 miss=0 verifyFail=0 rung0=0 total=325
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7463,7583] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7463,7583] src=Resim n=325 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=180 expected=180 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=8 requested=112 requestedPerMille=933 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=112 grants=112 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=112 finishes=112 abandoned=0 stuck=0 replayTicks=342 replayOverruns=0 freshProtects=7 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7583,7703] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7583,7703] src=Resim hit=338 miss=0 verifyFail=0 rung0=0 total=338
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7583,7703] src=Prediction n=120 p10=-6 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7583,7703] src=Resim n=338 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=19 requested=101 requestedPerMille=842 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=102 grants=102 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=102 finishes=102 abandoned=0 stuck=0 replayTicks=321 replayOverruns=0 freshProtects=17 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7703,7823] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7703,7823] src=Resim hit=309 miss=0 verifyFail=0 rung0=0 total=309
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7703,7823] src=Prediction n=120 p10=-6 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7703,7823] src=Resim n=309 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=2 p99=2 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=182 expected=182 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=10 requested=110 requestedPerMille=917 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=110 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=110 finishes=110 abandoned=0 stuck=0 replayTicks=340 replayOverruns=0 freshProtects=9 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7823,7943] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7823,7943] src=Resim hit=335 miss=0 verifyFail=0 rung0=0 total=335
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7823,7943] src=Prediction n=120 p10=-6 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7823,7943] src=Resim n=335 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=108 refused=2 refusedPerMille=18 repeat=2 clamped=0 depthMin=2 depthMax=4
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=108 finishes=108 abandoned=0 stuck=0 replayTicks=332 replayOverruns=0 freshProtects=9 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=180 expected=180 discont=0 discontMax=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7943,8063] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[7943,8063] src=Resim hit=331 miss=0 verifyFail=0 rung0=0 total=331
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7943,8063] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[7943,8063] src=Resim n=331 p10=-8 p50=-7 p90=-6 min=-11 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=111 grants=109 refused=2 refusedPerMille=18 repeat=2 clamped=0 depthMin=2 depthMax=4
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=334 replayOverruns=0 freshProtects=9 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8063,8183] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8063,8183] src=Resim hit=330 miss=0 verifyFail=0 rung0=0 total=330
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8063,8183] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8063,8183] src=Resim n=330 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=184 expected=184 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=13 requested=107 requestedPerMille=892 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=107 grants=107 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=107 finishes=107 abandoned=0 stuck=0 replayTicks=334 replayOverruns=0 freshProtects=12 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8183,8303] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8183,8303] src=Resim hit=329 miss=0 verifyFail=0 rung0=0 total=329
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8183,8303] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8183,8303] src=Resim n=329 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=111 grants=111 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=111 finishes=111 abandoned=0 stuck=0 replayTicks=340 replayOverruns=0 freshProtects=8 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8303,8423] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8303,8423] src=Resim hit=336 miss=0 verifyFail=0 rung0=0 total=336
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8303,8423] src=Prediction n=120 p10=-6 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8303,8423] src=Resim n=336 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=179 expected=179 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=112 grants=112 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=112 finishes=112 abandoned=0 stuck=0 replayTicks=342 replayOverruns=0 freshProtects=7 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8423,8543] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8423,8543] src=Resim hit=335 miss=0 verifyFail=0 rung0=0 total=335
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8423,8543] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8423,8543] src=Resim n=335 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=183 expected=183 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=15 requested=105 requestedPerMille=875 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=104 grants=104 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=104 finishes=104 abandoned=0 stuck=0 replayTicks=323 replayOverruns=0 freshProtects=14 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8543,8663] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8543,8663] src=Resim hit=318 miss=0 verifyFail=0 rung0=0 total=318
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8543,8663] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8543,8663] src=Resim n=318 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10001
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=14 requested=106 requestedPerMille=883 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=107 grants=107 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=107 finishes=107 abandoned=0 stuck=0 replayTicks=332 replayOverruns=0 freshProtects=12 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8663,8783] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8663,8783] src=Resim hit=323 miss=0 verifyFail=0 rung0=0 total=323
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8663,8783] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8663,8783] src=Resim n=323 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=180 expected=180 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=9 requested=111 requestedPerMille=925 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=110 grants=108 refused=2 refusedPerMille=18 repeat=2 clamped=0 depthMin=2 depthMax=4
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=108 finishes=108 abandoned=0 stuck=0 replayTicks=332 replayOverruns=0 freshProtects=8 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8783,8903] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8783,8903] src=Resim hit=331 miss=0 verifyFail=0 rung0=0 total=331
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8783,8903] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8783,8903] src=Resim n=331 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=180 expected=180 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=8 requested=112 requestedPerMille=933 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=113 grants=113 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=113 finishes=113 abandoned=0 stuck=0 replayTicks=344 replayOverruns=0 freshProtects=6 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8903,9023] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[8903,9023] src=Resim hit=338 miss=0 verifyFail=0 rung0=0 total=338
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8903,9023] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[8903,9023] src=Resim n=338 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=9999
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=7 requested=113 requestedPerMille=942 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=112 grants=112 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=112 finishes=112 abandoned=0 stuck=0 replayTicks=344 replayOverruns=0 freshProtects=7 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9023,9143] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9023,9143] src=Resim hit=344 miss=0 verifyFail=0 rung0=0 total=344
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9023,9143] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9023,9143] src=Resim n=344 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=181 expected=181 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=17 requested=103 requestedPerMille=858 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=103 grants=103 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=103 finishes=103 abandoned=0 stuck=0 replayTicks=320 replayOverruns=0 freshProtects=15 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9143,9263] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9143,9263] src=Resim hit=312 miss=0 verifyFail=0 rung0=0 total=312
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9143,9263] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9143,9263] src=Resim n=312 p10=-8 p50=-7 p90=-6 min=-9 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=177 expected=177 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=6 requested=114 requestedPerMille=950 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=114 grants=114 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=114 finishes=114 abandoned=0 stuck=0 replayTicks=346 replayOverruns=0 freshProtects=5 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9263,9383] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9263,9383] src=Resim hit=344 miss=0 verifyFail=0 rung0=0 total=344
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9263,9383] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9263,9383] src=Resim n=344 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=19 requested=101 requestedPerMille=842 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=102 grants=100 refused=2 refusedPerMille=20 repeat=2 clamped=0 depthMin=2 depthMax=4
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=100 finishes=100 abandoned=0 stuck=0 replayTicks=317 replayOverruns=0 freshProtects=18 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=1 p99=2 max=2 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=176 expected=176 discont=0 discontMax=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9383,9503] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9383,9503] src=Resim hit=307 miss=0 verifyFail=0 rung0=0 total=307
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9383,9503] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-8 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9383,9503] src=Resim n=307 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=10 requested=110 requestedPerMille=917 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=109 grants=109 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=109 finishes=109 abandoned=0 stuck=0 replayTicks=333 replayOverruns=0 freshProtects=9 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9503,9623] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9503,9623] src=Resim hit=331 miss=0 verifyFail=0 rung0=0 total=331
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9503,9623] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9503,9623] src=Resim n=331 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Arrival] samples=120 gapCaptureTicks p50=2 p99=3 max=3 noAdvance=0 saturated=0 lostCaptureTicksX1000=0 lost=0 delivered=188 expected=188 discont=0 discontMax=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Gate] checks=120 declined=19 requested=101 requestedPerMille=842 deepSkips=0 survivingAnchors=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Chaos] requests=101 grants=101 refused=0 refusedPerMille=0 repeat=0 clamped=0 depthMin=2 depthMax=3
+LogOGResimProbe: Warning: [Warning][ResimProbe.Apply] prepares=101 finishes=101 abandoned=0 stuck=0 replayTicks=317 replayOverruns=0 freshProtects=17 staleProtects=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9623,9743] src=Prediction hit=120 miss=0 verifyFail=0 rung0=0 total=120
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Read] window=[9623,9743] src=Resim hit=309 miss=0 verifyFail=0 rung0=0 total=309
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9623,9743] src=Prediction n=120 p10=-7 p50=-6 p90=-5 min=-7 max=-5 satLow=0 satHigh=0
+LogOGRelayProbe: Warning: [Warning][RelayProbe.Delta] window=[9623,9743] src=Resim n=309 p10=-8 p50=-7 p90=-6 min=-10 max=-5 satLow=0 satHigh=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client simTicks=120 frames=200 meanTicksPerFrameX100=60 p50=1 p99=1 max=1 meanFrameUs=10000
+LogOGResimProbe: Warning: [Warning][ResimProbe.Frame] role=Client cadence dFrame1=40 dFrame0=0 dFrameGt1=80 discont=0 numSteps total=120 max=1 gt1=0
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=LocallyPredicted behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGResimProbe: Warning: [Warning][ResimProbe.Landing] class=RemoteProxy behind=60 atFrontier=0 discarded=0 atFrontierPerMille=0 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=LocallyPredicted corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120
+LogOGDivergenceProbe: Warning: [Warning][DivergenceProbe.Window] class=RemoteProxy corrections=60 disagreed=60 ratePerMille=1000 windowSamples=120

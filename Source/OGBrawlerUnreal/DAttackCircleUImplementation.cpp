@@ -9,7 +9,8 @@
 //C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Math\Color.h
 //C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Math\MathFwd.h
 
-#pragma optimize( "", off )
+#include "OGSimulation/CompilerControl.h"
+OGSIM_OPTIMIZE_OFF
 
 namespace dDAttackCircleUImplementation
 {
@@ -147,4 +148,4 @@ FColor getDAttackRadialSequenceStateColor(const DAttackRadialSequenceState& atta
 
 }
 
-#pragma optimize( "", on )
+OGSIM_OPTIMIZE_ON

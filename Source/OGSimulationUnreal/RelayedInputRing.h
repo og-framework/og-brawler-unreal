@@ -144,10 +144,12 @@ public:
 	//
 	// ⚠ [T34] NOT THE PRODUCTION RELAY PATH ANY MORE. The relay tap stages through
 	// `stageArrival` below, whose capacity is `kMaxDepth` and which takes no depth
-	// at all. This overload remains because `stageArrival` is built on it and
-	// because the tests drive the depth arms directly; a production caller that
-	// passes `TimeConfig::relayRedundancyDepthTicks` here would cap the ring at one
-	// entry per round and silently reproduce replace-latest.
+	// at all. This overload remains because `stageArrival` is built on it (with
+	// the literal `kMaxDepth`) and because the tests drive the depth arms
+	// directly; a production caller that passed anything below `kMaxDepth` here
+	// would cap the ring at that many entries per round and silently reproduce
+	// replace-latest (item 63 / RN-13 retired the session-configurable field
+	// that used to tempt exactly that call).
 	template <typename InputType>
 	bool writeLatest(uint32 captureTick, uint8 dA, const InputType& input, int32 depth)
 	{

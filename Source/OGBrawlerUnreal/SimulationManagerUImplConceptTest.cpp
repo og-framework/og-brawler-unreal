@@ -19,6 +19,15 @@ static_assert(
         SimulatableBrawler>,
     "SimulationNetSync<SimulatableBrawler> must satisfy SimulationNetSyncConcept");
 
+// [item 87] The resolution peer's own SimulatableTs-exact concept
+// (SimulationInputResolution.h) — the same adapter-side proof pattern this
+// task's other three assertions already use, extended to the new peer.
+static_assert(
+    SimulationInputResolutionConcept<
+        SimulationInputResolution<SimulatableBrawler>,
+        SimulatableBrawler>,
+    "SimulationInputResolution<SimulatableBrawler> must satisfy SimulationInputResolutionConcept");
+
 static_assert(
     SimulationReconciliationConcept<
         SimulationReconciliation<SimulatableBrawler>,
@@ -42,6 +51,7 @@ bool FSimulationManagerUImplConceptTest::RunTest(const FString& Parameters)
 {
     TestTrue(TEXT("SimulationManagerOwnerConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationNetSyncConcept satisfied at compile time"), true);
+    TestTrue(TEXT("SimulationInputResolutionConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationReconciliationConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationIntegrationExecutorConcept satisfied at compile time"), true);
     return true;
