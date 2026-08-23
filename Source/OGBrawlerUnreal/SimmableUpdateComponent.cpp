@@ -12,12 +12,9 @@
 #include "OGBrawler/BrawlerVisualizationInputSource.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
-// [T39] The relay ring's new carrier — forward-declared in the header, needed
-// whole here (spawn, find, the ring accessors, the callback install).
+// The relay ring's carrier: forward-declared in the header, needed whole here.
 #include "OGSimulationUnreal/SimulationInputRelay.h"
 
-//#include "Runtime/Core/Public/Logging/StructeredLog.h"
-//#include "Logging/StructeredLogFormat.h"
 #include "Logging/LogMacros.h"
 
 
@@ -63,6 +60,61 @@
 
 
 
+// =============================================================================
+// ORIENTATION -- USimmableUpdateComponent
+// =============================================================================
+// One instance per simulated character, on the character actor. This is the
+// ADAPTER: it registers the character with the simulation, owns that character's
+// wire surfaces, and is the RPC boundary for client->server input. It holds no
+// netcode policy of its own -- all of it is core, reached through the manager.
+//
+// BINDING DECLARATION -- THIS FILE IS UE ADAPTER CODE. Every engine or project
+// type named in this file's comments is one adapter's binding for the role it
+// names -- `USimmableUpdateComponent`, `ASimulationManagerUImpl`, `GEngine`,
+// `ASimulationInputRelay`, `ASimulationConnectionRelay`, `AOGBrawlerUECharacter`,
+// and, equally one adapter's binding, the replication vocabulary: `UChildConnection`,
+// `FNetPing`, `COND_SkipOwner`, `COND_OwnerOnly`, `NetSerialize`, `Iris`, `UObject`,
+// `FSimulationStateSyncBuffer`, `FSimulationInputSyncBuffer` -- and another
+// adapter substitutes its own. The engine-free core never sees any of them.
+//
+// ROLE. One instance runs on each side and they are not the same object. The
+// role test is `GetNetMode() != NM_Client`, world-level, and it is the same
+// predicate the manager picks its own role with.
+//
+// FOUR CHANNELS, and which way each one runs:
+//
+//   correction state    server -> owning client    replicated property + OnRep
+//   input bundle        client -> server           unreliable server RPC
+//   relayed input       server -> the OTHER peers  the relay host actor's ring
+//   connection tier     server -> owning client    the connection relay actor
+//
+// PHASE ORDER. Every step polls, because every step can legitimately not be
+// ready yet, and "not yet" is never an error:
+//
+//   BeginPlay
+//     -> tryInitializeWithManager      until the manager exists; then the query
+//                                      volumes and the visualization state
+//     -> tryRegisterWithNewFramework   until the bodies resolve; then register,
+//                                      latch the provider decision, spawn (or
+//                                      find) the relay host, and -- authority
+//                                      only -- register the id -> component route
+//   TickComponent                      visualization only, both roles
+//   EndPlay
+//     -> unregister, then destroy (authority) or unbind (client) the relay host
+//
+// THE CONCEPT SURFACE, and it is why this file contains forwarders: the core
+// reaches this object through an accessor pair and a callback pair, and nothing
+// else. The relayed-input ring itself lives on a separate per-character actor,
+// and the core never learns that.
+//
+// PROVIDER PRESENCE IS THE IDENTITY TEST. A locally-controlled character gets an
+// input provider; every other character gets none, and provider-ABSENCE is what
+// gives it a relay store for the core to predict from.
+//
+// Rationale, provenance and the worked derivations:
+//   Source/OGBrawlerUnreal/docs/SimmableUpdateComponent-rationale.md
+// The `§N` marks in this file point there.
+// =============================================================================
 OGSIM_OPTIMIZE_OFF
 
 namespace DAttackFakeInputCVars
@@ -152,7 +204,7 @@ namespace DAttackTargetVisualizationCVars
 //Component
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// ~10 seconds at 60 Hz — generous enough for scene startup, small enough to fail loudly on genuine bugs.
+// ~10 seconds at 60 Hz -- long enough for scene startup, short enough to fail loudly.
 constexpr int32 kMaxRegistrationAttempts = 600;
 
 USimmableUpdateComponent::USimmableUpdateComponent(const FObjectInitializer& ObjectInitializer)
@@ -167,10 +219,8 @@ USimmableUpdateComponent::USimmableUpdateComponent(const FObjectInitializer& Obj
 	PrimaryComponentTick.SetTickFunctionEnable(true);
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
-	// This component is designed to tick after the LiveLink component, which uses TG_PrePhysics
-	// We also use a tick prerequisite on LiveLink components, so technically this could also use TG_PrePhysics
+	// ⛔ Tick group deliberate; NO prerequisite is installed and no LiveLink component exists. §2
 	PrimaryComponentTick.TickGroup = ETickingGroup::TG_DuringPhysics;
-	//AddTickPrerequisiteComponent(LiveLinkComponent);
 
 
 }
@@ -180,9 +230,7 @@ void USimmableUpdateComponent::BeginPlay()
 {
 	UActorComponent::BeginPlay();
 
-	// Manager may not yet exist (ordering race between ASimulationManagerUImpl::BeginPlay
-	// and character BeginPlay). Poll via SetTimerForNextTick until it is available, then
-	// do all manager-dependent setup and kick off registration polling.
+	// The manager may not exist yet (BeginPlay ordering race); poll per tick until it does. §3
 	if (UWorld* world = GetWorld())
 	{
 		world->GetTimerManager().SetTimerForNextTick(
@@ -195,9 +243,8 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 {
 	++m_initializationAttempts;
 
-	// World-level authority — same predicate used when picking the manager's slot
-	// in ASimulationManagerUImpl::BeginPlay. HasAuthority() on non-replicated
-	// actors is always true and would disagree with the world-mode gate.
+	// ⛔ NEVER HasAuthority() HERE -- it is always true on a non-replicated actor and would
+	// disagree with the world-mode gate the manager picks its own role with. §3
 	const bool isAuthority = (GetNetMode() != NM_Client);
 	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(isAuthority);
 	AActor* Owner = GetOwner();
@@ -220,11 +267,7 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 	if (AOGBrawlerUECharacter* brawlerOwner = Cast<AOGBrawlerUECharacter>(Owner))
 		m_ownerInputCollection = brawlerOwner->getInputCollection();
 
-	// [T10 / og-netcode-v2-input-relay] The client-side tier consumer used to be
-	// bound here, lazily, per character. It now lives on the manager (one per
-	// world, bound in its BeginPlay where the TimeConfig is created) because the
-	// tier is a WIRE property, not a character property — see
-	// ASimulationConnectionRelay. Nothing tier-related is initialized here anymore.
+	// ⛔ NOTHING TIER-RELATED IS BOUND HERE -- the tier is a WIRE property, bound once per world. §5
 
 	ChaosSpatialQueryAdapter& queryAdapter = manager->editQueryAdapter();
 
@@ -279,12 +322,7 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		return;
 	}
 
-	// On a pure client only the locally-controlled character (ROLE_AutonomousProxy)
-	// feeds a live input provider. Simulated proxies of other players must NOT
-	// register a provider — provider-ABSENCE is what gives a character a
-	// RemoteInputCache, and collectInputAll's proxy branch then predicts it from
-	// that store via the scheduled read ([T7]; it used to hold the correction
-	// cache's last server-reported input instead).
+	// ⛔ A SIMULATED PROXY MUST NOT REGISTER A PROVIDER -- absence is what buys it a relay store. §4
 	const AActor* ownerActor = GetOwner();
 	const bool isLocallyPredicted = !isAuthority
 		&& ownerActor != nullptr
@@ -295,10 +333,7 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 	{
 		UOGBrawlerInputCollectionComponent* ic = m_ownerInputCollection;
 		const uint32 id = (unsigned int)GetUniqueID();
-		// [T15] The manager is no longer captured. The matcher's input history used
-		// to be fetched from it (manager -> reconciliation -> correction cache);
-		// collectInputAll now hands the character's own raw-capture delay line
-		// straight in, so this lambda reaches for nothing outside its arguments.
+		// ⛔ DO NOT CAPTURE THE MANAGER -- this lambda reaches nothing outside its arguments. §4
 		inputProvider = [ic, id](const SimulationTimeStep& step,
 		                         const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) {
 			return ic->buildPlayerInput(step, id, localInputCache);
@@ -324,27 +359,12 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		return;
 	}
 
-	// [T39] Latch the provider decision. This is the client half of the owner-skip
-	// precondition (see onRelayedInputRingArrived): a ring arriving for a
-	// provider-PRESENT character means COND_SkipOwner and provider-presence have
-	// diverged. Latched here rather than recomputed at arrival so the two decisions
-	// are literally the same evaluation, taken once.
+	// ⛔ LATCHED, NEVER RECOMPUTED AT ARRIVAL -- onRelayedInputRingArrived's divergence check
+	// is only meaningful if it reads literally this evaluation. §6
 	m_hasLocalInputProvider = isLocallyPredicted;
 
-	// ⭐ [T39] THE RELAY RING'S HOST — created here, on the authority, at the
-	// moment registration completes.
-	//
-	// ORDER IS LOAD-BEARING AND IS THE REASON THIS SITS ABOVE THE ROUTE BELOW.
-	// `noteDelayedInputComponent` is what makes `relayRemoteInput` able to find
-	// this component and write the ring. If the host did not exist by then, the
-	// first writes would land in `m_detachedRelayRing` and be invisible to every
-	// client, with nothing logged. Spawning first closes that window by
-	// construction rather than by timing.
-	//
-	// This is also why the host is NOT spawned on demand from the write path the
-	// way ASimulationConnectionRelay is: that actor has no always-reached creation
-	// point earlier than its first write (and PostLogin misses seamless travel),
-	// whereas this one does.
+	// ⛔ SPAWN THE HOST BEFORE THE noteDelayedInputComponent ROUTE -- until that route exists,
+	// relayRemoteInput stages into m_detachedRelayStagingRing, unseen and unlogged. §6
 	if (isAuthority)
 	{
 		if (UWorld* world = GetWorld())
@@ -358,25 +378,13 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 	}
 	else
 	{
-		// CLIENT: the PULL half of the link. The host may already have replicated
-		// in and pushed at the manager's listener before this component registered
-		// (in which case attachInputRelayHost already ran and this is a no-op), or
-		// it may not have arrived yet (in which case this finds nothing and the
-		// listener's push does the linking later). Both paths are idempotent; the
-		// pair exists because neither ordering can be relied on.
+		// CLIENT, the PULL half. NEITHER ORDERING CAN BE RELIED ON, so push and pull are both
+		// idempotent and both required. §6
 		attachInputRelayHost(
 			ASimulationInputRelay::findForOwner(GetWorld(), GetOwner()));
 	}
 
-	// [T24] Register the id -> component delivery route ONCE, at register-time,
-	// paired with the forgetOwner()/erase at unregisterFromNewFramework. This
-	// replaces the former per-park noteDelayedInputComponent call inside the receive
-	// loop: the route the coordinator's drain (and the malformed-slot deliver-now
-	// fallback) resolves against now exists for the whole registered lifetime of the
-	// component, not just after its first parked slot. Authority only — the
-	// coordinator, the delay queue, and the drain are all std::nullopt / no-op on a
-	// pure client, and m_onRemoteMoveReceivedCallback (the delivery terminus) is
-	// itself only wired at registration, so the route and its target come up together.
+	// ⛔ ROUTE REGISTERED ONCE, erased in unregisterFromNewFramework. Authority only. §7
 	if (isAuthority)
 		regManager->noteDelayedInputComponent((unsigned int)GetUniqueID(), *this);
 
@@ -392,18 +400,7 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework((unsigned int)GetUniqueID(), *this, isAuthority);
 
-	// [T39] The ring host dies with the character it carries input for.
-	//
-	// AUTHORITY DESTROYS; a client only drops its reference. A replicated actor is
-	// removed on clients by the destruction bunch, and destroying it locally would
-	// race that. This mirrors the split every other replicated actor in this
-	// codebase uses, and is the reason ASimulationConnectionRelay's self-reap is
-	// authority-gated too.
-	//
-	// EXPLICIT, NOT SELF-REAPING. The connection relay polls a 1 Hz timer because
-	// its owning PlayerController's death does not destroy it and there is no other
-	// reliable signal. This host has one: the component whose character it belongs
-	// to is ending play, right here, synchronously.
+	// ⛔ AUTHORITY DESTROYS, CLIENT ONLY UNBINDS -- a local destroy races the destruction bunch. §6
 	if (ASimulationInputRelay* host = m_inputRelayHost.Get())
 	{
 		if (isAuthority)
@@ -419,16 +416,11 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void USimmableUpdateComponent::OnRep_CorrectionState()
 {
-	// Stage 1 (Task 11) — wire-format compat fence (client side). Once a mismatch
-	// has been detected, no-op every subsequent OnRep so a mismatched peer cannot
-	// drive local correction logic.
+	// ⛔ ONCE A MISMATCH IS LATCHED EVERY LATER OnRep NO-OPS -- a mismatched peer must not correct. §8
 	if (m_wireFormatMismatchDetected)
 		return;
 
-	// Version byte detection: the buffer's NetSerialize captured the sender's
-	// wire-format version byte (byte 0 of the wire payload). If it disagrees with
-	// what this build expects, refuse to process and surface a loud build-mismatch
-	// error + one-time on-screen toast (risks_and_plan.md §5.2).
+	// The sender's wire-format version is byte 0, captured by the buffer's NetSerialize. §8
 	const uint8 expectedVersion = FSimulationStateSyncBuffer::kWireFormatVersion;
 	const uint8 wireVersion = m_simulationStateCorrectionSyncedBuffer.getReceivedWireFormatVersion();
 	if (wireVersion != expectedVersion)
@@ -459,34 +451,12 @@ void USimmableUpdateComponent::OnRep_CorrectionState()
 		m_onCorrectionStateReceivedCallback(m_simulationStateCorrectionSyncedBuffer);
 }
 
-// [og-netcode-v2-input-relay T8] `OnRep_CorrectionInput` stood here. It peeked the
-// replicated input for the `[ReceiveCorrectionInput]` trace and forwarded the
-// buffer to the core's injectCorrectionInput binding. Property, OnRep, trace and
-// binding are all retired — see the retirement block at
-// SimulationNetSync::sendCorrectionAll.
+// ⛔ `OnRep_CorrectionInput` STOOD HERE, all of it retired -- see SimulationNetSync::sendCorrectionAll. §9
 
-// [og-netcode-v2-input-relay / T1] Arrival of the outbound relay ring on a peer.
-//
-// Deliberately thin: T1 only opened the channel. The ring's entries are keyed by
-// CAPTURE tick and stamped with the schedule `dA`, so the consumer — not this
-// handler — decides what to do with them (T5 stores them per remote character; T7
-// reads them through the schedule). [T8] It is now the ONLY inbound input channel
-// a peer has for a character it does not control.
-//
-// [T39] `OnRep_RelayedInputRing()` stood here. The OnRep moved to
-// ASimulationInputRelay with the property it notifies; what arrives here now is
-// onRelayedInputRingArrived, routed from that actor through the callback
-// attachInputRelayHost installs. The BODY is unchanged in substance — forward the
-// ring to the core if anything is bound — with the owner-skip divergence check
-// added, because this is the first build in which a ring arriving at a
-// locally-predicted character is a detectable fault rather than the norm.
+// ⛔ `OnRep_RelayedInputRing()` STOOD HERE -- it moved to the relay host with its property. §6
 
-// --- [T39] Relay-ring forwarders --------------------------------------------
-//
-// The three functions below are the whole of what "the component stays the
-// concept surface" means in code: og-simulation still sees an accessor pair and a
-// callback pair on this object, and never learns that the ring is carried by a
-// different UObject entirely.
+// --- Relay-ring forwarders ---------------------------------------------------
+// The core sees only an accessor pair and a callback pair; the ring lives elsewhere. §6
 
 FRelayedInputRing& USimmableUpdateComponent::getRelayedInputRing()
 {
@@ -502,9 +472,7 @@ const FRelayedInputRing& USimmableUpdateComponent::getRelayedInputRing() const
 	return m_detachedRelayRing;
 }
 
-// ⭐ [T34] THE STAGED RELAY WRITE. See the declaration for why there is no depth
-// parameter. The host resolution is the same pair the read accessors use, so a
-// component that is somehow unlinked degrades identically on both paths.
+// ⛔ NO DEPTH PARAMETER -- see the declaration. Host resolution matches the read accessors. §6
 relayedInputRing::StageArrivalOutcome USimmableUpdateComponent::stageRelayedInput(
 	uint32 captureTick, uint8 dA, const simulatableBrawler::PlayerInput& input)
 {
@@ -516,10 +484,7 @@ relayedInputRing::StageArrivalOutcome USimmableUpdateComponent::stageRelayedInpu
 	const relayedInputRing::StageArrivalOutcome outcome =
 		stage.stageArrival<simulatableBrawler::PlayerInput>(captureTick, dA, input);
 
-	// A burst longer than the stage is the ONE input loss this side of R = 0 can
-	// see, so it is counted rather than absorbed. Counted on the HOST because the
-	// host is what a run inspects, and because a drop against the detached fallback
-	// is already covered by the louder fault that no host exists.
+	// ⛔ COUNTED, NOT ABSORBED, and on the HOST -- the one input loss this side can see. §6
 	if (outcome.droppedOldest && host != nullptr)
 		host->noteStageOverflowDrop();
 
@@ -531,10 +496,7 @@ void USimmableUpdateComponent::setOnRelayedInputReceivedCallback(
 {
 	m_onRelayedInputReceivedCallback = std::move(fn);
 
-	// If the host is ALREADY linked, the core has just bound after an arrival may
-	// have been dropped. The ring is a persistent property, so re-reading it is a
-	// complete recovery — the same argument registerPredictionOwner's bind-time
-	// populate rests on, applied to the other ordering.
+	// Re-read at bind -- the ring is a persistent property, so a missed arrival recovers in full. §6
 	if (const ASimulationInputRelay* host = m_inputRelayHost.Get())
 	{
 		if (m_onRelayedInputReceivedCallback)
@@ -554,9 +516,7 @@ void USimmableUpdateComponent::attachInputRelayHost(ASimulationInputRelay* host)
 
 	m_inputRelayHost = host;
 
-	// Route the host's arrivals at this component. Weak capture: the host outlives
-	// nothing, but it CAN outlive this component by a frame during teardown, and a
-	// raw `this` would then be a dangling call from a replicated OnRep.
+	// ⛔ WEAK CAPTURE, NEVER A RAW `this` -- the host can outlive this component by a frame. §6
 	TWeakObjectPtr<USimmableUpdateComponent> weakSelf(this);
 	host->setOnRelayedInputReceivedCallback(
 		[weakSelf](const FRelayedInputRing& ring)
@@ -565,42 +525,19 @@ void USimmableUpdateComponent::attachInputRelayHost(ASimulationInputRelay* host)
 				self->onRelayedInputRingArrived(ring);
 		});
 
-	// REPLAY THE CURRENT RING. Covers the ordering where the host replicated (and
-	// dropped one or more OnReps) before this link existed. A never-written ring
-	// reads as version 0 and the ingest no-ops, so this is free on the authority
-	// and on a freshly spawned host.
+	// REPLAY THE CURRENT RING -- a never-written ring reads as version 0 and the ingest no-ops. §6
 	if (m_onRelayedInputReceivedCallback)
 		m_onRelayedInputReceivedCallback(host->getRelayedInputRing());
 }
 
 void USimmableUpdateComponent::onRelayedInputRingArrived(const FRelayedInputRing& ring)
 {
-	// ⚠ [T39] THE OWNER-SKIP PRECONDITION, ASSERTED FROM THE RECEIVING END.
+	// ⚠ THE OWNER-SKIP PRECONDITION, ASSERTED FROM THE RECEIVING END. A ring with entries at a
+	// provider-PRESENT character means COND_SkipOwner and provider-presence disagree. §6
 	//
-	// The design's owner-echo removal rests on an equivalence nothing checked:
-	// "owning connection" — the set COND_SkipOwner narrows on, decided server-side
-	// from the host's owner chain — and "provider present" — the set that decides
-	// whether `SimulationNetSync::registerPredictionOwner` builds a
-	// RemoteInputCache at all, decided here from the local role. If they ever
-	// name different sets, the failure is silent in BOTH directions: a character
-	// in the first set but not the second still pays the echo, and a character in
-	// the second but not the first loses its relayed input entirely.
+	// ⛔ DO NOT DROP THE `num() > 0` GATE -- the host replicates to its owner, so empty is normal.
 	//
-	// THIS is the observable half. A ring with resident entries arriving for a
-	// character that has a local input provider means the skip did not apply where
-	// this build believes it does — most likely an unset or wrong Owner on the
-	// host (see the producing-end warning in ASimulationInputRelay::
-	// spawnForCharacter). Nothing consumes the payload either way: the core binds
-	// no store for a provider-present id, so this is pure diagnosis.
-	//
-	// GATED ON `num() > 0` DELIBERATELY. An empty ring is not evidence: the host
-	// actor itself is bAlwaysRelevant and DOES replicate to the owning client (only
-	// the property is skipped), so an owner legitimately holds a host carrying a
-	// never-written ring, and asserting on that would fire on every clean run.
-	//
-	// ONE-SHOT, and `ensure` rather than `check`: this is a bandwidth and
-	// correctness regression, not a memory-safety fault, and a session that hits
-	// it should stay playable enough to be diagnosed.
+	// ⛔ `ensure`, NEVER `check`, one-shot -- a bandwidth regression must stay playable to diagnose.
 	if (m_hasLocalInputProvider && ring.num() > 0 && !m_loggedOwnerSkipDivergence)
 	{
 		m_loggedOwnerSkipDivergence = true;
@@ -623,8 +560,7 @@ void USimmableUpdateComponent::sendLocalInputToAuthority(
 	uint32 currentTick,
 	uint32 redundancyDepth)
 {
-	// Build the redundancy bundle from the most-recent `redundancyDepth` ticks
-	// (clamped to kMaxSlots inside the builder) and fire the unreliable RPC.
+	// Bundle the most-recent `redundancyDepth` ticks (clamped inside the builder) and send. §7
 	FInputRedundancyBundle bundle;
 	buildRedundancyBundle<simulatableBrawler::PlayerInput>(
 		queue, currentTick, static_cast<uint8>(redundancyDepth), bundle);
@@ -633,20 +569,11 @@ void USimmableUpdateComponent::sendLocalInputToAuthority(
 
 void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInputRedundancyBundle& bundle)
 {
-	// Stage 1 (Task 11) — wire-format compat fence (server side).
-	// An empty bundle (the client had no pending input in the redundancy window)
-	// carries no wire header and therefore no version byte; getWireFormatVersion()
-	// returns 0 for it. That is normal idle traffic, NOT a mismatch — skip it
-	// silently (forEachSlot is a no-op on it anyway) so we don't log a false
-	// mismatch every idle frame.
+	// ⛔ AN EMPTY BUNDLE IS IDLE TRAFFIC, NOT A MISMATCH -- no wire header means no version byte. §8
 	if (bundle.wireBytes.Num() == 0)
 		return;
 
-	// Version byte detection: refuse to process a bundle whose wire-format version
-	// disagrees with this build (a pre/post-Stage-1 mismatch). Surface a loud error
-	// and early-return — do NOT disconnect the client here; the disconnect path is
-	// engine-managed and is a Stage 6 dedicated-server-validation concern
-	// (risks_and_plan.md §5.2).
+	// ⛔ REFUSE, BUT DO NOT DISCONNECT HERE -- the disconnect path is engine-managed. §8
 	const uint8 clientVersion = bundle.getWireFormatVersion();
 	if (clientVersion != FInputRedundancyBundle::kWireFormatVersion)
 	{
@@ -656,36 +583,22 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInp
 		return;
 	}
 
-	// [T21/T24] THIN TRANSPORT ADAPTER. Everything below the wire-format fence is
-	// pure engine-primitive acquisition plus a forward into the engine-agnostic
-	// ServerReceptionCoordinator. NO netcode policy lives here: the tier
-	// derivation/EMA, capture-tick dedup, park/drain, the malformed-slot fence, AND
-	// (T24) the per-slot receive loop itself are all in the core coordinator. This
-	// side resolves only the primitives a second engine must also supply — Address
-	// (root connection), player slot, RTT, server sim tick — and the wire buffer,
-	// then forwards them. The id->component delivery route is registered ONCE at
-	// register-time (tryRegisterWithNewFramework), not per slot.
+	// ⛔ NO NETCODE POLICY BELOW THIS FENCE -- tier derivation, dedup, park/drain, the malformed-
+	// slot fence and the per-slot loop are all core. This side resolves engine primitives only. §7
 	//
-	// The receive-path order is documented and load-bearing: fence (above) -> RTT
-	// SAMPLE (once per bundle) -> the core per-slot loop (receiveInputBundle).
+	// ⛔ ORDER IS LOAD-BEARING: fence, then ONE RTT sample, then the core per-slot loop. §7
 	ASimulationManagerUImpl* authorityManager =
 		ASimulationManagerUImpl::instanceFor(/*isAuthority=*/true);
 	ASimulationManagerUImpl::BrawlerReceptionCoordinator* coordinator =
 		(authorityManager != nullptr) ? authorityManager->getReceptionCoordinator() : nullptr;
 
-	// Resolve the ROOT connection ONCE — split-screen siblings (UChildConnection)
-	// collapse to the single wire entry their shared connection deserves; tier and
-	// slot key are both derived from it. A null connection is the documented
-	// "no wire identity" sentinel (standalone / listen-server local pawn).
+	// ⛔ RESOLVE THE ROOT CONNECTION ONCE -- split-screen siblings collapse to their shared wire. §7
 	UNetConnection* rootConn =
 		(coordinator != nullptr) ? GetRootNetConnection(GetOwner()) : nullptr;
 
 	const unsigned int id = (unsigned int)GetUniqueID();
 
-	// THE NO-WIRE FALLBACK BOUNDARY IS HERE, adapter-side (fable ruling). When there
-	// is no coordinator or no wire (standalone / listen-server local pawn), every
-	// slot takes the legacy undelayed delivery path directly, WITHOUT the coordinator
-	// — the core only ever sees a valid wire (task AC "Preserve fallback").
+	// ⛔ THE NO-WIRE FALLBACK IS ADAPTER-SIDE -- the core only ever sees a valid wire. §7
 	if (coordinator == nullptr || rootConn == nullptr)
 	{
 		bundle.forEachSlot<simulatableBrawler::PlayerInput>(
@@ -700,70 +613,39 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInp
 
 	const FUEConnectionHandle handle(rootConn);
 
-	// (1) RTT SAMPLE — ONCE PER BUNDLE, before the per-slot loop. A bundle is one
-	// datagram (one arrival event) and FNetPing's RoundTrip only advances on ack
-	// receipt anyway; sampling per slot would feed the same reading into the tier
-	// EMA up to kMaxSlots times and couple smoothing to redundancy depth.
-	// noteRttSample DRIVES THE SEND itself: it derives the tier and, on a change for
-	// this owner, fires sendConnectionTierToOwningClient through the sink (*this).
-	// The "no reading" skip and the publish-only-on-change dedup are core-owned (T23).
+	// ⛔ ONE RTT SAMPLE PER BUNDLE, NEVER PER SLOT -- per-slot couples the tier EMA to depth. §7
 	coordinator->noteRttSample(
 		handle, id, authorityManager->getServerReceptionTick(),
 		readRoundTripMs(rootConn), *this);
 
-	// (2) Slot primitive: WHICH local player on that wire (the child-connection id).
-	// Tier is keyed on the ROOT connection (latency is a property of the link);
-	// INPUT is per character, so the queue is keyed on the slot too.
+	// Tier keys on the ROOT connection (latency is the link's); input keys on the slot too. §7
 	const uint8 playerSlot = GetPlayerSlotForActor(GetOwner());
 
-	// (3) The whole per-slot loop is now core (T24): receiveInputBundle decodes the
-	// wire buffer, parks each slot in the ServerInputDelayQueue, and on the ONE
-	// non-parked (malformed-slot) path delivers immediately through the delivery
-	// sink — here the manager, which routes id->component via the register-time
-	// route. THE DELAY IS APPLIED EXACTLY ONCE (park-to-release): a released input
-	// keeps its ORIGINAL captureTick, and the server's consumer
-	// (SimulationNetSync::collectInputAll, authority branch) pops RemoteMoveQueue in
-	// ARRIVAL ORDER, so it contributes no offset of its own.
+	// ⛔ THE DELAY IS APPLIED EXACTLY ONCE (park-to-release) -- a released input keeps its ORIGINAL
+	// captureTick, and SimulationInputResolution::collectInputAll pops it in ARRIVAL order. §7
 	//
-	// [T3] The LAST argument is the RELAY sink — the same manager again, bound to a
-	// different boundary: on each genuinely-new capture tick the core taps the
-	// receipt path and calls relayRemoteInput, which writes (captureTick, dA, input)
-	// into that character's replicated relay ring for the OTHER clients. Two
-	// arguments, one object, deliberately: delivery routes an input INTO the
-	// simulation, the relay forwards it OUT. Nothing about the delivery half — or
-	// about sendCorrectionAll's still-live input write (dual-write until T8) — is
-	// changed by its presence.
+	// The LAST argument is the RELAY sink: delivery routes an input IN, the relay forwards it OUT. §6
 	coordinator->receiveInputBundle<SimulatableBrawler>(
 		id, handle, playerSlot, bundle, *authorityManager, *authorityManager);
 }
 
-// This component IS a ConnectionTierSink — the concept is compile-checked at the
-// noteRttSample call site below, but assert it here too so a breaking signature
-// change surfaces as a legible static_assert rather than an opaque template error.
+// Asserted here too, so a breaking signature change is a legible static_assert. §7
 static_assert(ConnectionTierSink<USimmableUpdateComponent>,
 	"USimmableUpdateComponent must satisfy ConnectionTierSink so ServerReceptionCoordinator "
 	"can drive the tier send through it");
 
 void USimmableUpdateComponent::sendConnectionTierToOwningClient(unsigned int id, uint8_t tier)
 {
-	// PURE TRANSPORT (T23). The core already applied the "no reading" skip and the
-	// publish-only-on-change dedup, and only calls this when the tier for this
-	// owner actually changed — so there is NO sentinel check and NO changed-vs-
-	// current test here. This component is its own sink target, so the id must be
-	// its own unique id (a central-manager sink in another engine would route on it).
+	// ⛔ PURE TRANSPORT -- the core applied the no-reading skip and the publish-only-on-change
+	// dedup already, so no sentinel check and no changed-vs-current test belongs here. §7
 	check(id == (unsigned int)GetUniqueID());
 
-	// [T10 / og-netcode-v2-input-relay] The tier is written to the wire's relay
-	// actor, not to a property of this component. Split-screen siblings resolve to
-	// the SAME root connection and therefore to the SAME relay — one wire, one
-	// tier property, which is what makes the sibling-starvation class the core's
-	// per-owner dedup guards against structurally impossible on the transport side.
+	// The tier is written to the wire's relay actor: siblings share one connection, one tier. §5
 	UNetConnection* rootConnection = GetRootNetConnection(GetOwner());
 	if (rootConnection == nullptr)
 	{
-		// No wire identity (standalone / listen-server-local pawn). Defensive: the
-		// only caller is the RPC receive path, which already early-outs on a null
-		// root connection before it can reach noteRttSample.
+		// No wire identity (standalone / listen-server local pawn). Defensive: the ONLY caller
+		// already early-outs on a null root connection. §7
 		return;
 	}
 
@@ -783,9 +665,7 @@ void USimmableUpdateComponent::sendConnectionTierToOwningClient(unsigned int id,
 
 DAttackState USimmableUpdateComponent::getMachineVizState()
 {
-	// Mirrors the TickComponent viz lookup below (same pattern, same authority
-	// resolution). Returns Idle on any missing link so callers stay ungated
-	// during registration ordering races.
+	// Mirrors the TickComponent viz lookup; returns Idle on any missing link. §10
 	const bool vizIsAuthority = (GetNetMode() != NM_Client);
 	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(vizIsAuthority);
 	if (manager == nullptr)
@@ -858,50 +738,20 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 		}
 
-		// --- D5.4 render-side input echo (T13): local-vs-remote viz input source ---
+		// --- Render-side input echo: one viz input source, local vs remote -----------
+		// Resolved ONCE per render frame and shared by every input-carrying viz site. §10
 		//
-		// Resolved ONCE per render frame and shared by every input-carrying viz site
-		// below, so the aim indicator and the block-prediction wedge can never read
-		// two different samples of the same frame.
+		// ⛔ hasInputComponent() IS THE LOCAL-vs-REMOTE DISCRIMINATOR -- the host's own pawn is LOCAL.
 		//
-		// LOCAL character: sample live, at THIS render frame's rate. hasInputComponent()
-		// is the local-vs-remote discriminator and is exactly the test the radial viz
-		// above already uses (line ~555) — setupBindings() is reached only from
-		// AOGBrawlerUECharacter::SetupPlayerInputComponent, which UE calls only for a
-		// locally-controlled pawn. It is true for a pure client's autonomous proxy AND
-		// for the listen-server host's own pawn; it is false for every simulated proxy.
-		// (The registration-time ROLE_AutonomousProxy test used in tryRegisterWithManager
-		// is deliberately NOT reused here: it excludes the host, which we now want to echo.)
+		// ⛔ NOT the registration-time ROLE_AutonomousProxy test: that one excludes the host. §10
 		//
-		// REMOTE simulated proxy: [T7] RE-SOURCED. This used to read the correction
-		// cache's input column (`editReconciliation().getLatestInput(...)`) — fed by
-		// the SERVER->CLIENT correction-input channel. It now reads the relay store's
-		// LAST-KNOWN relayed input, which is the same character's real input as
-		// relayed by the server, and is the source the sim's own proxy prediction
-		// resolves from. [T8] That channel is now DELETED, so this re-point is
-		// irreversible: a viz left on the column would today be rendering this
-		// client's own prediction of the proxy, silently, dressed as authority.
-		// [T16] And the column itself is now gone, so "left on the column" is no
-		// longer even expressible — this is the only remote source there is.
-		// Still the only input that exists for someone else's character, and still
-		// tick-quantized. NOT the per-tick scheduled read: the viz wants "what is this
-		// player doing", not "which input does tick N run on".
+		// REMOTE proxy: the relay store's LAST-KNOWN input, NOT the per-tick scheduled read. §10
 		//
-		// LISTEN-SERVER IMPROVEMENT (intended, T13, and PRESERVED by the re-source):
-		// the host's own pawn takes the LOCAL path here, so the remote-source read is
-		// not what it renders from. Its fallback still holds either way — the authority
-		// allocates no relay stores at all (registerPredictionOwner's provider-absent
-		// branch is the only site that creates one, and it runs on the client), so this
-		// call answers nullopt on the authority for exactly the same structural reason
-		// getLatestInput did when the caches were what was missing (T16 has since
-		// retired getLatestInput along with the whole input column; the structural
-		// argument for THIS accessor's nullopt is unaffected — it is about stores).
+		// ⚠ ON THE AUTHORITY THE RELAY STORE EXISTS BUT IS NEVER WRITTEN, so this answers nullopt. §11
 		//
-		// The echoed value carries CONTINUOUS FIELDS ONLY (T12's makeVisualizationPlayerInput
-		// pins every discrete field neutral), so attack / Hadouken edges structurally cannot
-		// render-echo. Cosmetic only — never fed to the sim, the RPC or a cache.
+		// ⛔ CONTINUOUS FIELDS ONLY -- discrete fields are pinned neutral; never fed to the sim. §10
 		//
-		// No tier consult here: muting on a degraded tier is optional task T15.
+		// ⛔ NO TIER CONSULT HERE -- muting on a degraded tier is a separate, optional change.
 		const bool hasLiveLocalInput =
 			m_ownerInputCollection != nullptr && m_ownerInputCollection->hasInputComponent();
 
@@ -911,13 +761,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				[this]() { return m_ownerInputCollection->buildLatestVisualizationInput(); },
 				vizManager->getLastRelayedInput((unsigned int)GetUniqueID()));
 
-		// Attack aim visualization — attack-direction indicator (red L / 3-point path)
-		// and reference arcs. Sourced per-character via the shared vizPlayerInput above:
-		// render-rate live sample for the local character, held-constant LAST RELAYED
-		// input for remote simulated proxies ([T7] — was the correction cache's input
-		// column, ~1 RTT behind; the relayed one is fresher by roughly the return leg).
-		// For a remote proxy with nothing relayed yet, the viz is skipped for that frame
-		// — unchanged pre-existing behaviour, preserved by the nullopt contract.
+		// Attack aim viz, from the shared vizPlayerInput; skipped for a proxy with nothing relayed. §10
 		{
 			if (vizPlayerInput.has_value())
 			{
@@ -938,10 +782,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			}
 		}
 
-		// Projectile visualization — debug sphere per alive (flying) projectile slot,
-		// plus tick-stamped hit/block indicators (T30). currentTick + dt come from the
-		// SAME clock the sim uses (prediction tick on clients, server tick on the
-		// authority), so the viz residual-lifetime maths line up with the sim's pruning.
+		// Projectile viz. currentTick + dt come from the SAME clock the sim uses. §10
 		{
 			const SimulationTimeStep projectileVizStep = vizManager->runsPrediction()
 				? vizManager->getClientClock().getPredictionStep()
@@ -972,13 +813,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				(*attackSimState).get<dAttackGuardSimulation::State>());
 		}
 
-		// Attacker-side block-prediction viz. NO local-player gate on WHETHER it draws —
-		// it draws for every character; the local-vs-remote split is only about WHERE the
-		// input comes from, and that decision is made once in vizPlayerInput above
-		// (render-rate live sample locally, server correction ~1 RTT behind for remote
-		// simulated proxies). The old "skipped on the authority" limitation called out in
-		// Task 8's PIE matrix is now gone for the HOST'S OWN character, which has live
-		// input; it still applies to a remote proxy whose cache has no entry yet.
+		// Block-prediction viz draws for EVERY character; only the input SOURCE splits. §10
 		{
 			if (vizPlayerInput.has_value())
 			{
@@ -998,22 +833,9 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		}
 	}
 
-	//if (GetNetMode() == NM_DedicatedServer || GetNetMode() == NM_ListenServer)
-	//{
-	//	m_simulationStateSyncedBuffer.writeToBuffer(0, 1337.f);
-	//	m_simulationStateSyncedBuffer.writeToBuffer(0 + sizeof(float), 1336.f);
 
-	//}
-	//else
-	//{
-	//	LoggingFunctorUImpl loggingFunctor(true);
 
-	//	loggingFunctor.logFloat("first synced Float", m_simulationStateSyncedBuffer.readFromBuffer<float>(0));
-	//	const uint32 floatSize = sizeof(float);
-	//	loggingFunctor.logFloat("first synced Float", m_simulationStateSyncedBuffer.readFromBuffer<float>(0 + floatSize/*sizeof(float)*/));
-	//}
 
-	//EpicGamesAssignment::runAssignment();
 }
 
 void USimmableUpdateComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -1022,58 +844,20 @@ void USimmableUpdateComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 	DOREPLIFETIME(USimmableUpdateComponent, m_simulationStateCorrectionSyncedBuffer);
 
-	// [og-netcode-v2-input-relay T8] The `m_replicatedInputSyncedBuffer`
-	// registration stood on the line above. Retiring a replicated property means
-	// retiring its registration in the same edit: a DOREPLIFETIME naming a member
-	// that no longer exists is a compile error (so it cannot be forgotten), while
-	// keeping the member and dropping only the registration would have left a
-	// silently-never-replicated field. Both halves went together.
+	// ⛔ THE `m_replicatedInputSyncedBuffer` REGISTRATION STOOD HERE -- removed in the SAME edit
+	// as the member: one half alone is a compile error, the other a silently dead field. §9
 	//
-	// FENCE COHERENCE. Removing a property leaves NO hole and NO stale version
-	// expectation: DOREPLIFETIME registrations are per-property lifetime entries,
-	// not fixed wire offsets, and each surviving property carries its own
-	// self-describing NetSerialize (watermark-trimmed length prefix). The
-	// increment's SINGLE wire fence is
-	// FSimulationStateSyncBuffer::kWireFormatVersion, which T4 bumped 1 -> 2 for
-	// the applied-capture-tick ref and which T8 deliberately does NOT bump: the
-	// state payload's layout is unchanged by this task, and every build that
-	// speaks version 2 already agrees the input value is not on the wire — the
-	// relay ring, the input RPC and the state buffer all ride behind that one
-	// fence, so a mismatched peer is still refused loudly at the first correction
-	// OnRep. FSimulationInputSyncBuffer's own kWireFormatVersion is likewise
-	// untouched; that struct survives in its CLIENT->SERVER role.
+	// ⛔ REMOVING A PROPERTY NEEDS NO VERSION BUMP -- registrations are lifetime entries. §9
 
-	// [og-netcode-v2-input-relay / T1] The outbound input relay ring's
-	// `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` stood on the
-	// line above, with NO COND_.
+	// ⛔ `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` STOOD HERE, with NO COND_.
+	// It is now COND_SkipOwner on the ring's own per-character dependent object. §6
 	//
-	// ⭐ [T39] GONE, IN THE SAME EDIT AS THE MEMBER — the rule this block already
-	// states for the T8 removal, applied again. The ring is now
-	// `DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing,
-	// COND_SkipOwner)` on its own per-character Iris dependent object, which is
-	// what lets it be scheduled and prioritised independently of the correction
-	// state above (they used to share one atomic batch and die together under
-	// packet pressure — T37) and what finally lets the owner echo be skipped (the
-	// owning client provably never reads its own ring).
-	//
-	// ⛔ THE COND_ COULD NOT HAVE BEEN ADDED HERE INSTEAD. A condition on this
-	// component would resolve against the CHARACTER's owning connection, which is
-	// the same relationship — but the whole reason for the move is the atomic
-	// batch, not the condition, and adding the condition without the move would
-	// have reclaimed ~85 B/round while leaving the ring dying with the state on
-	// every overflow frame. The saving is the smaller half of this change.
+	// ⛔ THE COND_ COULD NOT HAVE BEEN ADDED HERE -- the shared atomic batch is what forced it. §6
 
-	// [T10 / og-netcode-v2-input-relay] The COND_OwnerOnly connection-tier
-	// registration that used to sit here is GONE. The tier replicates from
-	// ASimulationConnectionRelay, whose owner-only RELEVANCY does the narrowing
-	// the condition used to do.
+	// ⛔ THE COND_OwnerOnly TIER REGISTRATION IS GONE -- owner-only RELEVANCY narrows it now. §5
 }
 
-// [og-netcode-v2-input-relay item 77] Closes the OGSIM_OPTIMIZE_OFF opened
-// above. The file had no closing pragma since its initial commit, so the
-// whole rest of the TU (~1000 lines, including TickComponent) compiled
-// unoptimized in every build — closing the pair here, at true end-of-file,
-// changes nothing (there was no code after this point either), it just makes
-// the always-off scope an explicit pair instead of an implicit "off to EOF".
+// ⛔ CLOSES THE OGSIM_OPTIMIZE_OFF PAIR AT TRUE EOF. The file carried no closing pragma from
+// its first commit, so the whole TU compiled unoptimized in every build. §2
 OGSIM_OPTIMIZE_ON
 
