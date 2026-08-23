@@ -70,6 +70,22 @@ class AOGBrawlerUECharacter : public ACharacter
 	UPROPERTY()
 	UMaterialInterface* HumanoidBaseMaterial = nullptr;
 
+	// ⛔ REPLICATED, AND THE ONLY REPLICATED STATE ON THIS CLASS. Purely cosmetic:
+	// it never reaches the engine-free simulation core, so it cannot affect
+	// determinism or the correction path.
+	UPROPERTY(ReplicatedUsing = OnRep_BrawlerColor)
+	FLinearColor BrawlerColor = FLinearColor::White;
+
+	UFUNCTION()
+	void OnRep_BrawlerColor();
+
+	// The one dynamic instance the tint is written to. Created lazily because
+	// RebuildHumanoidMesh() re-applies the BASE material to every section.
+	UPROPERTY(Transient)
+	UMaterialInstanceDynamic* HumanoidColorMID = nullptr;
+
+	void ApplyBrawlerColor();
+
 	HumanoidVisualization m_humanoidViz;
 
 	void RebuildHumanoidMesh();
@@ -167,6 +183,8 @@ protected:
 	virtual void BeginPlay();
 
 	virtual void PossessedBy(AController* NewController) override;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// Client-side mirror of PossessedBy's IMC-add. Fires when the server-
 	// authoritative Controller pointer replicates to this client-side pawn.

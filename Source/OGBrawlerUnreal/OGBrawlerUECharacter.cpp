@@ -20,6 +20,8 @@
 #include "OGBrawlerUnreal/HumanoidMeshBuilder.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
@@ -188,6 +190,11 @@ void AOGBrawlerUECharacter::RebuildHumanoidMesh()
 		HumanoidMeshBuilder::buildEllipsoidSection(m_humanoidViz.legs, LatSegs, LonSegs, geo);
 		createSection(2, geo);
 	}
+
+	// ⛔ MUST BE LAST. Every createSection above sets the BASE material, so a rebuild
+	// silently reverts the brawler tint. This re-applies it. Do not move this above
+	// the sections, and do not drop it when adding a fourth section.
+	ApplyBrawlerColor();
 }
 
 
@@ -202,9 +209,97 @@ void AOGBrawlerUECharacter::BeginPlay()
 	InputCollection->addInputMappingContextForController(Controller);
 }
 
+// ---------------------------------------------------------------------------
+// BRAWLER COLOUR — a distinct tint per brawler, server-assigned, replicated.
+//
+// ⛔ KEYED PER BRAWLER, NOT PER CONNECTION. This game supports couch co-op:
+// AOGBrawlerPlayerController::JoinLocalPlayer calls CreatePlayer(ControllerId=-1),
+// so several players share ONE connection. Anything keyed on the connection or its
+// address gives every sibling on a couch the same colour. The counter below is
+// bumped once per POSSESSION, which is per brawler.
+//
+// Stable for a whole run, deliberately NOT stable across runs: a
+// leaver's slot is never reused, so a rejoining player gets the next colour rather
+// than their old one.
+// ---------------------------------------------------------------------------
+namespace
+{
+	// Hand-picked so neighbours stay distinguishable for a colour-blind reader and
+	// against the level's grey; 10 entries for a 6-brawler target, so the wrap below
+	// is a safety net rather than an expected path.
+	const FLinearColor kBrawlerPalette[] = {
+		FLinearColor(0.90f, 0.20f, 0.20f), // red
+		FLinearColor(0.20f, 0.45f, 0.95f), // blue
+		FLinearColor(0.95f, 0.75f, 0.10f), // amber
+		FLinearColor(0.20f, 0.75f, 0.35f), // green
+		FLinearColor(0.70f, 0.30f, 0.85f), // violet
+		FLinearColor(0.15f, 0.80f, 0.80f), // cyan
+		FLinearColor(0.95f, 0.50f, 0.15f), // orange
+		FLinearColor(0.95f, 0.45f, 0.70f), // pink
+		FLinearColor(0.55f, 0.75f, 0.20f), // lime
+		FLinearColor(0.45f, 0.35f, 0.75f), // indigo
+	};
+	constexpr int32 kBrawlerPaletteCount = UE_ARRAY_COUNT(kBrawlerPalette);
+
+	// ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
+	// diverge from the authority's and hand two brawlers the same tint.
+	int32 gNextBrawlerColorIndex = 0;
+}
+
+void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
+	DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);
+}
+
+void AOGBrawlerUECharacter::OnRep_BrawlerColor()
+{
+	ApplyBrawlerColor();
+}
+
+void AOGBrawlerUECharacter::ApplyBrawlerColor()
+{
+	if (HumanoidMesh == nullptr) return;
+
+	if (HumanoidColorMID == nullptr)
+	{
+		UMaterialInterface* baseMat = HumanoidBaseMaterial
+			? HumanoidBaseMaterial
+			: UMaterial::GetDefaultMaterial(MD_Surface);
+		HumanoidColorMID = UMaterialInstanceDynamic::Create(baseMat, this);
+		if (HumanoidColorMID == nullptr) return;
+	}
+
+	// `Color` is BasicShapeMaterial's vector parameter. A wrong name here fails
+	// SILENTLY — the mesh renders in the base tint and nothing logs — so it is
+	// named once, at this single write site, rather than being spread around.
+	HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), BrawlerColor);
+
+	// RebuildHumanoidMesh() re-applies the BASE material to every section, so the
+	// MID must be re-applied after any rebuild, not just once at possession.
+	const int32 sectionCount = HumanoidMesh->GetNumSections();
+	for (int32 section = 0; section < sectionCount; ++section)
+	{
+		HumanoidMesh->SetMaterial(section, HumanoidColorMID);
+	}
+}
+
 void AOGBrawlerUECharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
+
+	// Authority only: PossessedBy does not run on clients, but HasAuthority() is
+	// stated rather than assumed because the counter must never advance twice.
+	if (HasAuthority())
+	{
+		BrawlerColor = kBrawlerPalette[gNextBrawlerColorIndex % kBrawlerPaletteCount];
+		++gNextBrawlerColorIndex;
+
+		// The listen-server's own pawn gets no OnRep, so apply here too.
+		ApplyBrawlerColor();
+	}
 
 	// Server-side hook for mid-game-spawned pawns: fires after Controller is
 	// wired, which BeginPlay's IMC-add misses because BeginPlay can run before
