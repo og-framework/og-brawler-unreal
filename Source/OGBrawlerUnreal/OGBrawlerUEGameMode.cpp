@@ -2,6 +2,7 @@
 
 #include "OGBrawlerUEGameMode.h"
 #include "OGBrawlerUECharacter.h"
+#include "OGBrawlerUEHUD.h"
 #include "OGBrawlerPlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
@@ -12,6 +13,9 @@ AOGBrawlerUEGameMode::AOGBrawlerUEGameMode()
 {
 	DefaultPawnClass = AOGBrawlerUECharacter::StaticClass();
 	PlayerControllerClass = AOGBrawlerPlayerController::StaticClass();
+	// ⛔ AGameModeBase LEAVES THIS UNSET, so without this line the engine's no-op AHUD
+	//   is in play and nothing screen-space can be drawn at all.
+	HUDClass = AOGBrawlerUEHUD::StaticClass();
 }
 
 void AOGBrawlerUEGameMode::BeginPlay()

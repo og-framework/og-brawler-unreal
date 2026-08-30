@@ -1649,6 +1649,9 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
 // The cap's denominator, reaped so a churning session is judged on the resident roster. §10
     m_authorityRegisteredIds.erase(id);
 
+// Same unregister contract for the display. ⛔ A kept ring is a leak keyed on a dead id. §10
+    m_inputHistory.forgetCharacter(id);
+
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
 }
 

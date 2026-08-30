@@ -221,10 +221,23 @@ calculation* (`risks_and_plan.md` R-UE1; proposal §7.4).
 pwsh tools/lint/visualization_hitbox_isolation.ps1
 ```
 
-It globs `*Visualization*.h|.cpp` under
-`Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/` (the headers are **not**
-isolated in a `Visualization/` directory — a filename pattern is the available
-handle) and fails on any `#include` of a hitbox-**resolution** header.
+It globs `*Visualization*` and `*UEHUD*` (`.h|.cpp`) under **two** roots —
+`Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/` and
+`Source/OGBrawlerUnreal/` — and fails on any `#include` of a hitbox-**resolution**
+header. Neither root isolates its visualization units in a `Visualization/`
+directory, so a filename pattern is the available handle; `*UEHUD*` is there because
+the UE half's only screen-space drawing surface does not carry `Visualization` in its
+name. 23 files today, all printed on every run.
+
+> ⚠ **The UE root was added on 2026-08-25.** Before that the lint scanned the
+> og-brawler core alone, so a green run said nothing about any UE-side visualization
+> unit even when the unit's own name matched the glob. Every configured root must now
+> exist **and match at least one file**; a root that matches nothing is exit 2, not a
+> quiet pass.
+
+Both parameters are arrays. `pwsh -File` cannot pass one: use
+`pwsh -Command "& ./tools/lint/visualization_hitbox_isolation.ps1 -VisualizationRoot A,B"`
+for several roots; a single root over a scratch tree works under `-File` as before.
 
 Like R-P1, this is one of three mitigation arms, and the lint is the weakest:
 
@@ -234,14 +247,16 @@ Like R-P1, this is one of three mitigation arms, and the lint is the weakest:
 | **This lint** (structural) | A visualization TU including the hit resolver | `tools/lint/visualization_hitbox_isolation.ps1` |
 | **Review checklist** (procedural) | Side channels — statics, singletons, injected functors | `VISUALIZATION_DISCIPLINE.md` §3 |
 
-The lint sees `#include` lines only, so **a green run is not proof the invariant
-holds**. The full invariant, the For Honor precedent, the permitted-vs-forbidden
+The lint sees **direct** `#include` lines only — a transitive include is invisible to
+leaf matching by construction — so **a green run is not proof the invariant holds**. The full invariant, the For Honor precedent, the permitted-vs-forbidden
 boundary, and the review checklist live in
 `Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/VISUALIZATION_DISCIPLINE.md`.
 
-**Contract:** a new header that **resolves** hits gets a blacklist entry in the same
-change; a new header that merely **declares** sim state types does not — visualization
-reading post-sim state through a `const&` is the design, not an exception.
+**Contract, two halves.** A new header that **resolves** hits gets a blacklist entry in
+the same change; a new header that merely **declares** sim state types does not —
+visualization reading post-sim state through a `const&` is the design, not an
+exception. And a new presentation translation unit is covered **iff its filename
+matches a glob**: name it `*Visualization*`, or add its glob in the same change.
 
 ---
 
@@ -311,6 +326,7 @@ Exit codes: **0** = clean · **1** = an unresolved anchor or an unused escape ·
 | FILE:LINE | `` `ResimGatePolicy.h:86` `` | …and the line (or `86-92` range) is inside it |
 | PAIR | `` `File.h` :: `symbol` ``, or two adjacent table cells | the symbol occurs in **that** file, on a non-comment line |
 | QSYM | `` `StateCorrectionCache::pushPredictionTick` `` | a file declares that type and carries the member in code |
+| CASE | `` `Panel.OneFactorScalesBothTheGeometryAndTheText` ``, `` `OGBrawler.InputHistoryDisplay` `` | the exact name appears **inside double quotes** in non-comment code — see below |
 | MEMBER | `` `m_pendingResimAnchorTick` `` | it occurs in non-comment code somewhere |
 | IDENT / TYPE | `` `collectInputAll` ``, `` `ResimSweepDiagnostics` `` | same, for lowerCamelCase and PascalCase tokens |
 | SNIPPET | `` `if (!withinDepth) { ++x; }` `` | every identifier inside the fragment resolves |
@@ -319,6 +335,41 @@ Everything else inside backticks is **counted and printed as UNCHECKED**. That
 number is part of the output on every run, clean or not: a lint that hides what it
 could not parse is the failure this project keeps repeating, and "clean" must never
 be readable as "verified".
+
+## Dotted registered names — Catch2 case names and console variables
+
+A test-case name and a console variable are **not identifiers**. They exist only as
+string literals, so every symbol rule above is structurally blind to them, and until
+2026-08-27 a document citing one was **counted as UNCHECKED while the run reported
+CLEAN**. That mattered here more than anywhere: this repository's rationale documents
+cite case names as their *evidence*, so the sentence "a test pins this" was the one
+claim the lint could not check.
+
+The CASE arm closes it. A token resolves when **every segment is PascalCase** and the
+**exact name, double quotes included**, occurs in non-comment code:
+
+```
+`Panel.OneFactorScalesBothTheGeometryAndTheTextAndTheyCannotDriftApart`
+    -> TEST_CASE("Panel.OneFactorScalesBothTheGeometryAndTheTextAndTheyCannotDriftApart", ...)
+`OGBrawler.InputHistoryDisplay`
+    -> TEXT("OGBrawler.InputHistoryDisplay") in the FAutoConsoleVariableRef registration
+```
+
+Three properties are deliberate:
+
+- **The quotes are required.** A bare substring search would pass a citation of
+  `Panel.EveryArrowIsTheScreenImageOfTheAngle` against a test actually named
+  `…OfTheAngleTheMatcherTested` — and appending words is the most common rename.
+- **Comment stripping applies.** A deleted test whose name survives in a HISTORY
+  comment does not certify the citation, the same discipline the symbol rules use.
+- **A lowercase segment is not a name.** `storage.add`, `decision.landed` and
+  `m_reconciliation.wipeAllForResync` are member access written out in prose. They
+  stay UNCHECKED, because their owning expression is not something the tree declares.
+  Widening the arm to swallow them would make it fire on ordinary prose.
+
+FILE is tried first, so `` `src/CaseNames.cpp` `` is still a path anchor, not a name.
+A name that is *supposed* not to resolve takes a `lint-external-ref` declaration like
+any other anchor.
 
 ## Comment-stripping is load-bearing
 
@@ -363,6 +414,14 @@ declaration in the same change, and the reason says *why* it cannot resolve.
   inside a log format string resolves.
 - A `file:NNN` anchor is checked for **range, not content**: `:371` proves the file
   has 371 lines, not that line 371 still says what the doc claims.
+- **A dotted name with a lowercase segment stays UNCHECKED.** `storage.add`,
+  `decision.landed`, `m_reconciliation.findInputCache` — 25 distinct such tokens are
+  live in the two tiers today. Naming a method through its owner is therefore *not*
+  a checked claim; cite the method on its own, or as `Owner::method`, to get one.
+- **The FILE arm's extension set is `h hpp cpp ini cs md yml disabled`.** A backticked
+  `` `doc_anchor_lint.ps1` `` or `` `CMakeLists.txt` `` matches no arm and is UNCHECKED,
+  so a renamed script or build file in a doc is not caught. Both of this directory's
+  own lint scripts are cited that way today.
 
 ## Tests
 
@@ -373,6 +432,101 @@ rather than a claim. The known-bad fixture seeds four real historical defects.
 
 ```pwsh
 pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests -Output Detailed"
+```
+
+---
+
+# Palette-legend lint
+
+`palette_legend_lint.ps1` checks that
+`docs/InputHistoryDisplay-rationale.md` §7.11's colour-legend tables agree with the
+`switch` arms that actually bind a lane colour to its meaning —
+`provenanceCellStyleOf`, `machineCellStyleOf` and `delayVerdictStyleOf` in
+`BrawlerInputHistoryVisualizationBars.h`.
+
+> **The rule:** those three switches are the ONLY place a name is bound to an RGB
+> triple. Nothing else in the tree maps a colour on the frame-meter bars to what it
+> means, so §7.11's tables are the human-readable copy of that binding — and a
+> hand-typed copy of tuned colour values goes stale silently the first time anyone
+> retunes a hue.
+
+```pwsh
+pwsh tools/lint/palette_legend_lint.ps1
+```
+
+It fails on: an enumerator with a switch arm but no table row; a table row naming an
+enumerator no switch has an arm for; an RGB mismatch; a `LaneCellFill` mismatch (a
+hole documented as a colour, or a colour documented as a hole); and — new — a mismatch
+between a row's `On screen (sRGB hex)` cell and the hex re-derived from that same row's
+own RGB floats. Each of the three enumerator tables' row COUNT is checked against that
+enumerator's own count constant — `kRowProvenanceSummaryCount`, `kMachineStateCellCount`,
+`kInputDelayVerdictCount`, read from their declaring headers, never a literal — so an
+enumerator added without a table row fails the same way the existing palette
+distinctness sweeps in the Catch2 suite do. A fourth table covers `kLaneElisionColor`
+and `kUnnamedLaneColor`, the two colours drawn on the bars that belong to no enumerator
+at all; they are checked by value (RGB and hex) but deliberately not counted against
+any of the three constants.
+
+**The `On screen (sRGB hex)` column and the `-EmitHex` mode.** §7.11's RGB floats are
+LINEAR, not what the screen shows — `meterCellColor` builds an `FLinearColor` straight
+from them and lets Unreal gamma-encode it for display, so reading a float as an sRGB
+byte gives a materially wrong, always-darker colour. The hex column is the byte value
+that actually renders, computed per channel by `s = 12.92·L` when `L ≤ 0.0031308`, else
+`s = 1.055·L^(1/2.4) − 0.055`, then `round(s × 255)` clamped to `0..255`. Run
+
+```pwsh
+pwsh tools/lint/palette_legend_lint.ps1 -EmitHex
+```
+
+to print the GENERATED hex for every switch arm and non-enumerator colour, computed
+from `-BarsHeaderPath`'s own floats — this is the source a human pastes the column
+FROM; it reads only the header, never the doc, and checks nothing. The ordinary
+(non-`-EmitHex`) run then independently re-derives the same hex from the same floats
+and compares it against what the doc has written down. Both paths call the SAME
+`ConvertTo-SRGB8` / `ConvertTo-SRGBHex` functions — there is exactly one implementation
+of the conversion, so it cannot drift from itself. Rounding is round-half-AWAY-FROM-ZERO
+(`floor(x + 0.5)`), pinned explicitly because PowerShell's `[math]::Round` defaults to
+banker's rounding (half-to-even) instead.
+
+| Parameter          | Default                                                  | Purpose |
+| ------------------- | --------------------------------------------------------- | ------- |
+| `-RepoRoot`         | two levels above the script                                | Root relative paths resolve against. |
+| `-BarsHeaderPath`   | `BrawlerInputHistoryVisualizationBars.h`                    | The header carrying the three switches and the two non-enumerator colours. |
+| `-CoreHeaderPath`   | `BrawlerInputHistoryVisualization.h`                        | Declares `kRowProvenanceSummaryCount`. |
+| `-LanesHeaderPath`  | `BrawlerInputHistoryVisualizationLanes.h`                   | Declares `kMachineStateCellCount` and `kInputDelayVerdictCount`. |
+| `-DocPath`          | `Source/OGBrawlerUnreal/docs/InputHistoryDisplay-rationale.md` | The doc carrying §7.11's four tables. |
+| `-EmitHex`          | off                                                        | Prints the generated hex table from the header and exits 0; never opens `-DocPath`'s content. |
+
+Every path is an ordinary parameter (relative paths resolve against `-RepoRoot`; an
+absolute path is used as-is), which is what lets a RED probe point the lint at a
+SCRATCH COPY without ever seeding a defect in place on a shipped file.
+
+**What this lint does NOT check.** It can verify that a name, an RGB triple, the
+derived sRGB hex and a fill kind agree between the header and §7.11. It **cannot**
+verify that a row's MEANING sentence, or its plain-English `Colour` word, are true —
+both are prose, and nothing here reads either of them. A clean run is not a claim that
+any description or colour name in §7.11 is accurate, only that the names, RGB values,
+hex and fill kinds it can parse agree with the shipped header. §7.11 states this
+plainly too, so a green lint is never read as blessing more than it establishes.
+
+Exit codes: **0** = clean (or, with `-EmitHex`, the generated table printed) · **1** =
+at least one mismatch · **2** = usage/IO error (a configured path does not exist, or a
+table the lint needs is missing from the doc entirely — never a silent zero).
+
+## Tests
+
+`tools/lint/tests/palette_legend_lint.Tests.ps1` (Pester 5, same shape as
+`doc_anchor_lint.Tests.ps1`): a clean fixture pair (a small header + a matching §7.11
+fixture, both carrying the hex and Colour columns) alongside the RED mutations this
+lint's acceptance criteria name — a perturbed RGB channel, a deleted table row, a table
+row naming no arm, the `NoVerdict` hole documented as a colour, a perturbed hex digit,
+a deleted hex column, and a linear float changed without regenerating its hex (the
+drift case the hex arm exists for) — plus two usage-error cases, an `-EmitHex` output
+check, and a round-trip test proving the emitter and the checker call the same
+conversion function. Fixtures only; never a shipped file.
+
+```pwsh
+pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/palette_legend_lint.Tests.ps1 -Output Detailed"
 ```
 
 ---

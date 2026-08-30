@@ -22,6 +22,14 @@
     complementary arms are the code-review checklist in VISUALIZATION_DISCIPLINE.md
     (side channels a grep cannot see) and the `const&` signature itself.
 
+    SCOPE — BOTH halves of the invariant, engine-free and UE-side. The visualization
+    surface spans two trees: the engine-free free functions in og-brawler's core, and
+    the `Source/OGBrawlerUnreal` units that render them (a debug-draw helper, the
+    input-history ring store, and `AOGBrawlerUEHUD`, the project's only screen-space
+    drawing surface). Scanning the core alone left every UE-side unit unguarded while
+    still reporting clean, so a green run said nothing about the UE half. Both roots
+    are scanned; see the file-collection section for the root and glob contract.
+
     DESIGN — what counts as a "hitbox-resolution" header (the scoping decision):
 
       FLAGGED: headers that RESOLVE hits — that decide whether a hit landed and
@@ -57,26 +65,36 @@
     a commented-out include or a doc mention of a header name is never flagged.
 
     KNOWN LIMITATION (by design, and the reason the review checklist exists): this
-    lint sees INCLUDES ONLY. A side channel that needs no include — a static/global
-    a sim-side component later reads, a singleton lookup, a template parameter bound
-    to a hit-resolving functor at the call site — is invisible here. Those are the
-    cases VISUALIZATION_DISCIPLINE.md's checklist exists to catch in review. A green
-    run of this lint is NOT proof the invariant holds; it is proof the cheapest way
-    to break it is blocked.
+    lint sees DIRECT INCLUDES ONLY. Two things are therefore invisible to it. First,
+    a side channel that needs no include — a static/global a sim-side component later
+    reads, a singleton lookup, a template parameter bound to a hit-resolving functor
+    at the call site. Second, a TRANSITIVE reach: leaf matching runs over the text of
+    each scanned file, so a scanned file that includes a header which itself includes
+    a blacklisted one is not flagged, and cannot be. Both are the cases
+    VISUALIZATION_DISCIPLINE.md's checklist exists to catch in review; §4's transitive
+    ruling records the one such reach that exists in the tree today. A green run of
+    this lint is NOT proof the invariant holds; it is proof the cheapest way to break
+    it is blocked.
 
 .PARAMETER RepoRoot
     Repository root. Defaults to two levels above this script (tools/lint/..).
 
 .PARAMETER VisualizationRoot
-    Directory holding the visualization free functions, relative to RepoRoot.
-    There is NO Visualization/ subdirectory — the visualization headers live
-    alongside their sim siblings in the og-brawler core, which is why this lint
-    globs a FILENAME pattern rather than scanning a directory wholesale.
+    One or more directories holding visualization translation units, relative to
+    RepoRoot. There is NO Visualization/ subdirectory in either — the files live
+    alongside their sim or engine siblings, which is why this lint globs a FILENAME
+    pattern rather than scanning a directory wholesale. Every configured root must
+    exist and must match at least one file; see the file-collection section.
+
+    One root over a scratch tree works under `-File`; for several, use
+    `pwsh -Command "& ./script.ps1 -VisualizationRoot A,B"`.
+    ⚠ `pwsh -File` cannot pass an ARRAY — `-VisualizationRoot A B` is a binding
+    error (PositionalBinding is off), not two roots.
 
 .PARAMETER FilePattern
-    Filename glob identifying visualization translation units. Defaults to
-    '*Visualization*' (see the SCOPE note in the file-collection section below for
-    why this is broader than the six *Visualization.h headers named in the task).
+    One or more filename globs identifying visualization translation units. See the
+    SCOPE note in the file-collection section below for why each default is what it
+    is, and for the contract a new presentation unit has to satisfy.
 
 .EXAMPLE
     pwsh tools/lint/visualization_hitbox_isolation.ps1
@@ -87,11 +105,17 @@
 .OUTPUTS
     Exit 0 = clean. Exit 1 = at least one violation. Exit 2 = usage / IO error.
 #>
-[CmdletBinding()]
+# PositionalBinding is OFF deliberately. -VisualizationRoot and -FilePattern are both
+# arrays; with positional binding on, `-VisualizationRoot A B` silently binds B to
+# -FilePattern instead of adding a second root. A stray positional now fails loudly.
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path,
-    [string]$VisualizationRoot = 'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler',
-    [string]$FilePattern = '*Visualization*'
+    [string[]]$VisualizationRoot = @(
+        'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler',
+        'Source/OGBrawlerUnreal'
+    ),
+    [string[]]$FilePattern = @('*Visualization*', '*UEHUD*')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -194,40 +218,73 @@ if (-not (Test-Path -LiteralPath $RepoRoot)) {
     exit 2
 }
 
-$vizRootFull = Join-Path $RepoRoot $VisualizationRoot
-if (-not (Test-Path -LiteralPath $vizRootFull)) {
-    Write-Host "Visualization isolation lint: FAILED - visualization root not found at $VisualizationRoot (path moved?)."
-    Write-Host 'Update -VisualizationRoot, or the default in this script, in the same change that moves the headers.'
+if ($VisualizationRoot.Count -eq 0) {
+    Write-Host 'Visualization isolation lint: FAILED - no visualization root configured.'
+    Write-Host 'An empty root set would pass vacuously, so this is treated as a configuration error.'
     exit 2
+}
+
+foreach ($root in $VisualizationRoot) {
+    if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot $root))) {
+        Write-Host "Visualization isolation lint: FAILED - visualization root not found at $root (path moved?)."
+        Write-Host 'Update -VisualizationRoot, or the default in this script, in the same change that moves the files.'
+        exit 2
+    }
 }
 
 # ---------------------------------------------------------------------------
 # File collection.
 #
-# SCOPE NOTE: the task pinned the glob as `*Visualization.*`, which matches exactly
-# the six named headers and their .cpp siblings. This lint deliberately uses the
-# slightly broader `*Visualization*`, a strict SUPERSET, which additionally covers:
+# SCOPE NOTE - the glob set, and why each entry is there.
 #
+# `*Visualization*` rather than the narrower `*Visualization.*` the original task
+# pinned: a strict SUPERSET, which additionally covers
 #   DAttackVisualizationUtils.h/.cpp - shared visualization helpers, #included by
-#       FOUR of the six pinned headers. Left unguarded it is a transitive bypass:
-#       a hitbox include placed here reaches every visualization TU while the
+#       FOUR of the six originally pinned headers. Left unguarded it is a transitive
+#       bypass: a hitbox include placed here reaches every visualization TU while the
 #       narrow glob reports clean.
 #   CharacterVisualizationData.h     - visualization state payload; same rationale.
 #
-# Both are genuine visualization files and both are clean today, so the broader
-# glob costs nothing and closes the bypass. Every one of the six pinned headers is
-# still covered. The scanned set is printed below so a reviewer can confirm the
-# file set directly rather than infer it from the pattern.
+# `*UEHUD*` because the UE half's presentation surface does NOT carry
+# `Visualization` in its filename. `AOGBrawlerUEHUD` is the only screen-space
+# drawing surface in the project and is a visualization translation unit in every
+# sense the invariant cares about; scanning the UE root on the name glob alone would
+# have covered the ring store and the debug-draw helper while leaving the file that
+# actually draws unscanned - the same shape of gap this root list exists to close.
+#
+# CONTRACT: a new presentation translation unit is covered iff its filename matches
+# a glob here. Name it `*Visualization*`, or add its glob in the same change.
+#
+# ROOT SET: `og-brawler`'s core holds the engine-free visualization free functions;
+# `Source/OGBrawlerUnreal` holds the UE-side units that render them. Scanning only
+# the first left every UE-side unit unguarded, so a green run said nothing about the
+# UE half of the invariant. Test trees are deliberately NOT roots: a test may
+# legitimately construct a hit verdict in order to prove visualization ignores it.
+#
+# Every configured root must match at least one file. A root that silently matches
+# nothing - renamed away, moved out from under the lint - would let the scan shrink
+# without the report changing, which is exactly how this gap went unnoticed.
+# The scanned set is printed below so a reviewer can confirm the file set directly
+# rather than infer it from the patterns.
 # ---------------------------------------------------------------------------
-$files = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
-Get-ChildItem -Path $vizRootFull -File -Include "$FilePattern.h", "$FilePattern.cpp" -Recurse |
-    Sort-Object FullName |
-    ForEach-Object { $files.Add($_) }
+$includeGlobs = @($FilePattern | ForEach-Object { "$_.h"; "$_.cpp" })
 
-if ($files.Count -eq 0) {
-    Write-Host "Visualization isolation lint: FAILED - no files matched '$FilePattern.h|.cpp' under $VisualizationRoot."
-    Write-Host 'A zero-file scan would pass vacuously, so this is treated as a configuration error.'
-    exit 2
+$files = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+$seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+foreach ($root in $VisualizationRoot) {
+    $rootFull = Join-Path $RepoRoot $root
+    $rootFiles = @(Get-ChildItem -Path $rootFull -File -Include $includeGlobs -Recurse | Sort-Object FullName)
+
+    if ($rootFiles.Count -eq 0) {
+        Write-Host ("Visualization isolation lint: FAILED - no files matched '{0}' under {1}." -f ($includeGlobs -join '|'), $root)
+        Write-Host 'A configured root matching nothing would pass vacuously, so this is treated as a configuration error.'
+        exit 2
+    }
+
+    foreach ($f in $rootFiles) {
+        if ($seen.Add($f.FullName)) { $files.Add($f) }
+    }
 }
 
 # Matches  #include "foo/bar.h"  and  #include <foo/bar.h>, capturing the target.
@@ -269,7 +326,7 @@ foreach ($f in $files) {
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
-$docPath = "$VisualizationRoot/VISUALIZATION_DISCIPLINE.md"
+$docPath = 'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/VISUALIZATION_DISCIPLINE.md'
 
 if ($violations.Count -gt 0) {
     foreach ($v in $violations) {

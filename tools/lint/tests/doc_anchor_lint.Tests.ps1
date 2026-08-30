@@ -126,6 +126,27 @@ void SplitOwner::definedOnlyInCpp() {}
 '@
         Set-Content -LiteralPath (Join-Path $dir 'src/RelayActor.cpp') -Value $splitCpp
 
+        # -- names that exist ONLY as string literals --------------------------
+        # A Catch2 case name and a console variable are never identifiers, so no
+        # symbol rule can reach them. `Fixture.RetiredCaseName` sits in a COMMENT
+        # and must therefore NOT resolve, exactly as a dead symbol must not.
+        $caseNames = @'
+#include "catch.hpp"
+
+// HISTORY: TEST_CASE("Fixture.RetiredCaseName") was deleted in an earlier
+// refactor. The name survives in this comment and nowhere else.
+TEST_CASE("Fixture.TheGateAdmitsOnlyTheFirstActiveTick", "[Fixture]")
+{
+    REQUIRE(true);
+}
+
+static FAutoConsoleVariableRef CVarFixtureToggle(
+    TEXT("OGFixture.DisplayToggle"),
+    GFixtureToggle,
+    TEXT("Fixture display toggle."));
+'@
+        Set-Content -LiteralPath (Join-Path $dir 'src/CaseNames.cpp') -Value $caseNames
+
         # -- an ini whose ';' comments must be stripped ------------------------
         $ini = @'
 [OGFixture]
@@ -458,6 +479,94 @@ Describe 'doc_anchor_lint' {
                 Set-Content -LiteralPath (Join-Path $root 'doc/s.md') -Value "the call is ``if (x) { ++driftedName; }``"
                 $r = Invoke-Lint -Root $root -Docs @('doc/s.md') -Extra @{ NoBareIdentifiers = $true }
                 $r.Code | Should -Be 0
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+    }
+
+    Context 'Dotted registered names - Catch2 case names and console variables' {
+
+        It 'resolves a live Catch2 case name' {
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "pinned by ``Fixture.TheGateAdmitsOnlyTheFirstActiveTick``"
+                $r = Invoke-Lint -Root $root -Docs @('doc/c.md')
+                $r.Out  | Should -Match 'anchors CHECKED       : 1'
+                $r.Code | Should -Be 0
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'FIRES on a case name that no test declares' {
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "pinned by ``Fixture.TheGateAdmitsOnlyTheFirstActiveTickXYZ``"
+                $r = Invoke-Lint -Root $root -Docs @('doc/c.md')
+                $r.Code | Should -Be 1
+                $r.Out  | Should -Match 'DOTTED NAME'
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'FIRES on a strict PREFIX of a live case name, because the quotes are required' {
+            # A rename that only APPENDS words is the common one, and a substring
+            # match would sail straight through it.
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "pinned by ``Fixture.TheGateAdmitsOnly``"
+                (Invoke-Lint -Root $root -Docs @('doc/c.md')).Code | Should -Be 1
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'resolves a console variable, and rejects one that is not registered' {
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "the knob is ``OGFixture.DisplayToggle``"
+                (Invoke-Lint -Root $root -Docs @('doc/c.md')).Code | Should -Be 0
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "the knob is ``OGFixture.DisplayToggled``"
+                (Invoke-Lint -Root $root -Docs @('doc/c.md')).Code | Should -Be 1
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'does not resolve a case name that survives only in a comment' {
+            # The same discipline the symbol rules use: a deleted test whose name
+            # lives on in a HISTORY comment must not certify the citation.
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "pinned by ``Fixture.RetiredCaseName``"
+                $r = Invoke-Lint -Root $root -Docs @('doc/c.md')
+                $r.Code | Should -Be 1
+                $r.Out  | Should -Match 'DOTTED NAME'
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'leaves member access in prose UNCHECKED - a lowercase segment is not a name' {
+            # `storage.add` and `m_reconciliation.wipeAllForResync` are live doc
+            # spellings. They are expressions, not registered names, and widening
+            # the arm to swallow them would make it fire on prose.
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "it calls ``storage.addNoSuchThing``"
+                $r = Invoke-Lint -Root $root -Docs @('doc/c.md')
+                $r.Code | Should -Be 0
+                $r.Out  | Should -Match 'tokens UNCHECKED      : 1'
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'lets a FILE path win the token, so a dotted path is still a FILE anchor' {
+            $root = New-FixtureRoot
+            try {
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value "see ``src/CaseNames.cpp``"
+                (Invoke-Lint -Root $root -Docs @('doc/c.md')).Code | Should -Be 0
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'honours a lint-external-ref declaration on a dotted name' {
+            $root = New-FixtureRoot
+            try {
+                $doc = @'
+<!-- lint-external-ref: Engine.SomeRetiredCase -- a deleted case name; it must not resolve -->
+retired: `Engine.SomeRetiredCase`
+'@
+                Set-Content -LiteralPath (Join-Path $root 'doc/c.md') -Value $doc
+                (Invoke-Lint -Root $root -Docs @('doc/c.md')).Code | Should -Be 0
             } finally { Remove-Item -LiteralPath $root -Recurse -Force }
         }
     }

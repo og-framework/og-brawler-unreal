@@ -45,6 +45,17 @@
                                           must carry the literal `Class::member` in
                                           non-comment code (out-of-line definitions,
                                           split .h/.cpp).
+      CASE      `Panel.OneFactorScales`   a dotted REGISTERED NAME - a Catch2 test
+                or `OGBrawler.Display`     case name, or a console variable. Every
+                                          segment must be PascalCase, and the name
+                                          must appear inside DOUBLE QUOTES in
+                                          non-comment code. These exist only as
+                                          string literals, so no symbol rule can
+                                          reach them; before this arm every such
+                                          citation was silently UNCHECKED.
+                                          `storage.add` and `m_reconciliation.set`
+                                          are member access in prose, not names -
+                                          a lowercase segment keeps them out.
       MEMBER    `m_someMember`            must occur in non-comment code somewhere.
       IDENT     `someCamelCaseName`       must occur in non-comment code somewhere.
                                           Deliberately narrow: lowerCamelCase with at
@@ -104,6 +115,11 @@
       inside a log format string resolves.
     * A `file:NNN` anchor is checked for range, not for content: `:371` proves
       the file has 371 lines, not that line 371 still says what the doc claims.
+    * A dotted name with any lowercase segment (`storage.add`, `decision.landed`,
+      `m_reconciliation.wipeAllForResync`) is member access written out in prose.
+      It is NOT parsed as an anchor and stays UNCHECKED - so a doc naming a
+      renamed method through its owner still goes unverified. The remedy is to
+      cite the method on its own, or as `Owner::method`, which both arms check.
 
 .PARAMETER DocPaths
     Markdown files to lint. Defaults to every `.md` in every tier of
@@ -274,6 +290,12 @@ $rxIdent = '^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$'
 # PascalCase type / enumerator. Needs a lowercase letter after the first, so a
 # one-letter label (`A`) and an all-caps abbreviation (`GT`, `PT`) stay prose.
 $rxType = '^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$'
+# Dotted REGISTERED NAME: a Catch2 case name (`Panel.OneFactorScalesBoth...`) or a
+# console variable (`OGBrawler.InputHistoryDisplay`). EVERY segment must be
+# PascalCase, which is what separates a registered name from member access in
+# prose - `storage.add` and `m_reconciliation.setLogger` do not match and stay
+# UNCHECKED, because their owning expression is not a name the tree declares.
+$rxCase = '^[A-Z][A-Za-z0-9]*(?:\.[A-Z][A-Za-z0-9]*)+$'
 
 function Expand-Alias {
     param([string]$Path)
@@ -302,6 +324,16 @@ function Test-DeclaresType {
           '(?:class|struct|union|namespace|enum\s+class|enum\s+struct|enum)\s+' +
           '(?:[A-Z_][A-Z0-9_]*\s+)?' + $n + '\b'
     return [regex]::IsMatch($Code, $rx)
+}
+
+function Test-QuotedNameInCode {
+    param([string]$Code, [string]$Name)
+    # The name must sit INSIDE double quotes. A Catch2 case name and a console
+    # variable exist only as string literals, never as identifiers, so no symbol
+    # rule can reach them. Requiring the quotes also means a rename to a longer
+    # name cannot pass on a prefix match. .Contains(string) is ordinal, hence
+    # case-sensitive, for the same reason Test-SymbolInCode avoids -match.
+    return $Code.Contains('"' + $Name + '"')
 }
 
 function Test-SymbolInCode {
@@ -472,6 +504,22 @@ foreach ($doc in $resolvedDocs) {
                     if ($l1 -lt 1 -or $l2 -gt $n -or $l2 -lt $l1) {
                         Add-Violation $doc $lineNo $tok "LINE out of range (target file has $n lines)"
                     }
+                }
+                continue
+            }
+
+            # CASE: a dotted registered NAME - a Catch2 test-case name, or a
+            # console variable. Both exist ONLY as a quoted string, so every
+            # whole-token symbol rule above is structurally blind to them and
+            # such a citation fell straight through to UNCHECKED while the run
+            # still reported CLEAN. Documents in this tree cite case names as
+            # load-bearing evidence, so that silence was the worst kind.
+            # -cmatch, not -match: the shape is defined by its capitals.
+            # FILE is tried first, so a real path always wins the token.
+            if ($tok -cmatch $rxCase) {
+                $checked++
+                if (-not (Test-QuotedNameInCode -Code $blobCode -Name $tok)) {
+                    Add-Violation $doc $lineNo $tok 'DOTTED NAME: no quoted string literal in non-comment code carries it (a Catch2 case name or a console variable exists only as a string)'
                 }
                 continue
             }

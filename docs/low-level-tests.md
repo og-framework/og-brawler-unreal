@@ -192,11 +192,22 @@ The trade-off is the noise.
 
 **Two-part solution that lives in our code (no engine patches):**
 
-1. **`CATCH_REGISTER_TAG_ALIAS("[@og]", "~[SelfTests]")` in each test module.**
+1. **`CATCH_REGISTER_TAG_ALIAS("[@og]", "<top-level tag list>")` in each test module.**
    - File: `Source/OGSimulationTests/OgTagAliases.cpp` and the og-brawler-tests equivalent.
    - The alias is a Catch2 v3 tag-aliasing macro that expands at filter-parse time.
-   - Source of truth for "which UE auto-tests to exclude" lives next to the tests in C++.
-   - Extend by adding more `~[<UE-tag>]` exclusions if a UE upgrade brings new framework tests.
+   - Source of truth for "which tests `[@og]` selects" lives next to the tests in C++.
+   - **Both modules ship a whitelist of top-level tags, not the `~[SelfTests]` blacklist
+     this section described until 2026-08-25.** UE's framework tests are excluded by being
+     absent from the list. So is any *new* top-level tag of your own: such a test still runs
+     on a direct `exe "[MyTag]"` call but is invisible to `[@og]`, so the suite total stays
+     green while it never executes.
+   - Extend by **appending your new top-level tag** to the alias spec - not by adding
+     `~[<UE-tag>]` exclusions, which the whitelist form does not need.
+   - To check a module's list is still complete, compare the case count `[@og]` reports
+     against the number of `TEST_CASE` definitions in that module. og-simulation-tests
+     additionally holds `[Determinism][DevTest]` and `[Determinism][KU1CrossArch]` out of
+     `[@og]` on purpose, through an AND-spec its `OgTagAliases.cpp` documents; those are
+     opt-in, not a gap.
 
 2. **`oglltest` wrapper cmdlet in og-tools** (`Invoke-OgLowLevelTest`).
    - Calls the exe with `[@og]` as the default Catch2 positional filter.

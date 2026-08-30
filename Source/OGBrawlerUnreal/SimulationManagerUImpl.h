@@ -22,18 +22,31 @@
 //             deliverRemoteInput, relayRemoteInput
 //   PHYSICS   FSimulationManagerAsyncCallback's five _Internal hooks and
 //             everything the core SimulationManager runs beneath them
-//   CROSSING  exactly one, and it is one scalar:
+//   CROSSING  two, and they are not alike. The WRITE is one scalar:
 //             publishClientEffectiveInputDelayTicks -> a std::atomic<int32>
-//             that collectInputAll loads once per tick
-//   ⛔ Nothing else crosses. m_receptionCoordinator, m_frameHealthProbe,
-//      m_relayWriteProbe, m_connectionBudgetProbe and
-//      m_delayedInputComponentsById have NO internal synchronization. §1
+//             that collectInputAll loads once per tick. The READ is an
+//             ACCEPTED TEAR: the two input-history polls read the
+//             physics-written LocalInputCache slots and correction-cache
+//             lineage, for a display that decides nothing; the argument
+//             for it is §1's, not this table's. The input-delay decomposition
+//             inside pollInputHistoryLanes reads three GAME-THREAD members
+//             (the tier consumer, the shared TimeConfig, the resolution
+//             peer's published atomic) that this call already runs on, so
+//             it is NOT a third crossing -- same thread as its readers. The
+//             reader's hasCorrectionCache() presence test is one more: the
+//             cache map it asks is mutated on the GAME THREAD alone.
+//   The rest have NO internal synchronization: m_receptionCoordinator,
+//   m_frameHealthProbe, m_relayWriteProbe, m_connectionBudgetProbe,
+//   m_inputHistory and m_delayedInputComponentsById. §1
+//   ⛔ NOTHING ELSE CROSSES.
 //
-// ⛔ NARROW PASSTHROUGHS, NOT HANDLES. requestInputDelayIncreaseStall,
-// publishClientEffectiveInputDelayTicks, getLastRelayedInput, noteResimRequest
-// and noteResimGrant are one-purpose entry points rather than edit*()
-// accessors, because a general mutable handle invites exactly the cross-thread
-// reach each of them exists to bound. Do not widen one into an accessor. §1
+// NARROW PASSTHROUGHS, NOT HANDLES. requestInputDelayIncreaseStall,
+// publishClientEffectiveInputDelayTicks, getLastRelayedInput, getLocalInputCache,
+// pollInputHistory, getInputHistoryRows, pollInputHistoryLanes, getInputHistoryLanes,
+// noteResimRequest and noteResimGrant are one-purpose
+// entry points rather than edit*() accessors, because a general mutable handle
+// invites exactly the cross-thread reach each of them exists to bound. §1
+// ⛔ DO NOT WIDEN ONE INTO AN ACCESSOR.
 //
 // CONSTRUCTION ORDER - declaration order IS construction order, and nothing
 // enforces it but that rule (§2):
@@ -54,17 +67,20 @@
 // told from one that never took: RelayDelayFloorTicks, CorrectionRotationK,
 // ResimTriggerPolicy, and one retired ring-depth key. §3
 //
-// LOG CATEGORIES. ⛔ The three probe families below each get their OWN category,
+// LOG CATEGORIES. The three probe families below each get their OWN category,
 // because that is the only thing that silences a family's per-window Warning
-// summaries independently of its per-event Verbose detail. ⛔ And no probe family
-// may be filed under `[Resim.` or `[ResimCheck.` - the first inherits
-// LogOGSim=Verbose, the second is split across two categories, so neither can be
-// switched as one thing. §4
+// summaries independently of its per-event Verbose detail. `[Resim.` inherits
+// LogOGSim=Verbose and `[ResimCheck.` is split across two categories, so neither
+// can be switched as one thing. §4
+// ⛔ ONE CATEGORY PER PROBE FAMILY.
+// ⛔ NO PROBE FAMILY MAY BE FILED UNDER `[Resim.` OR `[ResimCheck.`
 //
 // BORROWED TIMECONFIG. m_replicatedTierConsumer and m_receptionCoordinator each
 // hold `const TimeConfig&` from m_manager, so each is emplaced AFTER it in
 // BeginPlay and reset BEFORE it in EndPlay. Neither may outlive it. §2
 // ===========================================================================
+
+#pragma once
 
 #include "OGSimulationUnreal/ISimulationTimingRelayListener.h"
 #include "OGSimulationUnreal/ISimulationConnectionRelayListener.h"
@@ -115,6 +131,7 @@
 #include "OGSimulationUnreal/ChaosPhysicsBodyReaderAdapter.h"
 #include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
+#include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 
 #include "SimulationManagerUImpl.generated.h"
 
@@ -343,6 +360,110 @@ public:
         return m_inputResolution.getLastRelayedInput<SimulatableBrawler>(id);
     }
 
+// This client's own raw captures for `id`, or nullptr when none. Diagnostics only. §1
+// ⛔ GAME-THREAD DOOR ONTO A PHYSICS-WRITTEN RING -- NOT same-thread with its writer, as
+//   getLastRelayedInput is. Its one caller is pollInputHistory, which owns the tear. §1
+// ⛔ m_reconciliation needs NO twin of this: editReconciliation() is already public.
+    const LocalInputCache<simulatableBrawler::PlayerInput>* getLocalInputCache(unsigned int id) const
+    {
+        return m_inputResolution.getDiagnostics().localInputCache<SimulatableBrawler>(id);
+    }
+
+// ---- THE INPUT-HISTORY DISPLAY ----------------------------------------
+//
+// One row ring per LOCAL character, keyed by character id, fed by a render-rate poll.
+// Nothing here is replicated, enters a correction payload, or reaches compute_checksum.
+
+// Sweep `id`'s resident capture window into its ring. ⛔ THIS IS THE READ CROSSING. §1
+    void pollInputHistory(unsigned int id, uint32 newestTick, float deadzone)
+    {
+        const LocalInputCache<simulatableBrawler::PlayerInput>* captures = getLocalInputCache(id);
+        if (captures == nullptr)
+            return;     // no capture line: a remote proxy, or not registered yet
+
+        m_inputHistory.poll(id, *captures, newestTick, deadzone);
+    }
+
+// The folded rows for `id`, or nullptr when it has none. Read-only; the panel's one source.
+    const brawlerInputHistoryVisualization::InputHistoryRowRing* getInputHistoryRows(
+        unsigned int id) const
+    {
+        return m_inputHistory.findRows(id);
+    }
+
+// Sweep `id`'s resident correction window into its provenance lane and file ONE live
+// machine-state sample. `machineState` is read at the caller's own viz site: no seam here.
+//
+// The estimator's offset rides along and the poll pairs it with `liveTick` -- the very
+// tick the lane axis is built from. ⛔ THE DISPLAY GETS ONE CLOCK SNAPSHOT PER POLL and
+//   never reads the clock again at draw time, or the marker and its axis would disagree.
+// ⚠ getNetworkEstimator() exists only on a predicting role, hence the guard. §5
+//
+// `includeDelay` gates the SAME poll's input-delay decomposition, read from three
+// GAME-THREAD members this call already runs on -- the tier consumer, the shared
+// TimeConfig and the resolution peer's published atomic -- so this is three more
+// same-thread reads inside an existing passthrough, NOT a new crossing. §1
+//
+// The clock reading rides the same guard as the offset above it and is the same PAIR of
+// postures already argued for that read: the estimator's two ticks are game-thread-written
+// and read here on the game thread, and the clock's prediction tick is the accepted tear. §1
+    void pollInputHistoryLanes(unsigned int id, uint32 liveTick, DAttackState machineState,
+        std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput,
+        bool pauseWhileIdle, bool includeDelay)
+    {
+        const std::optional<uint32> predictionOffsetTicks =
+            (m_manager.has_value() && m_manager->runsPrediction())
+                ? std::optional<uint32>(
+                      m_manager->getNetworkEstimator().getPredictionOffsetTicks())
+                : std::nullopt;
+
+        const std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay =
+            (includeDelay && m_replicatedTierConsumer.has_value() && m_manager.has_value())
+                ? std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition>(
+                      brawlerInputHistoryVisualization::decomposeInputDelay(
+                          m_replicatedTierConsumer->hasReceivedTier(),
+                          m_replicatedTierConsumer->currentTierIndex(),
+                          m_manager->getTimeConfig(),
+                          m_replicatedTierConsumer->effectiveInputDelayTicks(),
+                          m_inputResolution.getClientEffectiveInputDelayTicks()))
+                : std::nullopt;
+
+// ⛔ GUARDED LIKE THE OFFSET ABOVE: getClientClock() std::terminates on a server. §5
+        std::optional<brawlerInputHistoryVisualization::ClockDriftReading> clock;
+        if (m_manager.has_value() && m_manager->runsPrediction())
+        {
+            const ClientPredictionClock& predictionClock = m_manager->getClientClock();
+            const NetworkTimeEstimator&  estimator       = m_manager->getNetworkEstimator();
+
+            brawlerInputHistoryVisualization::ClockDriftReading reading;
+            reading.predictionTick = predictionClock.getPredictionTick();
+            reading.targetTick     = estimator.getTargetPredictionTick();
+            reading.authorityTick  = estimator.getLastAuthorityTick();
+// ⛔ CAST BEFORE THE SUBTRACTION -- a negative drift is the whole point, and two
+//   unsigned ticks would wrap it into a vast positive.
+            reading.driftTicks     = static_cast<int32_t>(reading.targetTick)
+                                   - static_cast<int32_t>(reading.predictionTick);
+            reading.pendingAction  = predictionClock.evaluateDrift();
+            reading.stallDebtTicks = predictionClock.getRequiredInputDelayIncreaseStallTicks();
+
+            clock = reading;
+        }
+
+        m_inputHistory.pollLanes(id,
+            inputHistoryVisualizationUImpl::makeReconciliationSlotReader<SimulatableBrawler>(
+                m_reconciliation, id),
+            liveTick, machineState, liveInput, pauseWhileIdle, predictionOffsetTicks, delay,
+            clock);
+    }
+
+// The per-tick lanes for `id`, or nullptr when it has none. Read-only; the bars' one source.
+    const brawlerInputHistoryVisualization::InputHistoryTickLanes* getInputHistoryLanes(
+        unsigned int id) const
+    {
+        return m_inputHistory.findLanes(id);
+    }
+
+
 // The one shared TimeConfig, to BIND not copy. ⛔ Pointer, so pre-construction is not UB. §2
     const TimeConfig* getTimeConfigPtr() const
     {
@@ -511,9 +632,10 @@ private:
 
 // PROBES 5 + 6 - the SERVER WRITE PATH. Diagnostic only, like the one above. §8
 //
-// ⛔ WHAT THEY CLOSE: the relay-loss hypothesis eliminated the server's own write on
-// sim-paced reasoning, but the ring is written from the RPC RECEIPT path and is paced by
-// PACKET ARRIVAL - and a client cannot tell a coalesced write from a send-path drop. §8
+// WHAT THEY CLOSE: the relay-loss hypothesis eliminated the server's own write on
+// sim-paced reasoning, but the ring is written from the RPC RECEIPT path and is paced
+// by PACKET ARRIVAL. §8
+// ⛔ A CLIENT CANNOT TELL A COALESCED WRITE FROM A SEND-PATH DROP.
 //
 // m_connectionBudgetProbe replaces the DERIVED half of the budget model with a measured one. §8
 //
@@ -529,6 +651,10 @@ private:
 // ⛔ Erased in unregisterFromNewFramework - the contract replacing the core's GC read. §10
     std::unordered_map<unsigned int, TWeakObjectPtr<USimmableUpdateComponent>>
         m_delayedInputComponentsById;
+
+// The display's rings, one per polled character id. GAME THREAD, unsynchronized, like
+// every other diagnostic member here. ⛔ Reaped in unregisterFromNewFramework. §1 §10
+    inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
 
 
     FSimulationManagerAsyncCallback* m_asyncCallback;

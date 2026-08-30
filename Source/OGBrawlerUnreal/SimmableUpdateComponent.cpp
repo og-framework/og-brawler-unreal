@@ -45,6 +45,7 @@
 #include "OGSimulationUnreal/LoggingFunctorUImpl.h"
 #include "OGSimulation/SimulationTimeContext.h"
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGSimulationUnreal/InputRedundancyBundleBuilder.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
@@ -782,17 +783,21 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			}
 		}
 
-		// Projectile viz. currentTick + dt come from the SAME clock the sim uses. §10
-		{
-			const SimulationTimeStep projectileVizStep = vizManager->runsPrediction()
-				? vizManager->getClientClock().getPredictionStep()
-				: vizManager->getServerClock().getSimulationStep();
+		// currentTick + dt come from the SAME clock the sim uses. §10
+		//
+		// HOISTED so the projectile viz and the input-history poll share ONE read: a
+		// second copy of this branch is a second convention waiting to drift. §10
+		const SimulationTimeStep vizSimulationStep = vizManager->runsPrediction()
+			? vizManager->getClientClock().getPredictionStep()
+			: vizManager->getServerClock().getSimulationStep();
 
+		// Projectile viz. §10
+		{
 			brawlerProjectileVisualization::Input projectileVisualizationInput(
 				rendererFunctorImpl,
 				m_staticData->m_projectileStaticData,
-				projectileVizStep.getTick(),
-				projectileVizStep.getDeltaSeconds());
+				vizSimulationStep.getTick(),
+				vizSimulationStep.getDeltaSeconds());
 			brawlerProjectileVisualization::visualize(projectileVisualizationInput,
 				(*attackSimState).get<brawlerProjectileSimulation::State>(),
 				attackSimAllState.getDerivedState().m_projectileDerivedState,
@@ -829,6 +834,73 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 					m_attackBlockPredictionVisualizationState.value(),
 					m_staticData->m_attackSimulationStaticData,
 					(*attackSimState).get<dAttackRadialSimulation::State>());
+			}
+		}
+
+		// --- Input-history poll: the display's only feed ------------------------------
+		// The rings behind this are keyed per character id, so a sibling on the couch
+		// would get its own the moment anything polled it.
+		// ⛔ FIRST LOCAL PLAYER'S CHARACTER ONLY -- a SELECTION here, not a structural limit.
+		//
+		// ⛔ RENDER-RATE GAME-THREAD READ of a physics-written capture line: the accepted
+		// tear argued at ASimulationManagerUImpl's CROSSING block. Nothing decides on it.
+		//
+		// ⛔ THE MASTER, READ ALONE, FIRST: with it off this costs one bool read and returns.
+		if (!inputHistoryVisualizationUImpl::masterEnabled())
+			return;
+
+		// The panel and the three bars, one shared id walk. None on means none of the
+		// feeds run. ⛔ THE DELAY BAR IS A THIRD BAR ON THE METER, so it implies the LANE
+		//   poll runs even when the other two bars are off.
+		{
+			const bool feedRowPanel   = inputHistoryVisualizationUImpl::displayEnabled();
+			const bool feedAnyBar     = inputHistoryVisualizationUImpl::anyBarEnabled();
+			const bool feedInputDelay = inputHistoryVisualizationUImpl::inputDelayEnabled();
+
+			// ⛔ ABOVE THE ID WALK BELOW, NEVER A CONJUNCT IN IT: off must not pay for that walk.
+			if (!feedRowPanel && !feedAnyBar)
+				return;
+
+			const std::optional<unsigned int> historyCharacterId =
+				inputHistoryVisualizationUImpl::firstLocalCharacterId(GetWorld());
+
+			if (historyCharacterId.has_value()
+				&& *historyCharacterId == (unsigned int)GetUniqueID())
+			{
+				if (feedRowPanel)
+				{
+					vizManager->pollInputHistory(*historyCharacterId,
+						vizSimulationStep.getTick(),
+						dAttackMachineSimulation::g_moveStickDeadzone.load());
+				}
+
+				// The machine state comes off the SAME attackSimState the block-prediction viz
+				// above already reads, at the same site.
+				// ⛔ NO NEW SEAM IS OPENED FOR IT.
+				//
+				// There is no per-tick machine-state history to read, so a tick this poll misses
+				// stays a hole rather than being invented.
+				// ⚠ SAMPLED LIVE AND NEVER BACK-FILLED.
+				// The pause's input half is the PANEL'S OWN classification of this capture,
+				// so "no input" means one thing across both displays.
+				// ⛔ NO SECOND IDEA OF NEUTRAL IS DERIVED HERE.
+				if (feedAnyBar)
+				{
+					std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput;
+					if (vizPlayerInput.has_value())
+					{
+						liveInput = brawlerInputHistoryVisualization::captureRowFieldsOf(
+							vizPlayerInput->get<dAttackMachineSimulation::PlayerInput>(),
+							dAttackMachineSimulation::g_moveStickDeadzone.load());
+					}
+
+					vizManager->pollInputHistoryLanes(*historyCharacterId,
+						vizSimulationStep.getTick(),
+						(*attackSimState).get<dAttackMachineSimulation::State>().m_currentState,
+						liveInput,
+						inputHistoryVisualizationUImpl::pauseLanesWhileIdle(),
+						feedInputDelay);
+				}
 			}
 		}
 	}

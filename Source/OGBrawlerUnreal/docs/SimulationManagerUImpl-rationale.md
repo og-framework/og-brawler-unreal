@@ -59,27 +59,160 @@ knobs — in about fifty lines. Everything below assumes it.
 | `deliverRemoteInput`, `relayRemoteInput`, `noteDelayedInputComponent` | GAME | the transport sinks, driven from the RPC receipt path |
 | `InjectInputs_External` → `releaseDelayedInputsForStep` | GAME | the drain, the reap and PROBE A |
 | `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the five Chaos hooks, and everything the core `SimulationManager` runs beneath them |
+| `pollInputHistory`, `pollInputHistoryLanes` | GAME | the input-history display's render-rate feed, driven from `USimmableUpdateComponent::TickComponent` |
 
-**There is exactly one crossing, and it carries one scalar.**
+**There are two crossings, and they are not alike.** One is a write of one scalar; the other is
+a read of a whole capture, and it is an accepted tear rather than a synchronized access.
+
+**The write crossing carries one scalar.**
 `publishClientEffectiveInputDelayTicks` writes a lone `std::atomic<int32>` inside
 `SimulationInputResolution`, which `SimulationInputResolution::collectInputAll` loads once per tick on the physics thread.
 The worst a race can do is apply a new delay one tick late.
 
 **Everything else on this class is game-thread-only and has no internal synchronization:**
-`m_receptionCoordinator`, `m_frameHealthProbe`, `m_relayWriteProbe`, `m_connectionBudgetProbe`
-and `m_delayedInputComponentsById`. `m_manager->editResimGateProbe()` is the mirror case on the
+`m_receptionCoordinator`, `m_frameHealthProbe`, `m_relayWriteProbe`, `m_connectionBudgetProbe`,
+`m_inputHistory` and `m_delayedInputComponentsById`. `m_manager->editResimGateProbe()` is the mirror case on the
 other side: physics-thread-only, and its correctness rests on nothing else touching it.
+
+### The read crossing — `pollInputHistory`, and why its tear is accepted
+
+`getLocalInputCache` opens a game-thread door onto `m_localInputCaches`, whose *contents* are
+written on the physics thread by `SimulationInputResolution::collectInputAll` (`LocalInputCache::push`)
+and by `wipeAllForResync` (`LocalInputCache::clear`). Unlike its neighbour `getLastRelayedInput`,
+this reader is **not** same-thread with that writer. `pollInputHistory` is its only caller, so the
+argument belongs here rather than at the door.
+
+**What is *not* racing, and it is the larger half.** The `std::unordered_map` that holds the lines
+is only ever restructured on the **game thread** — `registerLocalCharacter` and
+`unregisterCharacter` run from registration, which the peer's own thread roster records as
+game-thread in full. The poll's `find` is therefore same-thread with the only writer of the map's
+structure, and the container cannot rehash under it. `LocalInputCache`'s slot vector is sized once
+in its constructor and never resized, so the storage a read lands in cannot be reallocated either.
+**The exposure is confined to the bytes of one slot**, not to the container that holds it.
+
+**What can tear, and what the worst observable consequence is.** A slot is
+`{ tick, occupied, input }`, and `push` writes those in that order, so a game-thread read can
+observe a new `tick` beside the previous occupant's payload — or a payload half-updated. A
+`simulatableBrawler::PlayerInput` is several vectors rather than the single byte
+`SlotStateProvenance` rides the same unsynchronized access with, so the precedent is cited but
+**not borrowed**. The worst outcome is that **one capture tick is classified from wrong values**:
+one row of a diagnostic panel briefly shows the wrong direction glyph, button mask or action id.
+Because the row fold is idempotent, a wrong classification does not self-heal — it persists as a
+mis-drawn or mis-split row until that row scrolls out of the 64-row ring.
+
+**Why it cannot corrupt the ring.** `InputHistoryRowRing::appendCapture` is keyed on the capture
+tick **alone**, and the poll passes its own loop index, never a value read out of the slot. A torn
+payload therefore cannot move a tick, cannot reach `++tickCount` twice, and cannot make a stale
+tick rejoin an older row. The blast radius of a tear is the three *fields* of at most one row.
+
+**Why it cannot reach the simulation.** The ring is client-local: it is never replicated, never
+enters a correction payload and never reaches `compute_checksum`. The poll's route into the core is
+`const`-only in both directions — `getLocalInputCache` returns a pointer to `const`, and both
+reconciliation seams are `const` members reached through a `const` reference (`slotStateProvenance`
+on the diagnostics view, `getAppliedCaptureTickRef` on the peer itself) — so there is no write path
+back at all, and nothing downstream of the ring decides anything.
+
+**Why it cannot fault.** A torn read yields wrong values, never a wrong pointer: a
+`static_assert` at the poll pins `simulatableBrawler::PlayerInput` trivially destructible (it owns
+no memory) and the sub-input the display actually reads trivially copyable. A member that owned an
+allocation would turn this tear into a crash, and that assert is what stops one landing quietly.
+*(The composite fails `is_trivially_copyable` through `std::tuple`'s implementation alone, not
+through any member of its own — `std::tuple<int, float>` fails the same trait identically.)*
+
+**And it is bounded in time.** The read is diagnostics-only and gated on one predicate at its call
+site, so it can be switched off outright without reshaping anything.
+
+**The second caller shares this crossing and heals faster than the first.** `pollInputHistoryLanes`
+reads the physics-written correction cache through the same two `const` seams, fronted by
+`ReconciliationSlotReader` so both are asked at one simulation tick. Its worst outcome is one wrong
+*cell*, not one wrong row — and unlike the row fold, which is idempotent and therefore keeps a bad
+classification until it scrolls away, a provenance cell is **rewritten on every poll while its tick
+is still resident**, so a torn lineage byte is corrected on the next frame. The machine-state lane
+crosses nothing at all: its sample is read at the caller's own visualization site, from state the
+block-prediction visualization on the line above already holds.
+
+**A third feed inside the same passthrough, and it crosses NOTHING at all.** The input-delay
+decomposition `pollInputHistoryLanes` computes for `OGBrawler.InputHistoryInputDelay` reads
+`m_replicatedTierConsumer` (GAME-THREAD-written, §5), `m_manager->getTimeConfig()`
+(GAME-THREAD-bound at `BeginPlay`, mutated only by the OnRep listeners) and
+`m_inputResolution.getClientEffectiveInputDelayTicks()` (the atomic the WRITE crossing above
+publishes — GAME-THREAD-written, and this reader is on the SAME thread as that writer, not the
+physics thread that only loads it). `pollInputHistoryLanes` itself already runs on the game
+thread. Three same-thread reads of three game-thread-written values is not a crossing, so the
+CROSSING table above names it in the READ row's prose rather than adding a third bullet, and
+this paragraph is the same-thread argument that entry names. ⛔ **NO NEW PUBLIC ACCESSOR was
+added for any of the three** — the tier consumer and the TimeConfig pointer were already public
+(`getReplicatedTierConsumer`, `getTimeConfigPtr`), and the resolution peer's atomic is read
+through the SAME private member this method already touches for the offset.
+
+**The presence test crosses nothing either.** `ReconciliationSlotReader::hasCorrectionCache()`
+asks `m_reconciliation.findCorrectionCache<T>(id) != nullptr` through the same reader the two
+diagnostic seams already share, inside the same `pollInputHistoryLanes` call; the map it
+inspects is mutated on the GAME THREAD alone (`createCacheFor`/`removeCacheFor`, from the
+registration facade), never the physics thread, so this is a same-thread read like the three
+above it, not a fourth crossing.
 
 ### Why the passthroughs are narrow rather than `edit*()` accessors
 
 `requestInputDelayIncreaseStall`, `publishClientEffectiveInputDelayTicks`, `getLastRelayedInput`,
-`noteResimRequest` and `noteResimGrant` are one-purpose entry points. Each of the objects behind
+`getLocalInputCache`, `pollInputHistory`, `getInputHistoryRows`, `pollInputHistoryLanes`,
+`getInputHistoryLanes`, `noteResimRequest` and
+`noteResimGrant` are one-purpose entry points. Each of the objects behind
 them is otherwise driven **exclusively** by the core `SimulationManager`'s tick loop. Handing
 game-thread `UObject` code a general mutable handle to one of them would invite exactly the
 cross-thread reach the entry point exists to bound. **Do not widen one into an accessor.**
 
+⚠ **This list has now gone stale twice**, both times because a new member matching the pattern
+exactly was added without extending the sentence. The rule it states is about the *class* of
+member, not about these ten names: **every public member of `ASimulationManagerUImpl` that
+forwards to one core-owned object for one purpose belongs here**, and the enumeration is a
+reading aid. Replacing the list outright with that sentence would end the drift, at the cost of
+the ten anchors `doc_anchor_lint.ps1` currently resolves through it — a trade worth making only
+if the lead wants the anchors spent elsewhere.
+
+`getInputHistoryRows` and `getInputHistoryLanes` both return a pointer to `const` for the same
+reason: the panel that draws the rows, and the bars that draw the cells, must not write one.
+
 `requestInputDelayIncreaseStall` additionally guards on `runsPrediction()`: a server or
 standalone manager has no client clock at all, and `getClientClock()` would `std::terminate`.
+
+`pollInputHistoryLanes` guards on the same predicate for the same reason, around the one
+line that reads `getNetworkEstimator()`: an authority manager has no prediction offset, and
+it passes `std::nullopt` rather than a zero, because a display told "the offset is 0" would
+draw an authority marker on the newest cell. It guards the input-delay decomposition the same
+way, on `m_replicatedTierConsumer.has_value() && m_manager.has_value()`, and for the same
+reason: a role with neither has nothing to decompose.
+
+⛔ **THE LIST ABOVE IS UNCHANGED BY THE INPUT-DELAY DISPLAY, AND THAT IS THE POINT.**
+`pollInputHistoryLanes` already names the one entry point this display reaches through; its
+delay decomposition is three more same-thread reads INSIDE that existing passthrough, not a
+new one beside it. Widening what one narrow entry point does is exactly what "narrow" is
+meant to allow — it is adding a second *name* that would have been the drift this banner
+warns about.
+
+⛔ **THE CLOCK READING ADDS NO NEW CROSSING CLASS, AND THIS SAYS SO RATHER THAN LEAVING IT
+SILENT.** The `ClockDriftReading` the same passthrough builds for the frame meter's clock line
+(`InputHistoryDisplay-rationale.md` §7.12) is the SAME PAIR of postures argued two paragraphs
+above for the prediction offset, not a third thing. `getTargetPredictionTick` and
+`getLastAuthorityTick` read `NetworkTimeEstimator` state its own contract declares
+GAME-THREAD-written, by `updateRTT` and `recordAuthorityTick`, and this reader is on that
+thread — same-thread, nothing to tear. `getPredictionTick`, `evaluateDrift` and
+`getRequiredInputDelayIncreaseStallTicks` reach the physics-written prediction tick and stall
+debt, which is the accepted tear already taken: a naturally-aligned four-byte load on x64
+cannot tear, so the worst case is one line of diagnostic text one tick stale. **The CROSSING
+table gains no bullet and the NARROW PASSTHROUGHS list gains no name** — `pollInputHistoryLanes`
+was already on it, and this is more reads inside that one entry point.
+⛔ It takes `runsPrediction()` for the harder of the two reasons: `getClientClock()` does not
+return a wrong number on a role that does not predict, it calls `std::terminate`.
+
+⭐ **The offset is read at the POLL, not at the draw, and that placement is the whole point.**
+The lane axis is built from the `liveTick` this same call is given, so pairing the offset
+with it there makes the authority marker and the axis it is measured against one snapshot by
+construction. An earlier version handed the display a `const` accessor that read the
+prediction tick a second time at HUD draw time; a physics step landing between the two reads
+moved the marker a column while its printed offset held, and the accessor is gone rather than
+tolerated. ⛔ Do not reintroduce a clock accessor for a display: give the display the poll's
+  reading.
 
 ### One acknowledged wart
 
