@@ -149,14 +149,14 @@ FString buildInputDelayReadoutText(
 	FString tierPart;
 	if (d.tierKnown)
 	{
-		tierPart = FString::Printf(TEXT("tier %d → %d"), d.tierIndex, d.baseTicks);
+		// ⛔ A LABELLED PAIR, NEVER AN ARROW: an arrow here reads as a tier transition.
+		tierPart = FString::Printf(TEXT("tier %d  base %d"), d.tierIndex, d.baseTicks);
 		if (d.lanOverrideApplied)
 			tierPart += TEXT(" (LAN override)");
-		tierPart += TEXT("  arrived");
 	}
 	else
 	{
-		tierPart = FString::Printf(TEXT("no tier → fallback %d"), d.baseTicks);
+		tierPart = FString::Printf(TEXT("no tier  fallback base %d"), d.baseTicks);
 	}
 
 	FString pubPart = readout.publishMismatch

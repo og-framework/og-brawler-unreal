@@ -805,13 +805,30 @@ stopped naming one flag the moment the frame meter split into three independentl
 bars; the historical two-bar table and its RED probe belong to T23's shipped state and are
 kept only in this repository's history, not restated here to avoid a second, competing table.
 
+⛔ **THE TIER AND THE BASE DELAY ARE TWO LABELLED FIELDS, NEVER AN ARROW.** The tier arm
+renders `tier 2  base 3` and the no-tier arm `no tier  fallback base 4` — ONE state either
+way: the tier that arrived, and the unfloored base delay that tier implies. It used to render
+`tier 2 → 3`, and the first reader to meet it in a PIE session took that for a TRANSITION from
+tier 2 to tier 3.
+⛔ **THAT ARROW COULD NEVER HAVE DISAMBIGUATED ITSELF.** `rttTierInputDelays` is
+`{ 1, 2, 3, 4 }` indexed by tier 0..3, so the base is the tier index plus one at every shipped
+tier without exception — `tier 0 → 1`, `tier 1 → 2`, `tier 2 → 3`, `tier 3 → 4` — and no value
+the line could take would have separated "tier 2, base 3" from "moved from 2 to 3". The only
+tell was that tiers stop at 3, so `tier 3 → 4` named a tier that does not exist.
+⛔ **SO DO NOT RESTORE THE ARROW AS A TIDIER RENDERING.** A glyph that reads as movement over
+data that never moves is the exact failure class this display exists to stop telling, and it
+shipped because everyone who reviewed it read it as its authors, already knowing what it meant.
+⭐ **THE BARE WORD `arrived` WENT WITH IT.** It restated `tierKnown`, which the two arms
+already say — `tier N` against `no tier` — and standing as a peer field with no subject it read
+as a verb on whichever number happened to sit beside it.
+
 ⚠ **A DIVERGENCE THIS BAR WILL SHOW ON DAY ONE, AND IT IS NOT NEW.**
 `ConnectionTierTable-rationale.md` §8: *"the core never publishes tier 0 as a FIRST value...
 the client sits on the pre-arrival fallback while the server parks at tier-0 delay. That
 divergence is today's behaviour, is preserved deliberately."* On any wire that never leaves
 tier 0 — the ordinary shape of a short LAN session — every corrected tick will therefore read
 `ServerEarlier` (or `ServerLater`, depending on which side is larger at the shipped floor) for
-the whole session, and the readout will say `no tier → fallback N` throughout. **This is
+the whole session, and the readout will say `no tier  fallback base N` throughout. **This is
 EXPECTED on LAN, not a regression the delay bar introduced** — it is the same standing
 divergence the tier system has carried since before this display existed, now visible instead
 of silent. T24's PIE session confirms it is present and reads correctly.
