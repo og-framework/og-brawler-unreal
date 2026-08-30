@@ -503,28 +503,46 @@ the label. ⛔ **THE RESYNC'S LABEL IS SIGNED AND THE SIGN IS THE INFORMATION**:
 client re-ran twenty-two ticks it had already run, `+22` says it never ran them. An elision's
 count is unsigned because time going missing has no direction.
 
-⛔ **ONLY THE BACKWARD ONE IS DETECTED HERE, AND THE FORWARD ONE IS NOT DETECTED AT ALL.**
-`pollInputHistoryLanes` reads exactly one thing: `LaneIdleGate::lastPolledSimTick`, against the
-tick it was handed. A hard resync is the only assignment the clock makes to that tick, so a
-tick behind the last polled one is certain rather than likely. There is deliberately **no**
-second, derived test on the residency edges, and an earlier one was removed rather than
-narrowed. `WindowResidency::newestResident` is the newest resident tick *inside the poll
-window*, clamped at the tick the game thread read; `oldestResident` is the ring's own eviction
-edge, which is not clamped by anything. The physics thread owns that ring and keeps pushing
-while the sweep runs, so between two polls the old edge can move when the clamped new edge
+⛔ **THE SEAM IS THE DETECTOR, AND THE POLL'S OWN READING IS A CROSS-CHECK ON IT.**
+`pollInputHistoryLanes` reads two things. The first is the clock's own `hardResyncCount`,
+through `getDiagnostics()`, differenced against the reading the previous poll filed: a count
+that moved is a resync in EITHER direction, and beside it the clock hands over the exact tick
+it left (`lastHardResyncFromTick`) and the tick it landed on (`lastHardResyncToTick`), so the
+label is the signed difference of two known numbers rather than a bound on one. The second is
+`LaneIdleGate::lastPolledSimTick`, against the tick this poll was handed. A hard resync is the
+only assignment the clock makes to that tick, so a tick behind the last polled one is certain
+rather than likely.
+
+⛔ **THE BACKWARD ARM IS HELD ONLY ON THE CLAIM BOTH ARMS CAN SPEAK TO.** It is
+structurally blind forward — a tick the clock jumped ahead to is indistinguishable from a tick
+that simply advanced — so it is asked about the seam's answer only when the seam itself reports a
+BACKWARD pair, `lastHardResyncToTick < lastHardResyncFromTick`, and only on a poll where
+`axisBreaksFromSeam` is non-zero. Holding it on the forward case too would have made it read as
+a disagreement on every forward resync, which is the one thing it cannot see.
+⛔ **A DISAGREEMENT IS COUNTED, NEVER RESOLVED.** When only one of the two fires,
+`axisBreakDisagreements` records it and ONE break is still filed, from the seam's own numbers.
+It is a finding about the two readings, not a tie for the display to break, and there is
+deliberately no rule anywhere that prefers one arm over the other.
+
+There is still deliberately **no** derived test on the residency edges, and the one that
+existed was removed rather than narrowed. `WindowResidency::newestResident` is the newest
+resident tick *inside the poll window*, clamped at the tick the game thread read;
+`oldestResident` is the ring's own eviction edge, which is not clamped by anything.
+The physics thread owns that ring and keeps pushing while the sweep runs, so between two
+polls the old edge can move when the clamped new edge
 cannot — and a difference of those two deltas therefore says *a step landed mid-sweep* exactly
 as often as it says *the cache was wiped*. Separating them needs a magnitude tolerance, and
 this meter allows none: a threshold a hitch can cross is a marker that lies about the clock.
 
-**So a forward resync draws no marker until the clock's own event seam lands.** It is still on
-screen as the state it is — the horizon jumps to the frontier and the residency line collapses
-to a one-tick span, which is §7.5's own picture of everything having just been wiped — but it
-is a state, read off two lines, not an event with a signed label. That is a real and stated
-loss of reach. It is taken because the arm it replaces fired several times a second on a
-healthy client, and each false fire also closed the open idle span and zeroed the pause
-hysteresis, so the pause could never re-engage: one wrong marker cost the whole of the idle
-elision this section is about. A missing marker is the smaller failure, and the seam that
-removes it is a counter the clock already owns.
+**So a forward resync draws its own signed marker, and the derived arm stays deleted.** The two
+facts are independent, and that is the point: the clock supplies the event, so no tolerance on
+the ring's edges is needed to infer one. ⛔ **DO NOT REINTRODUCE THAT ARM.** It fired
+several times a second on a healthy client, and each false fire also closed the open idle span
+and zeroed the pause hysteresis, so the pause could never re-engage: one wrong marker cost the
+whole of the idle elision this section is about. What the residency edges are honest about is a
+STATE — the horizon jumps to the frontier and the residency line collapses to a one-tick span,
+§7.5's own picture of everything having just been wiped — and that is what they still say. The
+event is the clock's to report.
 
 ⛔ **BOTH CHOICES ARE MADE PER MARK.** `drawFrameMeterAxisEvents` asks `kind` inside its own
 loop, so a `Resync` and an `Elision` at adjacent columns draw two cells in two colours — the
@@ -654,6 +672,55 @@ each authority style differs from `kFrameMeterHorizonStyle` in **all four**, so 
 can collapse the pair. The authority colour additionally clears `kLanePaletteMinPairGap`
 against every colour either bar can put beneath it, because it is a rule drawn over cells
 rather than beside them.
+
+⭐ **A THIRD KIND OF MARKER SHARES THIS VOCABULARY, AND ALL FOUR STYLES ARE SWEPT AGAINST
+EACH OTHER.** The rate marks (§7.12) are the clock's own corrections to the rate time arrives
+at — a skip inserted a tick, a stall withheld one — and they are neither a rule across the
+bars nor a cell. Every marker style is a `FrameMeterMarkerStyle` value in the pure header, and
+`Authority.NoTwoOfTheFourMarkerStylesCanRenderIdentically` sweeps all six pairs among them:
+
+| style | what it claims | colour | alpha | thickness | shape |
+|---|---|---|---|---|---|
+| `kFrameMeterHorizonStyle` | the cache answers for nothing left of here (§7.5) | grey `0.55,0.55,0.58` | 0.45 | 1 | `PlainRule` |
+| `kFrameMeterAuthorityStyle` | the server is on this column | white | 1.00 | 3 | `LabelledRule` |
+| `kFrameMeterAuthorityOffBarStyle` | the server is off the bar, that way | white | 0.55 | 2 | `LabelledRule` |
+| `kFrameMeterRateMarkStyle` | the clock corrected its rate at this boundary | `kLaneResyncColor` | 0.80 | 4 | `SignedTickMark` |
+
+⛔ **ONE PAIR IS EXCEPTED, AND IT IS THE PAIR THAT IS ONE MARKER IN TWO STATES.** The
+authority style and its off-bar form share colour and shape deliberately and are told apart by
+alpha and thickness alone; every other pair differs in all four fields, and each swept colour
+pair clears `kLanePaletteMinPairGap`. The sweep asserts its own pair count, so a fifth style
+left out of the array fails it rather than passing quietly.
+
+⭐ **THE BETWEEN-SLOT GRAMMAR — WHERE A THING IS DRAWN SAYS WHAT KIND OF THING IT IS.**
+
+| drawn as | grammar | what it is |
+|---|---|---|
+| a cell one column wide, across every enabled bar | **ON** a column | that lane tick was a cut in the axis — an elision or a resync (§7.7) |
+| a rule the full height of the backdrop | **ON** a column, or on the bar's own edge | where the server is, or where the cache's reach ends |
+| a short mark in the label band, on a column EDGE, with a glyph beside it | **BETWEEN** two columns | the clock inserted or withheld a tick there |
+
+A skip and a stall consume no lane tick — both ticks of a skip are recorded and a stall repeats
+a frame — so a rate mark has no column of its own to claim, and drawing it on one would be the
+fabrication §7.3 forbids for a hole. The two kinds sit on OPPOSITE edges of their column for a
+physical reason: a skip at `P` arrived together with `P−1`, which is a backfilled copy, so the
+jump is on the LEFT edge of `P−1`'s column; a stall at `T` is a step that passed with no tick at
+all, so it is on the RIGHT edge of `T`'s column. `rateMarkX` is `frameMeterCellX` of that column
+plus one `cellStride` when `rightEdge`, which puts the two kinds exactly one stride apart on one
+column and is the whole reason neither can be read as the other. The glyph is the sign of the
+tick DISPLACEMENT — `+` inserted, `−` withheld — which is the resync label's own convention, and
+it is DERIVED from `kind` at the draw rather than stored beside it.
+⛔ **THE COLUMN COMES OFF `placeFrameMeterSimTick`, NEVER OFF A LANE TICK MINUS ONE.** A
+closed elided span takes that span's own marker cell, on its left edge whichever kind landed
+there; the span still being collapsed, and a tick the `LaneAxisEvent` ledger no longer reaches,
+are **not drawn at all**. Those marks survive only in the clock line's counts, which is a stated
+loss and not an oversight — a mark placed on a column that is not its own would be worse.
+⚠ **The mark crosses no cell, and that is what buys it its colour.** It names
+`kLaneResyncColor`, because a rate mark and a resync are one clock's two grades of correction,
+and it needs no palette clearance of its own against the cell colours below it precisely because
+it never sits over one. The two are told apart by KIND rather than hue: a cell across every bar
+carrying a signed *number*, against a mark above the bars carrying a signed *glyph* — the same
+distinction the elision cell and the horizon rule already have from each other.
 
 ⚠ **The offset value is printed BELOW the bars.** An elision count is printed above them
 (§7.7). Both are bare numbers beside the same meter and they mean entirely different things,
@@ -975,7 +1042,7 @@ of the three constants above.
 | Name | RGB (as written in the header) | On screen (sRGB hex) | Colour | Meaning |
 |---|---|---|---|---|
 | `kLaneElisionColor` | 0.62f, 0.32f, 0.00f | #CE9900 | burnt amber | Marks a collapsed idle span, one cell wide on both bars regardless of how many ticks it swallowed — missing time, not a state, so it clears the cross-palette floor against every real colour in both palettes (§7.7). |
-| `kLaneResyncColor` | 0.05f, 0.00f, 1.00f | #3F00FF | electric indigo | Marks a HARD RESYNC — the one cell where the lane axis was cut, and the same tick numbers were simulated twice (a backward resync) or never at all (a forward one). Its label is the SIGNED tick delta rather than a count of removed time, and that opposite claim is why it does not share the elision's colour: burnt amber says the display took time away, this says the client did (§7.7). Its own cross-palette floor is cleared against every real colour in both palettes AND against `kLaneElisionColor`, since the two markers sit one cell apart on the same axis. |
+| `kLaneResyncColor` | 0.05f, 0.00f, 1.00f | #3F00FF | electric indigo | Marks a HARD RESYNC — the one cell where the lane axis was cut, and the same tick numbers were simulated twice (a backward resync) or never at all (a forward one). BOTH DIRECTIONS ARE ANSWERED BY THE CLOCK'S OWN `hardResyncCount`, never by the correction ring's edges: a derived test cannot tell a wipe from a push that landed mid-sweep, and rather than keep the forward mark on one, the mark was withdrawn until the clock could be asked. The poll's own tick still cross-checks the backward case, and the two disagreeing is counted rather than resolved. Because the count arrives beside the exact tick the clock left, the label is the SIGNED difference of the new tick and that one — an exact number, not a bound — and that opposite claim to an elision's is why it does not share the elision's colour: burnt amber says the display took time away, this says the client did. Its own cross-palette floor is cleared against every real colour in both palettes AND against `kLaneElisionColor`, since the two markers sit one cell apart on the same axis. |
 | `kUnnamedLaneColor` | 1.00f, 1.00f, 0.35f | #FFFFA0 | pale yellow | The fallback when a cell's stored ordinal matches no enumerator this table covers. On screen this is a soft, pale yellow, not the loud warning colour the raw floats suggest — itself a small demonstration of why this section needed the hex column at all. Still further from every real palette colour than any two of them are from each other, so a fallback cell is never mistaken for a real state — the loudness argument is about distance in the palette, not about how bright it renders. |
 
 ⚠ **A correction to this table's own arithmetic.** An earlier hand check of `kUnnamedLaneColor`
@@ -993,10 +1060,14 @@ question worth asking. The clock line is one row of text under the bars that ans
 state the client already holds:
 
 ```
-clock drift -22  target 6197 = auth 6193 +4  next HARDRESYNC  debt 0  auth static 2816 ticks
-clock drift +1   target 6412 = auth 6408 +4  next NONE        debt 0  auth static 0 ticks
-clock drift -5   target 6500 = auth 6496 +4  next STALL       debt 2  auth static 1 ticks
+clock drift -22  target 6197 = auth 6193 +4  next HARDRESYNC  debt 0  auth static 2816 ticks  skips 0  stalls 6  resyncs 128
+clock drift +1   target 6412 = auth 6408 +4  next NONE        debt 0  auth static 0 ticks  skips 3  stalls 2  resyncs 0
+clock drift -5   target 6500 = auth 6496 +4  next STALL       debt 2  auth static 1 ticks  skips 3  stalls 6  resyncs 0
 ```
+
+⚠ The numbers illustrate the FORMAT. Only the first line's `auth static` 2,816 and its
+`resyncs` 128 are from the recorded session this section ends with; the rest are made up to
+show the shape of the line.
 
 **Where every token comes from.** The line is built UE-side by `buildClockDriftReadoutText`
 from `ClockDriftReadout` and nothing else; the readout is `buildClockDriftReadout`'s
@@ -1013,6 +1084,7 @@ at draw time. ⛔ **THE HUD FETCHES NOTHING** — a second read at draw time is 
 | `next` | `pendingAction` | `ClientPredictionClock::evaluateDrift` — what `advancePrediction` WOULD do next |
 | `debt` | `stallDebtTicks` | `ClientPredictionClock::getRequiredInputDelayIncreaseStallTicks` |
 | `auth static` | `authorityStaticTicks` | the lanes' `authorityStaticSimTicks`, accumulated across polls |
+| `skips` `stalls` `resyncs` | `skips` / `stalls` / `resyncs` | the lanes' `clockEventCounts`, accumulated from the DIFFERENCES of successive readings of `skipCount`, `stallCount` and `hardResyncCount` |
 
 ⛔ **THE ACTION WORD IS THE ENUMERATOR'S OWN NAME, UPPER-CASED** — `NONE`, `SKIP`, `STALL`,
 `HARDRESYNC` — the same rule `floorClassWord` follows for the delay readout. A prettier
@@ -1031,7 +1103,10 @@ no client clock, so an unguarded read is a hard crash on the dedicated server, n
 number on screen. On the authority the reading is absent, the readout answers
 `present == false`, and the line is simply not drawn —
 `Clock.NoReadingDrawsNothingRatherThanAPlausibleZero` pins that a plausible zero is never
-substituted for it.
+substituted for it. ⛔ **AND NO RATE MARK EITHER.** A mark is filed only from a DIFFERENCE of
+two readings, so a role that never files one leaves the label band empty rather than at zero,
+and the same case pins that too. With every bar switched off nothing is drawn at all — the
+frame meter's whole branch included, marks and clock line with it.
 
 **Placement.** It rides `anyBarEnabled()` rather than any one bar's toggle, because it
 describes the AXIS and not a lane, and it takes the next `frameMeterReadoutLineTopY` index
@@ -1060,9 +1135,50 @@ subtraction would have read **healthy** for the entire minute. The accumulated r
 hold no predecessor for it to have been static against. In production that transition happens
 only at startup, since `runsPrediction()` does not change within a session.
 
-⛔ **WHAT THIS LINE DOES NOT SHOW.** Skips and stalls are RATES on a continuous axis, not
-events — both ticks of a skip get cells and a stall repeats a frame — and `AdvanceResult` is
-consumed and dropped inside the prediction step, so neither is observable from here as a
-per-tick fact. What `next` shows is the drift STATE that decides them, sampled once per poll.
-A poll landing between two decisions can therefore miss a `SKIP` entirely, and the line makes
-no claim that it did not.
+⭐ **THE THREE COUNTS ARE THIS DISPLAY'S, NEVER THE CLOCK'S OWN TOTALS.** The clock counts
+from the moment it was built, which is before this display existed, so only the DIFFERENCE
+between two successive readings says anything about a session being watched: the first reading
+of all contributes nothing, and a gap in the readings is counted neither as a quiet stretch nor
+as a busy one. ⛔ **A COUNTER THAT READ LOWER THAN THE LAST ONE ANSWERS ZERO** rather than
+wrapping a subtraction into four billion — `clockEventDelta` is the one place that is decided.
+⭐ **THE COUNTS OUTLIVE THE MARKS.** A rate mark (§7.8) scrolls off the bar, is lost inside a
+span the gate is still collapsing, or falls behind the ledger's reach; the count keeps it. So
+`stalls` climbing while no `−` is on screen is the display working, not failing — it means the
+corrections happened somewhere the bar can no longer point at.
+
+⚠ **THE SEVEN SEAM READS ARE THE SAME ACCEPTED TEAR, AND THE ORDER MAKES IT ONE-SIDED.**
+They are taken inside `pollInputHistoryLanes` under the SAME `runsPrediction()` guard as the
+drift fields above, through `getDiagnostics()` — the clock publishes no bare accessor for any of
+them — and each is a plain physics-written `unsigned int`, so a naturally-aligned four-byte load
+cannot tear on the x64 target. What CAN straddle a write is a PAIR, and the two orders are
+deliberately opposed: **the clock writes the tick and then the count; the poll reads the count**
+**and then the tick.**
+
+Work the interleaving through and one side of it closes:
+
+* If the poll's count-read already sees the **incremented** count, then by the clock's own
+  program order the count-write landed after the tick-write — so the tick-write landed too, and
+  the poll's tick-read comes strictly after its count-read. ⛔ **A FRESH COUNT BESIDE A STALE**
+  **TICK IS THEREFORE IMPOSSIBLE**, and that is the case worth closing: it is the one that would
+  file a mark — the count moved, so a delta exists — at the *previous* event's tick, putting a
+  purple mark on a column where nothing happened.
+* The straddle that CAN happen is the mirror: the count-read lands before the increment while
+  the tick-read lands after the tick-write, giving a **stale count beside a fresh tick**. The
+  delta is then zero, so **no mark is filed and no token moves**. The event is not lost — the
+  next poll differences against that same stale count, sees the delta, and files the mark from
+  the tick the clock still holds, which is that event's own tick.
+
+⭐ **SO THE WORST CASE IS A MARK ONE POLL LATE, AT THE RIGHT TICK** — never a mark at the wrong
+one. A frame of latency on a diagnostic that decides nothing is the cheap failure; a mark
+sitting on a column the clock never touched is the expensive one, and the read order is what
+buys the first at the price of the second.
+⛔ **DO NOT REVERSE THAT READ ORDER.** Reading tick-then-count swaps which of those two is
+reachable, and the misplaced mark is exactly the class of defect this display was rebuilt to
+stop telling.
+
+⛔ **WHAT THIS LINE DOES NOT SHOW.** `AdvanceResult` is consumed and dropped inside the
+prediction step, so no per-tick record of a skip or a stall exists here — what the seam gives is
+a COUNT and the LAST tick of each kind, which is why a poll that saw three skips files one mark
+saying three rather than three marks it cannot place. What `next` shows is the drift STATE that
+decides them, sampled once per poll: a poll landing between two decisions can miss a `SKIP`
+entirely, and the line makes no claim that it did not. The `skips` count still sees it.

@@ -91,6 +91,20 @@ FString driftActionWord(ClientPredictionClock::DriftAction action)
 	return FString();
 }
 
+// The sign is the tick DISPLACEMENT -- a skip inserted one, a stall withheld one -- which is
+// the resync marker's own convention, so one sign reads across every correction of this axis.
+// ⛔ DERIVED FROM THE KIND, NEVER STORED: one kind, one glyph, decided in one place.
+FString rateMarkGlyph(const brawlerInputHistoryVisualization::FrameMeterRateMark& mark)
+{
+	using brawlerInputHistoryVisualization::RateMarkKind;
+
+	const FString sign = (mark.kind == RateMarkKind::Skip) ? TEXT("+") : TEXT("−");
+
+	// A poll that saw more than one correction of a kind can place only the last, so the
+	// mark says how many it stands for rather than claiming to have been the only one.
+	return (mark.count > 1u) ? sign + FString::Printf(TEXT("%u"), mark.count) : sign;
+}
+
 // Built from the readout model's fields ONLY -- the pure header owns the facts, this owns
 // the string. ⛔ NO LIVE READ OF ANY CLOCK: everything here is already in `readout`.
 FString buildClockDriftReadoutText(
@@ -100,10 +114,12 @@ FString buildClockDriftReadoutText(
 
 	// ⛔ SIGNED: the drift says ahead of the target or behind it; a count says neither.
 	return FString::Printf(
-		TEXT("clock drift %+d  target %u = auth %u %+d  next %s  debt %u  auth static %u ticks"),
+		TEXT("clock drift %+d  target %u = auth %u %+d  next %s  debt %u  auth static %u ticks")
+		TEXT("  skips %u  stalls %u  resyncs %u"),
 		r.driftTicks, r.targetTick, r.authorityTick,
 		static_cast<int32_t>(r.targetTick) - static_cast<int32_t>(r.authorityTick),
-		*driftActionWord(r.pendingAction), r.stallDebtTicks, readout.authorityStaticTicks);
+		*driftActionWord(r.pendingAction), r.stallDebtTicks, readout.authorityStaticTicks,
+		readout.skips, readout.stalls, readout.resyncs);
 }
 
 // Built from the readout model's fields ONLY, the fixed vocabulary given verbatim.
@@ -348,6 +364,9 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 
 	drawFrameMeterAxisEvents(geometry, layout, *lanes, window);
 
+	// The clock's own corrections, on the boundaries BETWEEN columns rather than on one.
+	drawFrameMeterRateMarks(geometry, layout, *lanes, window);
+
 	// Where the server is. Absent on a role that does not predict, which is the only
 	// case with no offset to show at all.
 	drawFrameMeterAuthorityMarker(geometry, layout,
@@ -401,6 +420,44 @@ void AOGBrawlerUEHUD::drawFrameMeterAxisEvents(
 		DrawText(label, kMeterElisionInk,
 			x + geometry.cellWidth * 0.5f - labelWidth * 0.5f,
 			frameMeterElisionLabelTopY(geometry, layout, labelHeight), font);
+	}
+}
+
+void AOGBrawlerUEHUD::drawFrameMeterRateMarks(
+	const brawlerInputHistoryVisualization::FrameMeterGeometry&     geometry,
+	const brawlerInputHistoryVisualization::FrameMeterLayout&       layout,
+	const brawlerInputHistoryVisualization::InputHistoryTickLanes&  lanes,
+	const brawlerInputHistoryVisualization::PollWindow&             window)
+{
+	using namespace brawlerInputHistoryVisualization;
+
+	FrameMeterRateMarkList marks;
+	collectFrameMeterRateMarks(lanes, window, marks);
+
+	UFont* const       font = GEngine->GetSmallFont();
+	const FLinearColor ink  = meterMarkerColor(kFrameMeterRateMarkStyle);
+
+	for (uint32_t index = 0u; index < marks.count; ++index)
+	{
+		const FrameMeterRateMark& mark  = marks.marks[index];
+		const FString             glyph = rateMarkGlyph(mark);
+
+		// The edge of the mark's own column, which is what a boundary between two ticks
+		// is in x: the two kinds sit one stride apart on the same column.
+		const float x = rateMarkX(geometry, mark);
+
+		float glyphWidth  = 0.f;
+		float glyphHeight = 0.f;
+		GetTextSize(glyph, glyphWidth, glyphHeight, font);
+
+		// ⛔ IN THE LABEL BAND, ACROSS NO CELL: this style needs no palette clearance.
+		const float topY = frameMeterElisionLabelTopY(geometry, layout, glyphHeight);
+		DrawLine(x, topY, x, geometry.originY - layout.backdropPadding,
+			ink, kFrameMeterRateMarkStyle.thickness);
+
+		// Beside the mark, never centred on it: a glyph astride the boundary would read
+		// as belonging to whichever column it happened to sit further into.
+		DrawText(glyph, ink, x + layout.backdropPadding, topY, font);
 	}
 }
 

@@ -205,6 +205,29 @@ was already on it, and this is more reads inside that one entry point.
 ⛔ It takes `runsPrediction()` for the harder of the two reasons: `getClientClock()` does not
 return a wrong number on a role that does not predict, it calls `std::terminate`.
 
+⛔ **THE CLOCK'S EVENT SEAM IS SEVEN MORE READS INSIDE THAT SAME PASSTHROUGH, AND STILL NO
+NEW CROSSING CLASS.** `skipCount`, `lastSkipTick`, `stallCount`, `lastStallTick`,
+`hardResyncCount`, `lastHardResyncFromTick` and `lastHardResyncToTick` are plain
+physics-written words on `ClientPredictionClock`, taken under the SAME `runsPrediction()` guard,
+in the SAME call, for the SAME display that decides nothing. Each is a naturally-aligned
+four-byte load that cannot tear, so the accepted tear argued above covers all seven and **the
+CROSSING table gains no bullet and the NARROW PASSTHROUGHS list gains no name**.
+⛔ **THEY ARE READ THROUGH `getDiagnostics()`, NEVER THROUGH A BARE ACCESSOR** — the clock
+deliberately publishes none, so the display cannot acquire a second, unfenced route to the same
+words.
+
+⭐ **THE COUNT OF EACH PAIR IS READ BEFORE ITS TICK, AND THE ORDER IS THE ARGUMENT.** The clock
+writes them the other way round — tick, then count — at every site in `advancePrediction`. Two
+opposed orders make one of the two possible straddles unreachable: a reader that has already
+seen the incremented count is, by the writer's program order, past the tick-write as well, and
+its tick-read comes later still. ⛔ **A FRESH COUNT BESIDE A STALE TICK CANNOT BE OBSERVED**
+here. What can is the reverse — a stale count beside a fresh tick — and it costs nothing: the
+poll's difference is zero, so it files nothing and the next poll picks the event up whole.
+⛔ **DO NOT REVERSE THE READ ORDER.** It is not a style choice: reading tick-first makes the
+unreachable case reachable, and that case is the one that would attribute an event to a tick
+that predates it — a wrong answer rather than a late one, on the one crossing in this file whose
+consumer draws a position from the value.
+
 ⭐ **The offset is read at the POLL, not at the draw, and that placement is the whole point.**
 The lane axis is built from the `liveTick` this same call is given, so pairing the offset
 with it there makes the authority marker and the axis it is measured against one snapshot by

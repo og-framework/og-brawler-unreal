@@ -70,6 +70,16 @@ private:
 		const brawlerInputHistoryVisualization::InputHistoryTickLanes&  lanes,
 		const brawlerInputHistoryVisualization::PollWindow&             window);
 
+	// Every rate correction the clock made inside `window` -- a short mark on a column
+	// EDGE in the label band, with its signed glyph beside it. A skip and a stall own no
+	// cell, so neither is drawn on one.
+	// ⛔ THE GLYPH IS DERIVED FROM `kind`, never stored: one kind, one glyph, decided once.
+	void drawFrameMeterRateMarks(
+		const brawlerInputHistoryVisualization::FrameMeterGeometry&     geometry,
+		const brawlerInputHistoryVisualization::FrameMeterLayout&       layout,
+		const brawlerInputHistoryVisualization::InputHistoryTickLanes&  lanes,
+		const brawlerInputHistoryVisualization::PollWindow&             window);
+
 	// One vertical rule, from a style the pure header owns. Both markers that cross these
 	// bars come through here, so neither can acquire a look of its own at the canvas.
 	void drawFrameMeterRule(

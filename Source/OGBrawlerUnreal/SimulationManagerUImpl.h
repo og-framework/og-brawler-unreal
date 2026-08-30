@@ -35,6 +35,9 @@
 //             it is NOT a third crossing -- same thread as its readers. The
 //             reader's hasCorrectionCache() presence test is one more: the
 //             cache map it asks is mutated on the GAME THREAD alone.
+//             The clock's seven diagnostic-view reads, taken beside that
+//             same poll's prediction tick, are that SAME accepted tear and
+//             not a new class of crossing. §1
 //   The rest have NO internal synchronization: m_receptionCoordinator,
 //   m_frameHealthProbe, m_relayWriteProbe, m_connectionBudgetProbe,
 //   m_inputHistory and m_delayedInputComponentsById. §1
@@ -445,6 +448,16 @@ public:
                                    - static_cast<int32_t>(reading.predictionTick);
             reading.pendingAction  = predictionClock.evaluateDrift();
             reading.stallDebtTicks = predictionClock.getRequiredInputDelayIncreaseStallTicks();
+// ⛔ THE SEAM, THROUGH THE VIEW: the clock publishes no bare accessor for any of these.
+// ⛔ COUNT BEFORE ITS TICK: the clock writes tick then count, so the tear is one-way.
+            reading.skipCount              = predictionClock.getDiagnostics().skipCount();
+            reading.lastSkipTick           = predictionClock.getDiagnostics().lastSkipTick();
+            reading.stallCount             = predictionClock.getDiagnostics().stallCount();
+            reading.lastStallTick          = predictionClock.getDiagnostics().lastStallTick();
+            reading.hardResyncCount        = predictionClock.getDiagnostics().hardResyncCount();
+            reading.lastHardResyncFromTick =
+                predictionClock.getDiagnostics().lastHardResyncFromTick();
+            reading.lastHardResyncToTick   = predictionClock.getDiagnostics().lastHardResyncToTick();
 
             clock = reading;
         }
