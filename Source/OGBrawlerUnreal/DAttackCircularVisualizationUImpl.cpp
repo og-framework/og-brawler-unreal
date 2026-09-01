@@ -38,6 +38,9 @@ namespace
 			return FColor::White;
 		case 13:
 			return FColor::Black;
+		case 14:
+			// Amber: channel midpoint of Orange (243,156,18) and Yellow (255,255,0).
+			return FColor(249, 205, 9);
 		default:
 			return FColor::Black;
 		}
