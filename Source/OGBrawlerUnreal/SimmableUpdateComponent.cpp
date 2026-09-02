@@ -723,7 +723,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				dAttackRadialVisualization::visualize2(attackCircularVisualizationInput,
 					(*attackSimState).get<dAttackRadialSimulation::State>(),
 					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
+					attackSimAllState.getDerivedState().get<dAttackRadialSimulation::DerivedState>(),
 					m_staticData->m_attackSimulationStaticData,
 					m_visualizationState);
 			}
@@ -732,7 +732,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				dAttackRadialVisualization::visualize(attackCircularVisualizationInput,
 					(*attackSimState).get<dAttackRadialSimulation::State>(),
 					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
+					attackSimAllState.getDerivedState().get<dAttackRadialSimulation::DerivedState>(),
 					m_staticData->m_attackSimulationStaticData,
 					m_visualizationState);
 			}
@@ -777,7 +777,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				dAttackAimVisualization::visualize(aimInput,
 					(*attackSimState).get<dAttackRadialSimulation::State>(),
 					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
-					attackSimAllState.getDerivedState().m_attackDerivedState,
+					attackSimAllState.getDerivedState().get<dAttackRadialSimulation::DerivedState>(),
 					m_staticData->m_attackSimulationStaticData,
 					m_attackAimVisualizationState.value());
 			}
@@ -800,7 +800,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				vizSimulationStep.getDeltaSeconds());
 			brawlerProjectileVisualization::visualize(projectileVisualizationInput,
 				(*attackSimState).get<brawlerProjectileSimulation::State>(),
-				attackSimAllState.getDerivedState().m_projectileDerivedState,
+				attackSimAllState.getDerivedState().get<brawlerProjectileSimulation::DerivedState>(),
 				m_projectileVisualizationState);
 		}
 

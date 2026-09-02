@@ -104,12 +104,6 @@ namespace
 {
 // kTierReapDeadlineDwellPeriods moved into the core coordinator, beside the reap logic.
 
-// Routes every projectile PhysicsDeclaration<I> to m_projectileStaticData.
-// ⛔ A specialization, not a concept: the declaration takes a non-type argument.
-	template <typename T> struct is_projectile_physics_decl : std::false_type {};
-	template <int I> struct is_projectile_physics_decl<brawlerProjectileSimulation::PhysicsDeclaration<I>> : std::true_type {};
-	template <typename T> inline constexpr bool is_projectile_physics_decl_v = is_projectile_physics_decl<T>::value;
-
 // Routes one SIMLOG message to a LogOG* category by its leading [Tag]. §4
 	void RouteOGMessage(const char* msg)
 	{
@@ -1161,15 +1155,9 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         record.simulatable->editPhysicsComposite().forEach([&](auto& decl)
         {
             using D = std::decay_t<decltype(decl)>;
-// Extract the right sub-StaticData at compile time so the fold stays generic.
-            const auto& subStaticData = [&]() -> const auto& {
-                if constexpr (std::is_same_v<D, dAttackRadialSimulation::PhysicsDeclaration>)
-                    return staticData.m_attackSimulationStaticData;
-                else if constexpr (is_projectile_physics_decl_v<D>)
-                    return staticData.m_projectileStaticData;
-                else
-                    return staticData.m_guardSimulationStaticData;
-            }();
+// Generic — each declaration names its own slice (PhysicsDeclaration.h). Adding a
+// body-owning sub-simulation therefore edits NO engine file.
+            const auto& subStaticData = D::staticDataOf(staticData);
             auto r = factory.createPhysicalObject(D::descriptor(), D::name);
             decl.bindings.ownBodyId        = r.bodyId;
             decl.bindings.parentBodyId     = parentBodyId;
