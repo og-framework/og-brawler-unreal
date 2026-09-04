@@ -124,6 +124,45 @@ public:
 		proxy->GetPhysicsThreadAPI()->SetV(uglm::toFVector(vel));
 	}
 
+	// Accumulate an acceleration for THIS step; engine applies force = a * mass.
+	// Mass-agnostic seam: the sim expresses intent as an acceleration (cm/s^2) and
+	// each adapter converts using its own body mass, so a contested step is resolved
+	// by Chaos with mass symmetry instead of one side overwriting V.
+	// Shape mirrors addBodyTorque above: resolve the proxy, then one call on the
+	// physics-thread API with bInvalidate = false, because we are already on the
+	// physics thread inside the sim step -- the same assumption setBodyLinearVelocity
+	// and captureBodyState make.
+	void addBodyAcceleration(BodyId bodyId, const glm::vec3& acceleration)
+	{
+		auto* proxy = resolveProxy(bodyId);
+		ensureAlwaysMsgf(proxy != nullptr, TEXT("ChaosPhysicsBodyAdapter::addBodyAcceleration - unresolved BodyId %u"), bodyId.value);
+		if (!proxy)
+		{
+			return;
+		}
+
+		constexpr bool bInvalidate = false;
+		auto* ptApi = proxy->GetPhysicsThreadAPI();
+		ptApi->AddForce(uglm::toFVector(acceleration) * ptApi->M(), bInvalidate);
+	}
+
+	// Instantaneous dv before this step's solve; engine applies impulse = dv * mass.
+	// Written as a read-modify-write of the physics-thread velocity through the same
+	// GetV()/SetV() pair captureBodyState and setBodyLinearVelocity already use. That
+	// form is mass-agnostic by construction, so no M() term appears here.
+	void addBodyVelocityChange(BodyId bodyId, const glm::vec3& velocityChange)
+	{
+		auto* proxy = resolveProxy(bodyId);
+		ensureAlwaysMsgf(proxy != nullptr, TEXT("ChaosPhysicsBodyAdapter::addBodyVelocityChange - unresolved BodyId %u"), bodyId.value);
+		if (!proxy)
+		{
+			return;
+		}
+
+		auto* ptApi = proxy->GetPhysicsThreadAPI();
+		ptApi->SetV(ptApi->GetV() + uglm::toFVector(velocityChange));
+	}
+
 	glm::vec3 getBodyInertiaTensor(BodyId bodyId) const
 	{
 		if (auto* proxy = resolveProxy(bodyId))

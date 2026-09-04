@@ -7,6 +7,7 @@
 #include "JoltGLMConversion.h"
 
 #include <Jolt/Jolt.h>
+#include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 
 #include <glm/mat4x4.hpp>
@@ -76,6 +77,43 @@ public:
 	{
 		JPH::BodyID joltId(bodyId.value);
 		m_bodyInterface.SetLinearVelocity(joltId, toJolt(vel * 0.01f)); // cm/s → m/s
+	}
+
+	// Accumulate an acceleration for THIS step; engine applies force = a * mass.
+	// Jolt is strict SI and mass-scaled: BodyInterface::AddForce takes newtons
+	// (kg*m/s^2) applied at the centre of mass, so the seam's cm/s^2 is scaled
+	// cm -> m exactly as setBodyLinearVelocity above scales cm/s -> m/s, and then
+	// multiplied by the body's mass.
+	// JPH::BodyInterface exposes no mass accessor, so the mass is read from the
+	// shape's mass properties. That IS the body's mass under Jolt's default
+	// EOverrideMassProperties::CalculateMassAndInertia; a body created with a mass
+	// override would need its mass plumbed in instead. Nothing in this tree creates
+	// Jolt bodies today, so the default is the only case that exists.
+	void addBodyAcceleration(BodyId bodyId, const glm::vec3& acceleration)
+	{
+		JPH::BodyID joltId(bodyId.value);
+
+		const JPH::RefConst<JPH::Shape> shape = m_bodyInterface.GetShape(joltId);
+		if (shape.GetPtr() == nullptr)
+		{
+			return;
+		}
+
+		const float mass = shape->GetMassProperties().mMass;
+		m_bodyInterface.AddForce(joltId, toJolt(acceleration * 0.01f) * mass); // cm/s^2 -> m/s^2, * kg -> N
+	}
+
+	// Instantaneous dv before this step's solve; engine applies impulse = dv * mass.
+	// AddLinearVelocity is used rather than AddImpulse(dv * mass): Jolt defines
+	// Body::AddImpulse as SetLinearVelocityClamped(v + impulse * invMass) and
+	// BodyInterface::AddLinearVelocity as SetLinearVelocityClamped(v + dv), so for
+	// impulse = dv * mass the two are the same operation -- but this form needs no
+	// mass lookup and therefore cannot silently disagree with the Chaos adapter's
+	// SetV(GetV() + dv).
+	void addBodyVelocityChange(BodyId bodyId, const glm::vec3& velocityChange)
+	{
+		JPH::BodyID joltId(bodyId.value);
+		m_bodyInterface.AddLinearVelocity(joltId, toJolt(velocityChange * 0.01f)); // cm/s -> m/s
 	}
 
 	glm::vec3 getBodyInertiaTensor(BodyId bodyId) const
