@@ -810,7 +810,7 @@ void ChaosSpatialQueryAdapter::filterDisabledAndUnreadyHits(TArray<FHitResult>& 
 		// ⚠ [movement-sim T38] All three of these were UNGUARDED dereferences before
 		// task 38, and the game-thread branch had no null check on the proxy at all
 		// — which is why task 9's probe routed its game-thread control AROUND this
-		// adapter rather than through it (Spike9Probe.cpp:639). Question 3.
+		// adapter rather than through it (Spike9Probe.cpp:639 @ 48a2e7f — probe deleted in task 9 phase 2). Question 3.
 		UPrimitiveComponent* component = hit.GetComponent();
 		FBodyInstance* bodyInstance = component ? component->GetBodyInstance() : nullptr;
 		auto* proxy = bodyInstance
