@@ -10,6 +10,7 @@
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "Runtime/Experimental/Chaos/Public/PhysicsProxy/SingleParticlePhysicsProxy.h"
 #include "PhysicsProxy/SingleParticlePhysicsProxy.h"
+#include "Chaos/ParticleHandle.h"
 #include "PBDRigidsSolver.h"
 
 class ChaosPhysicsBodyAdapter
@@ -173,14 +174,58 @@ public:
 		return glm::vec3(0.f);
 	}
 
+	// [task 46] READS THE SOLVED POSE -- `GetP()`/`GetQ()`, NEVER `GetX()`/`GetR()`.
+	//
+	// This runs from Chaos's `PostSolveCallback`
+	// (`FSimulationManagerAsyncCallback::OnPostSolve_Internal` ->
+	// `SimulationManager::onPostGameSimulation` -> `captureBodyStatesAll`). In UE 5.6
+	// `FPBDRigidsEvolutionGBF::AdvanceOneTimeStepImpl` the order inside ONE step is:
+	//
+	//     Integrate               writes P/Q and V; leaves X/R UNTOUCHED
+	//     ... constraint solve ...  refines P/Q and V
+	//     PostSolveCallback       <- WE ARE HERE
+	//     ParticleUpdatePosition  SetX(GetP()); SetR(GetQ())  -- the commit, 43 lines later
+	//
+	// So at this point X/R still hold the START-of-step pose, which for a sub-sim that
+	// wrote the body pre-solve is its own command echoed back. Measured by the task-9
+	// spike, run 6A (2026-09-05, both peers): capX.Z = 10.000000 (commanded) vs
+	// capP.Z = 7.812868 (solved) -- 2.187133 cm of solve discarded every step.
+	//
+	// V/W are DELIBERATELY UNCHANGED: Integrate and the solve both write them before this
+	// callback, so `GetV()`/`GetW()` are already end-of-step values. Reading P/Q here is
+	// what makes the captured tuple internally consistent -- pose and velocity from the
+	// same instant -- and what makes slot[T] mean "the state AFTER tick T", which is what
+	// the rollback push consumes (`SimulationManagerUImpl.cpp` `FirstPreResimStep_Internal`
+	// writes it as the PostPushData pose of the frame that replays tick T+1).
+	//
+	// WHY NOT `ptApi->GetP()`: `FRigidBodyHandle_Internal` HAS NO `GetP()`/`GetQ()`
+	// (`PhysicsProxy/SingleParticlePhysicsProxy.h` @5.6 -- the class is PreV/PreW/SetX/
+	// SetR/SetV/SetW/SetObjectState, and its base exposes only X/R/V/W). P/Q live on the
+	// rigid particle handle. `FConstGenericParticleHandle` is the engine's own
+	// type-agnostic reader for exactly this case: its `GetP()`/`GetQ()` return the rigid
+	// handle's P/Q for a DYNAMIC (or sleeping) particle and fall back to X/R otherwise
+	// (`Chaos/ParticleHandle.h` @5.6), which is the right answer for a static or kinematic
+	// body whose P is never integrated. Do NOT hand-roll that with `CastToRigidParticle()`:
+	// a rigid-typed particle parked in the Kinematic object state casts fine and would hand
+	// back a stale P.
+	//
+	// SAME FRAME, no conversion: X/R and P/Q are both particle-frame -- `XCom`/`PCom` are
+	// symmetric derivations from them (`Chaos/PBDRigidParticles.h` @5.6), and every body
+	// this project creates has CoM = 0 anyway. Established by task 47.
+	//
+	// BOTH PEERS MUST SHIP THIS TOGETHER. What this returns is what
+	// `StateCorrectionCache::tryInsertingCorrectState` feeds to `isSimilarTo` against the
+	// authority's copy, at a 0.0001 epsilon. Peers on opposite sides of this change would
+	// compare pose(T) against pose(T-1) and mispredict every tick.
 	PhysicsBodyState captureBodyState(BodyId bodyId) const
 	{
 		if (auto* proxy = resolveProxy(bodyId))
 		{
 			auto* ptApi = proxy->GetPhysicsThreadAPI();
+			const Chaos::FConstGenericParticleHandle particle(proxy->GetHandle_LowLevel());
 			PhysicsBodyState s;
-			s.position = uglm::toGLMVec3(ptApi->GetX());
-			s.rotation = uglm::toGLMQuat(FQuat(ptApi->GetR()));
+			s.position = uglm::toGLMVec3(particle->GetP());
+			s.rotation = uglm::toGLMQuat(FQuat(particle->GetQ()));
 			s.linearVelocity = uglm::toGLMVec3(ptApi->GetV());
 			s.angularVelocity = uglm::toGLMVec3(ptApi->GetW());
 			return s;

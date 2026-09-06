@@ -208,11 +208,24 @@ private:
 
 class ASimulationManagerUImpl;
 
+// ⛔ THE OPTION SET IS A CONTRACT, NOT A WISH LIST. Every bit named below
+// registers this object into one more Chaos dispatch list, and each list calls
+// the matching *_Internal hook. A bit whose hook is NOT overridden here reaches
+// the asserting base implementation the first time that list actually runs.
+// ⛔ ContactModification was on this list from the initial release (e93cb39,
+// 2026-05-26) with no OnContactModification_Internal override. It stayed dormant
+// only because every body in the tree was ECR_Overlap on every channel, so Chaos
+// never ran a collision modifier. The first ECR_Block body (ChaosPhysicsFactory's
+// blockingCategories translation) took PIE straight into
+// FPBDCollisionConstraints::ApplyCollisionModifier -> the assert. It is REMOVED
+// rather than stubbed with a no-op, because ruling #5 chose solver separation
+// with NO authored priority, so nothing in this tree wants the hook - and a
+// registered no-op still pays a modifier callback per contact for nothing.
+// ⛔ RE-ADDING THE BIT REQUIRES ADDING ITS OVERRIDE IN THE SAME EDIT.
 class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<
 	FSimulationInput2,
 	FSimulationState2,
 	Chaos::ESimCallbackOptions::Presimulate |
-	Chaos::ESimCallbackOptions::ContactModification |
 	Chaos::ESimCallbackOptions::Rewind |
 	Chaos::ESimCallbackOptions::PostSolve>
 {

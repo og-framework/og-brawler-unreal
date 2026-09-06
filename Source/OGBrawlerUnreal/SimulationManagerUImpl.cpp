@@ -544,7 +544,48 @@ void ASimulationManagerUImpl::BeginPlay()
 			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
 			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
 // Projectile category - its own trace channel, so projectile overlaps stay distinguishable.
-			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
+			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
+// [movement-sim T39] Static level geometry. The movement sub-sim's ground/wall probe and its
+// capsule sweeps search this category; no DAttack-authored shape belongs to it.
+//
+// ⛔ THE LOAD-BEARING EFFECT IS NOT THE RETURN VALUE, IT IS THE TABLE'S SIZE.
+// ChaosSpatialQueryAdapter resizes m_toEngine to (largest mapped category + 1), and
+// toObjectQueryParams iterates `cat < m_toEngine.size()`. With only categories 0-3 mapped the loop
+// stopped at 4, so bit 4 was never tested, AddObjectTypesToQuery was never called, and a
+// `worldOnly` search went out with EMPTY object query params - which is well-formed and matches
+// NOTHING.
+//
+// ⚠ ECC_WorldStatic IS ECollisionChannel(0) - the very value toEngineChannel returns for an
+// UNMAPPED category. So from this line on, "mapped to WorldStatic" and "never mapped" are
+// INDISTINGUISHABLE by return value; only m_toEngine.size() tells them apart. Task 40 exists to
+// make an unmapped category loud instead of silently channel 0. Do not read a WorldStatic result
+// as proof that a mapping exists.
+//
+// ⚠ KEEP IN SYNC with the client-branch table below - the two tables are duplicated with no
+// shared constant, and adding to one silently diverges client from server.
+			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
+// [movement-sim T43] The movement sub-sim's OWN body. BrawlerMovementSimulation.h:98 registers its
+// 30 cm sphere under this category, and PhysicsDeclaration is in the shipped composite
+// (SimulatableBrawler.h), so this runs for every character in every session.
+// Channel is user ruling #6, closed 2026-09-04 and lead-verified free: ch1 is `Damageable` in
+// DefaultEngine.ini and ch2-5 are the four entries above.
+//
+// ⛔ THIS LINE IS A FIX, NOT A NEW CAPABILITY. Without it toEngineChannel(5) fell through to the
+// unmapped fallback ECollisionChannel(0) - which IS ECC_WorldStatic - so
+// ChaosPhysicsFactory::applyDescriptor typed every character's MovementBody sphere as STATIC
+// LEVEL GEOMETRY. Harmless while nothing searched WorldStatic; LIVE from task 39 on, because a
+// `worldOnly` object query searches exactly that object type and would hand the movement sim
+// OTHER characters' spheres as ground. Task 40's [SpatialQuery.UnmappedCategory] category=5 line
+// in the 2026-09-05 18:11 run is what finally said so out loud.
+//
+// ⚠ TASK 13 OWNS THE FULL CHANNEL MAP. `character -> ECC_GameTraceChannel6` is the ONLY entry
+// task 43 added, at this site and the client one; do not double-add it there.
+//
+// ⚠ The reverse map moves too: the ctor writes m_toDAttack[GTC6] = character, a slot that was
+// kUnmapped before. It collides with nothing (the other five occupy WorldStatic and GTC2-GTC5)
+// and it is unreachable in production today, because no shipped query volume searches
+// `character` and resolveHitIdentity only ever sees channels an object query asked for.
+			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
 		});
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_manager.emplace(false, solver->GetAsyncDeltaTime(), ManagerType::Params{
@@ -680,7 +721,17 @@ void ASimulationManagerUImpl::BeginPlay()
 			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
 			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
 // Projectile category - its own trace channel, as on the authority branch.
-			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 }
+			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
+// [movement-sim T39] Static level geometry, as on the authority branch. Both caveats are spelled
+// out in full there: it is m_toEngine.size() (not the returned channel) that makes
+// toObjectQueryParams test bit 4, and ECC_WorldStatic == ECollisionChannel(0) == the unmapped
+// fallback. KEEP IN SYNC with the authority table above.
+			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
+// [movement-sim T43] The movement sub-sim's own body, as on the authority branch - and the client
+// needs it for the same reason the server does: it predicts the same sub-sim. The full rationale
+// (why an unmapped category silently became ECC_WorldStatic, and what the reverse map does) is
+// spelled out at the authority table above. KEEP IN SYNC with it.
+			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
 		});
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), ManagerType::Params{
