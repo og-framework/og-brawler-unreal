@@ -21,6 +21,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 #include "OGBrawler/DAttackRadialSequence.h"
@@ -73,18 +74,48 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	// Configure character movement
-	GetCharacterMovement()->bOrientRotationToMovement = false; // Character moves in the direction of input...	
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // ...at this rotation rate
+	// =====================================================================================
+	// ⛔⛔ CMC RETIRED — locomotion is `brawlerMovementSimulation`; do not re-enable.
+	//
+	// [movement-sim task 15] Every tuning knob that used to live here (JumpZVelocity,
+	// AirControl, the walk-speed cap, the analog-walk floor, the braking decelerations) is now
+	// authored ONCE in `simulatableBrawler::StaticData::m_movementStaticData`
+	// (`OGBrawler/SimulatableBrawlerTypes.h`), which is the sub-simulation's StaticData and
+	// the only place any of them is spelled. `Move()`, its engine movement-input call, and the
+	// per-Tick walk-speed-cap resync were all deleted in the same change.
+	//
+	// ⚠ THE THREE CALLS BELOW ARE BELT-AND-BRACES, NOT THE MECHANISM. What actually stops
+	// the CMC is `brawlerMovementSimulation::PhysicsSetup::body.simulatePhysics = true`: the
+	// physics factory's adopt-root pass simulates THIS character's capsule, the capsule IS the
+	// CMC's `UpdatedComponent`, and UE 5.6's CMC early-returns on
+	// `UpdatedComponent->IsSimulatingPhysics()` on both its sync and its async path. These
+	// calls make the retirement legible at the class that owns the component, and stop the
+	// component ticking for nothing.
+	//
+	// ⛔ RE-ENABLING THIS WITHOUT FLIPPING BOTH SIM FLAGS BACK GIVES TWO AUTHORITIES writing
+	// one capsule. Flipping only `simulatePhysics` back gives none. See the paired comments on
+	// `StaticData::drivesBody` and `PhysicsSetup::body` in `BrawlerMovementSimulation.h`.
+	//
+	// The CharacterMovementComponent.h include is KEPT ON PURPOSE — these three disable calls
+	// need the complete type. It is not a leftover.
+	// =====================================================================================
+	GetCharacterMovement()->SetMovementMode(MOVE_None);
+	GetCharacterMovement()->SetComponentTickEnabled(false);
+	GetCharacterMovement()->bAutoActivate = false;
 
-	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
-	// instead of recompiling to adjust them
-	GetCharacterMovement()->JumpZVelocity = 700.f;
-	GetCharacterMovement()->AirControl = 0.35f;
-	GetCharacterMovement()->MaxWalkSpeed = 100.f; // bootstrap; Tick() resyncs from g_moveSpeed.
-	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
-	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
+	// ⭐ FRICTION 0 / RESTITUTION 0 ON THE CAPSULE, and the mechanism is named: a
+	// `UPhysicalMaterial` default subobject assigned as the primitive's override, so it needs
+	// no content asset and cannot be un-set by a Blueprint that forgets to inherit one.
+	// RESTITUTION 0 IS LOAD-BEARING (revision 6): step 6' measures the solver's positional
+	// push-out and adopts it, so a bouncy capsule would feed a rebound back into the movement
+	// state. FRICTION 0 is recorded rather than relied on — the sim re-writes
+	// {position, velocity} every tick, so a tangential friction impulse has nothing to
+	// accumulate into. Mass is deliberately NOT asserted (revision 6: mass plays no part in
+	// the movement path).
+	CapsulePhysicalMaterial = CreateDefaultSubobject<UPhysicalMaterial>(TEXT("BrawlerCapsulePhysMat"));
+	CapsulePhysicalMaterial->Friction = 0.f;
+	CapsulePhysicalMaterial->Restitution = 0.f;
+	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
 
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -122,15 +153,31 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	this->NetUpdateFrequency = 60.0f; // Higher = more updates per second
 	this->MinNetUpdateFrequency = 60.0f;
 
+	// [movement-sim task 15] ⛔ ACTOR MOVEMENT REPLICATION OFF (R6). The capsule's pose is
+	// carried by the simulation's own state wire and reproduced on every peer by
+	// `brawlerMovementSimulation::integrate` step 5, then corrected through the resim path.
+	// Leaving UE's actor-movement replication on would put a SECOND, unsynchronised copy of
+	// the same pose on the wire and fight the correction with visible rubber-banding.
+	this->SetReplicateMovement(false);
+
 	this->bAlwaysRelevant = true; // Always relevant for network updates
 
 	this->NetCullDistanceSquared = 10000.f* 10000.f; // Distance at which the character is culled from the network updates
 
 	HumanoidMesh = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("HumanoidMesh"));
 	HumanoidMesh->SetupAttachment(RootComponent);
-	// Capsule center sits CapsuleHalfHeight above the floor; the visualization is
-	// authored with feet at local Z=0, so push the mesh down by that amount.
-	HumanoidMesh->SetRelativeLocation(FVector(0.f, 0.f, -GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()));
+	// [movement-sim task 15] THE CAPSULE HOVERS NOW, so the feet no longer sit at
+	// `-CapsuleHalfHeight`. `brawlerMovementSimulation`'s hover servo holds the capsule
+	// CENTRE at `rideHeight` above the surface, so the mesh must drop by the half-height AND
+	// the ride height for the feet to touch the ground.
+	// ⚠ THE 10.f MIRRORS `m_movementStaticData.rideHeight` (`SimulatableBrawlerTypes.h`, the
+	// one place it is authored) exactly as the 42/96 capsule dimensions mirror
+	// `InitCapsuleSize` above — the sub-simulation is engine-free and cannot read this file,
+	// so the pairing is maintained by hand. CHANGE BOTH TOGETHER or the character walks with
+	// its feet 10 cm into, or 10 cm above, the floor.
+	static constexpr float kRideHeightMirror = 10.f;
+	HumanoidMesh->SetRelativeLocation(FVector(
+		0.f, 0.f, -(GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() + kRideHeightMirror)));
 	HumanoidMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	HumanoidMesh->SetGenerateOverlapEvents(false);
 
@@ -339,11 +386,9 @@ void AOGBrawlerUECharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 		InputCollection->setupBindings(EnhancedInputComponent);
 		m_inputComponent = EnhancedInputComponent;
 
-		// CMC Move binding stays on the character — AOGBrawlerUECharacter::Move feeds
-		// AddMovementInput for the legacy CharacterMovementComponent path (sim path is
-		// handled by InputCollection::onMove). Two consumers, one action.
-		UInputAction* MoveAction = InputCollection->getTranslator().getAction(dInput::gameMapping::Move);
-		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AOGBrawlerUECharacter::Move);
+		// [movement-sim task 15] The character's own Move binding is GONE with the CMC path.
+		// The Move action now has exactly ONE consumer: `InputCollection::onMove`, which caches
+		// the stick for `buildPlayerInput()` to relay to the simulation on the physics tick.
 	}
 	else
 	{
@@ -366,8 +411,13 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 
 	InputCollection->updateGameThreadCache();
 
-	// Sync MaxWalkSpeed from the tweakable each frame so OGBrawler.MoveSpeed updates live.
-	GetCharacterMovement()->MaxWalkSpeed = dAttackMachineSimulation::g_moveSpeed.load();
+	// [movement-sim task 15] The per-frame walk-speed-cap resync is GONE with the CMC path.
+	// ⭐ [movement-sim task 17] AND THE WINDOW IT OPENED IS CLOSED. This block used to warn that
+	// `OGBrawler.MoveSpeed` had NO READER "until task 16" and that the console lever was inert.
+	// Task 16 has landed: `readMovementStaticDataCVars()` (MovementSchemeCVar.cpp) reads the cvar
+	// ONCE, when the manager builds its `StaticData`, into the movement sub-simulation's
+	// `maxWalkSpeed`. Mid-session changes are still ignored — that is the design, and each sink
+	// says so out loud — but the lever is no longer inert.
 
 	const glm::vec2 lookStick = InputCollection->consumeLookStick();
 
@@ -401,89 +451,10 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 
 }
 
-void AOGBrawlerUECharacter::Move(const FInputActionValue& Value)
-{
-	if (Controller == nullptr)
-		return;
-
-	// [hit-resolution T12] Freeze CMC movement while the character is in a flinch
-	// state — HitFlinch (target-side, driven by the T3 inbound-hit routing pass)
-	// or GuardFlinch (attacker-side, from a successful guard-block on the target).
-	// Same shape as the HoldGuard freeze below: an early return suppresses
-	// AddMovementInput while the sim path still sees the raw stick + world
-	// direction via buildPlayerInput() on the physics tick. The machine sim's
-	// flinch cases already veto attack inputs (T1/T2), so the propagated move
-	// direction is a harmless no-op during flinch — no need to also gate the sim
-	// path. Read via SimulatableBrawler's viz-state snapshot (game-thread safe;
-	// worst-case 1-physics-tick lag ≈ 16 ms at 60 Hz, well inside the 300 ms
-	// flinch window).
-	if (isCharacterInFlinch())
-		return;
-
-	// HoldGuard (left trigger axis / Left Shift) freezes CMC movement so the character roots
-	// in place while in guard stance. The sim still sees the unchanged moveStick +
-	// moveDirectionWorld because those flow via UOGBrawlerInputCollectionComponent::
-	// buildPlayerInput() on the physics tick — that path does not consult getHoldGuard().
-	// Net result: visible motion stops but the attack picker (integrate3) keeps reading
-	// the player's intended direction.
-	if (InputCollection->getHoldGuard())
-		return;
-
-	// Stick magnitude carries analog speed: buildMoveDirectionWorld() returns a unit
-	// world direction (internal normalize), so the magnitude must be passed as the
-	// AddMovementInput scalar — otherwise any deflection produces full-speed motion.
-	// Deadzone-gate before computing the direction: buildMoveDirectionWorld itself
-	// returns zero below the deadzone, but exiting early here skips the work and avoids
-	// feeding a zero direction to AddMovementInput.
-	const glm::vec2 stick = InputCollection->getMoveStick();
-	const float stickMagnitude = glm::length(stick);
-	const float moveDeadzone = dAttackMachineSimulation::g_moveStickDeadzone.load();
-	if (stickMagnitude < moveDeadzone)
-		return;
-
-	glm::vec3 worldDir = InputCollection->buildMoveDirectionWorld();
-	worldDir.z = 0.f;
-
-	// TEMPORARILY DISABLED: freeze CMC movement when the player's intended move direction
-	// is sharply away from where they're aiming (XY-projected angle ≥ 3π/4 ≈ 135°). Acts
-	// like the HoldGuard freeze above — the sim's PlayerInput still receives the
-	// unchanged moveDirectionWorld via buildPlayerInput() on the physics tick, so the
-	// attack picker continues to read the player's intended direction.
-	//const glm::vec3 aimDir = InputCollection->buildAimDirection();
-	//const glm::vec3 aimDirXY(aimDir.x, aimDir.y, 0.f);
-	//const float aimLenXY  = glm::length(aimDirXY);
-	//const float moveLenXY = glm::length(worldDir);
-	//if (aimLenXY > KINDA_SMALL_NUMBER && moveLenXY > KINDA_SMALL_NUMBER)
-	//{
-	//	const float dotXY = glm::clamp(
-	//		glm::dot(aimDirXY / aimLenXY, worldDir / moveLenXY), -1.f, 1.f);
-	//	const float angle = glm::acos(dotXY);
-	//	if (angle >= 3.f * glm::pi<float>() / 4.f)
-	//		return;
-	//}
-
-	AddMovementInput(uglm::toFVector(worldDir), FMath::Min(stickMagnitude, 1.f));
-}
-
 void AOGBrawlerUECharacter::Attack(const FInputActionValue& Value)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, FString::Printf(TEXT("attack!")));
 
-}
-
-bool AOGBrawlerUECharacter::isCharacterInFlinch() const
-{
-	// SimmableUpdateComponent is created in the ctor as a default subobject, so
-	// it should never be null once construction completes — but nullptr-guard
-	// anyway because Move() is called from Enhanced Input callbacks and no input
-	// event should ever be able to crash the character. Falls back to "not
-	// flinching" so the movement path proceeds normally when the sim isn't
-	// wired up.
-	if (SimmableUpdateComponent == nullptr)
-		return false;
-
-	const DAttackState state = SimmableUpdateComponent->getMachineVizState();
-	return state == DAttackState::HitFlinch || state == DAttackState::GuardFlinch;
 }
 
 // [og-netcode-v2-input-relay item 77] Closes the OGSIM_OPTIMIZE_OFF opened

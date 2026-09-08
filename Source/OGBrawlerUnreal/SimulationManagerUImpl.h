@@ -157,6 +157,29 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
 // Game-rule logging (DAttackMachine/Radial/Guard via OGBLOG_G)
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
+// ⭐⭐ THE ONE-TIME MOVEMENT CVAR READ'S RESULT — [movement-sim task 16, USER RULING #3].
+//
+// Ruling #3 is ONE-TIME, FULL STOP: `OGBrawler.MovementModel`, `.MoveSpeed`, `.StepPeriodTicks`
+// and `.StepSpeed` are read EXACTLY ONCE, when the simulation manager constructs its
+// `StaticData`, and never again. Nothing in the tick path may consult a console variable: the
+// values are authored data, every peer must agree on them for the whole session, and a value
+// that could change mid-session would make a resimulated tick disagree with the tick it replays.
+//
+// ⛔ SO THIS STRUCT IS THE ONLY THING THAT CROSSES THE SEAM, and it is `const` at its one
+// member. The read itself lives in `MovementSchemeCVar.cpp`, beside the variables it reads and
+// the "changed too late" latch it arms — see `ASimulationManagerUImpl::readMovementStaticDataCVars`.
+struct FMovementStaticDataCVars
+{
+	brawlerMovementSimulation::MovementModel model;
+	float    maxWalkSpeed;
+	uint32_t stepPeriodTicks;
+	float    stepSpeed;
+	// ⚠ NOT A CVAR. The ENGINE's gravity, captured at the same instant so the sim's own
+	// gravity law starts life agreeing with it; `BeginPlay` then `checkf`s that agreement
+	// against the WORLD's gravity, which a level is allowed to override and this is not.
+	float    gravity;
+};
+
 enum class TryRegisterStatus { Pending, Ready };
 
 // The provider signature, named once so the four sites passing one cannot drift apart. §5
@@ -698,6 +721,16 @@ private:
     std::optional<ChaosPhysicsBodyReaderAdapter> m_physReaderAdapter;
     std::optional<ChaosSpatialQueryAdapter>  m_queryAdapter;
 
+// ⭐⭐ THE ONE-TIME CVAR READ - [movement-sim task 16, ruling #3]. DEFINED IN
+// `MovementSchemeCVar.cpp`, NOT in SimulationManagerUImpl.cpp, and that is deliberate: it is
+// the TU that registers the four variables, so the read is a direct load of the very objects
+// the console writes rather than a `FindConsoleVariable` lookup by string that can miss a
+// rename in silence. That TU also owns the "consumed" latch the four sinks test before warning
+// that a mid-session change is being ignored, and the refused-name sweep (a stale ini naming a
+// constant that no longer exists is reported LOUDLY there, per the obligation routed from
+// task 56). Reads the engine's default gravity at the same instant.
+    static FMovementStaticDataCVars readMovementStaticDataCVars();
+
 // ---- SIMULATABLE-PACK ALIAS CHAIN -------------------------------------
 //
 // Single source of truth: widen this one alias and every type below inherits it.
@@ -712,10 +745,25 @@ private:
 // Owned resources + peers, typed from the alias chain. ⛔ Order matters - see below. §2
     BrawlerStorage m_storage;
 
+// ⭐ [movement-sim task 16] THE ONE-TIME CVAR READ, AND IT IS DECLARED HERE FOR A REASON:
+// members construct in DECLARATION order, so this one must sit IMMEDIATELY ABOVE m_staticData,
+// which reads it in its own initializer. Moving it below is not a style change - it is
+// reading an uninitialized object, silently, exactly as the banner below warns. §2
+    const FMovementStaticDataCVars m_movementStaticDataCVars = readMovementStaticDataCVars();
+
 // Game static data - the ownership ROOT for StaticData across the whole tree.
 //
 // ⛔ NEVER copied or moved: nested sub-StaticData binds sibling references that a copy dangles. §2
-    simulatableBrawler::StaticData m_staticData;
+// ⭐ Its FIVE movement parameters come from the one-time read above; every other constant it
+// holds is still authored in SimulatableBrawlerTypes.h. This is the ONE call site in the tree
+// that passes anything - every test peer default-constructs and therefore measures the
+// authored literals.
+    simulatableBrawler::StaticData m_staticData{
+        m_movementStaticDataCVars.model,
+        m_movementStaticDataCVars.maxWalkSpeed,
+        m_movementStaticDataCVars.stepPeriodTicks,
+        m_movementStaticDataCVars.stepSpeed,
+        m_movementStaticDataCVars.gravity };
 
 // ⛔ ENFORCED BY ONE THING ONLY: members construct in DECLARATION order, not list order.
 //
@@ -756,11 +804,16 @@ private:
 
     ChaosTickMapper m_chaosTickMapper;
 
+// ⭐ [movement-sim task 17] `BodyId parentBodyId` IS GONE. It cached the ACharacter capsule's
+// body id across the two-phase `tryRegister` for exactly two readers: the two-source tripwire
+// (deleted with it) and the resolvability gate, which now reads the movement declaration's own
+// `bindings.ownBodyId` — the same body, because that declaration's descriptor sets `isRoot`.
+// The capsule id is still derived inside the first-call pass as a LOCAL, where the factory and
+// `decl.bindings.parentBodyId` consume it; nothing needed it to survive the call.
     struct PendingRegistration
     {
         std::optional<SimulatableBrawler> simulatable;
         bool bodiesCreated = false;
-        BodyId parentBodyId;
         BrawlerInputProviderFn inputProvider;
         bool isAuthority = false;
     };

@@ -355,10 +355,13 @@ ChaosSpatialQueryAdapter::ChaosSpatialQueryAdapter(UWorld* world, std::initializ
 	// ECollisionChannel(0) above, and ECC_WorldStatic IS ECollisionChannel(0), so
 	// they will answer toEngineChannel with a perfectly plausible channel for the
 	// life of the process and nothing downstream can tell.
-	// This is NOT a check that every known category is mapped: `character` is
-	// deliberately unmapped until task 13, and complaining about it here would fire
-	// on every launch and train the reader to ignore the category. It fires only on
-	// a gap, and the shipped table (0..4, size 5) has none — see the
+	// This is NOT a check that every known category is mapped. ⚠ [movement-sim task 17] It
+	// used to say `character` was "deliberately unmapped until task 13" and that the shipped
+	// table was "(0..4, size 5)"; BOTH are stale. Task 39 mapped `world` and task 43 mapped
+	// `character`, so the shipped table is 0..5, size 6 — as the `isCategoryMapped` asserts at
+	// the top of this file have said since task 43. The distinction the paragraph exists for
+	// is unchanged: this fires only on a GAP (an unmapped category BELOW the highest mapped
+	// one), never on a category simply not present, and the shipped table has no gap — see the
 	// ambiguousGapMask static_assert above, which is what pins that silence.
 	const uint32_t gapMask =
 		ambiguousGapMask(m_mappedCategoryMask, static_cast<uint32_t>(m_toEngine.size()));

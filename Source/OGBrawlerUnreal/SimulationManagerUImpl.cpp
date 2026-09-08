@@ -419,6 +419,28 @@ void ASimulationManagerUImpl::BeginPlay()
 	if (uWorld == nullptr)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
+	// ⭐⭐ THE SIM'S GRAVITY MUST AGREE WITH THE ENGINE'S — [movement-sim task 16].
+	//
+	// ⛔ THIS IS NOT A TAUTOLOGY, EVEN THOUGH THE SIM'S VALUE WAS READ FROM THE ENGINE.
+	// `readMovementStaticDataCVars()` runs in a member initializer, during construction, where
+	// no world exists — so it can only read the PROJECT DEFAULT
+	// (`UPhysicsSettings::DefaultGravityZ`). A level is free to override gravity in its
+	// `WorldSettings` (`bGlobalGravitySet` / `GlobalGravityZ`), and `UWorld::GetGravityZ()`
+	// here is the first moment that override is observable. The two disagreeing means the
+	// character falls at one rate while every prop in the level falls at another.
+	//
+	// ⚠ WHY IT MATTERS DESPITE THE BODY'S OWN GRAVITY BEING OFF (ruling #16 a): the sim applies
+	// `StaticData::gravity` itself precisely BECAUSE engine gravity would double-apply on the
+	// character. Everything the character shares a floor with is still on the engine's number.
+	const float engineGravityZ = uWorld->GetGravityZ();
+	const float simGravityZ    = m_staticData.m_movementStaticData.gravity;
+	checkf(FMath::Abs(simGravityZ - engineGravityZ) < 1e-3f,
+		TEXT("SimulationManagerUImpl: the movement simulation's gravity (%f cm/s^2) disagrees with ")
+		TEXT("the engine's (%f cm/s^2). The sim's value is read from UPhysicsSettings::DefaultGravityZ ")
+		TEXT("at construction; this world overrides gravity in its WorldSettings. Either clear that ")
+		TEXT("override or teach the movement StaticData about per-level gravity."),
+		simGravityZ, engineGravityZ);
+
 	FPhysScene* physScene = uWorld->GetPhysicsScene();
 	if (physScene == nullptr)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
@@ -564,18 +586,23 @@ void ASimulationManagerUImpl::BeginPlay()
 // ⚠ KEEP IN SYNC with the client-branch table below - the two tables are duplicated with no
 // shared constant, and adding to one silently diverges client from server.
 			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
-// [movement-sim T43] The movement sub-sim's OWN body. BrawlerMovementSimulation.h:98 registers its
-// 30 cm sphere under this category, and PhysicsDeclaration is in the shipped composite
-// (SimulatableBrawler.h), so this runs for every character in every session.
+// [movement-sim T43] The movement sub-sim's OWN body. `brawlerMovementSimulation::PhysicsSetup::body`
+// (BrawlerMovementSimulation.h) registers its shape under this category, and PhysicsDeclaration is
+// in the shipped composite (SimulatableBrawler.h), so this runs for every character in every
+// session.
+// ⚠ [movement-sim task 17] THE SHAPE IS A CAPSULE, NOT A SPHERE. Task 11 replaced the skeleton's
+// 30 cm sphere with `CapsuleGeometry{42.f, 96.f}` and set `isRoot`, so the factory ADOPTS the
+// ACharacter's own capsule rather than creating anything. The category, and every sentence below
+// about what an unmapped category would have done to it, are unaffected — only the noun was stale.
 // Channel is user ruling #6, closed 2026-09-04 and lead-verified free: ch1 is `Damageable` in
 // DefaultEngine.ini and ch2-5 are the four entries above.
 //
 // ⛔ THIS LINE IS A FIX, NOT A NEW CAPABILITY. Without it toEngineChannel(5) fell through to the
 // unmapped fallback ECollisionChannel(0) - which IS ECC_WorldStatic - so
-// ChaosPhysicsFactory::applyDescriptor typed every character's MovementBody sphere as STATIC
-// LEVEL GEOMETRY. Harmless while nothing searched WorldStatic; LIVE from task 39 on, because a
+// ChaosPhysicsFactory::applyDescriptor typed every character's movement body as STATIC LEVEL
+// GEOMETRY. Harmless while nothing searched WorldStatic; LIVE from task 39 on, because a
 // `worldOnly` object query searches exactly that object type and would hand the movement sim
-// OTHER characters' spheres as ground. Task 40's [SpatialQuery.UnmappedCategory] category=5 line
+// OTHER characters' capsules as ground. Task 40's [SpatialQuery.UnmappedCategory] category=5 line
 // in the 2026-09-05 18:11 run is what finally said so out loud.
 //
 // ⚠ TASK 13 OWNS THE FULL CHANNEL MAP. `character -> ECC_GameTraceChannel6` is the ONLY entry
@@ -1188,12 +1215,9 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         FBodyInstanceAsyncPhysicsTickHandle parentHandle =
             character->GetCapsuleComponent()->GetBodyInstanceAsyncPhysicsTickHandle();
         const BodyId parentBodyId = m_physAdapter->getBodyId(parentHandle);
-        record.parentBodyId = parentBodyId;
 
-// Stamp the authoritative capsule body id into the brawler's CharacterBindings. §10
-//
-// SOURCE TODAY: the engine capsule body; the planned movement sub-sim will supply it instead.
-        record.simulatable->setCharacterBindings({ /*.capsuleBodyId =*/ parentBodyId });
+// ⚠ CharacterBindings is NO LONGER STAMPED HERE. [movement-sim T13] moved it BELOW the
+// physics fold, because its source is now that fold's output. See the §10 banner there.
 
         AActor* ownerActor = owner.GetOwner();
 // ⛔ Attach and parent-body are the SAME capsule, so ONE handle - two let callers desync. §10
@@ -1207,7 +1231,17 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         {
             using D = std::decay_t<decltype(decl)>;
 // Generic — each declaration names its own slice (PhysicsDeclaration.h). Adding a
-// body-owning sub-simulation therefore edits NO engine file.
+// body-owning sub-simulation therefore edits no engine file to have its body CREATED,
+// BOUND, CAPTURED, REWOUND and CHECKSUMMED.
+//
+// ⚠ [movement-sim T13, from the task-10 review] THAT IS THE WHOLE OF THE CLAIM, and the
+// earlier unqualified wording overstated it. Making that body COLLIDABLE OR QUERYABLE is
+// still hand-written engine work: its `collisionCategory` needs one entry in EACH of the two
+// ChaosCategoryMapping tables in BeginPlay above (authority branch and client branch,
+// duplicated with no shared constant), or ChaosPhysicsFactory::applyDescriptor types the
+// shape by the unmapped fallback and no object query can ask for it. Tasks 39 and 43 paid
+// exactly that cost for `world` and `character`. Generic creation, hand-written collision —
+// state both halves.
             const auto& subStaticData = D::staticDataOf(staticData);
             auto r = factory.createPhysicalObject(D::descriptor(), D::name);
             decl.bindings.ownBodyId        = r.bodyId;
@@ -1231,12 +1265,84 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         });
 #endif
 
+// Stamp the authoritative capsule body id into the brawler's CharacterBindings. §10
+//
+// SOURCE SINCE [movement-sim T13]: the movement sub-simulation's OWN PhysicsDeclaration
+// bindings, not the ACharacter capsule lookup. That is why this stamp sits AFTER the fold —
+// before it, `bindings.ownBodyId` is still zero. (The `#if DO_CHECK` block above catches a
+// zero id in development and test builds; being `checkf`, it is compiled out of Shipping, so
+// it is a development instrument and not a Shipping-build guarantee.)
+//
+// ⭐ THE VALUE IS UNCHANGED, AND THAT IS THE POINT. Task 11's descriptor sets `isRoot`, so
+// the factory ADOPTS the ACharacter's existing capsule instead of creating a body; that is
+// what makes `ownBodyId == parentBodyId == capsuleBodyId` true by construction. This
+// identity is exactly what `isRoot` buys, and it is why task 11's review refused to defer
+// `isRoot` to a later task. ⛔ Anyone "simplifying" `isRoot` away silently breaks this line.
+        const BodyId movementOwnBodyId =
+            record.simulatable->getPhysicsComposite()
+                .get<brawlerMovementSimulation::PhysicsDeclaration>().bindings.ownBodyId;
+
+// ⭐ [movement-sim task 17] THE TWO-SOURCE TRIPWIRE IS GONE. It asserted
+// `movementOwnBodyId == record.parentBodyId` for as long as the two sources coexisted;
+// `PendingRegistration::parentBodyId` — the record field that held the second one — is deleted
+// with it, and the resolvability gate below now reads this same declaration. The identity it
+// watched is UNCHANGED and still stated above: it is `isRoot` that makes it hold, not an
+// assertion.
+//
+// ⭐ AND THE IDENTITY IS STILL ASSERTED, one layer down and by a check this task does not touch:
+// `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root arm ends in
+// `checkf(bodyId == m_parentBodyId, …)` (`ChaosPhysicsFactory.cpp:195`), and its `m_parentBodyId`
+// is derived from the SAME capsule component this function passed as the attach parent. So the
+// removal drops a duplicate, not the only witness.
+// ⚠ Neither was ever a Shipping-build guarantee — `checkf` compiles out there (task 36).
+
+        record.simulatable->setCharacterBindings({ /*.capsuleBodyId =*/ movementOwnBodyId });
+
+// THE TELEPORT SEED — spawn. BrawlerMovementSimulation.h's InitialConditions is a
+// COUNTER-FREE edge: the UE layer sets `teleportPending` non-zero here, the sub-sim's first
+// step consumes it and clears it back to zero in the same tick. It is ON THE WIRE (16 B) so
+// that a respawn replays identically on a client and through a resim.
+//
+// ⛔ FIRST-CALL PASS ONLY. This branch runs once per character (guarded by
+// `record.bodiesCreated`), and the record is moved wholesale into storage at registration
+// below, so the seed survives to the sub-sim's first integrate. Seeding it per call would
+// re-teleport the character every tick until it registers.
+//
+// The pose comes from the capsule component, which is where the engine has the character
+// standing at spawn — this branch runs on the FIRST tryRegister call, before the sub-sim has
+// integrated once, so nothing has driven the capsule yet whatever `drivesBody` says. (It says
+// `true`: task 15 flipped it together with `simulatePhysics` and retired the CMC. This is
+// still a READ of the engine's authoritative spawn pose, and the reason is the ORDER, not a
+// second authority.)
+//
+// ⚠ THE CONSUMER DOES WRITE BACK. The teleport branch is documented as the ONE body write
+// that ignores `drivesBody` — it calls setBodyTransform + setBodyLinearVelocity(0) on the
+// capsule. Seeded from the capsule's OWN current location that is a value no-op, but it is
+// a real engine call, and a future seed from any other source would MOVE the character.
+        auto& movementIC = record.simulatable->editAllState().editState()
+            .edit<brawlerMovementSimulation::InitialConditions>();
+        movementIC.teleportPending = 1u;
+        movementIC.teleportPos     =
+            uglm::toGLMVec3(character->GetCapsuleComponent()->GetComponentLocation());
+
         record.bodiesCreated = true;
         return TryRegisterStatus::Pending;
     }
 
 // Resolvability gate.
-    bool allResolvable = m_physAdapter->isBodyResolvable(record.parentBodyId);
+//
+// ⭐ [movement-sim task 17] THE SOURCE IS THE MOVEMENT DECLARATION'S OWN `ownBodyId`, which is
+// what `PendingRegistration::parentBodyId` used to hold and no longer exists to hold. The value
+// is the same body — the descriptor's `isRoot` makes the factory ADOPT the ACharacter capsule,
+// so the movement declaration's own id IS the capsule id (stated in full at the stamp above).
+//
+// ⚠ AND IT IS DELIBERATELY REDUNDANT WITH THE FOLD BELOW, which visits every declaration and
+// therefore visits this one too. It is kept as the named, order-first read so the gate says out
+// loud WHICH body a `Pending` is waiting on; it adds no guarantee the fold does not already give.
+    const BodyId movementBodyId =
+        record.simulatable->getPhysicsComposite()
+            .get<brawlerMovementSimulation::PhysicsDeclaration>().bindings.ownBodyId;
+    bool allResolvable = m_physAdapter->isBodyResolvable(movementBodyId);
     if (allResolvable)
     {
         record.simulatable->getPhysicsComposite().forEach([&](const auto& decl)

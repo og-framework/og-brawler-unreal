@@ -70,6 +70,15 @@ class AOGBrawlerUECharacter : public ACharacter
 	UPROPERTY()
 	UMaterialInterface* HumanoidBaseMaterial = nullptr;
 
+	// [movement-sim task 15] Friction 0 / restitution 0, assigned to the capsule as a
+	// primitive phys-material OVERRIDE in the constructor. Held as a UPROPERTY so the
+	// default subobject is rooted for the lifetime of the CDO/instance and cannot be
+	// collected out from under `SetPhysMaterialOverride`. Restitution 0 is load-bearing:
+	// step 6' of the movement sub-simulation adopts the solver's positional push-out, so a
+	// bouncy capsule would feed a rebound straight back into the movement state.
+	UPROPERTY()
+	class UPhysicalMaterial* CapsulePhysicalMaterial = nullptr;
+
 	// ⛔ REPLICATED, AND THE ONLY REPLICATED STATE ON THIS CLASS. Purely cosmetic:
 	// it never reaches the engine-free simulation core, so it cannot affect
 	// determinism or the correction path.
@@ -159,18 +168,16 @@ protected:
 
 	DAttackCameraState m_cameraState;
 
-	void Move(const FInputActionValue& Value);
 	OGBrawlerUEPID m_camPid;
 
 	void Attack(const FInputActionValue& Value);
 	virtual void Tick(float DeltaSeconds) override;
 
-	// [hit-resolution T12] True while the character's machine sim state is
-	// HitFlinch (target-side, driven by the T3 inbound-hit routing pass) or
-	// GuardFlinch (attacker-side, from a successful guard-block on the target).
-	// Consulted by Move() to freeze CMC movement during the ~0.3 s flinch window,
-	// mirroring the existing HoldGuard freeze idiom in that function.
-	bool isCharacterInFlinch() const;
+	// [movement-sim task 15] The flinch-freeze predicate is DELETED. Its only caller was `Move()`,
+	// the legacy CMC path, and the flinch freeze it implemented now lives in the simulation
+	// itself: `brawlerMovementSimulation::integrate` step 1 gates on `machineFreezesMovement`,
+	// which reads the machine sub-simulation's own state on the sim clock instead of a
+	// game-thread viz snapshot. One authority, one clock.
 
 
 protected:

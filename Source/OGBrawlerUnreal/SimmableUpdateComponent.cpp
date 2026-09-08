@@ -8,6 +8,7 @@
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
 #include "OGBrawler/BrawlerProjectileVisualization.h"
+#include "OGBrawler/BrawlerMovementVisualization.h"
 #include "OGBrawler/DAttackAimVisualization.h"
 #include "OGBrawler/BrawlerVisualizationInputSource.h"
 #include "OGSimulation/DMathUtil.h"
@@ -189,6 +190,34 @@ namespace DAttackRadialVisualizationCVars
 		TEXT("DAttackRadialVisualization.loggingEnabled"),
 		loggingEnabled,
 		TEXT("test)"),
+		ECVF_Default);
+}
+
+// [movement-sim task 18] THE MOVEMENT DEBUG DRAW'S MASTER SWITCH.
+//
+// ⛔ DEFAULT 0, AND OFF MUST COST ONE BOOL READ. The draw is ~60 debug-line calls per
+// character per frame; nothing about it may run and no sim slice may be fetched until this
+// reads true, so the gate at the call site is a plain early-out and never a conjunct inside
+// a walk that has already paid for something.
+//
+// ⚠ READ PER FRAME, DELIBERATELY -- DO NOT CONVERT THIS TO A ONE-TIME READ. Task 16
+// established that `StaticData` cvars are read ONCE, at construction, so a tunable cannot move
+// under a running session and put two peers on different numbers. A VIZ cvar is the opposite
+// case: it feeds nothing simulated, and its whole value is that a tuner can type
+// `OGBrawler.Viz.Movement 1` mid-session and see the next frame change. Same file, two
+// disciplines, different kinds of value -- the reasoning is repeated at
+// `brawlerMovementVisualization::visualize` so neither site can be "fixed" in isolation.
+namespace OGBrawlerMovementVisualizationCVars
+{
+	bool movementVizEnabled = false;
+	static FAutoConsoleVariableRef movementVizEnabledCVar(
+		TEXT("OGBrawler.Viz.Movement"),
+		movementVizEnabled,
+		TEXT("Draw the movement sub-simulation's debug readout for every simulated character: the "
+			"capsule outline at the SIM's position (coloured by SupportState, red while frozen), the "
+			"sim velocity, the surface normal and the (u, v, up) frame as four SEPARATE rays at the "
+			"probe point, the ride-height / probe-reach band marks, and the signed servo error "
+			"(rideHeight - clearance). Off by default; costs one bool read when off."),
 		ECVF_Default);
 }
 
@@ -664,25 +693,6 @@ void USimmableUpdateComponent::sendConnectionTierToOwningClient(unsigned int id,
 	relay->setConnectionTier(tier);
 }
 
-DAttackState USimmableUpdateComponent::getMachineVizState()
-{
-	// Mirrors the TickComponent viz lookup; returns Idle on any missing link. §10
-	const bool vizIsAuthority = (GetNetMode() != NM_Client);
-	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(vizIsAuthority);
-	if (manager == nullptr)
-		return DAttackState::Idle;
-
-	SimulationObjectStorage<SimulatableBrawler>& storage = manager->editStorage();
-	if (!storage.has<SimulatableBrawler>((unsigned int)GetUniqueID()))
-		return DAttackState::Idle;
-
-	const SimulatableBrawler& simulatable = storage.get<SimulatableBrawler>((unsigned int)GetUniqueID());
-	return simulatable.getVizState()
-		.getState()
-		.get<dAttackMachineSimulation::State>()
-		.m_currentState;
-}
-
 void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -802,6 +812,32 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				(*attackSimState).get<brawlerProjectileSimulation::State>(),
 				attackSimAllState.getDerivedState().get<brawlerProjectileSimulation::DerivedState>(),
 				m_projectileVisualizationState);
+		}
+
+		// --- Movement viz [movement-sim task 18] --------------------------------------
+		// ⛔ THE MASTER READ, ALONE, FIRST: with the cvar off this costs one bool read and
+		// nothing else -- no slice fetch, no draw call, no arithmetic. Default is 0.
+		//
+		// ⚠⚠ RENDER CLOCK READING A SIM-TICK SNAPSHOT. `attackSimAllState` is `getVizState()`
+		// -- the whole-`AllState` copy `updateVisualizationAll` takes once per completed SIM tick
+		// in `ASimulationManagerUImpl::OnPostPhysicsStep`. So every drawn `State` / `DerivedState`
+		// value is stale by up to one 60 Hz tick (16.67 ms), and a render frame above 60 Hz
+		// redraws the same snapshot unchanged; `StaticData` is not stale at all, being authored
+		// once per session. ⭐ The State and DerivedState halves come from the SAME copy, so the
+		// probe reading and the body pose describe ONE tick and can be combined -- which is what
+		// the servo-error arithmetic in the header rests on. The full staleness contract is
+		// written out at the top of `BrawlerMovementVisualization.h`.
+		//
+		// ⛔ PURE READER: every argument is a `const&` and the call has no mutable parameter at
+		// all. Deleting these lines and the header leaves the simulation byte-identical.
+		if (OGBrawlerMovementVisualizationCVars::movementVizEnabled)
+		{
+			brawlerMovementVisualization::Input<DAttackRendererFunctorUImpl> movementVisualizationInput(
+				rendererFunctorImpl);
+			brawlerMovementVisualization::visualize(movementVisualizationInput,
+				(*attackSimState).get<brawlerMovementSimulation::State>(),
+				attackSimAllState.getDerivedState().get<brawlerMovementSimulation::DerivedState>(),
+				m_staticData->m_movementStaticData);
 		}
 
 		{

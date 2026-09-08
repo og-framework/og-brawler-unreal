@@ -74,7 +74,8 @@ public:
 	//     Shares the continuous read with (1) via simulatableBrawler::readContinuousInputFields,
 	//     so the two provably cannot drift; differs only in that it calls
 	//     makeVisualizationPlayerInput instead of makeSimPlayerInput, leaving every discrete
-	//     field neutral (triggeredActionId == inputSequence::kNoMatch, attacks false).
+	//     field neutral (triggeredActionId == inputSequence::kNoMatch, attacks false, and
+	//     [movement-sim task 14] holdGuard false ⇒ the movement input flags byte all-clear).
 	//     The motion matcher is NEVER invoked here — running it at render rate would misfire
 	//     it, since many render frames share one "previous tick". Rate: render frame.
 	//     Cosmetic only: never feed this to the simulation or to the input RPC.
@@ -140,6 +141,14 @@ public:
 	bool getLeftAttack() const { return m_leftAttack; }
 	bool getRightAttack() const { return m_rightAttack; }
 	bool getBlockLook() const { return m_blockLook; }
+	// [movement-sim task 14] NOW A SIM INPUT, not only a CMC gate. buildPlayerInput reads this
+	// every tick and hands it to makeSimPlayerInput, which sets
+	// brawlerMovementSimulation::kInputFlagHoldGuard — bit 0 of the movement sub-sim's input
+	// flags byte, ON THE WIRE, replicated and resimulated like any other PlayerInput field.
+	// Its reader is step 1's `frozen` gate in brawlerMovementSimulation::integrate.
+	// [movement-sim task 15] THE SECOND READER IS GONE. `AOGBrawlerUECharacter::Move`'s
+	// suppression of the legacy CMC path was deleted with that path, so this accessor now
+	// feeds the simulation and nothing else.
 	bool getHoldGuard() const { return m_holdGuard; }
 	bool hasInputComponent() const { return m_inputComponent != nullptr; }
 
