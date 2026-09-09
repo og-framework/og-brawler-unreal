@@ -73,7 +73,6 @@
 #include "OGBrawler/OGBrawlerLog.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGSimulationUnreal/ChaosPhysicsFactory.h"
-#include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
 
 #include "Runtime/Engine/Public/Net/NetPing.h"
@@ -592,7 +591,7 @@ void ASimulationManagerUImpl::BeginPlay()
 // session.
 // ⚠ [movement-sim task 17] THE SHAPE IS A CAPSULE, NOT A SPHERE. Task 11 replaced the skeleton's
 // 30 cm sphere with `CapsuleGeometry{42.f, 96.f}` and set `isRoot`, so the factory ADOPTS the
-// ACharacter's own capsule rather than creating anything. The category, and every sentence below
+// pawn's own root capsule rather than creating anything. The category, and every sentence below
 // about what an unmapped category would have done to it, are unaffected — only the noun was stale.
 // Channel is user ruling #6, closed 2026-09-04 and lead-verified free: ch1 is `Damageable` in
 // DefaultEngine.ini and ch2-5 are the four entries above.
@@ -1210,8 +1209,19 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     if (!record.bodiesCreated)
     {
 // First-call body creation pass.
-        ACharacter* character = Cast<ACharacter>(owner.GetOwner());
-        checkf(character != nullptr, TEXT("USimmableUpdateComponent must be attached to an ACharacter"));
+// ⭐ [movement-sim task 19] THIS CAST IS THE REGISTRATION PATH, AND IT IS NOT AN ACCESSOR SWAP.
+// It used to name the engine's walking-pawn base; task 19 rebased `AOGBrawlerUECharacter` on
+// `APawn`, so that base is no longer in the hierarchy and the old cast would return NULL HERE —
+// on the FIRST-CALL body-creation pass — which is registration failing outright: no bodies, no
+// simulation, no character. The root capsule this pass needs is declared by
+// `AOGBrawlerUECharacter` itself now, so that class IS the type the contract requires.
+// ⚠ `checkf` COMPILES OUT IN SHIPPING (task 36). There a wrong owner type is a null dereference
+// on the very next line rather than an assert, which is why the message below names the exact
+// class rather than a family.
+        AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(owner.GetOwner());
+        checkf(character != nullptr,
+               TEXT("USimmableUpdateComponent must be attached to an AOGBrawlerUECharacter — the ")
+               TEXT("first-call body pass reads that class's own root capsule"));
         FBodyInstanceAsyncPhysicsTickHandle parentHandle =
             character->GetCapsuleComponent()->GetBodyInstanceAsyncPhysicsTickHandle();
         const BodyId parentBodyId = m_physAdapter->getBodyId(parentHandle);
@@ -1268,13 +1278,13 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 // Stamp the authoritative capsule body id into the brawler's CharacterBindings. §10
 //
 // SOURCE SINCE [movement-sim T13]: the movement sub-simulation's OWN PhysicsDeclaration
-// bindings, not the ACharacter capsule lookup. That is why this stamp sits AFTER the fold —
+// bindings, not the pawn's own capsule lookup. That is why this stamp sits AFTER the fold —
 // before it, `bindings.ownBodyId` is still zero. (The `#if DO_CHECK` block above catches a
 // zero id in development and test builds; being `checkf`, it is compiled out of Shipping, so
 // it is a development instrument and not a Shipping-build guarantee.)
 //
 // ⭐ THE VALUE IS UNCHANGED, AND THAT IS THE POINT. Task 11's descriptor sets `isRoot`, so
-// the factory ADOPTS the ACharacter's existing capsule instead of creating a body; that is
+// the factory ADOPTS the pawn's existing root capsule instead of creating a body; that is
 // what makes `ownBodyId == parentBodyId == capsuleBodyId` true by construction. This
 // identity is exactly what `isRoot` buys, and it is why task 11's review refused to defer
 // `isRoot` to a later task. ⛔ Anyone "simplifying" `isRoot` away silently breaks this line.
@@ -1333,7 +1343,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 //
 // ⭐ [movement-sim task 17] THE SOURCE IS THE MOVEMENT DECLARATION'S OWN `ownBodyId`, which is
 // what `PendingRegistration::parentBodyId` used to hold and no longer exists to hold. The value
-// is the same body — the descriptor's `isRoot` makes the factory ADOPT the ACharacter capsule,
+// is the same body — the descriptor's `isRoot` makes the factory ADOPT the pawn's root capsule,
 // so the movement declaration's own id IS the capsule id (stated in full at the stamp above).
 //
 // ⚠ AND IT IS DELIBERATELY REDUNDANT WITH THE FOLD BELOW, which visits every declaration and

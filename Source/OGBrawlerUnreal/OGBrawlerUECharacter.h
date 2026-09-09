@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "Logging/LogMacros.h"
 #include "Runtime/Engine/Classes/Components/SphereComponent.h"
 
@@ -46,9 +46,27 @@ struct FTestStruct
 };
 
 UCLASS(config=Game)
-class AOGBrawlerUECharacter : public ACharacter
+class AOGBrawlerUECharacter : public APawn
 {
 	GENERATED_BODY()
+
+	// =====================================================================================
+	// [movement-sim task 19] ⭐ THE ROOT COLLISION CAPSULE — CREATED AND OWNED BY THIS CLASS.
+	// Until this task the pawn derived from the engine's stock walking-pawn base, which created
+	// this component, named it, made it the root, and handed its movement component the very
+	// same component to drive. That movement component was retired in task 15 — the movement
+	// sub-simulation owns locomotion — so the base class was doing exactly ONE useful thing for
+	// us: a handful of constructor lines. They live in our own constructor now, and the base is
+	// `APawn`.
+	//
+	// ⛔⛔ 42 / 96 IS A CONTRACT, NOT A TUNING VALUE.
+	// `brawlerMovementSimulation::PhysicsSetup::body` ships `CapsuleGeometry{42.f, 96.f}` with
+	// `isRoot`, and `ChaosPhysicsFactory`'s adopt-root branch `checkf`s the AUTHORED capsule
+	// AGAINST the descriptor rather than resizing it. A different size in the constructor is an
+	// immediate assert at the first character registration. Change both together or neither.
+	// =====================================================================================
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Collision", meta = (AllowPrivateAccess = "true"))
+	class UCapsuleComponent* CapsuleComponent;
 
 	/** Camera boom positioning the camera behind the character */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
@@ -206,4 +224,13 @@ public:
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	/** Returns InputCollection subobject **/
 	FORCEINLINE UOGBrawlerInputCollectionComponent* getInputCollection() const { return InputCollection; }
+	/**
+	 * Returns the root collision capsule.
+	 * ⭐ DELIBERATELY THE SAME NAME the engine base class used to provide, so all seven
+	 * pre-existing call sites across three files are unchanged by the migration. This is also the
+	 * component the movement sub-simulation ADOPTS as its body (`PhysicsSetup::body.isRoot`),
+	 * which is why its authored size is a contract rather than a tuning value — see the
+	 * capsule member above.
+	 **/
+	FORCEINLINE class UCapsuleComponent* GetCapsuleComponent() const { return CapsuleComponent; }
 };

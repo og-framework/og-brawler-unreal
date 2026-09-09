@@ -116,7 +116,8 @@ namespace
 	// Character walk speed, cm/s. ⭐ [movement-sim task 16] LIVE AGAIN, as a ONE-TIME read: the
 	// sim-side global it used to drive is deleted and this value now reaches
 	// `brawlerMovementSimulation::StaticData::maxWalkSpeed` through the manager's constructor.
-	// (It was INERT between task 15, which retired the CharacterMovementComponent, and here.)
+	// (It was INERT between task 15, which retired the engine's stock movement component, and
+	// here. [movement-sim task 19] later deleted that component outright with the base class.)
 	float GMoveSpeed = 100.f;
 
 	void OnMoveSpeedChanged(IConsoleVariable*) { WarnIfAfterTheOneTimeRead(TEXT("OGBrawler.MoveSpeed")); }

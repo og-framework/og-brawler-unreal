@@ -5,7 +5,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/Controller.h"
 #include "EnhancedInputComponent.h"
@@ -66,8 +66,40 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 
 	DVolume<DShapeUImplementation> volume(volumeCreationParams);
 
-	// Set size for collision capsule
+	// =====================================================================================
+	// [movement-sim task 19] ⭐ THE ROOT CAPSULE, CREATED HERE. These are the lines the engine's
+	// stock walking-pawn base used to run for us — read off `Character.cpp`'s constructor at
+	// `ref=5.6` through the GitHub API (the local engine tree is out of bounds on this
+	// initiative), kept in the same order, and given this project's capsule size. Nothing else
+	// that base class provided was still in use by the time this task ran, so the whole of the
+	// inheritance is replaced by what you can read below.
+	//
+	// ⛔ THE SUBOBJECT NAME IS DELIBERATELY THE ENGINE'S OLD ONE. `[PhysicsFactory.AdoptRoot]`
+	// logs the adopted component's NAME, and every PIE transcript on this initiative (task 15
+	// §GATE 1 onwards) records `CollisionCylinder`. Keeping it makes "PIE parity with task 15"
+	// a line-for-line comparison instead of a judgement call.
+	//
+	// ⛔⛔ 42 / 96 IS A CONTRACT. `brawlerMovementSimulation::PhysicsSetup::body` ships
+	// `CapsuleGeometry{42.f, 96.f}` with `isRoot`, and `ChaosPhysicsFactory`'s adopt-root branch
+	// `checkf`s the authored capsule AGAINST the descriptor instead of resizing it — a different
+	// number here asserts at the first character registration.
+	//
+	// ⚠ THE FOUR SETTINGS AFTER THE SIZE ARE CARRIED OVER FOR BEHAVIOUR NEUTRALITY, not because
+	// anything in this project reads them today: the collision profile is what the capsule
+	// answers with between spawn and registration (`ChaosPhysicsFactory::applyDescriptor` then
+	// sets object type, responses, simulate-physics and gravity from the descriptor and owns it
+	// from that point on), `SetShouldUpdatePhysicsVolume` keeps physics-volume tracking on, and
+	// the two navigation/step-up bits are inert with no other stock-movement pawn in the game.
+	// They are kept so this migration moves nothing observable; drop them in a task that says so.
+	// =====================================================================================
+	CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CollisionCylinder"));
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
+	GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+	GetCapsuleComponent()->CanCharacterStepUpOn = ECB_No;
+	GetCapsuleComponent()->SetShouldUpdatePhysicsVolume(true);
+	GetCapsuleComponent()->SetCanEverAffectNavigation(false);
+	GetCapsuleComponent()->bDynamicObstacle = true;
+	RootComponent = GetCapsuleComponent();
 	
 	// Don't rotate when the controller rotates. Let that just affect the camera.
 	bUseControllerRotationPitch = false;
@@ -75,33 +107,30 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	bUseControllerRotationRoll = false;
 
 	// =====================================================================================
-	// ⛔⛔ CMC RETIRED — locomotion is `brawlerMovementSimulation`; do not re-enable.
+	// ⛔⛔ THE ENGINE'S STOCK MOVEMENT COMPONENT IS GONE — not disabled, DELETED WITH THE BASE
+	// CLASS. Locomotion is `brawlerMovementSimulation`; do not re-introduce a second authority
+	// over this capsule.
 	//
-	// [movement-sim task 15] Every tuning knob that used to live here (JumpZVelocity,
+	// [movement-sim task 15] Every tuning knob that used to live on it (JumpZVelocity,
 	// AirControl, the walk-speed cap, the analog-walk floor, the braking decelerations) is now
 	// authored ONCE in `simulatableBrawler::StaticData::m_movementStaticData`
 	// (`OGBrawler/SimulatableBrawlerTypes.h`), which is the sub-simulation's StaticData and
 	// the only place any of them is spelled. `Move()`, its engine movement-input call, and the
 	// per-Tick walk-speed-cap resync were all deleted in the same change.
 	//
-	// ⚠ THE THREE CALLS BELOW ARE BELT-AND-BRACES, NOT THE MECHANISM. What actually stops
-	// the CMC is `brawlerMovementSimulation::PhysicsSetup::body.simulatePhysics = true`: the
-	// physics factory's adopt-root pass simulates THIS character's capsule, the capsule IS the
-	// CMC's `UpdatedComponent`, and UE 5.6's CMC early-returns on
-	// `UpdatedComponent->IsSimulatingPhysics()` on both its sync and its async path. These
-	// calls make the retirement legible at the class that owns the component, and stop the
-	// component ticking for nothing.
+	// ⭐ [movement-sim task 19] TASK 15 COULD ONLY SWITCH IT OFF; THIS TASK REMOVED IT. What
+	// stood here were three belt-and-braces disable calls, plus one include kept alive on
+	// purpose to serve them. The calls went with the base class that declared their accessor,
+	// the include went with the calls, and there is no component left to disable.
 	//
-	// ⛔ RE-ENABLING THIS WITHOUT FLIPPING BOTH SIM FLAGS BACK GIVES TWO AUTHORITIES writing
-	// one capsule. Flipping only `simulatePhysics` back gives none. See the paired comments on
-	// `StaticData::drivesBody` and `PhysicsSetup::body` in `BrawlerMovementSimulation.h`.
-	//
-	// The CharacterMovementComponent.h include is KEPT ON PURPOSE — these three disable calls
-	// need the complete type. It is not a leftover.
+	// ⛔ WHAT KEEPS THE CAPSULE SINGLE-AUTHORITY IS UNCHANGED, AND IT IS A PAIR:
+	// `brawlerMovementSimulation::PhysicsSetup::body.simulatePhysics = true` makes the physics
+	// factory's adopt-root pass simulate THIS capsule, and `StaticData::drivesBody = true` makes
+	// the sub-simulation the one thing that writes it. `simulatePhysics` alone leaves a free
+	// rigid body nobody drives; `drivesBody` alone would put the sim back in a fight with
+	// whatever else moved the component. See the paired comments on `StaticData::drivesBody` and
+	// `PhysicsSetup::body` in `BrawlerMovementSimulation.h`.
 	// =====================================================================================
-	GetCharacterMovement()->SetMovementMode(MOVE_None);
-	GetCharacterMovement()->SetComponentTickEnabled(false);
-	GetCharacterMovement()->bAutoActivate = false;
 
 	// ⭐ FRICTION 0 / RESTITUTION 0 ON THE CAPSULE, and the mechanism is named: a
 	// `UPhysicalMaterial` default subobject assigned as the primitive's override, so it needs
@@ -130,8 +159,15 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	
 	// Create a PhysicsComponent
 
-	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
-	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+	// [movement-sim task 19] THE INHERITED SKELETAL-MESH COMPONENT IS GONE with the base class.
+	// It was `SetVisibility(false)` at construction from its first commit, and nothing in this
+	// module ever animated off it: the visible body is `HumanoidMesh` below, a
+	// `UProceduralMeshComponent` built in C++ from `HumanoidVisualization`.
+	// ⚠ STATED PRECISELY: the SPAWNED pawn uses no skeletal mesh — `OGBrawlerUEGameMode` sets
+	// `DefaultPawnClass` to this C++ class DIRECTLY. `Content/ThirdPerson/Blueprints/`
+	// `BP_ThirdPersonCharacter.uasset` (last touched 2024-02-08, referenced by no other asset
+	// and by no map) does still assign a mannequin and an AnimBP to the component this task
+	// removed — which is why the honest claim is about the spawned pawn, not about the project.
 
 	//a Camera settings
 	m_cameraAxis = CreateDefaultSubobject<USphereComponent>(TEXT("CameraAxis"));
@@ -189,8 +225,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	}
 
 	m_humanoidViz = humanoidVisualizationDefaults::buildDefault();
-
-	GetMesh()->SetVisibility(false);
 }
 
 void AOGBrawlerUECharacter::PostInitializeComponents()
@@ -434,20 +468,24 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 		if (InputCollection->hasInputComponent())
 			tmpAimInput = worldAimDirection;
 
-		glm::mat4 aimRotationMatrix2;
-		const glm::vec3 defaultLeft(0.f, 1.f, 0.f);
-		dMathUtil::getRotationMatrix(defaultLeft, tmpAimInput, aimRotationMatrix2);
-		FTransform fAimRotationMatrix = uglm::toFtransform(aimRotationMatrix2);
-		GetMesh()->SetWorldRotation(fAimRotationMatrix.GetRotation());
-
+		// [movement-sim task 19] The write to the inherited skeletal mesh's world rotation stood
+		// here and went with that component. It was a DUPLICATE: same `getRotationMatrix` call,
+		// same `(0, 1, 0)` default axis and same `tmpAimInput` as the `HumanoidMesh` write below,
+		// on an invisible component. Nothing read the result back — there is no other `GetMesh()`,
+		// and no `SkeletalMeshComponent` or `AnimInstance` anywhere in this module.
 		glm::mat4 humanoidAimRotationMatrix;
 		const glm::vec3 humanoidDefaultForward(0.f, 1.f, 0.f);
 		dMathUtil::getRotationMatrix(humanoidDefaultForward, tmpAimInput, humanoidAimRotationMatrix);
 		HumanoidMesh->SetWorldRotation(uglm::toFtransform(humanoidAimRotationMatrix).GetRotation());
 	}
 
+	// [movement-sim task 19] Anchored on the CAPSULE, and that is a VALUE NO-OP. The inherited
+	// skeletal mesh this used to read was attached to the capsule at an identity relative
+	// transform — the base class attached it and never offset it, this constructor never moved
+	// it, and the spawned pawn is this C++ class rather than a Blueprint that could override it
+	// — so its world translation WAS the capsule's. Same sphere, same place, one fewer component.
 	if(!InputCollection->hasInputComponent())
-		DrawDebugSphere(GetWorld(), GetMesh()->GetComponentTransform().GetTranslation() + FVector(0.f, 0.f, 100.f), 10, 10, FColor::Green);
+		DrawDebugSphere(GetWorld(), GetCapsuleComponent()->GetComponentTransform().GetTranslation() + FVector(0.f, 0.f, 100.f), 10, 10, FColor::Green);
 
 }
 

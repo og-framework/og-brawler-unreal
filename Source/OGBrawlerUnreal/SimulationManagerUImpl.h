@@ -804,7 +804,7 @@ private:
 
     ChaosTickMapper m_chaosTickMapper;
 
-// ⭐ [movement-sim task 17] `BodyId parentBodyId` IS GONE. It cached the ACharacter capsule's
+// ⭐ [movement-sim task 17] `BodyId parentBodyId` IS GONE. It cached the pawn root capsule's
 // body id across the two-phase `tryRegister` for exactly two readers: the two-source tripwire
 // (deleted with it) and the resolvability gate, which now reads the movement declaration's own
 // `bindings.ownBodyId` — the same body, because that declaration's descriptor sets `isRoot`.

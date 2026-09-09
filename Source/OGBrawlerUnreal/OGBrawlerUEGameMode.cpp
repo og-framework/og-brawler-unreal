@@ -11,6 +11,11 @@
 
 AOGBrawlerUEGameMode::AOGBrawlerUEGameMode()
 {
+	// ⭐ [movement-sim task 19] THE C++ CLASS DIRECTLY — checked, and unchanged by the migration.
+	// `DefaultPawnClass` is a `TSubclassOf<APawn>`, so rebasing `AOGBrawlerUECharacter` from the
+	// engine's walking-pawn base onto `APawn` needs nothing here. ⚠ AND THIS IS WHAT THE GAME
+	// SPAWNS: no Blueprint sits between this line and the pawn, so no binary asset participates
+	// in the class hierarchy that task 19 changed.
 	DefaultPawnClass = AOGBrawlerUECharacter::StaticClass();
 	PlayerControllerClass = AOGBrawlerPlayerController::StaticClass();
 	// ⛔ AGameModeBase LEAVES THIS UNSET, so without this line the engine's no-op AHUD

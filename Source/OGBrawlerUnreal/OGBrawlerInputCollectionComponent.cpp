@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGBrawlerInputCollectionComponent.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/LocalPlayer.h"
@@ -54,9 +54,12 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	UInputAction* LeftAttackAction  = m_inputTranslator.getAction(dInput::gameMapping::LeftAttack);
 	UInputAction* RightAttackAction = m_inputTranslator.getAction(dInput::gameMapping::RightAttack);
 	// [movement-sim task 15] The Jump ACTION still exists in the mapping; only its binding to
-	// the CMC is gone (ruling #1 = defer jump to a later task). When jump returns it becomes a
-	// bit in `brawlerMovementSimulation::PlayerInput::flags` (task 21's reserved bit), not an
-	// `ACharacter::Jump` call — see the standing input-wire rule on that type.
+	// the engine's stock movement component is gone (ruling #1 = defer jump to a later task).
+	// ⭐ [movement-sim task 19] AND THE ENGINE-SIDE CALLEE WENT WITH IT: this pawn no longer
+	// derives from the engine's walking-pawn base, so there is no inherited `Jump()` left to
+	// bind to even if somebody wanted to. When jump returns it becomes a bit in
+	// `brawlerMovementSimulation::PlayerInput::flags` (task 21's reserved bit) — see the
+	// standing input-wire rule on that type.
 	UInputAction* SetSchemeCameraRelativeAction  = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeCameraRelative);
 	UInputAction* SetSchemeAimRelativeAction     = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeAimRelative);
 	UInputAction* SetSchemeMoveRelativeAimAction = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeMoveRelativeAim);
@@ -268,7 +271,17 @@ void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)
 	// meaningful between input bursts.
 	if (!v.IsNearlyZero())
 	{
-		const ACharacter* ch = Cast<ACharacter>(GetOwner());
+		// ⭐ [movement-sim task 19] `APawn` IS THE NARROWEST TYPE THAT ANSWERS THIS. The only
+		// thing wanted from the owner is its controller, and `GetController()` is `APawn`'s.
+		// ⛔ THIS IS NOT AN ACCESSOR SWAP. The previous cast named the engine's walking-pawn
+		// base, which this component's owner stopped deriving from in task 19, so it would
+		// return NULL on every event — `pc` null, the block below skipped, and
+		// `m_lastMoveInputWasGamepad` frozen at its `false` initializer for the whole session.
+		// The symptom is SILENT and one-sided: a gamepad player never gets the move-stick-feeds-
+		// aim fallback (`buildAimDirection` and `buildMoveDirectionWorld` both gate on that
+		// flag), while mouse-and-keyboard behaves normally, so nothing looks broken on the
+		// machine most likely to be testing.
+		const APawn* ch = Cast<APawn>(GetOwner());
 		const APlayerController* pc = ch ? Cast<APlayerController>(ch->GetController()) : nullptr;
 		if (pc != nullptr)
 		{
