@@ -927,7 +927,7 @@ legitimately moves ±1 across Stall/Skip steps, and a ±1 skew at trigger time c
 a request landing on a refused frame or a replay one frame short of the clock's catch-up need.
 
 **The grant** is recorded where Chaos starts the rewind, at `PhysicsStep`, which can differ from
-the frame we asked for **only by being deeper**: an engine-side requester merged in via a `Min`,
+the frame we asked for **only by being deeper**: an engine-side requester merged in via a *min*,
 or the validation walking down (`FMath::Min` on the engine side). A *shallower* clamp is structurally impossible on this wiring —
 validation walks downward, the merge can only deepen, and the replay-loop push-data skip that could
 start a replay late is dead code on this engine. So `clampedGrants` reads a constant `0` by
@@ -999,12 +999,45 @@ role.
 resolvability and, once every body resolves, perform the registration and return `Ready`.
 
 **The capsule body id.** `setCharacterBindings` stamps the authoritative capsule `BodyId` into the
-brawler's `CharacterBindings`. **Source today:** the engine character's capsule component body,
-created and owned and moved by the character-movement component — this site only learns its
-`BodyId`. When the planned character-movement sub-sim lands, modelled on radial and guard with its
-own `PhysicsDeclaration`, the capsule body will be created and registered through the factory pass
-instead, and `capsuleBodyId` will come from that sub-sim's `bindings.ownBodyId`. See
-`BrawlerMovementSimulation.h`'s `CharacterBindings` comment for the full future-direction note.
+brawler's `CharacterBindings`, and its **source is the movement sub-simulation's own
+`PhysicsDeclaration`** — `bindings.ownBodyId`, read out of the physics composite *after* the
+creation fold has run. Before the fold that id is still zero, which is why the stamp sits below it.
+
+The value is the capsule's, and it is the capsule's *by construction* rather than by coincidence:
+the movement descriptor sets `isRoot`, so `ChaosPhysicsFactory` **adopts** the engine character's
+existing capsule instead of creating a body under it, and its adopt-root arm ends in a `checkf`
+that the adopted body's id equals the parent id the factory derived from that same component. One
+body, one id, reached through the sub-simulation's own declaration.
+
+A **two-source tripwire** used to sit at this stamp: a second `checkf`, comparing the declaration's
+`ownBodyId` against a capsule id cached on `PendingRegistration` for as long as the two sources
+coexisted. Both are gone. The cached `parentBodyId` field had exactly two readers — that tripwire
+and the resolvability gate — and the gate now reads the same declaration, so the field had none
+left. Removing it removes a duplicate, not the only witness: the factory's own assertion, which
+this file does not own, still watches the identity. The capsule id is still derived inside the
+first-call pass, as a **local**, because the factory and each declaration's own
+`bindings.parentBodyId` consume it there.
+
+**The movement sub-simulation, and what it costs this file.** It is registered by exactly the same
+generic fold as radial, guard and the three projectile slots — `staticDataOf` hands the fold its
+static-data slice, `descriptor()` the body and shapes, `queryVolumes` the probe volume — so no
+line in this file branches on it. Three things about it are nonetheless this file's business:
+
+* **It adopts; it does not create.** `isRoot` on its descriptor means the engine character's
+  capsule *is* its body. `simulatePhysics = true` on that adopted component is what switches the
+  engine's own character-movement component off, and the sub-simulation's `drivesBody` is the
+  other half of that pair. Neither may be flipped alone: `simulatePhysics` without `drivesBody`
+  leaves nobody driving the capsule, and `drivesBody` without `simulatePhysics` leaves two.
+* **Its collision category is hand-written engine work, and this file pays it.** `character` needs
+  one row in EACH of the two mapping tables in `BeginPlay` — authority branch and client branch,
+  duplicated with no shared constant — and the channel itself must be declared in the project's
+  collision settings. Generic creation, hand-written collision; the fold's own comment states both
+  halves, because stating only the first one overstates the claim.
+* **Its spawn pose is seeded here, exactly once.** The first-call pass writes `teleportPending`
+  and `teleportPos` into the sub-simulation's `InitialConditions` from the capsule's current
+  transform. That edge is on the wire, so a respawn replays identically on a client and through a
+  resim, and it is the one body write that ignores `drivesBody` — which is safe here only because
+  it is seeded from the capsule's own location and is therefore a value no-op.
 
 **Attach parent and parent body are the same capsule** under the one-deep hierarchy, so passing one
 handle expresses "these shapes belong to this character". They used to be passed separately, which

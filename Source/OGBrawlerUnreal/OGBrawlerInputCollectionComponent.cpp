@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGBrawlerInputCollectionComponent.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/LocalPlayer.h"
@@ -53,7 +53,13 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	UInputAction* HoldGuardAction   = m_inputTranslator.getAction(dInput::gameMapping::HoldGuard);
 	UInputAction* LeftAttackAction  = m_inputTranslator.getAction(dInput::gameMapping::LeftAttack);
 	UInputAction* RightAttackAction = m_inputTranslator.getAction(dInput::gameMapping::RightAttack);
-	UInputAction* JumpAction        = m_inputTranslator.getAction(dInput::gameMapping::Jump);
+	// [movement-sim task 15] The Jump ACTION still exists in the mapping; only its binding to
+	// the engine's stock movement component is gone (ruling #1 = defer jump to a later task).
+	// ⭐ [movement-sim task 19] AND THE ENGINE-SIDE CALLEE WENT WITH IT: this pawn no longer
+	// derives from the engine's walking-pawn base, so there is no inherited `Jump()` left to
+	// bind to even if somebody wanted to. When jump returns it becomes a bit in
+	// `brawlerMovementSimulation::PlayerInput::flags` (task 21's reserved bit) — see the
+	// standing input-wire rule on that type.
 	UInputAction* SetSchemeCameraRelativeAction  = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeCameraRelative);
 	UInputAction* SetSchemeAimRelativeAction     = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeAimRelative);
 	UInputAction* SetSchemeMoveRelativeAimAction = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeMoveRelativeAim);
@@ -75,12 +81,6 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	ic->BindAction(SetSchemeCameraRelativeAction,  ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onSetSchemeCameraRelative);
 	ic->BindAction(SetSchemeAimRelativeAction,     ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onSetSchemeAimRelative);
 	ic->BindAction(SetSchemeMoveRelativeAimAction, ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onSetSchemeMoveRelativeAim);
-
-	if (ACharacter* ch = Cast<ACharacter>(GetOwner()))
-	{
-		ic->BindAction(JumpAction, ETriggerEvent::Started,   ch, &ACharacter::Jump);
-		ic->BindAction(JumpAction, ETriggerEvent::Completed, ch, &ACharacter::StopJumping);
-	}
 }
 
 void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
@@ -255,7 +255,7 @@ void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)
 	// Enhanced Input sums axis contributions across every source bound to Move (left stick
 	// + WASD + D-pad). Holding two positive sources on the same axis (e.g. LeftStick-Right
 	// + DPad-Right) can push the summed magnitude past 1.0, which would feed a >1 analog
-	// speed scalar downstream (AddMovementInput / sim PlayerInput). Clamp to the unit disk
+	// speed scalar downstream (the sim's PlayerInput). Clamp to the unit disk
 	// while preserving sub-unit partial input so analog stick nuance is kept. (length > 1
 	// guarantees a non-zero vector, so normalize is safe.)
 	if (glm::length(m_moveStick) > 1.f)
@@ -271,7 +271,17 @@ void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)
 	// meaningful between input bursts.
 	if (!v.IsNearlyZero())
 	{
-		const ACharacter* ch = Cast<ACharacter>(GetOwner());
+		// ⭐ [movement-sim task 19] `APawn` IS THE NARROWEST TYPE THAT ANSWERS THIS. The only
+		// thing wanted from the owner is its controller, and `GetController()` is `APawn`'s.
+		// ⛔ THIS IS NOT AN ACCESSOR SWAP. The previous cast named the engine's walking-pawn
+		// base, which this component's owner stopped deriving from in task 19, so it would
+		// return NULL on every event — `pc` null, the block below skipped, and
+		// `m_lastMoveInputWasGamepad` frozen at its `false` initializer for the whole session.
+		// The symptom is SILENT and one-sided: a gamepad player never gets the move-stick-feeds-
+		// aim fallback (`buildAimDirection` and `buildMoveDirectionWorld` both gate on that
+		// flag), while mouse-and-keyboard behaves normally, so nothing looks broken on the
+		// machine most likely to be testing.
+		const APawn* ch = Cast<APawn>(GetOwner());
 		const APlayerController* pc = ch ? Cast<APlayerController>(ch->GetController()) : nullptr;
 		if (pc != nullptr)
 		{
@@ -354,6 +364,21 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	const bool leftAttack  = getLeftAttack();
 	const bool rightAttack = getRightAttack();
 
+	// [movement-sim task 14] THE POINT WHERE holdGuard REACHES THE SIMULATION. This is the
+	// field's first and only writer onto the wire: makeSimPlayerInput turns this bool into
+	// brawlerMovementSimulation::kInputFlagHoldGuard (bit 0 of the movement sub-sim's input
+	// flags byte), and step 1's `frozen` gate in brawlerMovementSimulation::integrate is the
+	// only thing that reads it back. Before this line the gate was inert — task 51 shipped the
+	// reader with no writer on purpose, so that landing the writer was one reviewable change.
+	//
+	// It costs ZERO new wire bytes: the flags byte already rides every ring entry (task 11
+	// spent it as a `bool`, task 51 re-laid it as bits), and this only sets a bit inside it.
+	//
+	// ⭐ [movement-sim task 15] AND IT IS NOW THE ONLY READER. The legacy CMC path had a second
+	// freeze in `AOGBrawlerUECharacter::Move` reading this same accessor; task 15 deleted it
+	// along with the rest of that path. One reader, one freeze, on the sim clock.
+	const bool holdGuard   = getHoldGuard();
+
 	// --- Motion-sequence matching (predicting client only) ---
 	// Runs over the client's RAW CAPTURE history and produces a triggeredActionId carried on
 	// the machine PlayerInput. The result replicates to the server through the normal
@@ -373,11 +398,27 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 		dAttackMachineSimulation::g_moveStickDeadzone.load(),
 		kGameMotions);
 
-	UE_LOG(LogOGSimTick, Log,
-		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u"),
-		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId);
+	const simulatableBrawler::PlayerInput packed = simulatableBrawler::makeSimPlayerInput(
+		continuous, leftAttack, rightAttack, triggeredActionId,
+		// [movement-sim task 52] Named, not positional. Task 14 passed this bool as a trailing
+		// defaulted argument; the parameter is now a required InputFlagFields, so a future flag
+		// is `{.holdGuard = holdGuard, .jump = jump}` -- it cannot be transposed with holdGuard
+		// and it cannot be forgotten by leaving the argument off.
+		simulatableBrawler::InputFlagFields{.holdGuard = holdGuard});
 
-	return simulatableBrawler::makeSimPlayerInput(continuous, leftAttack, rightAttack, triggeredActionId);
+	// [movement-sim task 14] `movementFlags` is read back off the PACKED composite rather than
+	// re-printed from the `holdGuard` bool above, so this observes the wire field the sim will
+	// actually consume, not the packer's input. That makes the task's PIE acceptance check
+	// (holding guard raises the holdGuard bit) answerable from a shipped log line with no
+	// temporary instrumentation to add and remove. ⚠ LogOGSimTick defaults to Warning in
+	// Config/DefaultEngine.ini — this line is per-tick chatter and is silent until someone
+	// runs `Log LogOGSimTick Log` in the console.
+	UE_LOG(LogOGSimTick, Log,
+		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u movementFlags=0x%02X"),
+		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId,
+		static_cast<uint32>(packed.get<brawlerMovementSimulation::PlayerInput>().flags));
+
+	return packed;
 }
 
 simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildLatestVisualizationInput() const
@@ -390,6 +431,10 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildLatestV
 	// Continuous read shared with buildPlayerInput; visualization packer leaves every discrete
 	// field neutral. The motion matcher is deliberately not reachable from here — there is no
 	// step, no componentId and no manager in scope to run it with.
+	// [movement-sim task 14] holdGuard joined that neutral set and is deliberately NOT read
+	// here, even though getHoldGuard() is in scope and cheap: it is a discrete button, so the
+	// discrete-field-neutral rule (see the three-sources block in the header) applies, and a
+	// render-rate echo of a guard press would be a discrete edge leaking onto a cosmetic path.
 	return simulatableBrawler::makeVisualizationPlayerInput(
 		simulatableBrawler::readContinuousInputFields(*this));
 }

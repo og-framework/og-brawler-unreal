@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "Logging/LogMacros.h"
 #include "Runtime/Engine/Classes/Components/SphereComponent.h"
 
@@ -46,9 +46,27 @@ struct FTestStruct
 };
 
 UCLASS(config=Game)
-class AOGBrawlerUECharacter : public ACharacter
+class AOGBrawlerUECharacter : public APawn
 {
 	GENERATED_BODY()
+
+	// =====================================================================================
+	// [movement-sim task 19] ⭐ THE ROOT COLLISION CAPSULE — CREATED AND OWNED BY THIS CLASS.
+	// Until this task the pawn derived from the engine's stock walking-pawn base, which created
+	// this component, named it, made it the root, and handed its movement component the very
+	// same component to drive. That movement component was retired in task 15 — the movement
+	// sub-simulation owns locomotion — so the base class was doing exactly ONE useful thing for
+	// us: a handful of constructor lines. They live in our own constructor now, and the base is
+	// `APawn`.
+	//
+	// ⛔⛔ 42 / 96 IS A CONTRACT, NOT A TUNING VALUE.
+	// `brawlerMovementSimulation::PhysicsSetup::body` ships `CapsuleGeometry{42.f, 96.f}` with
+	// `isRoot`, and `ChaosPhysicsFactory`'s adopt-root branch `checkf`s the AUTHORED capsule
+	// AGAINST the descriptor rather than resizing it. A different size in the constructor is an
+	// immediate assert at the first character registration. Change both together or neither.
+	// =====================================================================================
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Collision", meta = (AllowPrivateAccess = "true"))
+	class UCapsuleComponent* CapsuleComponent;
 
 	/** Camera boom positioning the camera behind the character */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
@@ -69,6 +87,15 @@ class AOGBrawlerUECharacter : public ACharacter
 
 	UPROPERTY()
 	UMaterialInterface* HumanoidBaseMaterial = nullptr;
+
+	// [movement-sim task 15] Friction 0 / restitution 0, assigned to the capsule as a
+	// primitive phys-material OVERRIDE in the constructor. Held as a UPROPERTY so the
+	// default subobject is rooted for the lifetime of the CDO/instance and cannot be
+	// collected out from under `SetPhysMaterialOverride`. Restitution 0 is load-bearing:
+	// step 6' of the movement sub-simulation adopts the solver's positional push-out, so a
+	// bouncy capsule would feed a rebound straight back into the movement state.
+	UPROPERTY()
+	class UPhysicalMaterial* CapsulePhysicalMaterial = nullptr;
 
 	// ⛔ REPLICATED, AND THE ONLY REPLICATED STATE ON THIS CLASS. Purely cosmetic:
 	// it never reaches the engine-free simulation core, so it cannot affect
@@ -159,18 +186,16 @@ protected:
 
 	DAttackCameraState m_cameraState;
 
-	void Move(const FInputActionValue& Value);
 	OGBrawlerUEPID m_camPid;
 
 	void Attack(const FInputActionValue& Value);
 	virtual void Tick(float DeltaSeconds) override;
 
-	// [hit-resolution T12] True while the character's machine sim state is
-	// HitFlinch (target-side, driven by the T3 inbound-hit routing pass) or
-	// GuardFlinch (attacker-side, from a successful guard-block on the target).
-	// Consulted by Move() to freeze CMC movement during the ~0.3 s flinch window,
-	// mirroring the existing HoldGuard freeze idiom in that function.
-	bool isCharacterInFlinch() const;
+	// [movement-sim task 15] The flinch-freeze predicate is DELETED. Its only caller was `Move()`,
+	// the legacy CMC path, and the flinch freeze it implemented now lives in the simulation
+	// itself: `brawlerMovementSimulation::integrate` step 1 gates on `machineFreezesMovement`,
+	// which reads the machine sub-simulation's own state on the sim clock instead of a
+	// game-thread viz snapshot. One authority, one clock.
 
 
 protected:
@@ -199,4 +224,13 @@ public:
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	/** Returns InputCollection subobject **/
 	FORCEINLINE UOGBrawlerInputCollectionComponent* getInputCollection() const { return InputCollection; }
+	/**
+	 * Returns the root collision capsule.
+	 * ⭐ DELIBERATELY THE SAME NAME the engine base class used to provide, so all seven
+	 * pre-existing call sites across three files are unchanged by the migration. This is also the
+	 * component the movement sub-simulation ADOPTS as its body (`PhysicsSetup::body.isRoot`),
+	 * which is why its authored size is a contract rather than a tuning value — see the
+	 * capsule member above.
+	 **/
+	FORCEINLINE class UCapsuleComponent* GetCapsuleComponent() const { return CapsuleComponent; }
 };

@@ -272,15 +272,12 @@ public:
 	// divergence check and forwards to the core callback.
 	void onRelayedInputRingArrived(const FRelayedInputRing& ring);
 
-	// [hit-resolution T12] Game-thread-safe read of the character's machine sim
-	// state via the viz-state snapshot the composite refreshes each physics tick
-	// (SimulatableBrawler::getVizState). Safe from any game-thread context — input
-	// callbacks (AOGBrawlerUECharacter::Move gates on HitFlinch/GuardFlinch),
-	// Tick, viz. Returns DAttackState::Idle when the manager or storage entry is
-	// not yet available (pre-registration ordering, or already unregistered) — the
-	// safe default that keeps callers ungated. Non-const because SimulationManagerUImpl
-	// currently only exposes editStorage(); read-only in intent.
-	DAttackState getMachineVizState();
+	// [movement-sim task 15] `getMachineVizState()` is DELETED. Its sole caller was
+	// `AOGBrawlerUECharacter`'s flinch-freeze predicate, which served the legacy CMC `Move()`
+	// path; both went with the CMC. The freeze now happens inside the simulation
+	// (`brawlerMovementSimulation::integrate` step 1), so no game-thread mirror of the
+	// machine state is needed to gate movement. The TickComponent viz lookup it mirrored is
+	// unaffected and still in place.
 
 protected:
 	// To add mapping context
