@@ -224,6 +224,13 @@ public:
 	// offset 4. This is the SINGLE wire fence of the input-relay increment: the
 	// relay ring, the RPC and the input buffer all ride behind it, so ONE
 	// mismatched build is refused loudly at the first correction OnRep.
+	//
+	// [ringout task 2, 2026-09-13] BUMPED 2 -> 3. 3 = the state composite carries a
+	// ring-out sub-simulation. Note this is NOT a layout change — every pre-existing
+	// offset held — so the usual "an append needs no bump" rule would have declined
+	// it. It was made because an older archived build does not compile the
+	// sub-simulation in at all, which no byte of the payload can express. Full
+	// reasoning at the constant in CorrectionStateBufferCodec.h.
 	static constexpr uint8 kWireFormatVersion = correctionStateBuffer::kWireFormatVersion;
 
 	FSimulationStateSyncBuffer()
