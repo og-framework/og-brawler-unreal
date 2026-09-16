@@ -38,9 +38,20 @@ longer settles it. Two things do:
   (`SimulationManagerUImpl-rationale.md`, whose §1 carries the score push's threading
   argument) and the sibling display's. One feature, one tier.
 
-⛔ **The document is not split across both tiers.** The backlog offered that option
-explicitly; a fact asserted in two places is the broken join `doc_anchor_lint.ps1` was
-built to catch, and this document would have been the first to demonstrate it.
+⛔ **Superseded, 2026-09-16.** The pure header now carries its own record at
+`OGBrawler/docs/BrawlerScoreboardVisualization-rationale.md`, and the reason is not a change
+of mind about duplication — it is a test this section did not apply: **does the path resolve
+for someone who has checked out only that repository?** The `og-brawler` submodule **ships
+standalone**. A pure header whose reasoning lived only here would point at a directory such a
+reader does not have, which is a worse join than a duplicated paragraph. Licence subtree alone
+was the wrong discriminator.
+
+⚠ **So the two documents overlap, and the overlap is load-bearing rather than accidental.**
+This file is authoritative for decisions the **UE layer** makes — the three console
+variables, the join, the read-only guarantee and the draw. The sibling is authoritative for
+decisions the **pure header** makes — the row model, the ordering, the clamps, the layout,
+the inks and the countdown. ⛔ **A correction to a shared claim is owed to both.** Nothing
+checks this.
 
 ---
 
@@ -85,7 +96,9 @@ every gate green.
 
 ## 2. The join, and the id that would have been wrong
 
-A row carries three facts that live in three different places.
+A row is assembled from facts that live in two places — some read off the actor, the rest
+read out of the simulation — and the key that ties them together is not the one an actor
+iteration hands you first.
 
 | fact | read from | present on |
 |---|---|---|
@@ -144,6 +157,44 @@ promise made in a comment.
 authority-only, so it is **not** this layer's route. A gather built on it would work
 perfectly on a listen server and return nothing on a client.
 
+### 2.5 The read-only guarantee holds by argument, not by the shape of the file
+
+The manager arrives as a pointer to const and its ring-out door returns a value; nothing in
+`ScoreboardVisualizationUImpl.h` or its `.cpp` names a non-const simulation accessor. Nothing
+gathered here is replicated, enters a correction payload, or reaches `compute_checksum`.
+
+⚠ **It is not, however, *structurally* read-only, and that word was deliberately dropped.**
+The `.cpp` contains exactly one `const_cast` — of the world handle, because `TActorIterator`
+demands a non-const one. A section promising structural read-only-ness while not mentioning it
+would be the one place a reader trusted the claim without checking. The cast is argued at its
+own site and the actors it visits are held through a pointer to const, so the guarantee holds
+— by that argument plus a const pointer, not by the shape of the file alone.
+
+### 2.6 ⛔ The swatch must be read off the character, inside the loop, and from nowhere else
+
+Every other spelling that compiles is a **mis-binding with no symptom** the compiler or this
+project's suites can see: a constant gives every row the same colour, and a value hoisted
+above the loop gives every row the **first** character's. Either one draws a board that looks
+entirely healthy while telling the player nothing.
+
+The row's tint and the row's id come from the same character in the same iteration, and that
+is the whole of the binding. ⚠ The alpha channel is dropped deliberately — `ScoreboardInk` is
+three channels and the swatch is opaque.
+
+### 2.7 The score's narrowing cast is written rather than assumed
+
+⚠ A negative score is **unreachable** — the replicated property mirrors a `uint32_t` counter
+that only ever increments — but the floor at zero is written anyway, so a future penalty
+scoring a fighter below zero cannot wrap the column into billions. `GetRingoutScore` returns
+`int32` and the row's field is `uint32_t`; the gather is where that mismatch is absorbed.
+
+### 2.8 A character the simulation does not know still gets a row
+
+One mid-registration, or a proxy on a peer that has not received it yet, keeps `isDead` false
+and draws no status column — but it still appears, carrying its replicated score. **A fighter
+missing from the board is worse than one whose status column is briefly blank**, because
+nothing about a missing row looks wrong.
+
 ---
 
 ## 3. The display tick — three hazards in one subtraction
@@ -160,7 +211,7 @@ listen-server session would close the editor.
 
 **2. The display tick moves BACKWARDS.** A hard resync rewinds the prediction clock. Both
 ticks are `uint32_t`, so an unguarded subtraction wraps to roughly four billion and the
-status column reads a nine-digit number. The subtraction is clamped at zero.
+status column reads a ten-digit number. The subtraction is clamped at zero.
 
 **3. The countdown is meaningless while alive.** `respawnAtTick` is left at its last value
 once the dead bit clears — deliberately, so the field records what happened rather than
@@ -181,8 +232,17 @@ sites so neither can be "fixed" in isolation. The original statement is in
 `SimmableUpdateComponent.cpp`, at the movement debug draw's master switch.
 
 * A **`StaticData`** CVar is read **once, at construction**, so a tunable cannot move under
-  a running session and put two peers on different numbers. ⛔ **The ring-out kill plane and
-  respawn delay are this kind**, and neither appears anywhere in this display's files.
+  a running session and put two peers on different numbers. ⛔ **Nothing simulated is read
+  from this display's files at all**, and the ring-out tunables are nowhere in them.
+
+  > ⚠ This bullet used to say *"the ring-out kill plane and respawn delay are this kind"*.
+  > **That is false, and false in the dangerous direction.** `killPlaneZ` and
+  > `respawnDelayTicks` are **not console variables at all** — they are defaulted constructor
+  > parameters of `brawlerRingout::StaticData` (`-500.f` and `120u`), and no console variable
+  > in this tree reaches either. Swept: the `OGBrawler.*` registrations are input, movement,
+  > input-history and scoreboard only. A reader who believed the old sentence would go looking
+  > for a console variable that does not exist — or, worse, add one believing the read-once
+  > discipline was already in place around it.
 * A **VIZ** CVar is the opposite case. It feeds nothing simulated, and its whole value is
   that a tuner can type `OGBrawler.ScoreboardScale 2` mid-session and see the **next** frame
   change. ⭐ **All three below are this kind.**
@@ -216,10 +276,26 @@ namespace is reached only from behind it. ⛔ A second scoreboard toggle owes th
 ### 4.3 ⭐ The master defaults **ON**, which no other viz CVar here does
 
 User ruling, 2026-09-13, and it is a deliberate departure from the house pattern rather
-than an oversight — so it is stated in three places that move together: the initialiser in
-`ScoreboardVisualizationUImpl.cpp`, the declaration comment in the header, and here.
+than an oversight — so it is stated wherever a reader meets the gate rather than in one
+place only: at `GScoreboard`'s initialiser in `ScoreboardVisualizationUImpl.cpp`, at the
+`DrawHUD` branch in `OGBrawlerUEHUD.cpp`, and here.
 
-Every other visualization toggle in this tree defaults off, and the reason is written at
+⚠ **The set is deliberately not counted.** A sentence naming a total is falsified by the
+next site that states the ruling or stops stating it — as happened twice: it once said
+*three* while the `DrawHUD` branch was a fourth, and the header's own copy has since been
+replaced by this document.
+
+> ⚠ **[ringout task 16]** This paragraph said *three* places and the `DrawHUD` branch was
+> the fourth, so the set that "moves together" was under-counted by one — which is how the
+> next correction misses a copy. It also said *"every other visualization toggle defaults
+> off"*: swept 2026-09-14, **five input-history toggles initialise to `true`**
+> (`GInputHistoryDisplay`, `GInputHistoryProvenance`, `GInputHistoryInputDelay`,
+> `GInputHistoryCharacterState`, `GInputHistoryPauseIdle`). They are child bools folded
+> through `GInputHistory`, which is `false`, so nothing of that display draws until its
+> master is on. The surviving claim is about **masters**, and it is corrected to that in all
+> five places this initiative had written it.
+
+Every other visualization **master** in this tree defaults off, and the reason is written at
 several of those sites: a debug draw nobody asked for should cost nothing. ⛔ **The
 scoreboard is not a debug visualization.** It is game-mode UI. A ring-out match whose score
 is invisible is not a playable match — it is a match in which nobody can tell they are
@@ -245,22 +321,71 @@ leaving the board off.
 ⛔ **A fully transparent backdrop is not drawn either.** Zero is the shipped alpha default,
 and an invisible rectangle is still a canvas call on every frame.
 
+### 4.5 ⭐⭐ The help strings state six numbers in words, and four assertions are what check them
+
+The constants live in another module; the sentences describing them live in the registrations
+here. The suite pins the **constants**, so retuning one alone goes red over in the pure
+header's test file — but a deliberate retune that updates the constant *and* that test leaves
+every sentence here stale, and **F26 says no mechanical gate in this tree reaches a
+`Source/OGBrawlerUnreal` file to notice.**
+
+The four `static_assert`s in `ScoreboardVisualizationUImpl.cpp` are that gate. Each one names
+the sentence it protects in its own message, so deleting the assertion cannot quietly delete
+the check:
+
+| pinned | the sentence it protects |
+|---|---|
+| `kScoreboardDefaultScale` | the scale help string's `Default 1.0` |
+| `kScoreboardMinScale`, `kScoreboardMaxScale` | the scale help string's `CLAMPED to [0.25, 4]` |
+| `kScoreboardDefaultBackgroundAlpha` | the alpha help string's `Default 0`, and its `the backdrop is not drawn at all` |
+| `kScoreboardMinBackgroundAlpha`, `kScoreboardMaxBackgroundAlpha` | the alpha help string's `CLAMPED to [0, 1]` |
+
+⛔ **The alpha default being exactly zero is not cosmetic.** The help string and the pure
+header's own rule both describe the shipped board as having **no** backdrop, and the
+`> 0.f` branch in `AOGBrawlerUEHUD::drawScoreboard` is what makes that true. A non-zero
+default would start drawing a rectangle every frame while both sentences still said it did
+not.
+
+### 4.6 One accessor block, and it is the only place a console value is read
+
+Every console value reaches the rest of the layer through `enabled`, `scale` or
+`backgroundAlpha`, and those three are the only place either clamp is applied. Each is read
+per drawn frame, for the reason in 4 above.
+
 ---
 
 ## 5. What this panel does *not* inherit from the input-history pane
 
-Three differences, and each one is a place where copying the precedent would be a defect.
+Each of these is a place where copying the precedent would be a defect. ⚠ **The list is not
+claimed to be complete and the count is deliberately not stated** — an earlier revision of
+the pure header said *"exactly THREE differences that matter"* and was already wrong when it
+was read, because `ScoreboardLayout::maxRows` is not console-driven while the pane's
+`visibleRows` **is** clamped.
 
 **1. It is not single-character.** The input-history pane picks one character by selection
 through `firstLocalCharacterId`. A scoreboard draws everyone, so no filter of that kind
-appears. ⛔ The *other* guard is still needed and still made: `firstLocalPlayerController`
+appears.
+
+⭐ **And the gather is keyed on character id, never on the connection** — inherited verbatim
+from the model file. Couch co-op shares one `UNetConnection` across local players, and a
+listen-server host's local player has none at all, so a connection-keyed gather would give
+every sibling the same data or fail outright on the host. ⛔ The *other* guard is still needed and still made: `firstLocalPlayerController`
 is asked at the draw site so **one** local player's HUD draws the board. Without it every
 couch-co-op sibling stacks the same panel on the same screen — and unlike a per-character
 pane, four identical boards at the same coordinates are not obviously four.
 
 **2. It is right-flush, so it needs the viewport WIDTH.** `placedScoreboardLayout` takes
 one; the pane's equivalent never did, because flush-left needs no measurement. Hardcoding
-1920 would put the board 640 px off-screen on an ultrawide.
+1920 would put the board 640 px **inboard of the right edge** on a 2560-wide ultrawide, and
+640 px **off-screen** at 1280.
+
+> ⚠ **[ringout task 15]** This line read *"640 px off-screen on an ultrawide"* until
+> 2026-09-14. That is the wrong direction: hardcoding a width larger than the viewport is
+> what pushes the board off-screen, so the off-screen case is the SMALLER viewport.
+> Measured through the shipped `placedScoreboardLayout`: at 2560 the hardcoded board's right
+> edge lands at 1920 against a correct 2560; at 1280 it lands at 1920 against a correct
+> 1280. The same transposition stood in `BrawlerScoreboardVisualization.h`'s DIFFERENCE 1
+> and is corrected there in the same pass.
 
 **3. It centres the DRAWN height, not a reserved window.** The pane reserves its full row
 window because rows arrive while you watch and a creeping top edge is unreadable. A
@@ -389,12 +514,15 @@ that code, not of its current contents.
 
 ## 7. Reading order
 
-1. `OGBrawler/BrawlerScoreboardVisualization.h` — the banner states the three ways this
-   board deliberately differs from the input pane, then the layout and clamps themselves.
-   The swatch's policy is at `scoreboardRowSwatch`, its geometry at `scoreboardSwatchRect`.
-2. `Source/OGBrawlerUnreal/ScoreboardVisualizationUImpl.h` — the join table, the CVar
-   read-cadence argument, and the display-tick contract.
-3. `Source/OGBrawlerUnreal/ScoreboardVisualizationUImpl.cpp` — the three registrations and
-   the gather.
-4. `Source/OGBrawlerUnreal/OGBrawlerUEHUD.cpp`, `drawScoreboard` — the canvas calls.
-5. This document, for anything that reads as a choice rather than a consequence.
+1. This document, for anything in the UE layer that reads as a choice rather than a
+   consequence.
+2. `OGBrawler/docs/BrawlerScoreboardVisualization-rationale.md` — the same, for the pure
+   header: the row model, the ordering, the clamps, the layout, the inks and the countdown.
+3. `OGBrawler/BrawlerScoreboardVisualization.h` — the code the two documents describe. The
+   swatch's policy is `scoreboardRowSwatch`, its geometry `scoreboardSwatchRect`.
+4. `Source/OGBrawlerUnreal/ScoreboardVisualizationUImpl.h` and `.cpp` — the three
+   registrations, the accessors and the gather.
+5. `Source/OGBrawlerUnreal/OGBrawlerUEHUD.cpp`, `drawScoreboard` — the canvas calls.
+
+⚠ **Items 3 and 4 carry a licence header, a docs pointer and code.** The reasoning that used
+to sit in their banners is in items 1 and 2; do not expect to find it at the declaration.

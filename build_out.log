@@ -1,0 +1,11 @@
+Using bundled DotNet SDK version: 8.0.300 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" OGBrawlerTests Win64 Development -project=C:\dev\og-brawler-unreal\OGBrawlerUnreal.uproject
+Log file: C:\dev\UnrealEngine\Engine\Programs\UnrealBuildTool\Log.txt
+Using 'git status' to determine working set for adaptive non-unity build (C:\dev\UnrealEngine).
+Using 'git status' to determine working set for adaptive non-unity build (C:\dev\og-brawler-unreal).
+Waiting for 'git status' command to complete
+Target is up to date
+Deploying OGBrawlerTests Win64 Development...
+
+Result: Succeeded
+Total execution time: 1.87 seconds

@@ -202,7 +202,7 @@ void AOGBrawlerUEHUD::DrawHUD()
 	//   no backdrop is drawn until the CVar reads true. [ringout task 6b]
 	// ⚠ [ringout task 10, user ruling 13, 2026-09-13] THIS SENTENCE USED TO OPEN "DEFAULT
 	//   OFF" AND THAT IS NO LONGER TRUE -- `GScoreboard` now initialises to `true`, making
-	//   this the one viz CVar in the project that does not default off, because the
+	//   this the one viz MASTER in the project that does not default off, because the
 	//   scoreboard is GAME-MODE UI rather than a debug draw. The one-bool-read property is
 	//   unchanged; it is now what turning the board OFF costs. Full argument at
 	//   `GScoreboard`'s initialiser in `ScoreboardVisualizationUImpl.cpp`.

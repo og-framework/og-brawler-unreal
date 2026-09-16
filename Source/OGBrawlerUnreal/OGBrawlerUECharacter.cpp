@@ -336,8 +336,9 @@ namespace
 	// draws at most `kScoreboardMaxRows` rows, so it needs at least that many distinct tints;
 	// naming that constant rather than writing a literal is what stops this becoming yet
 	// another mirror of `kPreDietCharacterCap` / `brawlerRingout::kMaxSpawnPoints` — a
-	// duplication the scoreboard header calls out by name. It is also the STRONGER bound: the
-	// advisory character cap is 4 and the row cap is 8.
+	// duplication that OGBrawler/docs/BrawlerScoreboardVisualization-rationale.md section 8
+	// calls out by name. It is also the STRONGER bound: the advisory character cap is 4 and
+	// the row cap is 8.
 	//
 	// ⚠ WHAT THIS DOES *NOT* PROMISE, WRITTEN DOWN BECAUSE THE ASSERT LOOKS STRONGER THAN IT
 	// IS. The counter is bumped once per POSSESSION and never reclaims a leaver's index, so
