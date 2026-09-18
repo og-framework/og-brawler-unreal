@@ -102,6 +102,12 @@
       Duplicate      adds a second site carrying an existing id    -> check 3
       RetiredReuse   adds a tag naming a RETIRED id                -> check 4
 
+    Each arm exists once per CLASS: the four above poison `G`, and `DUnresolvedTag`,
+    `DOrphan`, `DDuplicate` and `DRetiredReuse` poison `D`. An arm poisons its own
+    class and MUST leave the other one at 0/0/0/0; both directions are asserted.
+    (c) The class comes from the $POISON_CLASS table below, never from the arm's
+    first letter - see the comment there for the vacuous control that cost.
+
 .OUTPUTS
     Exit 0 = every tag resolves, no orphan, no duplicate, no retired id reused.
     Exit 1 = at least one violation.
@@ -281,10 +287,30 @@ Write-Info ("  rationale docs (D-nn) : {0}" -f $dDocCount)
 # the parser and all four checks run on it. NOTHING ON DISK IS MODIFIED.
 # A check that cannot be made to fail proves nothing, and this initiative has
 # shipped three vacuous controls and retired a fourth in place.
+#
+# (c) EVERY ARM'S CLASS IS DECLARED HERE, BY NAME. This table exists because the line it
+# replaced routed by FIRST LETTER - `if ($Poison.StartsWith('D')) { 'D' } else { 'G' }` - and
+# `'Duplicate'.StartsWith('D')` is TRUE. The pre-existing G uniqueness arm was therefore run
+# against the D class: `-Poison Duplicate` and `-Poison DDuplicate` were the SAME ARM, G CHECK 3
+# had no control at all, and because both runs exit 1 and print POISON ARM FIRED the failure was
+# invisible from the exit code - which is exactly how a vacuous control survives. A name cannot
+# be mis-classified by a table, and an arm MISSING from the table is a loud exit 2 rather than a
+# silent mis-route, so a fifth arm added without registering it fails on its first run.
+# Keep this table and the -Poison ValidateSet in step; they are the same list, twice.
+$POISON_CLASS = @{
+    'UnresolvedTag'  = 'G'; 'Orphan'  = 'G'; 'Duplicate'  = 'G'; 'RetiredReuse'  = 'G'
+    'DUnresolvedTag' = 'D'; 'DOrphan' = 'D'; 'DDuplicate' = 'D'; 'DRetiredReuse' = 'D'
+}
 $poisonDescription = ''
 $poisonClass = ''
 if ($Poison -ne 'None') {
-    $poisonClass = if ($Poison.StartsWith('D')) { 'D' } else { 'G' }
+    if (-not $POISON_CLASS.ContainsKey($Poison)) {
+        [Console]::Error.WriteLine(
+            "POISON: '$Poison' is not registered in the " + '$POISON_CLASS' +
+            " table - an unregistered arm cannot be routed to a class.")
+        exit 2
+    }
+    $poisonClass = $POISON_CLASS[$Poison]
     if ($poisonClass -eq 'G') { $victimSet = $tags;  $victimDocs = $docs }
     else                      { $victimSet = $dtags; $victimDocs = $ddocs }
     if ($victimSet.Count -eq 0) { Write-Error "POISON: no $poisonClass tags found to poison"; exit 2 }

@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerController.h"
 
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
+#include "OGBrawlerUnreal/ScoreboardVisualizationUImpl.h"
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 
 namespace
@@ -195,6 +196,19 @@ void AOGBrawlerUEHUD::DrawHUD()
 	//   and all three bar toggles, so this is one call rather than an OR of three.
 	if (inputHistoryVisualizationUImpl::anyBarEnabled())
 		drawInputHistoryFrameMeter();
+
+	// ⛔ OFF COSTS THIS ONE BOOL READ, AND ON IS THE DEFAULT. Nothing below the branch runs:
+	//   no actor is iterated, no simulation slice is fetched, no geometry is computed and
+	//   no backdrop is drawn until the CVar reads true. [ringout task 6b]
+	// ⚠ [ringout task 10, user ruling 13, 2026-09-13] THIS SENTENCE USED TO OPEN "DEFAULT
+	//   OFF" AND THAT IS NO LONGER TRUE -- `GScoreboard` now initialises to `true`, making
+	//   this the one viz MASTER in the project that does not default off, because the
+	//   scoreboard is GAME-MODE UI rather than a debug draw. The one-bool-read property is
+	//   unchanged; it is now what turning the board OFF costs. Full argument at
+	//   `GScoreboard`'s initialiser in `ScoreboardVisualizationUImpl.cpp`.
+	//   ⛔ THE BRANCH ITSELF IS UNTOUCHED -- this is a comment-only correction.
+	if (scoreboardVisualizationUImpl::enabled())
+		drawScoreboard();
 }
 
 const ASimulationManagerUImpl* AOGBrawlerUEHUD::findHistorySource(
@@ -685,5 +699,133 @@ void AOGBrawlerUEHUD::drawDirectionGlyph(
 	{
 		DrawLine(segment.from.x, segment.from.y, segment.to.x, segment.to.y,
 			color, layout.arrowThickness);
+	}
+}
+
+// [ringout task 6b] THE RING-OUT SCOREBOARD.
+// ⛔ THE GATHER IS scoreboardVisualizationUImpl'S AND EVERY NUMBER IS THE PURE HEADER'S.
+//   This method iterates nothing, sorts nothing, and computes no origin, row height or
+//   column edge: it turns a placed layout and ordered rows into canvas calls.
+void AOGBrawlerUEHUD::drawScoreboard()
+{
+	using namespace brawlerScoreboardVisualization;
+
+	if (Canvas == nullptr || GEngine == nullptr)
+		return;
+
+	const UWorld* world = GetWorld();
+
+	// ⛔ ONE LOCAL PLAYER'S HUD DRAWS, NOT EVERY SIBLING'S -- each local player owns a HUD,
+	//   so without this every couch-co-op sibling stacks the same board on one screen.
+	//   The SAME guard the two input-history displays make, through the same accessor.
+	// ⚠ THIS IS THE ONLY THING THAT SELECTS A LOCAL PLAYER HERE. It does NOT filter the
+	//   ROWS: a scoreboard draws everyone, which is exactly where this panel parts company
+	//   with the single-character input-history pane.
+	if (GetOwningPlayerController()
+		!= inputHistoryVisualizationUImpl::firstLocalPlayerController(world))
+	{
+		return;
+	}
+
+	// ⛔ POINTER TO CONST, and it stays one: the board may not write a thing it draws.
+	//   The same role expression every other manager lookup in this file uses.
+	const ASimulationManagerUImpl* manager =
+		ASimulationManagerUImpl::instanceFor(GetNetMode() != NM_Client);
+
+	// ⭐ ALREADY ORDERED BY CHARACTER ID when it arrives, so two peers watching one match
+	//   see the same player in the same row. Never re-sorted, and never sorted here.
+	const std::vector<ScoreboardRow> rows =
+		scoreboardVisualizationUImpl::gatherScoreboardRows(world, manager);
+	if (rows.empty())
+		return;
+
+	// One call, so the scale cannot be applied after the placement: the layout arrives
+	// already scaled AND already placed against this frame's own viewport.
+	// ⛔ THE BOARD IS FLUSH RIGHT AND VERTICALLY CENTRED ON ITS DRAWN HEIGHT, and none of
+	//   that is decided here -- `rowCount` is in the signature precisely because the
+	//   centring is on the rows that exist, not on the eight a full board reserves.
+	const ScoreboardLayout layout = placedScoreboardLayout(ScoreboardLayout{},
+		scoreboardVisualizationUImpl::scale(), rows.size(),
+		static_cast<float>(Canvas->SizeX), static_cast<float>(Canvas->SizeY));
+
+	const std::size_t drawnRows = scoreboardDrawnRowCount(layout, rows.size());
+
+	// ⛔ A FULLY TRANSPARENT BACKDROP IS NOT DRAWN. Zero is the shipped default, and an
+	//   invisible rectangle is still a canvas call on every frame the board is up.
+	const float backgroundAlpha = scoreboardVisualizationUImpl::backgroundAlpha();
+	if (backgroundAlpha > 0.f)
+	{
+		DrawRect(FLinearColor(kScoreboardBackdropInk.r, kScoreboardBackdropInk.g,
+			         kScoreboardBackdropInk.b, backgroundAlpha),
+			layout.originX, layout.originY,
+			layout.rowWidth, scoreboardHeight(layout, drawnRows));
+	}
+
+	UFont* const font = GEngine->GetSmallFont();
+
+	for (std::size_t slot = 0u; slot < drawnRows; ++slot)
+	{
+		const ScoreboardRow& row = rows[slot];
+
+		// ⛔ KEYED ON A BOOL, and the selector is the pure header's. This method names no
+		//   colour of its own, which is what keeps the board outside
+		//   `palette_legend_lint.ps1`'s enum-keyed-palette scope.
+		const ScoreboardInk ink = scoreboardRowInk(row.isDead);
+		const FLinearColor  color(ink.r, ink.g, ink.b, 1.f);
+
+		const float textY = scoreboardRowTopY(layout, slot) + layout.textOffsetY;
+
+		// ⛔ `layout.textScale` REACHES EVERY DrawText AND EVERY GetTextSize BELOW.
+		//   `GetSmallFont()` is fixed-size, so a scale that reached only the geometry would
+		//   give a bigger box holding the same tiny glyphs -- and a measure that omitted it
+		//   would place each right-aligned column further out of alignment the larger the
+		//   board got, which is invisible at the default scale most runs use.
+
+		// Column 1 [ringout task 10] -- the fighter's COLOUR SWATCH, where the raw id used
+		// to be drawn as text. A filled rectangle, so unlike columns two and three it needs
+		// no font and no measure.
+		// ⛔ THE COLOUR IS THE ROW'S OWN, THROUGH THE PURE SELECTOR, and the selector is
+		//   deliberately independent of `row.isDead`: a dead fighter's swatch is its full
+		//   tint, because a row is most in need of identifying while its owner is counting
+		//   down. Status is carried by the text ink above and by column three below -- two
+		//   cues, neither of them the identity channel. The argument is written out at
+		//   `scoreboardRowSwatch`.
+		// ⛔ `row.characterId` HAS NOT LEFT THE ROW. It is still the key the gather joined
+		//   this row on and still the key the rows were ordered by, so two peers show the
+		//   same player in the same row. It simply is not DRAWN any more.
+		// ⛔ EVERY ONE OF THESE FOUR NUMBERS IS THE PURE HEADER'S. This method computes no
+		//   geometry, here least of all: the swatch's height is derived from the row height
+		//   and the inset, and deriving it here would be the only arithmetic in the file.
+		const ScoreboardInk       swatch     = scoreboardRowSwatch(row);
+		const ScoreboardSwatchRect swatchRect = scoreboardSwatchRect(layout, slot);
+		DrawRect(FLinearColor(swatch.r, swatch.g, swatch.b, 1.f),
+			swatchRect.x, swatchRect.y, swatchRect.width, swatchRect.height);
+
+		// Column 2 -- the score. A RIGHT edge: `rightX - measuredWidth`, so a column of
+		// two- and three-digit scores stays a column instead of jittering.
+		const FString scoreText = FString::Printf(TEXT("%u"), row.score);
+		float         scoreWidth = 0.f;
+		float         scoreHeight = 0.f;
+		GetTextSize(scoreText, scoreWidth, scoreHeight, font, layout.textScale);
+		DrawText(scoreText, color,
+			layout.originX + layout.scoreRightX - scoreWidth, textY, font, layout.textScale);
+
+		// Column 3 -- the respawn countdown, and ONLY while this fighter is out.
+		// ⛔ GATED ON THE LEVEL, THROUGH THE PURE PREDICATE, never on the countdown being
+		//   non-zero: `ticksUntilRespawn` is stale by construction for a living fighter.
+		if (scoreboardRowDrawsCountdown(row))
+		{
+			// ⚠ THE WORD IS NOT DECORATION. Columns two and three are both right-aligned
+			//   integers, so a bare number here would be indistinguishable from a score
+			//   that had simply moved right. `OUT` says which quantity this is.
+			const FString statusText =
+				FString::Printf(TEXT("OUT %u"), row.ticksUntilRespawn);
+			float statusWidth = 0.f;
+			float statusHeight = 0.f;
+			GetTextSize(statusText, statusWidth, statusHeight, font, layout.textScale);
+			DrawText(statusText, color,
+				layout.originX + layout.statusRightX - statusWidth, textY, font,
+				layout.textScale);
+		}
 	}
 }

@@ -54,6 +54,9 @@
 #include "OGSimulation/CompilerControl.h"
 #include "Runtime/Engine/Public/Net/UnrealNetwork.h"
 #include "EngineUtils.h"
+// [ringout task 9] The level-placed respawn points: TActorIterator over APlayerStart,
+// walked ONCE in BeginPlay. See seedRingoutSpawnPointsFromLevel below.
+#include "GameFramework/PlayerStart.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
@@ -86,6 +89,7 @@
 #include "OGSimulation/ResimGatePolicy.h"
 
 #include <algorithm>
+#include <array>
 #include <utility>
 #include <vector>
 
@@ -409,6 +413,117 @@ ASimulationManagerUImpl::~ASimulationManagerUImpl()
 	}
 }
 
+// ⭐⭐ [ringout task 9, 2026-09-13] THE RESPAWN POINTS ARE THE LEVEL'S `APlayerStart` ACTORS.
+//
+// USER RULING, 2026-09-13, out of a PIE session: the authored table in
+// `brawlerRingout::StaticData` is placeholder authoring at (±200, ±200, Z=200), the platform
+// this mode ships on is somewhere else, and every respawn therefore dropped the fighter off
+// the map. Respawn slot N is now PLAYER START N, so moving a spawn point is level design.
+//
+// ══ ⛔⛔ WHY THIS WRITES `StaticData` AFTER CONSTRUCTION, WHICH THE BANNER FORBIDS ══════════
+// §2's ownership rule is that `StaticData` is constructed in place once and never moves. What
+// that rule PROTECTS is that no tick ever sees it change: a constant the simulation reads
+// mid-session is a constant two peers can disagree about and a resim can replay against the
+// wrong value. This is a ONE-TIME INIT that happens before the first tick can exist, which is
+// inside what the rule protects rather than an exception to it. ⛔ DO NOT "FIX" IT BACK INTO
+// A CONSTRUCTOR ARGUMENT: `m_staticData` is brace-initialised in a member initializer, which
+// runs during ACTOR CONSTRUCTION, and no level actor is reachable then. `APlayerStart` exists
+// at `BeginPlay` and not one moment earlier. (`readMovementStaticDataCVars()` has the same
+// shape for the same reason, one member above it.)
+//
+// ══ ⭐ AND THE ORDERING IS ENFORCED, NOT ASSUMED ═══════════════════════════════════════════
+// The two `checkf`s below are the mechanical form of "exactly once, before the first
+// integrate". The second is the load-bearing one: every simulation step in this process runs
+// through `m_manager`, which is emplaced LATER IN THIS SAME `BeginPlay` (both role branches),
+// and the physics delegates that drive it (`OnPhysScenePreTick` / `OnPhysSceneStep` /
+// `OnPhysScenePostTick`) plus the async callback are bound at the very END of it. An empty
+// `m_manager` is therefore proof that no tick has happened yet. ⚠ It is also why this must not
+// drift below the `emplace` calls: `m_integrationLayer` holds a REFERENCE to `m_staticData`,
+// so a later write would still be visible and would still compile — the assertion is what
+// makes the ordering a stated requirement instead of an accident of line order.
+//
+// ══ ⛔ BOTH ROLES, DELIBERATELY ════════════════════════════════════════════════════════════
+// Unlike `m_spawnSlots` (authority-only bookkeeping), this table is read by
+// `brawlerRingout::integrate` on EVERY PEER — a client predicts its own respawn. So a client
+// that skipped this would predict to the placeholder point and be corrected on every respawn.
+// There is no role branch here and there must not be one.
+//
+// ⭐ ALL THE POLICY IS IN THE ENGINE-FREE CORE. The sort, the fallback and the (0,0,0) guard
+// are `brawlerRingout::spawnPointsFromLevelPlacements`, asserted by `Ringout.SpawnPoints.*` in
+// `BrawlerRingoutSimulationTest.cpp`. This function walks actors and converts a name to bytes.
+void ASimulationManagerUImpl::seedRingoutSpawnPointsFromLevel(UWorld& world)
+{
+	checkf(!m_ringoutSpawnPointsSeeded,
+		TEXT("seedRingoutSpawnPointsFromLevel: the ring-out spawn table has already been ")
+		TEXT("seeded. It is a ONE-TIME init, and a second pass would merge the level over its ")
+		TEXT("own previous answer rather than over the authored defaults."));
+
+	checkf(!m_manager.has_value() && !m_integrationLayer.has_value(),
+		TEXT("seedRingoutSpawnPointsFromLevel: the manager or integration layer already ")
+		TEXT("exists, so a simulation tick may already have read StaticData::spawnPoints. ")
+		TEXT("This seed must run BEFORE the first integrate - move it back above the role ")
+		TEXT("branches in BeginPlay rather than relaxing this check."));
+
+	std::vector<brawlerRingout::LevelSpawnPoint> placements;
+	for (TActorIterator<APlayerStart> it(&world); it; ++it)
+	{
+		const APlayerStart* playerStart = *it;
+		if (playerStart == nullptr)
+			continue;
+
+// ⛔ THE NAME, AS BYTES, AND THIS CONVERSION IS THE WHOLE REASON THE CORE TAKES A
+// `std::string`. `FName`'s own ordering (`FastLess` / `FNameFastLess` / `CompareIndexes`)
+// compares the NAME TABLE INDEX, which the engine documents as *"only stable during this
+// process' lifetime"* - the order the string was first interned in THIS process. A server and
+// a client never intern in the same order, so sorting FNames would hand two peers different
+// tables while looking exactly like a deterministic sort. `GetName()` is the string saved in
+// the map package; every peer that loaded the map has the same bytes.
+		brawlerRingout::LevelSpawnPoint placement;
+		placement.name     = TCHAR_TO_UTF8(*playerStart->GetName());
+		placement.position = uglm::toGLMVec3(playerStart->GetActorLocation());
+		placements.push_back(std::move(placement));
+	}
+
+// ⛔ THE FALLBACK IS THE TABLE AS IT STANDS RIGHT NOW, which - because nothing else ever
+// writes it and this runs once - is exactly the authored default. So "fewer player starts than
+// slots leaves the rest authored" is literally "leaves the rest alone", and ZERO player starts
+// is a no-op rather than a table of origins.
+	const std::array<glm::vec3, brawlerRingout::kMaxSpawnPoints> authoredFallback =
+		m_staticData.m_ringoutStaticData.spawnPoints;
+
+	m_staticData.m_ringoutStaticData.spawnPoints =
+		brawlerRingout::spawnPointsFromLevelPlacements(placements, authoredFallback);
+
+	m_ringoutSpawnPointsSeeded = true;
+
+// ⛔ `UE_LOG`, NOT `OGBLOG_G`, AND THAT IS NOT A STYLE CHOICE. The `ogblog` sink routes
+// everything to `LogOGBrawler`, which the shipped ini pins at `Warning` - which is why the
+// sub-sim's own `[Ringout.respawn]` line appears in NO captured log and could not be used to
+// answer "where did it teleport to?" while this task was being scoped. This is the line that
+// answers that question, at Warning, on its own category, once per session per manager.
+//
+// Volume: one line plus `kMaxSpawnPoints` rows, at composition. Not on any tick path.
+	UE_LOG(LogOGMgmt, Warning,
+		TEXT("[Ringout.spawnPoints] seeded from the level: %d APlayerStart actor(s) found, ")
+		TEXT("%d slot(s) filled, %d left authored (netMode=%d)"),
+		static_cast<int32>(placements.size()),
+		FMath::Min(static_cast<int32>(placements.size()),
+			static_cast<int32>(brawlerRingout::kMaxSpawnPoints)),
+		static_cast<int32>(brawlerRingout::kMaxSpawnPoints)
+			- FMath::Min(static_cast<int32>(placements.size()),
+				static_cast<int32>(brawlerRingout::kMaxSpawnPoints)),
+		static_cast<int32>(GetNetMode()));
+
+	for (uint32 slot = 0u; slot < brawlerRingout::kMaxSpawnPoints; ++slot)
+	{
+		const glm::vec3& point = m_staticData.m_ringoutStaticData.spawnPoints[slot];
+		UE_LOG(LogOGMgmt, Warning,
+			TEXT("[Ringout.spawnPoints]   slot %u -> (%.2f, %.2f, %.2f) [%s]"),
+			slot, point.x, point.y, point.z,
+			(slot < placements.size()) ? TEXT("level") : TEXT("authored"));
+	}
+}
+
 void ASimulationManagerUImpl::BeginPlay()
 {
 	Super::BeginPlay();
@@ -439,6 +554,17 @@ void ASimulationManagerUImpl::BeginPlay()
 		TEXT("at construction; this world overrides gravity in its WorldSettings. Either clear that ")
 		TEXT("override or teach the movement StaticData about per-level gravity."),
 		simGravityZ, engineGravityZ);
+
+// ⭐⭐ [ringout task 9] THE RING-OUT SPAWN TABLE IS SEEDED FROM THE LEVEL, HERE, ONCE.
+//
+// ⛔ POSITION IS LOAD-BEARING AND IS ASSERTED AT THE DEFINITION. This sits ABOVE both
+// role branches, so it runs before `m_integrationLayer` and `m_manager` are emplaced and
+// therefore before any tick can read `StaticData::spawnPoints`. Moving it below either
+// `emplace` still COMPILES - the integration layer holds a reference, so a later write is
+// still visible - which is exactly why the ordering is a `checkf` and not a comment.
+//
+// ⛔ NOT ROLE-GATED: a client predicts its own respawn, so it needs the same table.
+	seedRingoutSpawnPointsFromLevel(*uWorld);
 
 	FPhysScene* physScene = uWorld->GetPhysicsScene();
 	if (physScene == nullptr)
@@ -1162,6 +1288,88 @@ void ASimulationManagerUImpl::onPostSimulationGameThread()
     m_manager->onPostSimulationGameThread();
 }
 
+// =========================================================================================
+// [ringout task 5] ⭐ THE AUTHORITY-SIDE SCORE PUSH
+// =========================================================================================
+//
+// WHAT IT IS. One game-thread pass that copies each character's authority-side ring-out
+// score out of `brawlerRingout::ScoreSystem` and onto that character's replicated
+// `RingoutScore` property, from which UE replicates it to every client. It carries NO
+// POLICY — who scores, how much and when is entirely task 4's law, in engine-free core.
+//
+// ⛔ WHY A FILE-LOCAL FUNCTION AND NOT A MEMBER. Everything it needs is passed in, so it
+// adds no name to the class's surface and no member to its threading table. The class
+// banner's NARROW PASSTHROUGHS list exists precisely to stop this kind of thing becoming an
+// accessor; a free function that the one call site below hands two references to cannot be
+// reached by anything else.
+//
+// ⛔ THE ROUTE TABLE IS `m_delayedInputComponentsById`, AND REUSING IT IS A REAL COUPLING —
+// stated here because nothing else would state it. That map is registered in
+// `USimmableUpdateComponent::tryRegisterWithNewFramework` under `if (isAuthority)` and
+// erased in `unregisterFromNewFramework`, so it is exactly "the authority's live characters,
+// resolvable to their actors" — which is what this push needs and what no other member is.
+// ⚠ IF THAT REGISTRATION EVER NARROWS (a condition beyond `isAuthority`, a later call site,
+// a role that stops registering), THIS PUSH SILENTLY LOSES THOSE CHARACTERS: their score
+// never leaves the server and their scoreboard row freezes at whatever last replicated. It
+// fails quiet, so it is written down rather than left to be rediscovered.
+//
+// ⛔⛔ THIS IS A CROSS-THREAD READ, AND THE ARGUMENT FOR IT IS THE CLASS BANNER'S THIRD
+// CROSSING — read that before touching this. The short form: `ScoreSystem`'s score table is
+// WRITTEN on the physics thread (`postIntegrate`, beneath `OnPreSimulate_Internal`) and read
+// here on the GAME thread. What makes it the same ACCEPTED TEAR the input-history poll takes
+// rather than a new hazard is that the table cannot be RESTRUCTURED under this reader: the
+// only inserting and erasing calls are `onCharacterRegistered` / `onCharacterUnregistered`,
+// both driven from `tryRegister` / `unregisterFromNewFramework`, both GAME THREAD. The award
+// itself reaches an EXISTING entry, so it writes one naturally-aligned four-byte word and
+// cannot rehash. Worst case: a scoreboard number one tick stale, on a display that decides
+// nothing — which is the same bound `BrawlerColor` and this property both rest on.
+//
+// ⭐ THAT ARGUMENT HAS A PRECONDITION, AND THE PRECONDITION IS MACHINE-CHECKED BELOW rather
+// than asserted in prose. `postIntegrate` awards through `operator[]`, which INSERTS — and
+// therefore MAY REHASH — for an id the roster has not got. Task 4 chose that deliberately so
+// an award to an unseeded id is a real award rather than a dropped one. It is unreachable in
+// a legal session because `onCharacterRegistered` seeds every authority-registered id, and
+// it seeds it BEFORE `tryRegister` returns `Ready`, which is before the route entry this
+// walk reads even exists. The `checkf` states exactly that ordering, so a future change that
+// breaks it fails loudly in Development instead of racing silently.
+namespace
+{
+    void pushRingoutScoresToCharacters(
+        const brawlerRingout::ScoreSystem& scoreSystem,
+        const std::unordered_map<unsigned int, TWeakObjectPtr<USimmableUpdateComponent>>& routes)
+    {
+        for (const auto& entry : routes)
+        {
+            const unsigned int id = entry.first;
+
+// A stale handle is SKIPPED, not erased. The two transport sinks prune the map when they
+// meet one because they are its owners; this is a reader and pruning here would mutate the
+// container mid-walk for no benefit - `unregisterFromNewFramework` erases it promptly anyway.
+            USimmableUpdateComponent* component = entry.second.Get();
+            if (component == nullptr)
+                continue;
+
+            AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(component->GetOwner());
+            if (character == nullptr)
+                continue;
+
+// ⛔ THE NO-REHASH PRECONDITION, STATED AS A TRIPWIRE. See the banner above.
+            checkf(scoreSystem.hasScoreEntry(id),
+                   TEXT("Ring-out score push: id=%u is in the authority route table but has no ")
+                   TEXT("ScoreSystem roster entry. The game-thread read of the score table is ")
+                   TEXT("safe only because the roster is seeded by onCharacterRegistered before ")
+                   TEXT("tryRegister returns Ready - an unseeded id lets postIntegrate's ")
+                   TEXT("operator[] INSERT, and rehash, on the physics thread under this walk."),
+                   id);
+
+// ⛔ THE UNCHANGED-VALUE GUARD IS INSIDE THE SETTER, not here. One write site, one guard:
+// a second early-out here could drift out of step with it and neither would be obviously wrong.
+            character->SetAuthoritativeRingoutScore(
+                static_cast<int32>(scoreSystem.scoreOf(id)));
+        }
+    }
+}
+
 void ASimulationManagerUImpl::OnPhysicsPreTick(FPhysScene* Scene, float DeltaTime)
 {
 }
@@ -1183,6 +1391,30 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 	}
 
 	updateVisualizationAll(m_storage);
+
+// ---- [ringout task 5] THE SCORE PUSH ----------------------------------
+//
+// ⛔ THE GATE IS `!runsPrediction()`, THE SAME EXPRESSION TWELVE LINES ABOVE, and it is now
+// the layer's ONLY role site for ring-out - [ringout task 19] deleted the BeginPlay wiring
+// line, the flag it wrote, and the two-sided checkf that cross-checked them, because there is
+// no longer a second gate to disagree with: brawlerRingout::ScoreSystem declares
+// kRoleAffinity = AuthorityOnly and SimulationSystemsExecutor skips it off the authority.
+// ⛔ NOT HasAuthority(): `bReplicates = false` pins Role to authority on every peer.
+//
+// ⚠ THIS GATES THE REPLICATION, NOT THE AWARD. A client whose gate here were deleted would
+// push scores its ScoreSystem never computed - an empty roster, so zeroes over the replicated
+// values - which is loud rather than silent. Per F26 nothing mechanical checks this line.
+//
+// WHY HERE, beside updateVisualizationAll. This is the one game-thread point that runs
+// directly after the simulation has advanced, and harvesting a physics-side result for
+// PRESENTATION is exactly what its neighbour already does. The push is a poll, not an event:
+// it costs one int compare per character per pass when nothing changed, and the score
+// changes at most once per death tick.
+	if (m_manager.has_value() && !m_manager->runsPrediction())
+	{
+		pushRingoutScoresToCharacters(m_systemsExec.get<brawlerRingout::ScoreSystem>(),
+			m_delayedInputComponentsById);
+	}
 }
 
 TryRegisterStatus ASimulationManagerUImpl::tryRegister(
@@ -1334,6 +1566,63 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         movementIC.teleportPending = 1u;
         movementIC.teleportPos     =
             uglm::toGLMVec3(character->GetCapsuleComponent()->GetComponentLocation());
+
+
+// THE SPAWN-SLOT SEED - ring-out, task 3. Same first-call branch, and for the same reason:
+// `brawlerRingout::InitialConditions::spawnSlot` is written ONCE per character and read on
+// every respawn for the life of that character. Unlike the teleport seed above it is NOT a
+// counter-free edge - nothing consumes it and nothing clears it.
+//
+// ⛔ FIRST-CALL PASS ONLY, inherited from the branch it sits in. Re-seeding per call would
+// not merely be wasteful: `acquire` is idempotent, so it would return the same index, but a
+// character whose slot had been RELEASED and handed to someone else would silently change
+// spawn point mid-session. Once, at registration, is the contract.
+//
+// ⛔⛔ AUTHORITY ONLY, AND THIS IS NOT HasAuthority(). `bReplicates = false` makes
+// `GetLocalRole()` report authority on this actor in every role, which is why this file uses
+// the WORLD-level test everywhere. `record.isAuthority` IS that test: the caller
+// (`USimmableUpdateComponent::tryRegisterWithNewFramework`) computes it as
+// `(GetNetMode() != NM_Client)` - literally the expression `BeginPlay` names
+// `worldIsAuthority` - and passes it in. The `checkf` states that equivalence rather than
+// leaving it to a comment, because `tryRegister` is a public entry point.
+//
+// ⭐ WHY A CLIENT MAY SAFELY LEAVE ITS OWN COPY AT THE DEFAULT 0, AND WHY THAT CANNOT BE
+// READ BEFORE THE SERVER'S NUMBER ARRIVES. `tryRegister` runs on BOTH roles, so a client
+// registers its own character locally with `spawnSlot` at its in-class initialiser, 0. That
+// value is read by exactly one thing: the respawn arm of `brawlerRingout::integrate`, which
+// is reached only after the character has (a) crossed the kill plane and (b) waited
+// `StaticData::respawnDelayTicks` - 120 ticks, 2.0 s at 60 Hz - for `tick >= respawnAtTick`.
+// The correction that carries the authority's `InitialConditions` is an ORDINARY state
+// correction on the already-running rotation, arriving within a handful of ticks of
+// registration and restoring the whole struct by assignment. So the client's 0 is
+// overwritten two orders of magnitude before the only code that reads it can run, and a
+// resim RESTORES the authority's value rather than recomputing it. There is no path on
+// which the placeholder is read first: death itself cannot occur earlier than the first
+// correction and still leave 120 ticks of countdown to run before the value matters.
+//
+// ⛔ AND ARRIVAL ORDER DECIDING THE NUMBER IS DELIBERATE - see the ⛔ banner on
+// `brawlerRingout::SpawnSlotAllocator`. Clients never derive this; a replay restores it. Do
+// not "fix" it into a per-peer derivation such as `GetPlayerSlotForActor`, which is per-wire
+// and answers 0 for the primary pawn of every remote client.
+        if (record.isAuthority)
+        {
+            checkf(record.isAuthority == (GetNetMode() != NM_Client),
+                   TEXT("tryRegister: isAuthority disagrees with the world-level net mode; the ")
+                   TEXT("spawn-slot table must be populated on the authority world only"));
+
+            auto& ringoutIC = record.simulatable->editAllState().editState()
+                .edit<brawlerRingout::InitialConditions>();
+
+// ⛔ THE OVER-CAPACITY ANSWER IS WRITTEN THROUGH, NOT CLAMPED. `acquire` returns
+// `kNoFreeSlot`, whose value is `kMaxSpawnPoints`, and the sub-sim's defensive index branch
+// turns that into a `[Warning][Ringout.spawnSlot]` and no teleport seed. Clamping to 0 here
+// would put the over-capacity character on top of whoever legitimately holds 0, silently.
+            ringoutIC.spawnSlot = m_spawnSlots.acquire(id);
+
+            UE_LOG(LogOGMgmt, Log,
+                TEXT("tryRegister: ring-out spawnSlot=%u assigned to id=%u"),
+                ringoutIC.spawnSlot, id);
+        }
 
         record.bodiesCreated = true;
         return TryRegisterStatus::Pending;
@@ -1803,6 +2092,13 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
 
 // The cap's denominator, reaped so a churning session is judged on the resident roster. §10
     m_authorityRegisteredIds.erase(id);
+
+// Same unregister contract for the ring-out spawn-slot table (task 3). ⛔ WITHOUT THIS a
+// session that churns characters exhausts a four-entry table and every later join is handed
+// the out-of-range value, respawning nowhere. UNGATED for the same reason the erase above is:
+// nothing on the client role ever acquired, so `release` is a no-op there by construction
+// rather than by a role test.
+    m_spawnSlots.release(id);
 
 // Same unregister contract for the display. ⛔ A kept ring is a leak keyed on a dead id. §10
     m_inputHistory.forgetCharacter(id);

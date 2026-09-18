@@ -152,6 +152,54 @@ inspects is mutated on the GAME THREAD alone (`createCacheFor`/`removeCacheFor`,
 registration facade), never the physics thread, so this is a same-thread read like the three
 above it, not a fourth crossing.
 
+### The second read crossing — the ring-out score push, and why its tear is the same one
+
+*(ring-out initiative task 5, 2026-09-13)*
+
+`ASimulationManagerUImpl::OnPostPhysicsStep` now copies each character's ring-out score out of
+`brawlerRingout::ScoreSystem` — reached through `m_systemsExec`, on the **game thread** — and
+onto that character's replicated `RingoutScore` property. `brawlerRingout::ScoreSystem`'s
+`postIntegrate` writes that table on the **physics thread**, beneath `onGameSimulation`. The two
+are not same-thread, so this is a crossing and the CROSSING table in the header gains a bullet.
+
+⭐ **It gets a bullet where the clock's seven diagnostic reads deliberately did not**, and the
+difference is worth stating so the precedent is not misread. Those were *more reads inside an
+entry point already on the list* (`pollInputHistoryLanes`), of words the argument above already
+covered. This is a **different member** — `m_systemsExec` — read from a **different call site**,
+neither of which the existing argument had ever looked at. A crossing table that silently absorbs
+new members is a table nobody can trust.
+
+**Why the tear is accepted, and it is the same two-part argument, not a new one.**
+
+* **The container cannot be restructured under the reader — the larger half, exactly as for
+  `pollInputHistory`.** `ScoreSystem`'s table is a `std::unordered_map`, and its only inserting
+  and erasing calls are `onCharacterRegistered` and `onCharacterUnregistered`. Both are driven
+  from `ASimulationManagerUImpl::tryRegister` and
+  `ASimulationManagerUImpl::unregisterFromNewFramework` — through `notifyCharacterRegistered` /
+  `notifyCharacterUnregistered` — and this class's own thread roster records both as game-thread
+  in full. The push's `scoreOf` is therefore same-thread with the only writer of the map's
+  structure, and the container cannot rehash under it.
+* **What can tear is one word, and the consequence is bounded.** The award reaches an entry that
+  already exists and adds to a `uint32_t`. A naturally-aligned four-byte load on x64 cannot tear,
+  so the worst observable outcome is that **one character's score is read one tick stale** and a
+  scoreboard row shows the previous number for one frame. The next pass corrects it, and the
+  value is cosmetic by construction — it reaches no integrator, no reconciler and no wire but its
+  own `UPROPERTY`.
+
+⛔ **THE FIRST BULLET HAS A PRECONDITION, AND IT IS THE ONE THING TO PROTECT.** `postIntegrate`
+awards through `operator[]`, which **inserts** for an id the roster has not got — a deliberate
+choice, so that an award to an unseeded id is a real award rather than a silently dropped one.
+An insert can rehash, **on the physics thread**, and that would break the first bullet outright
+rather than degrade it. It is unreachable in a legal session for a reason that is structural and
+not merely likely: `onCharacterRegistered` seeds every authority-registered id, and it is called
+from `tryRegister` **before** that function returns `TryRegisterStatus::Ready`, which is before
+the route entry the push walks is registered at all. The push carries a `checkf` stating exactly
+that, so the day the ordering changes, a Development build says so instead of racing.
+
+⚠ **A future system added to `m_systemsExec` does NOT inherit this argument.** It holds for
+`brawlerRingout::ScoreSystem` because of that type's own container discipline, not because
+`m_systemsExec` is safe to read. Anything else read from there needs its own paragraph here.
+
 ### Why the passthroughs are narrow rather than `edit*()` accessors
 
 `requestInputDelayIncreaseStall`, `publishClientEffectiveInputDelayTicks`, `getLastRelayedInput`,

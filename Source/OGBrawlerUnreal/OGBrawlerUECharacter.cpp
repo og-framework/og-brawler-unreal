@@ -24,9 +24,13 @@
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
+// [ringout task 5] For OGBLOG_G — OnRep_RingoutScore's one diagnostic line. The sink it
+// routes through is installed on BOTH roles by ASimulationManagerUImpl::BeginPlay.
+#include "OGBrawler/OGBrawlerLog.h"
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
+#include "OGBrawler/BrawlerScoreboardVisualization.h"
 #include "OGSimulation/DMathUtil.h"
 #include "glm/mat4x4.hpp"
 #include "glm/ext/matrix_transform.hpp"
@@ -322,6 +326,38 @@ namespace
 	};
 	constexpr int32 kBrawlerPaletteCount = UE_ARRAY_COUNT(kBrawlerPalette);
 
+	// ⭐⭐ [ringout task 10] THE SCOREBOARD NOW DRAWS THIS TINT INSTEAD OF A RAW CHARACTER
+	// ID, so two brawlers sharing one is no longer merely confusing in the world — it makes
+	// two ROWS OF THE BOARD indistinguishable, which is the one thing that column exists to
+	// prevent. The `%` wrap below is what could do it, and this is the gate that says it
+	// cannot for any board this project can draw.
+	//
+	// ⛔ THE BOUND IS THE SCOREBOARD'S OWN ROW CAP, NOT A FOURTH COPY OF THE 4. The board
+	// draws at most `kScoreboardMaxRows` rows, so it needs at least that many distinct tints;
+	// naming that constant rather than writing a literal is what stops this becoming yet
+	// another mirror of `kPreDietCharacterCap` / `brawlerRingout::kMaxSpawnPoints` — a
+	// duplication that OGBrawler/docs/BrawlerScoreboardVisualization-rationale.md section 8
+	// calls out by name. It is also the STRONGER bound: the advisory character cap is 4 and
+	// the row cap is 8.
+	//
+	// ⚠ WHAT THIS DOES *NOT* PROMISE, WRITTEN DOWN BECAUSE THE ASSERT LOOKS STRONGER THAN IT
+	// IS. The counter is bumped once per POSSESSION and never reclaims a leaver's index, so
+	// the guarantee is "the first `kBrawlerPaletteCount` possessions of a run get distinct
+	// tints", not "no two concurrent brawlers ever share one". A run with enough joins and
+	// rejoins to wrap past ten CAN hand a newcomer the tint of a fighter who never left. That
+	// is pre-existing behaviour of the palette, unchanged here, and it is far outside the
+	// ≤ 4-player session this mode is built for — but it is the honest bound.
+	//
+	// ⛔ THIS ASSERT IS ONE OF ONLY THREE MECHANISMS THAT REACH A `Source/OGBrawlerUnreal`
+	// FILE (finding F26: the compiler, a lint's file glob, and a pure header a Catch2 case
+	// can read). Shrinking the palette below the row cap is a compile error, not a review
+	// finding.
+	static_assert(
+		kBrawlerPaletteCount
+			>= static_cast<int32>(brawlerScoreboardVisualization::kScoreboardMaxRows),
+		"the brawler palette must carry at least one distinct tint per drawable scoreboard "
+		"row, or two rows of the ring-out scoreboard can show the same swatch");
+
 	// ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
 	// diverge from the authority's and hand two brawlers the same tint.
 	int32 gNextBrawlerColorIndex = 0;
@@ -333,11 +369,94 @@ void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	// ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
 	DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);
+
+	// ⛔⛔ [ringout task 5] NOT COND_OwnerOnly EITHER, AND HERE IT IS LOAD-BEARING RATHER
+	// THAN MERELY CORRECT. A scoreboard shows EVERYONE's score to EVERYONE: a viewer needs
+	// the other three rows far more than their own, which they could have read locally.
+	// ⚠ AND THIS PROJECT RUNS COUCH CO-OP — several brawlers share ONE connection, and only
+	// ONE of the pawns on that connection is that connection's owner. Under COND_OwnerOnly a
+	// four-player, two-machine session would replicate each machine's FIRST pawn and starve
+	// every sibling sitting next to it: player 2's scoreboard would show player 1's score,
+	// its own row frozen at whatever it last was, and both remote rows frozen at 0. The
+	// failure is silent, looks like "the score isn't updating", and reproduces only with
+	// more than one pawn per connection — which is the configuration the game is for.
+	// ⇒ The extra cost of the plain form is one int32 per character per CHANGE (the push
+	//   below writes nothing when the value is unchanged), not per tick.
+	DOREPLIFETIME(AOGBrawlerUECharacter, RingoutScore);
 }
 
 void AOGBrawlerUECharacter::OnRep_BrawlerColor()
 {
 	ApplyBrawlerColor();
+}
+
+// [ringout task 5] ⭐ CLIENT-SIDE ARRIVAL. There is no client-side WORK to do — the
+// scoreboard reads `GetRingoutScore()` at draw time and nothing is derived from the value —
+// so this hook exists for the one thing prose cannot give task 8's PIE run: a per-peer,
+// per-change record that the value CROSSED THE WIRE. Replication behaviour is not reachable
+// from the low-level-test target, so this line is the live verification.
+//
+// CADENCE: one line per character per score CHANGE, which is at most one per death tick.
+// ⛔ THE `[Warning]` PREFIX IS DELIBERATE AND IS NOT NOISE-BLINDNESS. `ogblog`'s sink routes
+// every message to `LogOGBrawler`, which `Config/DefaultEngine.ini` ships at `=Warning`, so a
+// bare `[Ringout.*]` tag is INVISIBLE in a default PIE run. The prefix raises this one line
+// above that setting. (⚠ `ScoreSystem::postIntegrate`'s own `[Ringout.score]` award line has
+// no prefix and IS silent by default — task 8 must raise `LogOGBrawler` to see the authority
+// half. Reported in `impl_notes_ringout_5.md` §6.)
+//
+// ⚠ The sink is installed by `ASimulationManagerUImpl::BeginPlay`. A score arriving before
+// that — which requires the manager to be missing, i.e. no simulation at all — is swallowed.
+void AOGBrawlerUECharacter::OnRep_RingoutScore()
+{
+	// ⛔ THE SIM ID, NOT THE PAWN'S. See GetSimCharacterId() - every other `id=%u` in the
+	// simulation's logs is the SimmableUpdateComponent's, so printing the pawn's would make
+	// this line unjoinable with the [Ringout.death] and [Ringout.spawnSlot] lines beside it.
+	OGBLOG_G("[Warning][Ringout.score.client] id=%u score=%d",
+		GetSimCharacterId(), static_cast<int>(RingoutScore));
+}
+
+// [ringout task 5] The join key. See the declaration for why it is not GetUniqueID().
+unsigned int AOGBrawlerUECharacter::GetSimCharacterId() const
+{
+	return SimmableUpdateComponent != nullptr
+		? static_cast<unsigned int>(SimmableUpdateComponent->GetUniqueID())
+		: 0u;
+}
+
+// [ringout task 5] THE SINGLE WRITE SITE FOR THE REPLICATED SCORE.
+void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)
+{
+	// ⛔ HasAuthority() IS LEGITIMATE HERE, AND THAT IS WORTH STATING BECAUSE IT IS NOT
+	// LEGITIMATE ON THE PUSHER. `ASimulationManagerUImpl` sets `bReplicates = false`, which
+	// pins its Role to authority on every peer and makes `HasAuthority()` a CONSTANT there —
+	// that file warns about it twice and the push uses the world-level `GetNetMode()` test
+	// instead. This class is an `APawn`, whose constructor sets `bReplicates = true`, so its
+	// Role is genuinely assigned by the network and this test genuinely discriminates. It is
+	// a `checkf` rather than a silent early-out because a client reaching this is a routing
+	// defect, not a condition to tolerate: the value would be overwritten by the next
+	// correction from the server anyway, hiding the bug.
+	checkf(HasAuthority(),
+		TEXT("SetAuthoritativeRingoutScore called on a non-authority peer (id=%u). The score ")
+		TEXT("is pushed only from ASimulationManagerUImpl::OnPostPhysicsStep under the ")
+		TEXT("world-level authority test; a client learns it through OnRep_RingoutScore."),
+		GetSimCharacterId());
+
+	// ⛔ THE UNCHANGED-VALUE GUARD. See the declaration: UE marks a replicated property dirty
+	// when it is ASSIGNED, and the comparison is against the last SENT value only for
+	// properties the replication system re-compares — which costs the comparison on the
+	// server for every character every net update. Returning here makes the common case (no
+	// death this pass, i.e. almost every pass) cost one int compare and nothing else.
+	if (RingoutScore == NewScore)
+		return;
+
+	RingoutScore = NewScore;
+
+	// ⚠ NO `OnRep_RingoutScore()` CALL HERE, and the asymmetry with `PossessedBy`'s
+	// `ApplyBrawlerColor()` is deliberate. That one self-calls because the listen-server
+	// host's own pawn gets no OnRep and the tint would otherwise never be APPLIED. Nothing
+	// is applied here — the scoreboard reads the property directly — so a self-call would
+	// only duplicate the diagnostic line on the host and make the log lie about which side
+	// received what.
 }
 
 void AOGBrawlerUECharacter::ApplyBrawlerColor()

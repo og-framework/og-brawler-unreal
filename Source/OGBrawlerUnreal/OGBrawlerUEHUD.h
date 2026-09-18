@@ -131,4 +131,12 @@ private:
 	                        float rowTopY,
 	                        brawlerInputHistoryVisualization::DirectionBucket bucket,
 	                        const FLinearColor& color);
+
+	// The ring-out scoreboard [ringout task 6b]: every fighter's id, score and -- while
+	// that fighter is out -- its respawn countdown, flush RIGHT and vertically centred.
+	// Silently draws nothing when this is not the first local player's HUD, when there is
+	// no manager, or when no character exists yet; each of those is an ordinary frame.
+	// ⛔ EVERY LAYOUT NUMBER, THE ORDERING AND BOTH CLAMPS COME FROM PURE CODE. This holds
+	//   the canvas calls and the gather, and decides no geometry of its own.
+	void drawScoreboard();
 };
