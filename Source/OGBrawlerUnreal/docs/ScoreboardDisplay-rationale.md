@@ -23,28 +23,23 @@ difference is stated here rather than left to be inferred from two files side by
 
 ## 0. Why the record sits in this tier
 
-Three docs tiers exist and `doc_anchor_lint.ps1` now discovers all three, so "which tier is
-linted" — decision D9's discriminator when the input-history display chose this one — no
-longer settles it. Two things do:
+Three docs tiers exist and `doc_anchor_lint.ps1` discovers all three, so "which tier is
+linted" — decision D9's discriminator when the input-history display chose this one — does
+not settle it. Two things do:
 
-* **Not the `og-brawler` docs tier**, though it is the same BUSL-1.1 licence and would
-  otherwise be the natural home for a document about a pure header. That tier travels with
-  the `og-brawler` submodule, and **every load-bearing claim below is about files that are
-  not in it**: three console variables registered in `Source/OGBrawlerUnreal`, a join
-  across a UE actor and a UE-side manager, and a draw method on `AOGBrawlerUEHUD`. A reader
-  who checked out only `og-brawler` would be holding a document whose subject is absent.
-  The pure header keeps its own reasoning in its own banner, where it belongs.
-* **Here.** `Source/OGBrawlerUnreal/docs` already holds this initiative's other rationale
-  (`SimulationManagerUImpl-rationale.md`, whose §1 carries the score push's threading
-  argument) and the sibling display's. One feature, one tier.
-
-⛔ **Superseded, 2026-09-16.** The pure header now carries its own record at
-`OGBrawler/docs/BrawlerScoreboardVisualization-rationale.md`, and the reason is not a change
-of mind about duplication — it is a test this section did not apply: **does the path resolve
-for someone who has checked out only that repository?** The `og-brawler` submodule **ships
-standalone**. A pure header whose reasoning lived only here would point at a directory such a
-reader does not have, which is a worse join than a duplicated paragraph. Licence subtree alone
-was the wrong discriminator.
+* **Does the path resolve for a reader who has checked out only that repository?** The
+  `og-brawler` submodule **ships standalone**, so the pure header's reasoning belongs in the
+  `og-brawler` docs tier and is kept there, at
+  `OGBrawler/docs/BrawlerScoreboardVisualization-rationale.md`. Reasoning about that header
+  held only here would point such a reader at a directory they do not have, which is a worse
+  join than a duplicated paragraph. ⛔ **Licence subtree alone does not decide it** — both
+  tiers are BUSL-1.1.
+* **Where does the subject live?** **Every load-bearing claim below is about files the
+  `og-brawler` submodule does not contain**: three console variables registered in
+  `Source/OGBrawlerUnreal`, a join across a UE actor and a UE-side manager, and a draw
+  method on `AOGBrawlerUEHUD`. `Source/OGBrawlerUnreal/docs` also already holds this
+  initiative's other rationale (`SimulationManagerUImpl-rationale.md`, whose §1 carries the
+  score push's threading argument) and the sibling display's. One feature, one tier.
 
 ⚠ **So the two documents overlap, and the overlap is load-bearing rather than accidental.**
 This file is authoritative for decisions the **UE layer** makes — the three console
@@ -235,14 +230,11 @@ sites so neither can be "fixed" in isolation. The original statement is in
   a running session and put two peers on different numbers. ⛔ **Nothing simulated is read
   from this display's files at all**, and the ring-out tunables are nowhere in them.
 
-  > ⚠ This bullet used to say *"the ring-out kill plane and respawn delay are this kind"*.
-  > **That is false, and false in the dangerous direction.** `killPlaneZ` and
-  > `respawnDelayTicks` are **not console variables at all** — they are defaulted constructor
-  > parameters of `brawlerRingout::StaticData` (`-500.f` and `120u`), and no console variable
-  > in this tree reaches either. Swept: the `OGBrawler.*` registrations are input, movement,
-  > input-history and scoreboard only. A reader who believed the old sentence would go looking
-  > for a console variable that does not exist — or, worse, add one believing the read-once
-  > discipline was already in place around it.
+  > ⛔ **`killPlaneZ` and `respawnDelayTicks` are not console variables at all.** They are
+  > defaulted constructor parameters of `brawlerRingout::StaticData` (`-500.f` and `120u`),
+  > and no console variable in this tree reaches either: the `OGBrawler.*` registrations are
+  > input, movement, input-history and scoreboard only. ⛔ **Do not look for a read-once
+  > discipline around them, and do not add a console variable believing one is in place.**
 * A **VIZ** CVar is the opposite case. It feeds nothing simulated, and its whole value is
   that a tuner can type `OGBrawler.ScoreboardScale 2` mid-session and see the **next** frame
   change. ⭐ **All three below are this kind.**
@@ -281,19 +273,13 @@ place only: at `GScoreboard`'s initialiser in `ScoreboardVisualizationUImpl.cpp`
 `DrawHUD` branch in `OGBrawlerUEHUD.cpp`, and here.
 
 ⚠ **The set is deliberately not counted.** A sentence naming a total is falsified by the
-next site that states the ruling or stops stating it — as happened twice: it once said
-*three* while the `DrawHUD` branch was a fourth, and the header's own copy has since been
-replaced by this document.
+next site that states the ruling or stops stating it.
 
-> ⚠ **[ringout task 16]** This paragraph said *three* places and the `DrawHUD` branch was
-> the fourth, so the set that "moves together" was under-counted by one — which is how the
-> next correction misses a copy. It also said *"every other visualization toggle defaults
-> off"*: swept 2026-09-14, **five input-history toggles initialise to `true`**
-> (`GInputHistoryDisplay`, `GInputHistoryProvenance`, `GInputHistoryInputDelay`,
-> `GInputHistoryCharacterState`, `GInputHistoryPauseIdle`). They are child bools folded
-> through `GInputHistory`, which is `false`, so nothing of that display draws until its
-> master is on. The surviving claim is about **masters**, and it is corrected to that in all
-> five places this initiative had written it.
+> ⛔ **The claim below is about MASTERS, and the distinction is load-bearing.** Five
+> input-history toggles initialise to `true` — `GInputHistoryDisplay`,
+> `GInputHistoryProvenance`, `GInputHistoryInputDelay`, `GInputHistoryCharacterState` and
+> `GInputHistoryPauseIdle` — but they are child bools folded through `GInputHistory`, which
+> is `false`, so nothing of that display draws until its master is on.
 
 Every other visualization **master** in this tree defaults off, and the reason is written at
 several of those sites: a debug draw nobody asked for should cost nothing. ⛔ **The
@@ -357,10 +343,10 @@ per drawn frame, for the reason in 4 above.
 ## 5. What this panel does *not* inherit from the input-history pane
 
 Each of these is a place where copying the precedent would be a defect. ⚠ **The list is not
-claimed to be complete and the count is deliberately not stated** — an earlier revision of
-the pure header said *"exactly THREE differences that matter"* and was already wrong when it
-was read, because `ScoreboardLayout::maxRows` is not console-driven while the pane's
-`visibleRows` **is** clamped.
+claimed to be complete and the count is deliberately not stated** — any total is one
+difference away from being wrong, and `ScoreboardLayout::maxRows`, which is not
+console-driven while the pane's `visibleRows` **is** clamped, is a difference no short count
+covers.
 
 **1. It is not single-character.** The input-history pane picks one character by selection
 through `firstLocalCharacterId`. A scoreboard draws everyone, so no filter of that kind
@@ -379,13 +365,11 @@ one; the pane's equivalent never did, because flush-left needs no measurement. H
 1920 would put the board 640 px **inboard of the right edge** on a 2560-wide ultrawide, and
 640 px **off-screen** at 1280.
 
-> ⚠ **[ringout task 15]** This line read *"640 px off-screen on an ultrawide"* until
-> 2026-09-14. That is the wrong direction: hardcoding a width larger than the viewport is
-> what pushes the board off-screen, so the off-screen case is the SMALLER viewport.
-> Measured through the shipped `placedScoreboardLayout`: at 2560 the hardcoded board's right
-> edge lands at 1920 against a correct 2560; at 1280 it lands at 1920 against a correct
-> 1280. The same transposition stood in `BrawlerScoreboardVisualization.h`'s DIFFERENCE 1
-> and is corrected there in the same pass.
+> ⚠ **Measured, not reasoned** — through the shipped `placedScoreboardLayout`: at 2560 the
+> hardcoded board's right edge lands at 1920 against a correct 2560; at 1280 it lands at
+> 1920 against a correct 1280. ⛔ **The direction is the point:** a hardcoded width LARGER
+> than the viewport is what pushes the board off-screen, so the off-screen case is the
+> SMALLER viewport.
 
 **3. It centres the DRAWN height, not a reserved window.** The pane reserves its full row
 window because rows arrive while you watch and a creeping top edge is unreadable. A

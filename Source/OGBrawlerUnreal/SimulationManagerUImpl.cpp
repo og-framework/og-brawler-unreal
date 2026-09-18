@@ -658,25 +658,6 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 	}
 
-// ---- [ringout task 4] THE SCORE SYSTEM'S ROLE GATE --------------------
-//
-// The ONE thing the UE layer contributes to the ring-out award: the bool. All of the law -
-// who is alive, who died, how many points, the id-ordered apply - is in
-// brawlerRingout::ScoreSystem, in engine-free core, where the LLT target can drive it. This
-// file holds no policy, exactly as it holds none for task 3's spawn-slot table.
-//
-// ⛔ worldIsAuthority, NOT HasAuthority(). bReplicates = false makes Role always authority on
-// this actor, so HasAuthority() is a CONSTANT here - see the warning at its computation above
-// and the checkf in tryRegister. This is the same world-level expression
-// USimmableUpdateComponent passes in as record.isAuthority.
-//
-// ⛔ ABOVE THE ROLE BRANCH, AND THAT PLACEMENT IS THE PROOF THE WINDOW IS EMPTY. The system's
-// hooks are reachable only through m_manager, which both branches below emplace. Setting the
-// flag here means no tick and no registration can reach the award before the role is known.
-// The flag's own default is false, so the failure mode of deleting this line is a scoreboard
-// stuck at zero - never a client inventing points.
-	m_systemsExec.get<brawlerRingout::ScoreSystem>().setIsAuthority(worldIsAuthority);
-
 	if (worldIsAuthority)
 	{
 		if (s_instances[0] != nullptr)
@@ -1413,35 +1394,26 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 
 // ---- [ringout task 5] THE SCORE PUSH ----------------------------------
 //
-// ⛔ AUTHORITY ONLY, AND THIS IS NOT HasAuthority(). `bReplicates = false` on this actor
-// pins Role to authority on every peer, so HasAuthority() is a CONSTANT here - the same
-// warning this file already carries at the BeginPlay computation and at tryRegister. The
-// world-level `GetNetMode() != NM_Client` is the expression `worldIsAuthority` names in
-// BeginPlay and the one USimmableUpdateComponent passes in as `record.isAuthority`.
+// ⛔ THE GATE IS `!runsPrediction()`, THE SAME EXPRESSION TWELVE LINES ABOVE, and it is now
+// the layer's ONLY role site for ring-out - [ringout task 19] deleted the BeginPlay wiring
+// line, the flag it wrote, and the two-sided checkf that cross-checked them, because there is
+// no longer a second gate to disagree with: brawlerRingout::ScoreSystem declares
+// kRoleAffinity = AuthorityOnly and SimulationSystemsExecutor skips it off the authority.
+// ⛔ NOT HasAuthority(): `bReplicates = false` pins Role to authority on every peer.
 //
-// ⛔ THE checkf IS OUTSIDE THE BRANCH ON PURPOSE. Inside it, it could only ever be evaluated
-// on the arm that makes it true. Out here it is a real two-sided tripwire on the one thing
-// this push and task 4's award have to agree about: they must be gated by the SAME bool. If
-// BeginPlay's wiring line is deleted, the award silently stops and this fires.
+// ⚠ THIS GATES THE REPLICATION, NOT THE AWARD. A client whose gate here were deleted would
+// push scores its ScoreSystem never computed - an empty roster, so zeroes over the replicated
+// values - which is loud rather than silent. Per F26 nothing mechanical checks this line.
 //
 // WHY HERE, beside updateVisualizationAll. This is the one game-thread point that runs
 // directly after the simulation has advanced, and harvesting a physics-side result for
 // PRESENTATION is exactly what its neighbour already does. The push is a poll, not an event:
 // it costs one int compare per character per pass when nothing changed, and the score
 // changes at most once per death tick.
+	if (m_manager.has_value() && !m_manager->runsPrediction())
 	{
-		const bool worldIsAuthority = (GetNetMode() != NM_Client);
-		const brawlerRingout::ScoreSystem& scoreSystem =
-			m_systemsExec.get<brawlerRingout::ScoreSystem>();
-
-		checkf(worldIsAuthority == scoreSystem.getIsAuthority(),
-			TEXT("Ring-out score push: the world-level authority test (%d) disagrees with the ")
-			TEXT("role ScoreSystem was wired with in BeginPlay (%d). One of the two gates has ")
-			TEXT("moved; the award and its replication must not be gated differently."),
-			worldIsAuthority ? 1 : 0, scoreSystem.getIsAuthority() ? 1 : 0);
-
-		if (worldIsAuthority)
-			pushRingoutScoresToCharacters(scoreSystem, m_delayedInputComponentsById);
+		pushRingoutScoresToCharacters(m_systemsExec.get<brawlerRingout::ScoreSystem>(),
+			m_delayedInputComponentsById);
 	}
 }
 

@@ -892,12 +892,12 @@ private:
         BrawlerSimulatables,
         simulatableBrawler::StaticData,
         brawlerHitRouting::System,
-// ⛔ [ringout task 4] THE AWARD FIRES ON ALL THREE ROLES FROM HERE - authority, client
-// prediction, and every resim replay tick - and it is GATED INSIDE the system by a flag
-// BeginPlay supplies, because SimulationTimeStep cannot tell a role from a clock. The flag
-// defaults to FALSE, so a wiring that forgets the call scores nothing rather than scoring
-// twice. See brawlerRingout::ScoreSystem::setIsAuthority for why a setter and not the
-// executor's piecewise_construct ctor.
+// ⛔ [ringout task 19] NO ROLE LOGIC LIVES HERE. Each system declares its own
+// kRoleAffinity and the executor gates every hook on the role SimulationManager hands it at
+// each fire - brawlerHitRouting::System is AllRoles and fires on all three, including every
+// resim replay tick; brawlerRingout::ScoreSystem is AuthorityOnly and fires nowhere else.
+// Nothing is wired at composition and nothing is stored: this alias just names the pack, and
+// its ORDER is the firing order. See OGSimulation/SystemRoleAffinity.h.
         brawlerRingout::ScoreSystem>;
 
 // Value-owned; default-constructs the routing and score systems. Passed by reference at emplace().
