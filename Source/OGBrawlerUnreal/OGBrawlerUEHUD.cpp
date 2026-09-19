@@ -181,6 +181,67 @@ FString buildInputDelayReadoutText(
 	return line;
 }
 
+// Built from the header model's fields ONLY. The word LOCAL / NEAREST says which stack
+// this is; on the nearest, the range it was chosen at and whether this client controls
+// it -- which is what says where its delay bar's client half came from.
+// ⛔ NO LIVE READ OF ANY POSITION: everything here is already in `header`.
+FString buildFrameMeterStackHeaderText(
+	const brawlerInputHistoryVisualization::FrameMeterStackHeader& header)
+{
+	// ⛔ THE WORD IS NOT DECORATION: both stacks carry an id, and an id alone cannot say
+	//   which of the two a reading belongs to.
+	const FString control = header.isLocallyControlled ? TEXT("LOCAL") : TEXT("REMOTE");
+
+	if (!header.isNearestStack)
+		return FString::Printf(TEXT("LOCAL id=%u"), header.characterId);
+
+	return FString::Printf(TEXT("NEAREST id=%u  d=%.1f m  %s"),
+		header.characterId, header.distanceMeters, *control);
+}
+
+// Built from the readout model's fields ONLY -- the pure header owns the facts, this
+// owns the string. ⛔ NO LIVE READ OF ANY RELAY: everything here is already in `readout`.
+FString buildRelayReadReadoutText(
+	const brawlerInputHistoryVisualization::RelayReadReadout& readout)
+{
+	// ⛔ A WORD, NOT A ZERO, when nothing has arrived: a `dA` of 0 is a legal LAN
+	//   schedule stamp, so printing one for "no stamp at all" states a fact that is false.
+	const FString stamp = readout.dLatestKnown
+		? FString::Printf(TEXT("relay dA=%u"), readout.dLatest)
+		: FString(TEXT("relay dA=-- (nothing arrived)"));
+
+	return stamp + FString::Printf(TEXT("  hit/miss/verify %u/%u/%u  noprobe %u"),
+		readout.hits, readout.misses, readout.verifyFails, readout.noProbes);
+}
+
+// The relay-health tally, on the SAME line the stamp above takes. Built from the readout
+// model's fields ONLY -- the pure header owns the facts, this owns the string.
+// ⛔ A WORD, NOT A ROW OF ZEROES, for a character this client controls: it resolves no
+//   relayed input at all, and printing 0/0/0 would state a measurement nobody made.
+FString buildRelayHealthReadoutText(
+	const brawlerInputHistoryVisualization::RelayHealthReadout& readout)
+{
+	if (readout.local)
+		return TEXT("relay: LOCAL - no relayed input");
+
+	// ⛔ THE CAUSES ARE THE BAR'S OWN RUN LETTERS, so the line and the cells spell one
+	//   vocabulary rather than two.
+	const FString fallback = FString::Printf(
+		TEXT("fb %u (L %u/S %u/O %u/V %u)"),
+		readout.fallbackPending + readout.arrivedReplayable + readout.arrivedTooLate
+			+ readout.neverArrived,
+		readout.loss, readout.starved, readout.evicted, readout.verify);
+
+	const FString lateness = readout.medianLatenessKnown
+		? FString::Printf(TEXT("late %u (med %u t)"),
+			readout.arrivedReplayable + readout.arrivedTooLate, readout.medianLatenessTicks)
+		: FString(TEXT("late 0"));
+
+	return FString::Printf(TEXT("%s  %s  toolate %u  never %u  pending %u"),
+		*fallback, *lateness, readout.arrivedTooLate, readout.neverArrived,
+		readout.fallbackPending);
+}
+
 } // namespace
 
 void AOGBrawlerUEHUD::DrawHUD()
@@ -278,6 +339,19 @@ void AOGBrawlerUEHUD::drawInputHistoryPanel()
 	{
 		drawInputHistoryRow(layout, rows->at(panelRingIndexForSlot(rows->size(), slot)), slot);
 	}
+
+	// The meter draws a second stack for the nearest brawler and this panel cannot: its
+	// rows come from a capture line only a locally controlled character has. A reader
+	// seeing two stacks and one panel would otherwise be guessing whose rows these are.
+	// ⛔ THE ABSENCE IS DRAWN, NOT LEFT SILENT.
+	if (!m_nearestCharacterId.has_value())
+		return;
+
+	const FString placeholder =
+		FString::Printf(TEXT("NEAREST id=%u - no capture line"), *m_nearestCharacterId);
+
+	DrawText(placeholder, kIdleButtons, panelPlaceholderX(layout), panelPlaceholderTopY(layout),
+		GEngine->GetSmallFont(), layout.textScale);
 }
 
 void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
@@ -292,10 +366,103 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 	if (manager == nullptr)
 		return;
 
+	// The second stack's subject, chosen from positions that move every frame and held
+	// across frames by the pure selector's own hysteresis.
+	// ⛔ THE CHOICE IS FORGOTTEN WHILE THE STACK IS OFF, so switching it back on picks
+	//   from where the fight is NOW rather than resuming one made from stale positions.
+	std::optional<unsigned int> nearestId;
+	float                       nearestDistanceCm = 0.f;
+
+	if (inputHistoryVisualizationUImpl::nearestStackEnabled())
+	{
+		nearestId = inputHistoryVisualizationUImpl::nearestCharacterIdTo(
+			manager, characterId, m_nearestCharacterId, nearestDistanceCm);
+		m_nearestCharacterId = nearestId;
+	}
+	else
+	{
+		m_nearestCharacterId.reset();
+	}
+
+	// ⛔ ONE MEASURE FEEDS BOTH STACKS' BANDS. Two would differ by a pixel and the
+	//   lift would leave the stacks overlapping or gapped by that pixel.
+	const float labelHeight = meterLabelHeight();
+
+	// How far the primary is raised so the nearest can have the anchor. With no second
+	// stack this is ZERO, and the primary is then drawn from exactly the geometry it
+	// always was -- which is what makes the one-stack display pixel-for-pixel today's.
+	float liftPixels = 0.f;
+
+	if (nearestId.has_value())
+	{
+		// ⛔ TWO SELECTIONS, BECAUSE THE TWO STACKS DO NOT DRAW THE SAME BARS: the
+		//   relay-health bar is on the stack following someone else's character alone.
+		const FrameMeterBarSelection selection =
+			inputHistoryVisualizationUImpl::barSelection(false);
+		const FrameMeterBarSelection nearestSelection =
+			inputHistoryVisualizationUImpl::barSelection(true);
+
+		// The PRIMARY stack's own readouts, because it is the primary that moves: its
+		// tier line, its residency line, and the clock line below them.
+		// A lift that shrank on a role with no clock reading would move both stacks for a
+		// reason that has nothing to do with the display.
+		// ⛔ THE CLOCK LINE IS RESERVED WHETHER OR NOT THIS ROLE HAS A CLOCK.
+		const uint32_t primaryReadoutLines =
+			(frameMeterBarSlotOf(selection, FrameMeterBarKind::InputDelay).has_value()
+				? 1u : 0u)
+			+ (frameMeterBarSlotOf(selection, FrameMeterBarKind::Provenance).has_value()
+				? 1u : 0u)
+			+ 1u;
+
+		// ⛔ THE ANCHORED STACK'S BAR COUNT IS AN ARGUMENT: its bars are drawn ABOVE an
+		//   origin pinned to the bottom margin, so a taller bar band raises its top edge.
+		liftPixels = frameMeterPrimaryLift(FrameMeterLayout{},
+			frameMeterEnabledBarCount(selection), primaryReadoutLines, labelHeight,
+			frameMeterEnabledBarCount(nearestSelection));
+
+		FrameMeterStackHeader primaryHeader;
+		primaryHeader.characterId         = characterId;
+		primaryHeader.isLocallyControlled = true;
+
+		drawInputHistoryFrameMeterStack(*manager, characterId, liftPixels, labelHeight,
+			primaryHeader);
+
+		FrameMeterStackHeader nearestHeader;
+		nearestHeader.isNearestStack = true;
+		nearestHeader.characterId    = *nearestId;
+		// Centimetres are the simulation's unit and metres are the one a reader has an
+		// intuition for at fighting range.
+		nearestHeader.distanceMeters = nearestDistanceCm * 0.01f;
+		// ⛔ THE MANAGER'S ONE LOCALITY TEST, asked once and carried in the header from
+		//   here on: a ring that has not been created yet is not a local character.
+		nearestHeader.isLocallyControlled =
+			manager->isLocallyControlledOnThisPeer(*nearestId);
+
+		drawInputHistoryFrameMeterStack(*manager, *nearestId, 0.f, labelHeight, nearestHeader);
+		return;
+	}
+
+	drawInputHistoryFrameMeterStack(*manager, characterId, liftPixels, labelHeight,
+		std::nullopt);
+}
+
+void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
+	const ASimulationManagerUImpl& manager,
+	unsigned int                   characterId,
+	float                          liftPixels,
+	float                          labelHeight,
+	const std::optional<brawlerInputHistoryVisualization::FrameMeterStackHeader>& header)
+{
+	using namespace brawlerInputHistoryVisualization;
+
 	// ⛔ POINTER TO CONST, and it stays one: the bars may not write a cell they draw.
-	const InputHistoryTickLanes* lanes = manager->getInputHistoryLanes(characterId);
+	const InputHistoryTickLanes* lanes = manager.getInputHistoryLanes(characterId);
 	if (lanes == nullptr || !lanes->hasAxis())
 		return;
+
+	// ⛔ ASKED ONCE: whether this is the second stack decides two readouts and nothing
+	//   else, and two tests of one fact could disagree.
+	const bool isNearestStack = header.has_value() && header->isNearestStack;
 
 	// A second window would drift by a tick, and a vertical slice through the two bars
 	// would then quietly mean two different things.
@@ -305,18 +472,30 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 
 	// The selection each bar's own CVar makes, and the compaction it buys -- both come
 	// straight from the pure header; nothing here recomputes a slot.
-	const FrameMeterBarSelection selection = inputHistoryVisualizationUImpl::barSelection();
+	// The stack that follows someone else's character is the one with a relay to report on.
+	const FrameMeterBarSelection selection =
+		inputHistoryVisualizationUImpl::barSelection(isNearestStack);
 	const uint32_t               barCount  = frameMeterEnabledBarCount(selection);
+
+	// ⛔ THE HEADER'S ANSWER, NEVER A SECOND TEST: the one locality read was made where the
+	//   nearest was chosen. A stack drawn without a header is the primary, which is local.
+	const bool isLocallyControlled = !header.has_value() || header->isLocallyControlled;
 
 	// ⛔ ZERO BARS DRAWS NOTHING AND COMPUTES NO GEOMETRY -- `DrawHUD` already gates this
 	//   whole method on `anyBarEnabled()`, so this is a second, cheap fence, not the only one.
 	if (barCount == 0u)
 		return;
 
-	const FrameMeterLayout   layout;
-	const FrameMeterGeometry geometry = frameMeterGeometryFor(layout,
-		static_cast<float>(Canvas->SizeX), static_cast<float>(Canvas->SizeY),
-		frameMeterCellCount(window), barCount);
+	const FrameMeterLayout layout;
+
+	// `frameMeterGeometryFor` computes the anchored geometry it always computed, and a
+	// lift of 0 returns it unchanged -- which is why a single stack cannot have moved.
+	// ⛔ THE LIFT IS A STEP ON THE ANSWER, NEVER AN ARGUMENT TO IT.
+	const FrameMeterGeometry geometry = frameMeterLiftedBy(
+		frameMeterGeometryFor(layout,
+			static_cast<float>(Canvas->SizeX), static_cast<float>(Canvas->SizeY),
+			frameMeterCellCount(window), barCount),
+		liftPixels);
 
 	if (geometry.cellCount == 0u)
 		return;
@@ -333,6 +512,15 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 	// delay bar is absent, line 1 when it has already claimed line 0.
 	const bool delaySlotPresent =
 		frameMeterBarSlotOf(selection, FrameMeterBarKind::InputDelay).has_value();
+
+	const bool relaySlotPresent =
+		frameMeterBarSlotOf(selection, FrameMeterBarKind::RelayHealth).has_value();
+
+	// The primary spends it on the delay decomposition and the nearest on the relay
+	// reading; the two replace each other and never stack, which is what keeps the two
+	// stacks the same number of readout rows tall.
+	// ⛔ LINE 0 HAS ONE OWNER PER STACK.
+	const bool firstReadoutLineClaimed = isNearestStack ? relaySlotPresent : delaySlotPresent;
 
 	// Each bar draws at its OWN slot among the enabled bars -- `frameMeterBarSlotOf` is the
 	// only place compaction happens, so an absent bar simply has no slot to draw at.
@@ -354,7 +542,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		}
 
 		drawFrameMeterResidencyReadout(geometry, layout,
-			buildProvenanceResidencyReadout(*lanes), delaySlotPresent ? 1u : 0u);
+			buildProvenanceResidencyReadout(*lanes), firstReadoutLineClaimed ? 1u : 0u);
 	}
 
 	// ⛔ THE READOUT IS DRAWN ONLY WHEN THE DELAY BAR IS: it describes that bar alone.
@@ -365,7 +553,24 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		drawFrameMeterBar(geometry, bar, *slot, FrameMeterBarKind::InputDelay,
 			&delayVerdictStyleOfOrdinal);
 
-		drawFrameMeterDelayReadout(geometry, layout, buildInputDelayReadout(*lanes, window));
+		// A tier is a property of the LOCAL connection and says nothing about a remote
+		// proxy, so the nearest stack spends that line on the relay bar's own reading below.
+		if (!isNearestStack)
+			drawFrameMeterDelayReadout(geometry, layout, buildInputDelayReadout(*lanes, window));
+	}
+
+	// ⛔ THE READOUT IS DRAWN ONLY WHEN THE RELAY BAR IS: it describes that bar alone,
+	//   exactly as the delay and residency readings describe theirs.
+	if (const std::optional<uint32_t> slot =
+			frameMeterBarSlotOf(selection, FrameMeterBarKind::RelayHealth))
+	{
+		readRelayHealthBar(*lanes, window, isLocallyControlled, bar);
+		drawFrameMeterBar(geometry, bar, *slot, FrameMeterBarKind::RelayHealth,
+			&relayReadVerdictStyleOfOrdinal);
+
+		drawFrameMeterRelayReadout(geometry, layout,
+			manager.getRelayReadReadout(characterId),
+			buildRelayHealthReadout(*lanes, window, isLocallyControlled));
 	}
 
 	if (const std::optional<uint32_t> slot =
@@ -386,11 +591,87 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 	drawFrameMeterAuthorityMarker(geometry, layout,
 		frameMeterAuthorityMarkerOf(*lanes, window));
 
-	// ⛔ THE NEXT LINE AFTER WHICHEVER READOUTS THIS SELECTION DREW -- never a claimed one.
-	const uint32_t clockLine = (delaySlotPresent ? 1u : 0u)
-		+ (frameMeterBarSlotOf(selection, FrameMeterBarKind::Provenance).has_value() ? 1u : 0u);
+	// It describes THIS CLIENT'S AXIS, which both stacks share, so a second copy would be
+	// the same reading printed twice -- and under a remote's id it would read as that
+	// remote's clock, which nothing here knows anything about.
+	// ⛔ THE CLOCK IS ON THE PRIMARY ONLY.
+	if (!isNearestStack)
+	{
+		// ⛔ THE NEXT LINE AFTER WHICHEVER READOUTS THIS SELECTION DREW -- never a claimed one.
+		const uint32_t clockLine = (delaySlotPresent ? 1u : 0u)
+			+ (frameMeterBarSlotOf(selection, FrameMeterBarKind::Provenance).has_value() ? 1u : 0u);
 
-	drawFrameMeterClockReadout(geometry, layout, buildClockDriftReadout(*lanes), clockLine);
+		drawFrameMeterClockReadout(geometry, layout, buildClockDriftReadout(*lanes), clockLine);
+	}
+
+	// ⛔ LAST, AND ONLY WHEN THERE ARE TWO STACKS TO TELL APART. One stack alone is
+	//   unambiguous, and a label it never had is a pixel it never had.
+	if (header.has_value())
+		drawFrameMeterStackHeader(geometry, layout, *header);
+}
+
+void AOGBrawlerUEHUD::drawFrameMeterStackHeader(
+	const brawlerInputHistoryVisualization::FrameMeterGeometry&    geometry,
+	const brawlerInputHistoryVisualization::FrameMeterLayout&      layout,
+	const brawlerInputHistoryVisualization::FrameMeterStackHeader& header)
+{
+	using namespace brawlerInputHistoryVisualization;
+
+	const FString text = buildFrameMeterStackHeaderText(header);
+	UFont* const  font = GEngine->GetSmallFont();
+
+	float labelWidth  = 0.f;
+	float labelHeight = 0.f;
+	GetTextSize(text, labelWidth, labelHeight, font);
+
+	// The elision counts in this band are centred on the columns they mark, so the two
+	// share a line without sharing a place; a header on a line of its own would cost every
+	// stack another row of the margin the second stack was only just fitted into.
+	// ⛔ FLUSH WITH THE BARS' OWN LEFT EDGE, in the elision label band.
+	DrawText(text, kMeterLightInk, geometry.originX,
+		frameMeterElisionLabelTopY(geometry, layout, labelHeight), font);
+}
+
+void AOGBrawlerUEHUD::drawFrameMeterRelayReadout(
+	const brawlerInputHistoryVisualization::FrameMeterGeometry& geometry,
+	const brawlerInputHistoryVisualization::FrameMeterLayout&   layout,
+	const brawlerInputHistoryVisualization::RelayReadReadout&   readout,
+	const brawlerInputHistoryVisualization::RelayHealthReadout& health)
+{
+	using namespace brawlerInputHistoryVisualization;
+
+	// ⛔ NOTHING IS DRAWN WITHOUT A READING: this client has served no relayed read for
+	//   that character and holds no cell about one, so there is no relay to report on.
+	if (!readout.present && !health.present)
+		return;
+
+	// A locally controlled character has no ring to have stamped a schedule, so the health
+	// line stands alone rather than being appended to a stamp that does not exist.
+	const FString text = health.local
+		? buildRelayHealthReadoutText(health)
+		: buildRelayReadReadoutText(readout) + TEXT("  ")
+			+ buildRelayHealthReadoutText(health);
+	UFont* const  font = GEngine->GetSmallFont();
+
+	float labelWidth  = 0.f;
+	float labelHeight = 0.f;
+	GetTextSize(text, labelWidth, labelHeight, font);
+
+	// The same line the tier decomposition takes on the primary, through the same
+	// placement helper: the two readings replace each other rather than stacking.
+	DrawText(text, kMeterLightInk, geometry.originX,
+		frameMeterDelayReadoutTopY(geometry, layout, labelHeight), font);
+}
+
+float AOGBrawlerUEHUD::meterLabelHeight()
+{
+	// A digit, because every band this places holds one and the small font is fixed
+	// width; the string is a probe for the FONT's line height, not for this text.
+	float probeWidth  = 0.f;
+	float probeHeight = 0.f;
+	GetTextSize(TEXT("0"), probeWidth, probeHeight, GEngine->GetSmallFont());
+
+	return probeHeight;
 }
 
 void AOGBrawlerUEHUD::drawFrameMeterAxisEvents(
@@ -616,7 +897,8 @@ void AOGBrawlerUEHUD::drawFrameMeterBar(
 	}
 
 	// ⛔ DECIDED IN THE PURE HEADER, NOT HERE -- delay-bar runs arrive one tick in N, noise.
-	if (!frameMeterBarDrawsRunLabels(kind))
+	const FrameMeterRunLabel labelKind = frameMeterRunLabelOf(kind);
+	if (labelKind == FrameMeterRunLabel::None)
 		return;
 
 	LaneRunList runs;
@@ -626,13 +908,26 @@ void AOGBrawlerUEHUD::drawFrameMeterBar(
 	{
 		const LaneRun& run = runs.runs[index];
 
+		// The cause letter is always one character wide; a run length is as wide as it reads.
+		const bool  isLetter = labelKind == FrameMeterRunLabel::CauseLetter;
+		const TCHAR letter   = isLetter
+			? static_cast<TCHAR>(relayMissLabelLetter(static_cast<RelayMissLabel>(run.label)))
+			: TCHAR(0);
+
+		// ⛔ A RUN WITH NO CAUSE TO NAME GETS NO LABEL: a hit names nothing, and a blank
+		//   glyph drawn on it would read as a cause the display could not identify.
+		if (isLetter && letter == TCHAR(0))
+			continue;
+
 		// Overlapping neighbours is expected at narrow cells and the reference does it
-		// too; a number narrower than its own run is the only one worth drawing at all.
-		if (!runLabelFits(geometry, run))
+		// too; a label narrower than its own run is the only one worth drawing at all.
+		if (!runLabelFits(geometry, run, isLetter ? 1u : decimalDigitCount(run.length)))
 			continue;
 
 		const LaneCellStyle style = styleOf(run.value);
-		const FString       label = FString::Printf(TEXT("%u"), run.length);
+		const FString       label = isLetter
+			? FString::Printf(TEXT("%c"), letter)
+			: FString::Printf(TEXT("%u"), run.length);
 
 		float labelWidth  = 0.f;
 		float labelHeight = 0.f;

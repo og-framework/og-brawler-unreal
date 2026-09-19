@@ -22,6 +22,7 @@
 #include "GameFramework/HUD.h"
 
 #include <cstddef>
+#include <optional>
 
 #include "OGBrawler/BrawlerInputHistoryVisualizationBars.h"
 #include "OGBrawler/BrawlerInputHistoryVisualizationPanel.h"
@@ -48,8 +49,52 @@ private:
 	// manager or no history yet -- every one of those is an ordinary frame.
 	void drawInputHistoryPanel();
 
-	// The two stacked frame-meter bars, one cell per capture tick, newest at the right.
+	// The meter, as a whole: which characters its stacks are about, and where each one
+	// sits. ⛔ THE ONLY PLACE THE SECOND STACK'S EXISTENCE IS DECIDED.
 	void drawInputHistoryFrameMeter();
+
+	// ONE stack of bars, one cell per capture tick, newest at the right.
+	//
+	// `liftPixels` raises it off the meter's own bottom anchor so another stack can take
+	// that anchor; 0 IS the anchor. `header` names the character the bars are about and
+	// is drawn only when there are two stacks to tell apart -- one stack alone is the
+	// display that shipped before this, down to the pixel.
+	// The tier line becomes the relay line, and the clock -- which describes the axis
+	// rather than a character -- is drawn on the primary alone.
+	// ⛔ THE NEAREST STACK SWAPS TWO READOUTS, NEVER THE BARS.
+	void drawInputHistoryFrameMeterStack(
+		const ASimulationManagerUImpl&                                 manager,
+		unsigned int                                                   characterId,
+		float                                                          liftPixels,
+		float                                                          labelHeight,
+		const std::optional<brawlerInputHistoryVisualization::FrameMeterStackHeader>& header);
+
+	// The one line that says which character a stack is about, in its label band.
+	// ⛔ EVERY TOKEN COMES FROM THE HEADER MODEL. This formats a string; it reads nothing.
+	void drawFrameMeterStackHeader(
+		const brawlerInputHistoryVisualization::FrameMeterGeometry&    geometry,
+		const brawlerInputHistoryVisualization::FrameMeterLayout&      layout,
+		const brawlerInputHistoryVisualization::FrameMeterStackHeader& header);
+
+	// The relay reading, where the primary stack shows its tier decomposition. Silently
+	// draws nothing when the readout is not `present` -- this client has served no
+	// relayed read for that character.
+	// ⛔ EVERY TOKEN COMES FROM THE READOUT MODEL. This formats a string; it reads nothing.
+	void drawFrameMeterRelayReadout(
+		const brawlerInputHistoryVisualization::FrameMeterGeometry& geometry,
+		const brawlerInputHistoryVisualization::FrameMeterLayout&   layout,
+		const brawlerInputHistoryVisualization::RelayReadReadout&   readout,
+		const brawlerInputHistoryVisualization::RelayHealthReadout& health);
+
+	// The small font's line height, measured once per drawn frame. Every band on both
+	// stacks is placed from this ONE number.
+	// ⛔ MEASURED ONCE: two measures can differ by a pixel and the stacks would overlap.
+	float meterLabelHeight();
+
+	// Last frame's nearest choice, so the pure selector's hysteresis has something to
+	// hold. ⛔ A DRAWING-SIDE MEMORY OF A DRAWING-SIDE CHOICE -- nothing reads it back
+	//   into the simulation, and it is dropped whenever the second stack is switched off.
+	std::optional<unsigned int> m_nearestCharacterId;
 
 	// One bar, from cells the pure header already read out of a lane. The palette arrives
 	// as the lane's own style table, so this method names no colour of its own.

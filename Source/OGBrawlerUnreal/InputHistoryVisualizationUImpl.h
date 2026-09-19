@@ -35,6 +35,7 @@
 #include "OGBrawler/BrawlerInputHistoryVisualizationPoll.h"
 
 class APlayerController;
+class ASimulationManagerUImpl;
 class UWorld;
 
 namespace inputHistoryVisualizationUImpl
@@ -60,9 +61,17 @@ bool inputDelayEnabled();
 // DEFAULT ON.
 bool characterStateEnabled();
 
-// The three bar toggles folded into the pure header's own selection type -- the only
-// shape `frameMeterEnabledBarCount` / `frameMeterBarSlotOf` accept.
-brawlerInputHistoryVisualization::FrameMeterBarSelection barSelection();
+// The one switch for the RELAY-HEALTH BAR -- `OGBrawler.InputHistoryRelayHealth`,
+// DEFAULT ON. ⛔ FOLDS THE MASTER IN, same as every accessor on this page.
+bool relayHealthEnabled();
+
+// The bar toggles folded into the pure header's own selection type -- the only shape
+// `frameMeterEnabledBarCount` / `frameMeterBarSlotOf` accept.
+//
+// `isNearestStack` is the one thing the toggles alone cannot say: the relay-health bar
+// belongs to the stack following someone else's character and to no other, so the answer
+// differs per stack. ⛔ THE ONLY PLACE THAT TIE IS MADE.
+brawlerInputHistoryVisualization::FrameMeterBarSelection barSelection(bool isNearestStack);
 
 // True iff any bar is on. ⛔ THE LANE POLL'S OWN GATE, asked instead of ORing the three
 // bar accessors at the call site: zero bars on needs no lane data at all.
@@ -112,6 +121,28 @@ APlayerController* firstLocalPlayerController(const UWorld* world);
 // The first-joined local player's character id, or nullopt when there is none to
 // have -- a dedicated server, or a client before its pawn has been possessed.
 std::optional<unsigned int> firstLocalCharacterId(const UWorld* world);
+
+// The one switch for the SECOND STACK -- `OGBrawler.InputHistoryNearest`, DEFAULT ON.
+// Off, the meter draws exactly the one stack it drew before this existed.
+// ⛔ FOLDS THE MASTER IN, same as every accessor on this page.
+bool nearestStackEnabled();
+
+// The brawler nearest `localId`, or nullopt when the world holds no other -- the
+// character the second stack draws.
+//
+// `previousChoice` is last frame's answer, held through the pure selector's own
+// hysteresis so two candidates at nearly equal range do not swap the stack every frame.
+//
+// `outDistanceCm` is the range the answer was chosen at, and is left untouched when
+// there is no answer. The distance comes off the SAME gather the choice was made from,
+// so a header cannot report a range the choice was not made at.
+// ⛔ AN OUT-PARAM RATHER THAN A SECOND CALL.
+// ⛔ THE GATHER IS THE MANAGER'S AND THE CHOICE IS THE PURE HEADER'S. This function
+//   owns neither; it is the one place they are put together.
+std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* manager,
+                                                 unsigned int                   localId,
+                                                 std::optional<unsigned int>    previousChoice,
+                                                 float&                         outDistanceCm);
 
 // ---------------------------------------------------------------------------
 // THE TWO DIAGNOSTIC SEAMS BEHIND ONE READER, both asked at the SAME simulation tick.
@@ -214,6 +245,38 @@ public:
 	//
 	// `clock` is this poll's ONE read of the client clock, or nullopt on a role that does
 	// not predict. Paired with `liveSimTick` the same way, for the same reason.
+	//
+	// `remoteObservations` is the relayed reads this client served for a REMOTE
+	// character, and supplies the delay lane's client half for it. `remoteArrivals` says
+	// when each relayed capture finally got here and `rollbackWindowTicks` how far back a
+	// resim may still reach -- together, the relay-health lane. A locally controlled
+	// character passes none of the three and keeps the delay line it always had.
+	// ⛔ THE SOURCES ARE SELECTED BY TYPE -- the pure poll's own fence, so this
+	//   layer forwards a choice rather than making a second one.
+	template <typename SlotReader, typename RemoteObservationsT, typename RemoteArrivalsT>
+	brawlerInputHistoryVisualization::TickLanePollCounts pollLanes(
+		unsigned int                                                      id,
+		const SlotReader&                                                 reader,
+		uint32_t                                                          liveSimTick,
+		DAttackState                                                      machineState,
+		std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput,
+		bool                                                              pauseWhileIdle,
+		std::optional<uint32_t>                                           predictionOffsetTicks,
+		std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay,
+		std::optional<brawlerInputHistoryVisualization::ClockDriftReading>        clock,
+		const RemoteObservationsT&                                        remoteObservations,
+		const RemoteArrivalsT&                                            remoteArrivals,
+		uint32_t                                                          rollbackWindowTicks)
+	{
+		// ⛔ SCRATCH, REBUILT PER POLL: a kept inversion would outlive the slots it describes.
+		brawlerInputHistoryVisualization::AppliedCaptureInversion inversion;
+
+		return brawlerInputHistoryVisualization::pollInputHistoryLanes(
+			reader, liveSimTick, machineState, liveInput, pauseWhileIdle,
+			predictionOffsetTicks, delay, clock, remoteObservations, remoteArrivals,
+			rollbackWindowTicks, inversion, m_byId[id].lanes);
+	}
+
 	template <typename SlotReader>
 	brawlerInputHistoryVisualization::TickLanePollCounts pollLanes(
 		unsigned int                                                      id,
@@ -226,12 +289,10 @@ public:
 		std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay,
 		std::optional<brawlerInputHistoryVisualization::ClockDriftReading>        clock)
 	{
-		// ⛔ SCRATCH, REBUILT PER POLL: a kept inversion would outlive the slots it describes.
-		brawlerInputHistoryVisualization::AppliedCaptureInversion inversion;
-
-		return brawlerInputHistoryVisualization::pollInputHistoryLanes(
-			reader, liveSimTick, machineState, liveInput, pauseWhileIdle,
-			predictionOffsetTicks, delay, clock, inversion, m_byId[id].lanes);
+		return pollLanes(id, reader, liveSimTick, machineState, liveInput, pauseWhileIdle,
+			predictionOffsetTicks, delay, clock,
+			brawlerInputHistoryVisualization::NoRemoteDelayObservations{},
+			brawlerInputHistoryVisualization::NoRemoteInputArrivals{}, 0u);
 	}
 
 	// The folded rows for `id`, or nullptr when that character has never been polled.

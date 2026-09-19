@@ -13,6 +13,7 @@
 #include "OGBrawler/BrawlerInputHistoryVisualizationPanel.h"
 
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 
 namespace
 {
@@ -56,6 +57,36 @@ static FAutoConsoleVariableRef CVarInputHistoryCharacterState(
 	GInputHistoryCharacterState,
 	TEXT("1 = on (default), 0 = off. Draws the attack-machine-state frame-meter bar and ")
 	TEXT("runs the lane poll that feeds it, when the master OGBrawler.InputHistory is also on."),
+	ECVF_Default);
+
+// ⭐ DEFAULT ON, and it is the bar the relay-health investigation is for.
+bool GInputHistoryRelayHealth = true;
+
+static FAutoConsoleVariableRef CVarInputHistoryRelayHealth(
+	TEXT("OGBrawler.InputHistoryRelayHealth"),
+	GInputHistoryRelayHealth,
+	TEXT("1 = on (default), 0 = off. Draws the relay-health frame-meter bar -- per tick, ")
+	TEXT("whether the scheduled relayed read found the capture it wanted or fell back, and ")
+	TEXT("whether that capture ever arrived. It is drawn on the NEAREST stack only: the ")
+	TEXT("primary follows a character this client controls, which resolves no relayed input ")
+	TEXT("at all. Needs the master OGBrawler.InputHistory and OGBrawler.InputHistoryNearest."),
+	ECVF_Default);
+
+// It is an escape hatch rather than a feature flag: at 0 the meter draws exactly the one
+// stack it drew before the second one existed.
+// ⭐ DEFAULT ON while the remote weapon-swing investigation it was built for is open.
+bool GInputHistoryNearest = true;
+
+static FAutoConsoleVariableRef CVarInputHistoryNearest(
+	TEXT("OGBrawler.InputHistoryNearest"),
+	GInputHistoryNearest,
+	TEXT("1 = on (default), 0 = off. Draws a SECOND frame-meter stack for the brawler ")
+	TEXT("nearest the first local one -- the only way a remote proxy's corrections, ")
+	TEXT("machine state and relayed-input delay are visible at all. The nearest stack ")
+	TEXT("takes the bottom anchor and the primary is lifted one stack above it; at 0 the ")
+	TEXT("primary returns to the anchor and nothing else is drawn. Every other ")
+	TEXT("input-history CVar keeps its meaning and gates BOTH stacks, when the master ")
+	TEXT("OGBrawler.InputHistory is also on."),
 	ECVF_Default);
 
 // ⛔ THIS BOUNDS THE READ, NEVER THE ALLOCATION -- the lanes are always 240 ticks wide.
@@ -174,18 +205,33 @@ bool characterStateEnabled()
 	return GInputHistory && GInputHistoryCharacterState;
 }
 
-brawlerInputHistoryVisualization::FrameMeterBarSelection barSelection()
+bool relayHealthEnabled()
+{
+	return GInputHistory && GInputHistoryRelayHealth;
+}
+
+brawlerInputHistoryVisualization::FrameMeterBarSelection barSelection(bool isNearestStack)
 {
 	brawlerInputHistoryVisualization::FrameMeterBarSelection selection;
 	selection.provenance     = provenanceEnabled();
 	selection.inputDelay     = inputDelayEnabled();
 	selection.characterState = characterStateEnabled();
+	// ⛔ THE ONLY PLACE THE RELAY BAR IS TIED TO A STACK. The primary follows a character
+	//   this client controls, which resolves no relayed input at all.
+	selection.relayHealth    = isNearestStack && relayHealthEnabled();
 	return selection;
 }
 
 bool anyBarEnabled()
 {
-	return brawlerInputHistoryVisualization::frameMeterEnabledBarCount(barSelection()) != 0u;
+	// ⛔ ASKED OF THE STACK THAT CAN DRAW THE MOST BARS: a session running the relay bar
+	//   alone still needs the lane poll that feeds it.
+	return brawlerInputHistoryVisualization::frameMeterEnabledBarCount(barSelection(true)) != 0u;
+}
+
+bool nearestStackEnabled()
+{
+	return GInputHistory && GInputHistoryNearest;
 }
 // ⛔ END OF THE ACCESSOR BLOCK.
 
@@ -253,6 +299,36 @@ std::optional<unsigned int> firstLocalCharacterId(const UWorld* world)
 
 	// The same expression tryRegisterWithNewFramework uses as the registration key.
 	return static_cast<unsigned int>(simmable->GetUniqueID());
+}
+
+std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* manager,
+                                                 unsigned int                   localId,
+                                                 std::optional<unsigned int>    previousChoice,
+                                                 float&                         outDistanceCm)
+{
+	if (manager == nullptr)
+		return std::nullopt;
+
+	brawlerInputHistoryVisualization::NearestCharacterCandidateList candidates;
+	manager->gatherNearestCandidates(candidates);
+
+	const std::optional<unsigned int> chosen =
+		brawlerInputHistoryVisualization::nearestCharacterIdTo(
+			candidates, localId, previousChoice);
+
+	if (chosen.has_value())
+	{
+		// ⛔ OFF THE SAME LIST THE CHOICE WAS MADE FROM. A second gather could be taken a
+		//   frame later and would report a range the choice was not made at.
+		if (const std::optional<float> distance =
+				brawlerInputHistoryVisualization::nearestCharacterDistanceCm(
+					candidates, localId, *chosen))
+		{
+			outDistanceCm = *distance;
+		}
+	}
+
+	return chosen;
 }
 
 } // namespace inputHistoryVisualizationUImpl

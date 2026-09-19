@@ -431,6 +431,16 @@ public:
         return m_inputResolution.getDiagnostics().localInputCache<SimulatableBrawler>(id);
     }
 
+// A capture line exists for exactly the characters this client drives, which stays right
+// under couch co-op and on a listen host -- both of which a ROLE test gets wrong. Every
+// meter that needs the answer asks HERE; a second test anywhere in the meter path would
+// let two parts of one stack disagree about whose character it is drawing.
+// ⛔⛔ THE ONE LOCALITY TEST THE DISPLAY MAKES, AND THE ONLY PLACE IT IS SPELLED. §1
+    bool isLocallyControlledOnThisPeer(unsigned int id) const
+    {
+        return getLocalInputCache(id) != nullptr;
+    }
+
 // ---- THE INPUT-HISTORY DISPLAY ----------------------------------------
 //
 // One row ring per LOCAL character, keyed by character id, fed by a render-rate poll.
@@ -509,8 +519,16 @@ public:
                       m_manager->getNetworkEstimator().getPredictionOffsetTicks())
                 : std::nullopt;
 
+// The same test `pollInputHistory` makes, and for the same reason: a capture line
+// exists for exactly the characters this client controls. ⛔ NOT A ROLE TEST -- a
+// client can control several brawlers, and a listen-server host controls one. §1
+        const bool isLocallyControlled = isLocallyControlledOnThisPeer(id);
+
+// A remote proxy's stack shows the relay it is being predicted from instead.
+// ⛔ THE TIER DECOMPOSITION IS THE LOCAL CONNECTION'S and is not read for a remote.
         const std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay =
-            (includeDelay && m_replicatedTierConsumer.has_value() && m_manager.has_value())
+            (includeDelay && isLocallyControlled
+                && m_replicatedTierConsumer.has_value() && m_manager.has_value())
                 ? std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition>(
                       brawlerInputHistoryVisualization::decomposeInputDelay(
                           m_replicatedTierConsumer->hasReceivedTier(),
@@ -551,11 +569,139 @@ public:
             clock = reading;
         }
 
-        m_inputHistory.pollLanes(id,
+// A REMOTE proxy's delay-bar client half comes from the relayed reads this client
+// actually served for it, which is the one thing a tier reading cannot say. Absent
+// when the delay bar is off or this id has no ring, and then the half stays empty --
+// which the verdict already has a word for.
+// ⛔ ONE SOURCE PER POLL, CHOSEN HERE AND NOWHERE ELSE: the two calls below differ in
+//   the TYPE they pass, so neither poll can compile the other's read. §1
+        const RelayedReadObservationRing* const relayedReads =
+            isLocallyControlled ? nullptr : getRelayedReadObservations(id);
+
+// The relay-health bar's second source, taken beside the first so a poll can never hold
+// one without the other -- the pure poll static_asserts exactly that pairing.
+        const RelayedInputArrivalRing* const relayedArrivals =
+            isLocallyControlled ? nullptr : getRelayedInputArrivals(id);
+
+// How far back a resim may still reach, which is what separates an arrival that could
+// still have been replayed into a tick from one that could not.
+// The per-tier ceiling beside it escalates nothing today and its own banner says so, and
+// a negative value disables the authority's future guard and is no window at all here.
+// ⛔ THE SHIPPED WINDOW, `TimeConfig::rollbackWindowTicks`. §5
+        const uint32 rollbackWindowTicks =
+            (m_manager.has_value() && m_manager->getTimeConfig().rollbackWindowTicks > 0)
+                ? static_cast<uint32>(m_manager->getTimeConfig().rollbackWindowTicks)
+                : 0u;
+
+        const auto reader =
             inputHistoryVisualizationUImpl::makeReconciliationSlotReader<SimulatableBrawler>(
-                m_reconciliation, id),
-            liveTick, machineState, liveInput, pauseWhileIdle, predictionOffsetTicks, delay,
-            clock);
+                m_reconciliation, id);
+
+// The relay-health bar rides the same two sources and is its own toggle, so the delay bar
+// being off must not blind it; `includeDelay` still decides the tier decomposition above,
+// which is the reading it actually names.
+// ⛔ NOT GATED ON `includeDelay`.
+        if (relayedReads != nullptr && relayedArrivals != nullptr)
+        {
+            m_inputHistory.pollLanes(id, reader, liveTick, machineState, liveInput,
+                pauseWhileIdle, predictionOffsetTicks, delay, clock, *relayedReads,
+                *relayedArrivals, rollbackWindowTicks);
+        }
+        else
+        {
+            m_inputHistory.pollLanes(id, reader, liveTick, machineState, liveInput,
+                pauseWhileIdle, predictionOffsetTicks, delay, clock);
+        }
+    }
+
+// The relayed reads this client SERVED for `id`, or nullptr when it holds none -- a
+// locally controlled character, or one whose registration has not completed.
+// The accepted game-thread read of a physics-written ring is argued at that ring's own
+// declaration; this adds no posture of its own.
+// ⛔ POINTER TO CONST, straight through the resolution peer's diagnostic view. §1
+    const RelayedReadObservationRing* getRelayedReadObservations(unsigned int id) const
+    {
+        return m_inputResolution.getDiagnostics()
+            .relayedReadObservations<SimulatableBrawler>(id);
+    }
+
+// When each relayed capture for `id` first arrived, or nullptr when it holds none. It is
+// game-thread on both sides -- the arrival door and this read -- so it opens no crossing.
+// ⛔ POINTER TO CONST, straight through the resolution peer's diagnostic view. §1
+    const RelayedInputArrivalRing* getRelayedInputArrivals(unsigned int id) const
+    {
+        return m_inputResolution.getDiagnostics()
+            .relayedInputArrivals<SimulatableBrawler>(id);
+    }
+
+// The relay reading the nearest stack shows where the primary shows its tier line: the
+// newest schedule stamp, and how the scheduled read has been going across the
+// observations the ring still holds.
+// This counts, the pure header defines what is true, and the HUD builds the string.
+// ⛔ THE SPLIT `gatherScoreboardRows` ALREADY KEEPS.
+// ⛔ A TALLY OVER WHAT IS RESIDENT, never a session total -- a run of misses that has
+//   scrolled out is not a run of misses that is happening.
+    brawlerInputHistoryVisualization::RelayReadReadout getRelayReadReadout(unsigned int id) const
+    {
+        brawlerInputHistoryVisualization::RelayReadReadout readout;
+
+        const RelayedReadObservationRing* const ring = getRelayedReadObservations(id);
+        if (ring == nullptr)
+            return readout;
+
+        bool   anyObservation = false;
+        uint32 newestSimTick  = 0u;
+
+        for (std::size_t index = 0u; index < ring->size(); ++index)
+        {
+            const RelayedReadObservation* const observation = ring->at(index);
+            if (observation == nullptr)
+                continue;
+
+            switch (observation->outcome)
+            {
+            case ScheduledRelayedReadOutcome::Hit:        ++readout.hits;        break;
+            case ScheduledRelayedReadOutcome::Miss:       ++readout.misses;      break;
+            case ScheduledRelayedReadOutcome::VerifyFail: ++readout.verifyFails; break;
+            case ScheduledRelayedReadOutcome::NoProbe:    ++readout.noProbes;    break;
+            }
+
+// The stamp of the NEWEST observation, found by its own tick: the ring is addressed by
+// sim tick and therefore walked out of order, so the last slot read is not the last one
+// written. ⛔ NEVER THE LAST SLOT VISITED.
+            if (!anyObservation || observation->simTick > newestSimTick)
+            {
+                anyObservation       = true;
+                newestSimTick        = observation->simTick;
+                readout.dLatestKnown = observation->outcome != ScheduledRelayedReadOutcome::NoProbe;
+                readout.dLatest      = static_cast<uint32_t>(observation->dLatest);
+            }
+        }
+
+        readout.present = anyObservation;
+        return readout;
+    }
+
+// Every registered brawler's id and its viz-copy position in the ground plane -- the
+// one gather the nearest-character selection needs, and the only thing this class says
+// about it. The CHOICE is the pure header's.
+//
+// `updateVisualizationAll(m_storage)` is the sanctioned physics->game handoff, and a HUD
+// reading live state would be a fresh, unargued crossing.
+// ⛔ READ OFF THE VIZ SNAPSHOT, NOT `getAllState()` -- the ring-out slice's reason. §1
+// ⛔ FILLS A FIXED LIST AND ALLOCATES NOTHING -- this runs once per drawn frame.
+    void gatherNearestCandidates(
+        brawlerInputHistoryVisualization::NearestCharacterCandidateList& out) const
+    {
+        m_storage.forEachSimulatable<SimulatableBrawler>(
+            [&out](unsigned int id, const auto& simulatable)
+            {
+                const auto& movement = simulatable.getVizState().getState()
+                    .template get<brawlerMovementSimulation::State>();
+
+                out.add(brawlerInputHistoryVisualization::NearestCharacterCandidate{
+                    id, movement.bodyState.position.x, movement.bodyState.position.y });
+            });
     }
 
 // The per-tick lanes for `id`, or nullptr when it has none. Read-only; the bars' one source.

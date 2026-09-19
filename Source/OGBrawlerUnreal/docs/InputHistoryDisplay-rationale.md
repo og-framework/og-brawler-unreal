@@ -961,21 +961,22 @@ read again and hides everything, whatever the children are set to.
 
 Nothing else in this document maps a colour to its meaning. §7.4 gives the palettes'
 distinctness PROPERTIES and §7.9 gives the verdict RULES, but the only place a name is bound
-to an RGB triple is the `switch` arms of `provenanceCellStyleOf`, `machineCellStyleOf` and
-`delayVerdictStyleOf` in `BrawlerInputHistoryVisualizationBars.h`. Reading a bar on screen —
-with `OGBrawler.InputHistory` on — has meant reading that header. The four tables below are
-that binding, written down.
+to an RGB triple is the `switch` arms of `provenanceCellStyleOf`, `machineCellStyleOf`,
+`delayVerdictStyleOf` and `relayReadVerdictStyleOf` in
+`BrawlerInputHistoryVisualizationBars.h`. Reading a bar on screen — with
+`OGBrawler.InputHistory` on — has meant reading that header. The five tables below are that
+binding, written down.
 
 ⭐ **THIS TABLE IS CHECKED, NOT TRUSTED.** Palette values are each implementer's own choice —
 the suite asserts RELATIONS on them (pairwise gaps, cross-palette floors, `ServerEarlier`'s
 strict-max isolation), never literals, so a prose copy of today's colours would go stale
 silently the first time anyone retunes a hue. `tools/lint/palette_legend_lint.ps1` parses both
-this section and the three switches above and fails on any disagreement between them — an
+this section and the four switches above and fails on any disagreement between them — an
 enumerator with no row, a row naming no enumerator, an RGB mismatch, or a hole documented as a
 colour (or the reverse). Its row counts are asserted against `kRowProvenanceSummaryCount`,
-`kMachineStateCellCount` and `kInputDelayVerdictCount` — read from their own declaring
-headers, never a literal — so an enumerator added without a table row fails the lint the same
-way the existing palette sweeps fail the suite.
+`kMachineStateCellCount`, `kInputDelayVerdictCount` and `kRelayReadVerdictCount` — read from
+their own declaring headers, never a literal — so an enumerator added without a table row
+fails the lint the same way the existing palette sweeps fail the suite.
 
 ⭐ **THE RGB COLUMN IS LINEAR, NOT WHAT THE SCREEN SHOWS — READ THE HEX COLUMN INSTEAD.**
 `meterCellColor` (`OGBrawlerUEHUD.cpp`) builds `FLinearColor(color.r, color.g, color.b, 1.f)`
@@ -1049,6 +1050,39 @@ this table gives what each one looks like and means in isolation).
 | `InputDelayVerdict::ServerEarlier` | 0.36f, 1.00f, 1.00f | #A2FFFF | pale cyan | The server's reported lag reads SMALLER than the client's delay by more than one tick — impossible from lateness alone, so it always names a real divergence. |
 | `InputDelayVerdict::LagUnverified` | 0.80f, 0.08f, 1.00f | #E750FF | bright magenta | The server names a lag, but there is no client-side delay reading to compare it against. |
 | `InputDelayVerdict::NoCaptureNamed` | 0.47f, 0.02f, 0.12f | #B62761 | dark crimson | The server substituted — it named no capture for this tick at all. Checked FIRST, so a Sentinel join never falls through to a weaker verdict. |
+
+#### Relay-health verdict palette
+
+`RelayReadVerdict` — the seven states `relayHealthCellOf` and the bar's own locality
+argument can reach, plus `NoVerdict`, the hole for a tick this client has no relayed read
+for at all. It is drawn on the NEAREST stack only: the primary follows a character this
+client controls, which resolves no relayed input.
+
+⭐ **`Hit` IS `InputDelayVerdict::Agree`'S GREEN, CHANNEL FOR CHANNEL AND DELIBERATELY.**
+"I found the input I was looking for" is the same claim on both bars, and two greens a
+shade apart would be read as two different claims. It is the one intended collision between
+two of this meter's palettes; every other relay colour clears the in-palette floor against
+every delay colour, and a case pins the identity rather than a gap.
+
+⚠ **NEITHER INERT STATE IS GREY, AND `FallbackNeverArrived` IS NOT RED.** The design asked
+for dark grey twice and red once. Measured against the shipped palettes, none of the three is
+reachable: `RowProvenanceSummary::Unknown` (0.42), `RanUnconfirmed` (0.88) and the horizon
+rule (0.55) occupy the grey axis while `MachineStateCell::Idle`'s dark teal takes its dark
+end, so no grey clears the cross floor against all four; and the dark-red axis is bracketed by
+`MachineStateCell::Attacking` and `InputDelayVerdict::NoCaptureNamed`, leaving the nearest
+free hue a crimson-magenta. The three are desaturated and re-hued rather than forced, and this
+paragraph is the record of that, not a claim that the design's words were met.
+
+| Enumerator | RGB (as written in the header) | On screen (sRGB hex) | Colour | Meaning |
+|---|---|---|---|---|
+| `RelayReadVerdict::NoVerdict` | — (hole; draws nothing) | — (hole; draws nothing) | — (hole) | This client has no relayed read recorded for the tick at all — and the character is not one it controls, which would be `LocalNoRelay` instead. |
+| `RelayReadVerdict::Hit` | 0.00f, 0.84f, 0.00f | #00EC00 | bright green | The scheduled read found the capture it was scheduled to find. Identical to `InputDelayVerdict::Agree` on purpose — see above. |
+| `RelayReadVerdict::Neutral` | 0.30f, 0.08f, 0.30f | #955095 | dusky plum | The read asked the relay for no capture tick at all: nothing had ever arrived, the session was younger than the delay, or a replay read by the authority's ref. A real state, not a hole — nothing was missing because nothing was wanted. |
+| `RelayReadVerdict::LocalNoRelay` | 0.22f, 0.15f, 0.04f | #816C38 | dark olive | This client controls the character, so there is no relay to be healthy or not. Fills the whole window or none of it, which is what keeps the stack the same height whichever character the display follows. |
+| `RelayReadVerdict::FallbackPending` | 0.82f, 0.84f, 0.00f | #EAEC00 | acid yellow | The read fell back, the capture it wanted has not arrived, and the horizon has not passed — it still might. |
+| `RelayReadVerdict::FallbackArrivedReplayable` | 0.00f, 0.29f, 0.79f | #0093E6 | strong azure | The capture arrived within the rollback window, so a resimulation could still have run the tick on it. |
+| `RelayReadVerdict::FallbackArrivedTooLate` | 0.93f, 0.40f, 0.35f | #F7AAA0 | pale salmon | The capture arrived, but past the rollback window — it can never be applied to that tick. |
+| `RelayReadVerdict::FallbackNeverArrived` | 0.60f, 0.00f, 0.35f | #CB00A0 | crimson magenta | Past `rollbackWindow + the relay store's own 64-tick capacity`, an arrival could neither be replayed into the tick nor even be stored, so "never" is final rather than "not yet". |
 
 #### Non-enumerator markers
 

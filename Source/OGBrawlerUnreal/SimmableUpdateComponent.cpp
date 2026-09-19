@@ -875,8 +875,14 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 		// --- Input-history poll: the display's only feed ------------------------------
 		// The rings behind this are keyed per character id, so a sibling on the couch
-		// would get its own the moment anything polled it.
-		// ⛔ FIRST LOCAL PLAYER'S CHARACTER ONLY -- a SELECTION here, not a structural limit.
+		// gets its own the moment anything polls it.
+		// Binding the FEED to the selection is what made a remote proxy's corrections
+		// structurally invisible: by the time the display wanted them there was no ledger
+		// to show. A change of subject now needs no re-warm either.
+		// ⭐ THE LANES ARE POLLED FOR EVERY REGISTERED CHARACTER, and the display picks
+		//   which of them to draw at draw time.
+		// ⛔ THE ROW POLL KEEPS THE GATE BELOW. Its source is this client's own capture
+		//   line, which a remote proxy does not have at all.
 		//
 		// ⛔ RENDER-RATE GAME-THREAD READ of a physics-written capture line: the accepted
 		// tear argued at ASimulationManagerUImpl's CROSSING block. Nothing decides on it.
@@ -897,46 +903,55 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			if (!feedRowPanel && !feedAnyBar)
 				return;
 
-			const std::optional<unsigned int> historyCharacterId =
-				inputHistoryVisualizationUImpl::firstLocalCharacterId(GetWorld());
+			const unsigned int ownCharacterId = (unsigned int)GetUniqueID();
 
-			if (historyCharacterId.has_value()
-				&& *historyCharacterId == (unsigned int)GetUniqueID())
+			// `pollInputHistory` returns on a missing capture line anyway; asking here keeps
+			// the ROW display's one-character selection where it has always been stated.
+			// ⛔ STILL THE FIRST LOCAL PLAYER'S CHARACTER ALONE.
+			if (feedRowPanel)
 			{
-				if (feedRowPanel)
+				const std::optional<unsigned int> rowCharacterId =
+					inputHistoryVisualizationUImpl::firstLocalCharacterId(GetWorld());
+
+				if (rowCharacterId.has_value() && *rowCharacterId == ownCharacterId)
 				{
-					vizManager->pollInputHistory(*historyCharacterId,
+					vizManager->pollInputHistory(*rowCharacterId,
 						vizSimulationStep.getTick(),
 						dAttackMachineSimulation::g_moveStickDeadzone.load());
 				}
+			}
 
-				// The machine state comes off the SAME attackSimState the block-prediction viz
-				// above already reads, at the same site.
-				// ⛔ NO NEW SEAM IS OPENED FOR IT.
-				//
-				// There is no per-tick machine-state history to read, so a tick this poll misses
-				// stays a hole rather than being invented.
-				// ⚠ SAMPLED LIVE AND NEVER BACK-FILLED.
-				// The pause's input half is the PANEL'S OWN classification of this capture,
-				// so "no input" means one thing across both displays.
-				// ⛔ NO SECOND IDEA OF NEUTRAL IS DERIVED HERE.
-				if (feedAnyBar)
+			// The machine state comes off the SAME attackSimState the block-prediction viz
+			// above already reads, at the same site.
+			// ⛔ NO NEW SEAM IS OPENED FOR IT.
+			//
+			// There is no per-tick machine-state history to read, so a tick this poll misses
+			// stays a hole rather than being invented.
+			// ⚠ SAMPLED LIVE AND NEVER BACK-FILLED.
+			// The pause's input half is the PANEL'S OWN classification of this capture,
+			// so "no input" means one thing across both displays.
+			// ⛔ NO SECOND IDEA OF NEUTRAL IS DERIVED HERE.
+			//
+			// Each registered character runs this block for itself exactly once, which is
+			// what makes the ledgers per-character rather than per-selection. The cost is
+			// one lanes ledger per character, each already bounded at 240 ticks.
+			// ⛔ THIS COMPONENT'S OWN ID, UNCONDITIONALLY.
+			if (feedAnyBar)
+			{
+				std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput;
+				if (vizPlayerInput.has_value())
 				{
-					std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput;
-					if (vizPlayerInput.has_value())
-					{
-						liveInput = brawlerInputHistoryVisualization::captureRowFieldsOf(
-							vizPlayerInput->get<dAttackMachineSimulation::PlayerInput>(),
-							dAttackMachineSimulation::g_moveStickDeadzone.load());
-					}
-
-					vizManager->pollInputHistoryLanes(*historyCharacterId,
-						vizSimulationStep.getTick(),
-						(*attackSimState).get<dAttackMachineSimulation::State>().m_currentState,
-						liveInput,
-						inputHistoryVisualizationUImpl::pauseLanesWhileIdle(),
-						feedInputDelay);
+					liveInput = brawlerInputHistoryVisualization::captureRowFieldsOf(
+						vizPlayerInput->get<dAttackMachineSimulation::PlayerInput>(),
+						dAttackMachineSimulation::g_moveStickDeadzone.load());
 				}
+
+				vizManager->pollInputHistoryLanes(ownCharacterId,
+					vizSimulationStep.getTick(),
+					(*attackSimState).get<dAttackMachineSimulation::State>().m_currentState,
+					liveInput,
+					inputHistoryVisualizationUImpl::pauseLanesWhileIdle(),
+					feedInputDelay);
 			}
 		}
 	}

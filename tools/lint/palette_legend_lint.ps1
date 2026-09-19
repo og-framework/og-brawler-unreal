@@ -7,11 +7,11 @@
 
 .DESCRIPTION
     Nothing in the tree maps a lane colour to its meaning except the `switch` arms in
-    BrawlerInputHistoryVisualizationBars.h. §7.11 writes that binding down as three
-    tables (provenance, machine-state, input-delay verdict) plus a fourth table for the
-    three colours that belong to no enumerator at all. This lint parses BOTH sides — the
-    header's `provenanceCellStyleOf` / `machineCellStyleOf` / `delayVerdictStyleOf`
-    switches, and the doc's markdown tables — and diffs them.
+    BrawlerInputHistoryVisualizationBars.h. §7.11 writes that binding down as four
+    tables (provenance, machine-state, input-delay verdict, relay-health verdict) plus a
+    fifth table for the three colours that belong to no enumerator at all. This lint parses BOTH sides — the
+    header's `provenanceCellStyleOf` / `machineCellStyleOf` / `delayVerdictStyleOf` /
+    `relayReadVerdictStyleOf` switches, and the doc's markdown tables — and diffs them.
 
     ⭐ WHY A HAND-TYPED TABLE CANNOT BE TRUSTED. Palette values are each implementer's
     own choice; the test suite asserts RELATIONS on them (pairwise gaps, cross-palette
@@ -26,8 +26,9 @@
       * the row's RGB triple (or its "hole" marker) matches the arm's `LaneCellFill`
         and, for a State arm, its exact three channel literals;
       * the parsed row COUNT for each table equals the enumerator's own count constant
-        (`kRowProvenanceSummaryCount`, `kMachineStateCellCount`, `kInputDelayVerdictCount`
-        — read from their OWN declaring headers, never a literal), so an enumerator
+        (`kRowProvenanceSummaryCount`, `kMachineStateCellCount`, `kInputDelayVerdictCount`,
+        `kRelayReadVerdictCount` — read from their OWN declaring headers, never a
+        literal), so an enumerator
         added without a matching switch arm AND table row is still caught: the count
         constant moves and the table does not follow it.
       * `kLaneElisionColor`, `kLaneResyncColor` and `kUnnamedLaneColor` — module-level
@@ -77,7 +78,8 @@
     The header declaring `kRowProvenanceSummaryCount`.
 
 .PARAMETER LanesHeaderPath
-    The header declaring `kMachineStateCellCount` and `kInputDelayVerdictCount`.
+    The header declaring `kMachineStateCellCount`, `kInputDelayVerdictCount` and
+    `kRelayReadVerdictCount`.
 
 .PARAMETER DocPath
     The rationale doc carrying §7.11's four tables.
@@ -218,6 +220,9 @@ $palettes = @(
     @{ Key = 'delay'; Signature = 'constexpr LaneCellStyle delayVerdictStyleOf(InputDelayVerdict verdict)'
        CountName = 'kInputDelayVerdictCount'; CountText = $lanesText
        TableTitle = 'Input-delay verdict palette' }
+    @{ Key = 'relay'; Signature = 'constexpr LaneCellStyle relayReadVerdictStyleOf(RelayReadVerdict verdict)'
+       CountName = 'kRelayReadVerdictCount'; CountText = $lanesText
+       TableTitle = 'Relay-health verdict palette' }
 )
 
 $errors = [System.Collections.Generic.List[string]]::new()
