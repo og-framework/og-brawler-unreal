@@ -150,6 +150,85 @@ The judgement is per guard, asked cold: *if I were about to make the edit this t
 stop me?* Across four files the answers ran **0/1/4 → 1/3/6 → 2/4/5 → 3/6/7** (yes / uncertain /
 no) — improving, and **never yet a majority.**
 
+⚠ **PRE-DEFINITION — NOT A TREND.** Those four tallies were scored by different people **before this
+section defined what earns a `yes`**. They are **not comparable** with each other, nor with anything
+scored under the definition below, and *"improving"* is a reading the data cannot carry. The same
+holds for the next two, a header and its `.cpp` converted on 2026-09-22 and reported as **7/8/3** and
+**4/12/9**: re-scored under each other's rule they became **5/8/5** and **14/9/2** — ⛔ **the SIGN of
+the gap between the two files flipped with the scorer.** An undefined score is not a measurement.
+Kept as history; compare nothing against it unless it is re-scored.
+
+### 9.1 What earns a `yes` — scored by EDIT SHAPE
+
+Score **the forbidden edit the entry names** — its primary wrong edit — by **where that edit is
+typed relative to the tag**. Nothing else enters the score: not how tempting the edit looks, not how
+harmless it seems, not how tired of the glyph the reader is. Those are why two careful scorers
+disagreed.
+
+*The tagged statement* is the statement the tag immediately precedes, **including its continuation
+lines** up to its terminating `;` or `{`. A tag above a two-line condition covers both lines.
+
+| shape | score | why |
+|---|---|---|
+| **substitution** on the tagged token | **yes** | the tag is in view at the moment the edit is typed |
+| **addition** on the tagged statement | **yes** | same |
+| **deletion** of the tagged statement | **yes** | ⭐ **mechanically enforced** when the tag goes with it — see below |
+| **reorder** of a tagged pair | **no (ordering)** | the tag moves with its own line, so it is absent from where the wrong edit is typed |
+| edit **typed elsewhere** — another file, or a line the tag does not cover | **no (elsewhere)** | e.g. a declaration tag trying to govern a `.cpp`-body edit |
+| none of the above, or the entry names more than one primary edit | **uncertain** | record the shape; a recurring one earns a row here. Two primary edits usually mean two ids. |
+
+⭐ **The deletion row is the one property this apparatus actually guarantees.** Tags sit on their own
+line above the statement, so a deletion takes one of two forms:
+* **statement and tag together** → the entry is orphaned and **§7 CHECK 2 (`doc → tag`) fails the
+  gate.** That is enforcement, not persuasion, and it is witnessed: `-Poison Orphan` is this exact edit.
+* **statement alone** → the tag is stranded above the next line and **no arm fires.** It still scores
+  `yes`, because the tag sat on the adjacent line when the deletion was typed — but that half is
+  persuasion, not enforcement. Do not quote it as mechanical.
+
+⛔ **The score is a human judgement and is not a lint arm.** The one mechanically checkable part
+(deletion ⇒ orphan) already *is* CHECK 2. A checker that claimed to decide the rest could not really
+decide it, and would be a vacuous control of exactly the kind §7 warns about.
+
+### 9.2 Two decisions, not one
+
+The score is asked to answer two different questions. Keep them apart.
+
+1. **Programme — should the next file be converted?** An **aggregate** signal across files: the use
+   this section has always had.
+2. **Triage — what happens to THIS guard?** Decided **per guard, by its shape**, using §9.3.
+
+⛔ **A low aggregate is NOT licence to delete guards.** A 33 % yes-rate says something about whether
+to keep converting files. It says nothing about whether the other two-thirds of the *prohibitions*
+are true — R0 already ruled on that, one by one. Reading "33 % yes" as permission to drop two-thirds
+of them is the failure this clause exists to prevent.
+
+### 9.3 Triage — the score gates the TAG, never the PROHIBITION
+
+| score | the tag | the prohibition |
+|---|---|---|
+| `yes` | **keep it** | unchanged |
+| `no (ordering)` | **drop it** | **keep it.** Push it to a `static_assert` / `OG_CHECK` / `checkf` where expressible (§2 step 1 — answer by compiling). ⭐ Two ordering fences on one file got *stronger* exactly this way. Otherwise leave it in `docs/<File>-rationale.md` with **no site tag**. |
+| `no (elsewhere)` | **move it** to the site where the edit is typed, if one exists — it is misplaced, not worthless. If no such site exists, treat as `no (ordering)`. | unchanged |
+| `uncertain` | leave it; revisit when the file is next touched | unchanged |
+
+⛔⛔ **Deleting the CONTENT because its carrier scored badly is the mirror image of the R0 failure.**
+§8 forbids laundering a *false* claim into a doc; the symmetric error is discarding a *true* one
+because its delivery mechanism did not work. The tag is the carrier. The prohibition is the fact.
+**A score can retire a tag. It can never retire a fact.**
+
+⚠ Dropping a `G` tag orphans its entry and fails CHECK 2 — correctly. Retire the id (§3: retired,
+never reused) and carry its content into `docs/<File>-rationale.md` in the **same** change; never leave a live
+entry with no site, and never delete the text.
+
+### 9.4 Why pruning a tag is a gain, not merely cost-neutral
+
+§5's own finding: ***"Stacked tags were the single largest cause of 'this would not have stopped me'
+in every reader test run."*** A tag that stops nothing is not free. It costs a lint id and an upkeep
+obligation on the join gate, and it **borrows salience from the tags that do work** — a reader who
+has walked past three identical glyphs that meant nothing gives the fourth less attention. That is
+tag fatigue, and it has been observed on a converted file. Removing a `no` tag makes the `yes` tags
+around it better.
+
 ⛔ **"Keep going" is one possible answer, not the expected one.** ⚠ And a fabricated identifier or
 number appears about **once per 98 assertions** in converted prose — **every instance so far was
 found by reading, none by a checker.**

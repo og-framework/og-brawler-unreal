@@ -1,108 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-//
-// ===========================================================================
-// ASimulationManagerUImpl - THE UNREAL COMPOSITION ROOT AND TRANSPORT ADAPTER
-// ===========================================================================
-// ORIENTATION - read this before the members. Every rationale, provenance note
-// and worked derivation is in docs/SimulationManagerUImpl-rationale.md
-// (BUSL-1.1, this subtree); the section marks below are that document.
-//
-// WHAT THIS CLASS IS. It owns every simulation peer, binds them to Chaos, and
-// converts engine primitives into core calls. It carries NO netcode policy -
-// the policy lives in OGSimulation, which never names an engine type.
-//
-// TWO INSTANCES PER PROCESS, one per world - instanceFor(isAuthority):
-//   slot 0  AUTHORITY  dedicated server, listen-server host, standalone
-//   slot 1  CLIENT     pure client; the only role that predicts and resims
-// PIE fills both concurrently. They share nothing.
-//
-// THREADS. Every member here is GAME THREAD unless this table says otherwise.
-//   GAME      BeginPlay/EndPlay, all four OnRep listeners, the RPC receipt
-//             path, InjectInputs_External -> releaseDelayedInputsForStep,
-//             deliverRemoteInput, relayRemoteInput
-//   PHYSICS   FSimulationManagerAsyncCallback's five _Internal hooks and
-//             everything the core SimulationManager runs beneath them
-//   CROSSING  THREE as of [ringout task 5], and they are not alike. The WRITE
-//             is one scalar:
-//             publishClientEffectiveInputDelayTicks -> a std::atomic<int32>
-//             that collectInputAll loads once per tick. The READ is an
-//             ACCEPTED TEAR: the two input-history polls read the
-//             physics-written LocalInputCache slots and correction-cache
-//             lineage, for a display that decides nothing; the argument
-//             for it is §1's, not this table's. The input-delay decomposition
-//             inside pollInputHistoryLanes reads three GAME-THREAD members
-//             (the tier consumer, the shared TimeConfig, the resolution
-//             peer's published atomic) that this call already runs on, so
-//             it is NOT a third crossing -- same thread as its readers. The
-//             reader's hasCorrectionCache() presence test is one more: the
-//             cache map it asks is mutated on the GAME THREAD alone.
-//             The clock's seven diagnostic-view reads, taken beside that
-//             same poll's prediction tick, are that SAME accepted tear and
-//             not a new class of crossing. §1
-//             ⭐ THE THIRD IS A SECOND READ, AND IT IS A NEW MEMBER, NOT MORE
-//             READS INSIDE AN EXISTING ENTRY POINT - which is why it gets a
-//             bullet where the clock reads deliberately did not. The ring-out
-//             score push in OnPostPhysicsStep reads brawlerRingout::ScoreSystem's
-//             score table off m_systemsExec on the GAME thread; postIntegrate
-//             writes it on the PHYSICS thread. It is the SAME accepted tear,
-//             for the same two reasons and no others: (a) the table cannot be
-//             RESTRUCTURED under the reader - the only insert and erase are
-//             onCharacterRegistered / onCharacterUnregistered, both driven from
-//             tryRegister / unregisterFromNewFramework, both GAME THREAD - so
-//             the read cannot chase a rehashed bucket; (b) the award reaches an
-//             EXISTING entry and writes one naturally-aligned four-byte word,
-//             which cannot tear, for a SCOREBOARD that decides nothing. Worst
-//             case: one number one tick stale.
-//             ⛔ (a) HAS A PRECONDITION - postIntegrate's operator[] INSERTS for
-//             an unseeded id, deliberately. It is unreachable in a legal session
-//             because the roster is seeded before tryRegister returns Ready, and
-//             the push carries a checkf that says exactly that. A change that
-//             makes an award reach an unseeded id breaks this crossing IN KIND,
-//             not in degree. §1
-//   The rest have NO internal synchronization: m_receptionCoordinator,
-//   m_frameHealthProbe, m_relayWriteProbe, m_connectionBudgetProbe,
-//   m_inputHistory and m_delayedInputComponentsById. §1
-//   ⛔ NOTHING ELSE CROSSES.
-//
-// NARROW PASSTHROUGHS, NOT HANDLES. requestInputDelayIncreaseStall,
-// publishClientEffectiveInputDelayTicks, getLastRelayedInput, getLocalInputCache,
-// pollInputHistory, getInputHistoryRows, pollInputHistoryLanes, getInputHistoryLanes,
-// noteResimRequest and noteResimGrant are one-purpose
-// entry points rather than edit*() accessors, because a general mutable handle
-// invites exactly the cross-thread reach each of them exists to bound. §1
-// ⛔ DO NOT WIDEN ONE INTO AN ACCESSOR.
-//
-// CONSTRUCTION ORDER - declaration order IS construction order, and nothing
-// enforces it but that rule (§2):
-//   m_storage -> m_staticData -> m_reconciliation -> m_inputResolution ->
-//   m_netSync, then BeginPlay emplaces m_integrationLayer -> m_manager ->
-//   m_replicatedTierConsumer / m_receptionCoordinator. Those last two borrow
-//   m_manager's TimeConfig, so both reset BEFORE it in EndPlay.
-//
-// THE CLIENT'S EFFECTIVE INPUT DELAY - the one formula this header serves:
-//   effective = max(floor, tierKnown ? tierInputDelayTicks(tier)
-//                                    : rttTierInputDelays[kMaxConnectionTierIndex])
-// Two independent channels feed it (session floor, per-wire tier) and either
-// OnRep may land first, so ⛔ both go through one recompute
-// (recomputeAndPublishEffectiveInputDelay) and neither writes the atomic alone. §5
-//
-// FOUR SESSION KNOBS, all read once in BeginPlay (.cpp), each with an
-// unconditional Warning proof line, because a knob with no proof line cannot be
-// told from one that never took: RelayDelayFloorTicks, CorrectionRotationK,
-// ResimTriggerPolicy, and one retired ring-depth key. §3
-//
-// LOG CATEGORIES. The three probe families below each get their OWN category,
-// because that is the only thing that silences a family's per-window Warning
-// summaries independently of its per-event Verbose detail. `[Resim.` inherits
-// LogOGSim=Verbose and `[ResimCheck.` is split across two categories, so neither
-// can be switched as one thing. §4
-// ⛔ ONE CATEGORY PER PROBE FAMILY.
-// ⛔ NO PROBE FAMILY MAY BE FILED UNDER `[Resim.` OR `[ResimCheck.`
-//
-// BORROWED TIMECONFIG. m_replicatedTierConsumer and m_receptionCoordinator each
-// hold `const TimeConfig&` from m_manager, so each is emplaced AFTER it in
-// BeginPlay and reset BEFORE it in EndPlay. Neither may outlive it. §2
-// ===========================================================================
+// docs/SimulationManagerUImpl-rationale.md · docs/SimulationManagerUImpl-guards.md
 
 #pragma once
 
@@ -134,7 +31,6 @@
 #include "OGSimulation/SimulationManagerConcept.h"
 #include "OGSimulation/SimulationObjectStorage.h"
 #include "OGSimulation/SimulationReconciliation.h"
-// Explicit, not transitive through SimulationNetSync.h: the peer is a sibling now. §2
 #include "OGSimulation/SimulationInputResolution.h"
 #include "OGSimulation/SimulationNetSync.h"
 #include "OGSimulation/SimulationIntegrationExecutor.h"
@@ -142,15 +38,14 @@
 #include "OGSimulation/Network/ConnectionTierTable.h"
 #include "OGSimulation/Network/ServerInputDelayQueue.h"
 #include "OGSimulation/Network/ServerReceptionCoordinator.h"
-// Server write-path diagnostics; separable, with an end date in its own banner.
 #include "OGSimulation/Network/RelayWritePathProbe.h"
 #include "OGSimulation/Network/ReplicatedTierConsumer.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
-#include "OGBrawler/BrawlerHitRoutingSystem.h"   // brawlerHitRouting::System (fourth-peer system)
-#include "OGBrawler/BrawlerRingoutSimulation.h"  // brawlerRingout::SpawnSlotAllocator (task 3)
-#include "OGBrawler/BrawlerRingoutScoreSystem.h" // brawlerRingout::ScoreSystem (fourth-peer system, task 4)
+#include "OGBrawler/BrawlerHitRoutingSystem.h"
+#include "OGBrawler/BrawlerRingoutSimulation.h"
+#include "OGBrawler/BrawlerRingoutScoreSystem.h"
 
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
@@ -161,52 +56,28 @@
 
 #include "SimulationManagerUImpl.generated.h"
 
-// Rare simulation lifecycle: TimeResync.*, Resim.*, ResimCheck.Divergence, ResimCheck.PrepareRestore
 DECLARE_LOG_CATEGORY_EXTERN(LogOGSim, Log, All);
-// Per-tick simulation chatter: AuthoritySimulation, ClientPrediction, CollectInput, ResimCheck.*
 DECLARE_LOG_CATEGORY_EXTERN(LogOGSimTick, Log, All);
-// Manager / simulatable lifecycle: SimulationManager:*, tryRegister:*, NewFramework:*
 DECLARE_LOG_CATEGORY_EXTERN(LogOGMgmt, Log, All);
-// Replication-channel events: ServerReceive, Send*ToClients, ReceiveCorrection*, InjectCorrection*
 DECLARE_LOG_CATEGORY_EXTERN(LogOGNet, Log, All);
-// Fallback for unrecognized prefixes
 DECLARE_LOG_CATEGORY_EXTERN(LogOG, Log, All);
-// Client relay telemetry: RelayProbe.Read / .Arrival / .Stale. Own category, see the banner. §4
 DECLARE_LOG_CATEGORY_EXTERN(LogOGRelayProbe, Log, All);
-// Client prediction-vs-authority telemetry: DivergenceProbe.Correction / .Window. §4
 DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
-// Client resim-gate telemetry: ResimProbe.Gate / .Chaos / .Apply / .Landing / .Request / .Stranded. §4
 DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
-// Game-rule logging (DAttackMachine/Radial/Guard via OGBLOG_G)
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
-// ⭐⭐ THE ONE-TIME MOVEMENT CVAR READ'S RESULT — [movement-sim task 16, USER RULING #3].
-//
-// Ruling #3 is ONE-TIME, FULL STOP: `OGBrawler.MovementModel`, `.MoveSpeed`, `.StepPeriodTicks`
-// and `.StepSpeed` are read EXACTLY ONCE, when the simulation manager constructs its
-// `StaticData`, and never again. Nothing in the tick path may consult a console variable: the
-// values are authored data, every peer must agree on them for the whole session, and a value
-// that could change mid-session would make a resimulated tick disagree with the tick it replays.
-//
-// ⛔ SO THIS STRUCT IS THE ONLY THING THAT CROSSES THE SEAM, and it is `const` at its one
-// member. The read itself lives in `MovementSchemeCVar.cpp`, beside the variables it reads and
-// the "changed too late" latch it arms — see `ASimulationManagerUImpl::readMovementStaticDataCVars`.
 struct FMovementStaticDataCVars
 {
 	brawlerMovementSimulation::MovementModel model;
 	float    maxWalkSpeed;
 	uint32_t stepPeriodTicks;
 	float    stepSpeed;
-	// ⚠ NOT A CVAR. The ENGINE's gravity, captured at the same instant so the sim's own
-	// gravity law starts life agreeing with it; `BeginPlay` then `checkf`s that agreement
-	// against the WORLD's gravity, which a level is allowed to override and this is not.
 	float    gravity;
 };
 
 enum class TryRegisterStatus { Pending, Ready };
 
-// The provider signature, named once so the four sites passing one cannot drift apart. §5
-// ⛔ The raw-capture history is a PARAMETER: the sequence matcher runs inside the provider.
+// ⛔G-01  docs/SimulationManagerUImpl-guards.md
 using BrawlerInputProviderFn = std::function<simulatableBrawler::PlayerInput(
 	const SimulationTimeStep&,
 	const LocalInputCache<simulatableBrawler::PlayerInput>&)>;
@@ -254,50 +125,18 @@ private:
 
 class ASimulationManagerUImpl;
 
-// ── [netcode-v2 task 10 rework 1] ONE BODY'S HALF OF THE REWIND-PUSH PROBE ─────
-//
-// ⭐⭐ THIS TYPE EXISTS BECAUSE THE VERDICT READ HAD TO MOVE, and moving it split
-// the probe across two physics-thread hooks. `FRewindData::SetTargetStateAtFrame`
-// writes a history buffer; it does NOT touch the particle. So a read taken beside
-// the push returns the pre-push state BY CONSTRUCTION, and a "match" read there
-// could only ever mean the pushed value already equalled the live one - it can
-// never mean "the engine read the target". The verdict read is therefore taken one
-// hook later, at the top of OnPreSimulate_Internal on the resetting frame, after
-// the engine has had its chance to consume the target and before OG's own systems
-// write the body. These are the values that have to survive that gap.
-//
-// ⛔ PHYSICS THREAD ONLY, and written only while LogOGResimProbe is at Verbose.
-// Nothing reads it from the game thread, so it is not a fourth crossing.
-//
-// ⛔ `bodyName` IS A STRING LITERAL (a declaration's `D::name`), never owned and
-// never freed. Storing a `const char*` is safe only for that reason.
-//
-// Rationale, the token table and the residual blind spot: docs/SimulationManagerUImpl-rationale.md §8
 struct FRewindPushProbeStashedBody
 {
-	PhysicsBodyState pushed;      // what FirstPreResimStep_Internal pushed into the timeline
-	PhysicsBodyState beforePush;  // the live X/R/V/W read immediately BEFORE that push
+	PhysicsBodyState pushed;
+	PhysicsBodyState beforePush;
 	BodyId           bodyId{};
 	unsigned int     simulatableId = 0;
+	// ⛔G-02  docs/SimulationManagerUImpl-guards.md
 	const char*      bodyName = nullptr;
 	bool             wireCarriesRotationAndSpin = false;
-	bool             movedAtPush = false;   // the push call itself moved the particle
+	bool             movedAtPush = false;
 };
 
-// ⛔ THE OPTION SET IS A CONTRACT, NOT A WISH LIST. Every bit named below
-// registers this object into one more Chaos dispatch list, and each list calls
-// the matching *_Internal hook. A bit whose hook is NOT overridden here reaches
-// the asserting base implementation the first time that list actually runs.
-// ⛔ ContactModification was on this list from the initial release (e93cb39,
-// 2026-05-26) with no OnContactModification_Internal override. It stayed dormant
-// only because every body in the tree was ECR_Overlap on every channel, so Chaos
-// never ran a collision modifier. The first ECR_Block body (ChaosPhysicsFactory's
-// blockingCategories translation) took PIE straight into
-// FPBDCollisionConstraints::ApplyCollisionModifier -> the assert. It is REMOVED
-// rather than stubbed with a no-op, because ruling #5 chose solver separation
-// with NO authored priority, so nothing in this tree wants the hook - and a
-// registered no-op still pays a modifier callback per contact for nothing.
-// ⛔ RE-ADDING THE BIT REQUIRES ADDING ITS OVERRIDE IN THE SAME EDIT.
 class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<
 	FSimulationInput2,
 	FSimulationState2,
@@ -327,14 +166,6 @@ private:
 
 	ASimulationManagerUImpl* m_manager = nullptr;
 
-// ── [netcode-v2 task 10 rework 1] THE PROBE'S STASH AND ITS TWO READ POINTS ────
-//
-// ⛔ `m_pushProbeStashFrame == INDEX_NONE` IS THE "NOTHING PENDING" STATE, and it is
-// the ONLY thing that decides whether the drain runs. A stash still pending when the
-// next rewind starts, or when OnPreSimulate_Internal runs on a frame that is not
-// resetting, was NEVER READ at its verdict point - discardPushProbeStash says so out
-// loud as `verdict=UNREAD` rather than dropping it, because a silently dropped stash
-// is indistinguishable from a rewind that never happened. §8
 	TArray<FRewindPushProbeStashedBody> m_pushProbeStash;
 	int32    m_pushProbeStashFrame      = INDEX_NONE;
 	uint32_t m_pushProbeStashSimTick    = 0;
@@ -343,6 +174,86 @@ private:
 
 	void readPushProbeVerdict_Internal();
 	void discardPushProbeStash(const TCHAR* reason);
+
+	template <typename InputT, typename OutputT, Chaos::ESimCallbackOptions OptionsT>
+	static constexpr Chaos::ESimCallbackOptions registeredOptionsOf(
+		const Chaos::TSimCallbackObject<InputT, OutputT, OptionsT>*) { return OptionsT; }
+
+	template <typename Self>
+	static constexpr bool everyRegisteredHookIsOverridden()
+	{
+		using Opt = Chaos::ESimCallbackOptions;
+		constexpr Opt options = registeredOptionsOf(static_cast<const Self*>(nullptr));
+		static_assert(!EnumHasAnyFlags(options, Opt::Presimulate)
+			|| requires { requires std::is_same_v<decltype(&Self::OnPreSimulate_Internal), void (Self::*)()>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::Presimulate but does not "
+			"override OnPreSimulate_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::PreIntegrate)
+			|| requires { requires std::is_same_v<decltype(&Self::OnPreIntegrate_Internal), void (Self::*)()>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreIntegrate but does not "
+			"override OnPreIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::PostIntegrate)
+			|| requires { requires std::is_same_v<decltype(&Self::OnPostIntegrate_Internal), void (Self::*)()>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostIntegrate but does not "
+			"override OnPostIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::MidPhaseModification)
+			|| requires { requires std::is_same_v<decltype(&Self::OnMidPhaseModification_Internal), void (Self::*)(Chaos::FMidPhaseModifierAccessor&)>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::MidPhaseModification but does not "
+			"override OnMidPhaseModification_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::CCDModification)
+			|| requires { requires std::is_same_v<decltype(&Self::OnCCDModification_Internal), void (Self::*)(Chaos::FCCDModifierAccessor&)>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::CCDModification but does not "
+			"override OnCCDModification_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::StrainModification)
+			|| requires { requires std::is_same_v<decltype(&Self::OnStrainModification_Internal), void (Self::*)(Chaos::FStrainModifierAccessor&)>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::StrainModification but does not "
+			"override OnStrainModification_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::ContactModification)
+			|| requires { requires std::is_same_v<decltype(&Self::OnContactModification_Internal), void (Self::*)(Chaos::FCollisionContactModifier&)>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::ContactModification but does not "
+			"override OnContactModification_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::PreSolve)
+			|| requires { requires std::is_same_v<decltype(&Self::OnPreSolve_Internal), void (Self::*)()>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreSolve but does not "
+			"override OnPreSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		static_assert(!EnumHasAnyFlags(options, Opt::PostSolve)
+			|| requires { requires std::is_same_v<decltype(&Self::OnPostSolve_Internal), void (Self::*)()>; },
+			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostSolve but does not "
+			"override OnPostSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
+			"list, and the base hook is check(false): the first time that list runs, the process "
+			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
+			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+		return true;
+	}
+
+	void assertEveryRegisteredHookIsOverridden()
+	{
+		static_assert(everyRegisteredHookIsOverridden<FSimulationManagerAsyncCallback>());
+	}
 };
 
 UCLASS()
@@ -357,21 +268,19 @@ public:
     ASimulationManagerUImpl();
     ~ASimulationManagerUImpl();
 
-// slot 0 = authority world, slot 1 = pure client. PIE can fill both.
     static ASimulationManagerUImpl* instanceFor(bool isAuthority)
     {
         return isAuthority ? s_instances[0] : s_instances[1];
     }
 
-    // Clock accessors — forwarded from the manager (type-erased here for callers outside the template).
     const ServerTickClock& getServerClock() const { return m_manager->getServerClock(); }
     ServerTickClock& editServerClock()             { return m_manager->editServerClock(); }
     const ClientPredictionClock& getClientClock() const { return m_manager->getClientClock(); }
     bool runsPrediction() const { return m_manager->runsPrediction(); }
 
-// Stall debt for a positive tier delta. ⛔ getClientClock() std::terminates on a server. §5
     void requestInputDelayIncreaseStall(int32 deltaDelayTicks)
     {
+        // ⛔G-03  docs/SimulationManagerUImpl-guards.md
         if (!m_manager.has_value() || !m_manager->runsPrediction())
             return;
 
@@ -379,20 +288,12 @@ public:
     }
     void onGameSimulation(const SimulationUpdateInfo& info)
     {
-// Inbound-hit routing runs inside m_manager->onGameSimulation, via
-// brawlerHitRouting::System::postIntegrate - every tick, resim replays included. §5
-//
-// There is no adapter-side routing wrapper anymore: the former routeInboundHits() shim and
-// its map are gone, and the system's single postIntegrate pass leaves no reset-order hazard.
         m_manager->onGameSimulation(info);
     }
     void onPostGameSimulation(const SimulationUpdateInfo& info) { m_manager->onPostGameSimulation(info); }
     unsigned int onCheckIsSimilar() { return m_manager->onCheckIsSimilar(); }
     void prepareResimulation(int32_t chaosStep, uint32_t simTick) { m_manager->prepareResimulation(chaosStep, simTick); }
 
-// The two Chaos-side resim-gate probe feeds (request, grant). §8
-// ⛔ WHY OUR OWN COUNTERS: engine-side refusals sit behind DEBUG_REWIND_DATA, so a refused
-// rewind is COMPLETELY SILENT and we retry next frame. These two are that gate's visibility.
     void noteResimRequest(unsigned int anchorTick, int32 lastCompletedStep, int32 requestedChaosFrame)
     {
         if (!m_manager.has_value() || !m_manager->runsPrediction())
@@ -407,20 +308,17 @@ public:
             return;
         m_manager->editResimGateProbe().noteGrant(grantedChaosFrame);
     }
-// Defined in .cpp - needs the full USimmableUpdateComponent for NetSync instantiation.
     void onPostSimulationGameThread();
 
     virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-    // SimulationManagerOwnerConcept members — timing buffer forwarded through relay.
     FSmallSimulationStateSyncBuffer& getSyncedTimingBuffer();
     void setOnTimingInfoReceivedCallback(std::function<void(uint32_t, double)> fn)
     {
         m_onTimingInfoReceivedCallback = std::move(fn);
     }
 
-    // Called from ASimulationTimingRelay::OnRep_Buffer on clients via ISimulationTimingRelayListener.
     virtual void onTimingInfoReceived(uint32_t authorityTick, double roundTripTime) override
     {
         if (m_onTimingInfoReceivedCallback)
@@ -455,125 +353,68 @@ public:
     ChaosPhysicsBodyAdapter&  editPhysicsBodyAdapter() { return m_physAdapter.value(); }
     ChaosSpatialQueryAdapter& editQueryAdapter()       { return m_queryAdapter.value(); }
 
-// Read-only body adapter over GT-interpolated state; const because the concept requires only const.
     const ChaosPhysicsBodyReaderAdapter& getPhysicsBodyReaderAdapter() const { return m_physReaderAdapter.value(); }
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
 
     SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
     const SimulationReconciliation<SimulatableBrawler>& editReconciliation() const { return m_reconciliation; }
 
-// The newest input the server RELAYED for `id`, or nullopt when there is none to have. §6
-// ⛔ getLatestInput and its whole column are DELETED: this is the ONLY remote source now.
     std::optional<simulatableBrawler::PlayerInput> getLastRelayedInput(unsigned int id) const
     {
         return m_inputResolution.getLastRelayedInput<SimulatableBrawler>(id);
     }
 
-// This client's own raw captures for `id`, or nullptr when none. Diagnostics only. §1
-// ⛔ GAME-THREAD DOOR ONTO A PHYSICS-WRITTEN RING -- NOT same-thread with its writer, as
-//   getLastRelayedInput is. Its one caller is pollInputHistory, which owns the tear. §1
-// ⛔ m_reconciliation needs NO twin of this: editReconciliation() is already public.
     const LocalInputCache<simulatableBrawler::PlayerInput>* getLocalInputCache(unsigned int id) const
     {
         return m_inputResolution.getDiagnostics().localInputCache<SimulatableBrawler>(id);
     }
 
-// A capture line exists for exactly the characters this client drives, which stays right
-// under couch co-op and on a listen host -- both of which a ROLE test gets wrong. Every
-// meter that needs the answer asks HERE; a second test anywhere in the meter path would
-// let two parts of one stack disagree about whose character it is drawing.
-// ⛔⛔ THE ONE LOCALITY TEST THE DISPLAY MAKES, AND THE ONLY PLACE IT IS SPELLED. §1
     bool isLocallyControlledOnThisPeer(unsigned int id) const
     {
         return getLocalInputCache(id) != nullptr;
     }
 
-// ---- THE INPUT-HISTORY DISPLAY ----------------------------------------
-//
-// One row ring per LOCAL character, keyed by character id, fed by a render-rate poll.
-// Nothing here is replicated, enters a correction payload, or reaches compute_checksum.
-
-// Sweep `id`'s resident capture window into its ring. ⛔ THIS IS THE READ CROSSING. §1
     void pollInputHistory(unsigned int id, uint32 newestTick, float deadzone)
     {
         const LocalInputCache<simulatableBrawler::PlayerInput>* captures = getLocalInputCache(id);
         if (captures == nullptr)
-            return;     // no capture line: a remote proxy, or not registered yet
+            return;
 
         m_inputHistory.poll(id, *captures, newestTick, deadzone);
     }
 
-// The folded rows for `id`, or nullptr when it has none. Read-only; the panel's one source.
     const brawlerInputHistoryVisualization::InputHistoryRowRing* getInputHistoryRows(
         unsigned int id) const
     {
         return m_inputHistory.findRows(id);
     }
 
-// ---- THE RING-OUT SCOREBOARD [ringout task 6b] -------------------------
-//
-// `id`'s ring-out slice, or nullopt when no brawler in this world's storage carries that
-// id. The scoreboard's ONE door onto the two facts it cannot get from the actor: dead,
-// and the ABSOLUTE tick the respawn is due at. The score is NOT here and must not be --
-// it is `AOGBrawlerUECharacter::GetRingoutScore()`, replicated, and reading it from the
-// authority-only `ScoreSystem` instead would be a second code path nobody exercises.
-//
-// ⛔ READ OFF THE VIZ SNAPSHOT, NOT `getAllState()`. `updateVisualizationAll(m_storage)`
-//   takes `m_vizState = m_allState` once per game-thread pass in OnPostPhysicsStep, on the
-//   line immediately above the score push; that copy is the SANCTIONED physics->game
-//   handoff. A HUD reading `getAllState()` would be a fresh, unargued crossing of the
-//   fence this header's banner draws, so this accessor does not offer one. §1
-//
-// ⛔ `const`, AND BY VALUE. The slice is 5 B of plain data; returning a reference would
-//   hand a drawing surface a pointer into live storage for as long as it cared to keep it.
-//   Together with the `const ASimulationManagerUImpl*` the HUD holds, "the scoreboard
-//   writes no simulation state" is a compile error to break rather than a promise.
-//
-// ⚠ `State::respawnAtTick` IS MEANINGFUL ONLY WHILE `brawlerRingout::kFlagDead` IS SET and
-//   is deliberately left at its last value once cleared. Read the flag first.
     std::optional<brawlerRingout::State> getRingoutVizState(unsigned int id) const
     {
         if (!m_storage.has<SimulatableBrawler>(id))
             return std::nullopt;
 
+        // ⛔G-04  docs/SimulationManagerUImpl-guards.md
         return m_storage.get<SimulatableBrawler>(id)
             .getVizState().getState().get<brawlerRingout::State>();
     }
 
-// Sweep `id`'s resident correction window into its provenance lane and file ONE live
-// machine-state sample. `machineState` is read at the caller's own viz site: no seam here.
-//
-// The estimator's offset rides along and the poll pairs it with `liveTick` -- the very
-// tick the lane axis is built from. ⛔ THE DISPLAY GETS ONE CLOCK SNAPSHOT PER POLL and
-//   never reads the clock again at draw time, or the marker and its axis would disagree.
-// ⚠ getNetworkEstimator() exists only on a predicting role, hence the guard. §5
-//
-// `includeDelay` gates the SAME poll's input-delay decomposition, read from three
-// GAME-THREAD members this call already runs on -- the tier consumer, the shared
-// TimeConfig and the resolution peer's published atomic -- so this is three more
-// same-thread reads inside an existing passthrough, NOT a new crossing. §1
-//
-// The clock reading rides the same guard as the offset above it and is the same PAIR of
-// postures already argued for that read: the estimator's two ticks are game-thread-written
-// and read here on the game thread, and the clock's prediction tick is the accepted tear. §1
     void pollInputHistoryLanes(unsigned int id, uint32 liveTick, DAttackState machineState,
         std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput,
         bool pauseWhileIdle, bool includeDelay)
     {
         const std::optional<uint32> predictionOffsetTicks =
+            // ⛔G-05  docs/SimulationManagerUImpl-guards.md
             (m_manager.has_value() && m_manager->runsPrediction())
                 ? std::optional<uint32>(
                       m_manager->getNetworkEstimator().getPredictionOffsetTicks())
                 : std::nullopt;
 
-// The same test `pollInputHistory` makes, and for the same reason: a capture line
-// exists for exactly the characters this client controls. ⛔ NOT A ROLE TEST -- a
-// client can control several brawlers, and a listen-server host controls one. §1
+        // ⛔G-06  docs/SimulationManagerUImpl-guards.md
         const bool isLocallyControlled = isLocallyControlledOnThisPeer(id);
 
-// A remote proxy's stack shows the relay it is being predicted from instead.
-// ⛔ THE TIER DECOMPOSITION IS THE LOCAL CONNECTION'S and is not read for a remote.
         const std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay =
+            // ⛔G-07  docs/SimulationManagerUImpl-guards.md
             (includeDelay && isLocallyControlled
                 && m_replicatedTierConsumer.has_value() && m_manager.has_value())
                 ? std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition>(
@@ -585,8 +426,8 @@ public:
                           m_inputResolution.getClientEffectiveInputDelayTicks()))
                 : std::nullopt;
 
-// ⛔ GUARDED LIKE THE OFFSET ABOVE: getClientClock() std::terminates on a server. §5
         std::optional<brawlerInputHistoryVisualization::ClockDriftReading> clock;
+        // ⛔G-08  docs/SimulationManagerUImpl-guards.md
         if (m_manager.has_value() && m_manager->runsPrediction())
         {
             const ClientPredictionClock& predictionClock = m_manager->getClientClock();
@@ -596,14 +437,11 @@ public:
             reading.predictionTick = predictionClock.getPredictionTick();
             reading.targetTick     = estimator.getTargetPredictionTick();
             reading.authorityTick  = estimator.getLastAuthorityTick();
-// ⛔ CAST BEFORE THE SUBTRACTION -- a negative drift is the whole point, and two
-//   unsigned ticks would wrap it into a vast positive.
             reading.driftTicks     = static_cast<int32_t>(reading.targetTick)
                                    - static_cast<int32_t>(reading.predictionTick);
             reading.pendingAction  = predictionClock.evaluateDrift();
             reading.stallDebtTicks = predictionClock.getRequiredInputDelayIncreaseStallTicks();
-// ⛔ THE SEAM, THROUGH THE VIEW: the clock publishes no bare accessor for any of these.
-// ⛔ COUNT BEFORE ITS TICK: the clock writes tick then count, so the tear is one-way.
+            // ⛔G-09  docs/SimulationManagerUImpl-guards.md
             reading.skipCount              = predictionClock.getDiagnostics().skipCount();
             reading.lastSkipTick           = predictionClock.getDiagnostics().lastSkipTick();
             reading.stallCount             = predictionClock.getDiagnostics().stallCount();
@@ -616,26 +454,14 @@ public:
             clock = reading;
         }
 
-// A REMOTE proxy's delay-bar client half comes from the relayed reads this client
-// actually served for it, which is the one thing a tier reading cannot say. Absent
-// when the delay bar is off or this id has no ring, and then the half stays empty --
-// which the verdict already has a word for.
-// ⛔ ONE SOURCE PER POLL, CHOSEN HERE AND NOWHERE ELSE: the two calls below differ in
-//   the TYPE they pass, so neither poll can compile the other's read. §1
         const RelayedReadObservationRing* const relayedReads =
             isLocallyControlled ? nullptr : getRelayedReadObservations(id);
 
-// The relay-health bar's second source, taken beside the first so a poll can never hold
-// one without the other -- the pure poll static_asserts exactly that pairing.
         const RelayedInputArrivalRing* const relayedArrivals =
             isLocallyControlled ? nullptr : getRelayedInputArrivals(id);
 
-// How far back a resim may still reach, which is what separates an arrival that could
-// still have been replayed into a tick from one that could not.
-// The per-tier ceiling beside it escalates nothing today and its own banner says so, and
-// a negative value disables the authority's future guard and is no window at all here.
-// ⛔ THE SHIPPED WINDOW, `TimeConfig::rollbackWindowTicks`. §5
         const uint32 rollbackWindowTicks =
+            // ⛔G-10  docs/SimulationManagerUImpl-guards.md
             (m_manager.has_value() && m_manager->getTimeConfig().rollbackWindowTicks > 0)
                 ? static_cast<uint32>(m_manager->getTimeConfig().rollbackWindowTicks)
                 : 0u;
@@ -644,10 +470,7 @@ public:
             inputHistoryVisualizationUImpl::makeReconciliationSlotReader<SimulatableBrawler>(
                 m_reconciliation, id);
 
-// The relay-health bar rides the same two sources and is its own toggle, so the delay bar
-// being off must not blind it; `includeDelay` still decides the tier decomposition above,
-// which is the reading it actually names.
-// ⛔ NOT GATED ON `includeDelay`.
+        // ⛔G-11  docs/SimulationManagerUImpl-guards.md
         if (relayedReads != nullptr && relayedArrivals != nullptr)
         {
             m_inputHistory.pollLanes(id, reader, liveTick, machineState, liveInput,
@@ -661,33 +484,18 @@ public:
         }
     }
 
-// The relayed reads this client SERVED for `id`, or nullptr when it holds none -- a
-// locally controlled character, or one whose registration has not completed.
-// The accepted game-thread read of a physics-written ring is argued at that ring's own
-// declaration; this adds no posture of its own.
-// ⛔ POINTER TO CONST, straight through the resolution peer's diagnostic view. §1
     const RelayedReadObservationRing* getRelayedReadObservations(unsigned int id) const
     {
         return m_inputResolution.getDiagnostics()
             .relayedReadObservations<SimulatableBrawler>(id);
     }
 
-// When each relayed capture for `id` first arrived, or nullptr when it holds none. It is
-// game-thread on both sides -- the arrival door and this read -- so it opens no crossing.
-// ⛔ POINTER TO CONST, straight through the resolution peer's diagnostic view. §1
     const RelayedInputArrivalRing* getRelayedInputArrivals(unsigned int id) const
     {
         return m_inputResolution.getDiagnostics()
             .relayedInputArrivals<SimulatableBrawler>(id);
     }
 
-// The relay reading the nearest stack shows where the primary shows its tier line: the
-// newest schedule stamp, and how the scheduled read has been going across the
-// observations the ring still holds.
-// This counts, the pure header defines what is true, and the HUD builds the string.
-// ⛔ THE SPLIT `gatherScoreboardRows` ALREADY KEEPS.
-// ⛔ A TALLY OVER WHAT IS RESIDENT, never a session total -- a run of misses that has
-//   scrolled out is not a run of misses that is happening.
     brawlerInputHistoryVisualization::RelayReadReadout getRelayReadReadout(unsigned int id) const
     {
         brawlerInputHistoryVisualization::RelayReadReadout readout;
@@ -713,9 +521,7 @@ public:
             case ScheduledRelayedReadOutcome::NoProbe:    ++readout.noProbes;    break;
             }
 
-// The stamp of the NEWEST observation, found by its own tick: the ring is addressed by
-// sim tick and therefore walked out of order, so the last slot read is not the last one
-// written. ⛔ NEVER THE LAST SLOT VISITED.
+            // ⛔G-12  docs/SimulationManagerUImpl-guards.md
             if (!anyObservation || observation->simTick > newestSimTick)
             {
                 anyObservation       = true;
@@ -729,20 +535,13 @@ public:
         return readout;
     }
 
-// Every registered brawler's id and its viz-copy position in the ground plane -- the
-// one gather the nearest-character selection needs, and the only thing this class says
-// about it. The CHOICE is the pure header's.
-//
-// `updateVisualizationAll(m_storage)` is the sanctioned physics->game handoff, and a HUD
-// reading live state would be a fresh, unargued crossing.
-// ⛔ READ OFF THE VIZ SNAPSHOT, NOT `getAllState()` -- the ring-out slice's reason. §1
-// ⛔ FILLS A FIXED LIST AND ALLOCATES NOTHING -- this runs once per drawn frame.
     void gatherNearestCandidates(
         brawlerInputHistoryVisualization::NearestCharacterCandidateList& out) const
     {
         m_storage.forEachSimulatable<SimulatableBrawler>(
             [&out](unsigned int id, const auto& simulatable)
             {
+                // ⛔G-13  docs/SimulationManagerUImpl-guards.md
                 const auto& movement = simulatable.getVizState().getState()
                     .template get<brawlerMovementSimulation::State>();
 
@@ -751,21 +550,17 @@ public:
             });
     }
 
-// The per-tick lanes for `id`, or nullptr when it has none. Read-only; the bars' one source.
     const brawlerInputHistoryVisualization::InputHistoryTickLanes* getInputHistoryLanes(
         unsigned int id) const
     {
         return m_inputHistory.findLanes(id);
     }
 
-
-// The one shared TimeConfig, to BIND not copy. ⛔ Pointer, so pre-construction is not UB. §2
     const TimeConfig* getTimeConfigPtr() const
     {
         return m_manager.has_value() ? &m_manager->getTimeConfig() : nullptr;
     }
 
-// Publish the client's effective input delay - the one game->physics crossing. §1 §5
     void publishClientEffectiveInputDelayTicks(int32 delayTicks)
     {
         m_inputResolution.setClientEffectiveInputDelayTicks(delayTicks);
@@ -776,233 +571,94 @@ public:
         return m_inputResolution.getClientEffectiveInputDelayTicks();
     }
 
-// ---- CLIENT TIER CONSUMPTION ------------------------------------------
-//
-// One consumer per WORLD, not per CHARACTER: a tier is a property of the wire, and N
-// per-character consumers stalled one debt-accumulating clock N times per transition. §5
-
-// A tier TRANSITION arrived: apply, republish, convert old->new into a stall.
     virtual void onConnectionTierReceived(uint8_t oldTier, uint8_t newTier) override;
 
-// A tier latched before this bind: apply + republish, ⛔ never stall - it is the first. §5
     virtual void onConnectionTierReplayed(uint8_t tier) override;
 
-// ---- THE RELAY-RING HOST BOUNDARY -------------------------------------
-//
-// ⛔ A BRIDGE and nothing more: OGSimulationUnreal must not depend on OGBrawlerUnreal. §6
-//
-// ⛔ NO MAP, DELIBERATELY: three lookups on data that already replicates beat a registry.
-//
-// IDEMPOTENT: three independent link paths call this.
     virtual void onInputRelayHostReady(ASimulationInputRelay& host) override;
 
-// Read-only handle on the client tier cache (nullptr before BeginPlay built the manager).
     const ReplicatedTierConsumer* getReplicatedTierConsumer() const
     {
         return m_replicatedTierConsumer.has_value() ? &(*m_replicatedTierConsumer) : nullptr;
     }
 
-// ---- THE RELAY DELAY FLOOR --------------------------------------------
-//
-// The SECOND recompute input. ⛔ Either OnRep can land first, so ONE recompute holds both. §5
-//
-// Both arms live in ReplicatedTierConsumer::effectiveInputDelayTicks, which the server mirrors.
-
-// A floor CHANGE arrived: stamp, re-derive, republish, pay for an INCREASE with a stall.
     virtual void onRelayDelayFloorReceived(uint8_t floorTicks) override;
 
-// A floor latched before this bind: apply + republish, ⛔ no stall. Mirrors the tier replay.
     virtual void onRelayDelayFloorReplayed(uint8_t floorTicks) override;
 
-// ---- SERVER-AUTHORITATIVE RTT TIER + INPUT DELAY ----------------------
-//
-// ⛔ THE SERVER IS THE SOLE OWNER OF THE RTT TIER: the client never computes or samples one,
-// which is what makes tier disagreement impossible rather than merely unlikely. §5
-//
-// The whole reception subsystem is in the core coordinator; this manager is its adapter. §7
-//
-// ⛔ Authority-role only, nullopt on a pure client: it borrows m_manager's TimeConfig. §2
     using BrawlerReceptionCoordinator =
         ServerReceptionCoordinator<FUEConnectionHandle, SimulatableBrawler>;
     bool hasServerTierWiring() const { return m_receptionCoordinator.has_value(); }
 
-// ---- ENGINE-PRIMITIVE ACCESSORS for the RPC-boundary adapter ----------
-//
-// ⛔ These three are all this manager supplies, and none carries netcode policy. §7
-
-// The coordinator this manager owns, or nullptr on a pure client / pre-BeginPlay.
     BrawlerReceptionCoordinator* getReceptionCoordinator()
     {
         return m_receptionCoordinator.has_value() ? &*m_receptionCoordinator : nullptr;
     }
 
-// The server SIM TICK for RTT samples. ⚠ WART: physics write, game read; the EMA absorbs it. §7
     int32 getServerReceptionTick() const
     {
         return static_cast<int32>(getServerClock().getSimulationStep().getTick());
     }
 
-// The id->component mapping `deliver` resolves. ⛔ ONCE at register-time, not per slot. §7 §10
     void noteDelayedInputComponent(unsigned int id, USimmableUpdateComponent& component);
 
-// The coordinator's RemoteInputDeliverySink - the ONE method drain and fallback share. §7
     void deliverRemoteInput(unsigned int id, uint32 captureTick,
                             const simulatableBrawler::PlayerInput& input);
 
-// ALSO its RemoteInputRelaySink - the OUTBOUND half, staging for the OTHER clients. §6
-//
-// ⚠ That ring is `ASimulationInputRelay::m_relayedInputRing` under COND_SkipOwner - NOT the
-// component's m_detachedRelayRing, which is the no-host fallback nothing replicates. §11
-//
-// `dA` is the SCHEDULE STAMP: a peer derives the application tick as captureTick + dA.
     void relayRemoteInput(unsigned int id, uint32 captureTick, uint8 dA,
                           const simulatableBrawler::PlayerInput& input);
 
-// -----------------------------------------------------------------------
-// THE PRE-DIET CHARACTER CAP.
-//
-// ⛔ DELETED BY THE WIRE DIET, and their ABSENCE afterwards IS the cap-lifted statement.
-//
-// WHY 4: every remote ring must fit one packet alone; N=4 clears that bound and N=5 does not,
-// so at five characters an ORDINARY join crosses it with no server hitch required. §10
-//
-// The other half of the pre-diet configuration is TimeConfig::correctionRotationK. §3
-//
-// ⛔ CHECKED AT AUTHORITY REGISTRATION, which provably runs once per character. §10
-//
-// ⛔ [ringout task 4] COUPLED TO brawlerRingout::kMaxSpawnPoints, WHICH IS ALSO 4 - RAISING THIS
-// ALONE SILENTLY STOPS RESPAWNING EVERY CHARACTER PAST THE 4th. The ring-out spawn table has
-// exactly kMaxSpawnPoints entries and a character that gets no entry respawns with no teleport
-// seed and one [Warning][Ringout.spawnSlot] per respawn. The two constants must move together.
+    // ∴D-01  docs/SimulationManagerUImpl-rationale.md
     static constexpr int32 kPreDietCharacterCap = 4;
+    static_assert(static_cast<uint32>(kPreDietCharacterCap) <= brawlerRingout::kMaxSpawnPoints,
+        "kPreDietCharacterCap must not exceed brawlerRingout::kMaxSpawnPoints. The cap only WARNS - "
+        "it allocates nothing - while the ring-out spawn table has exactly kMaxSpawnPoints entries, so "
+        "a character registered past the table gets kNoFreeSlot and respawns with NO teleport seed (one "
+        "[Warning][Ringout.spawnSlot] per respawn). A cap above the table stops warning about exactly the "
+        "characters that cannot be placed: raise both together. Was the 'COUPLED TO "
+        "brawlerRingout::kMaxSpawnPoints' prose fence of SimulationManagerUImpl.h (task 11).");
 
 private:
-// The cap's denominator. ⛔ A SET, not a counter: asymmetric ends would disarm the cap. §10
     std::set<unsigned int> m_authorityRegisteredIds;
 
-// ---- THE RING-OUT SPAWN-SLOT TABLE (task 3) ---------------------------
-//
-// ⛔ AUTHORITY ONLY. It is populated by the registration seed below and drained by the
-// unregister contract, on the authority role alone; on a client it stays empty for the
-// life of the session, which is the same property `m_authorityRegisteredIds` above relies
-// on and the reason both are drained ungated.
-//
-// ⭐ ALL THE LOGIC IS IN THE CORE TYPE, NOT HERE. `brawlerRingout::SpawnSlotAllocator`
-// lives in the engine-free `BrawlerRingoutSimulation.h` so that the two properties that
-// matter — two remote clients never share an index, and a released index is reused by a
-// later join — are assertions in `BrawlerRingoutSimulationTest.cpp` rather than prose
-// about a file the low-level-test target cannot reach. This member holds NO policy.
-//
-// ⛔ IT ADDS NOTHING TO THE WIRE. What rides the wire is the uint32 it produces, inside
-// `brawlerRingout::InitialConditions`; the table itself is in no composite and has no
-// `SerializableFields` specialization.
     brawlerRingout::SpawnSlotAllocator m_spawnSlots;
 
-
-// ---- THE RING-OUT SPAWN TABLE, READ OFF THE LEVEL (task 9) ------------
-//
-// ⛔⛔ THIS IS THE ONE PLACE IN THE TREE THAT WRITES `StaticData` AFTER CONSTRUCTION, AND IT
-// IS A DELIBERATE, ARGUED EXCEPTION — NOT AN OVERSIGHT TO BE "FIXED" BACK.
-// The banner above states StaticData as constructed once and never moved. What that
-// discipline actually protects is that NO TICK EVER SEES IT CHANGE: a constant the sim
-// reads mid-session is a constant two peers can disagree about and a resim can replay
-// against the wrong value. This write is a ONE-TIME INIT inside `BeginPlay`, BEFORE the
-// integration layer and the manager are even constructed, so there is no tick for it to be
-// visible to. The `checkf`s at the definition are what hold that, mechanically.
-//
-// ⛔ WHY IT CANNOT BE A CONSTRUCTOR ARGUMENT INSTEAD, which is the obvious "proper" fix:
-// `m_staticData` is brace-initialised in a MEMBER INITIALIZER, which runs during actor
-// construction, and level actors are not reachable then. `APlayerStart` exists at
-// `BeginPlay` and not one moment earlier. The same sentence is already true of
-// `readMovementStaticDataCVars()` above and of the gravity `checkf` in `BeginPlay`.
-//
-// ⭐ ALL THE POLICY IS IN THE CORE TYPE, exactly as `m_spawnSlots` above:
-// `brawlerRingout::spawnPointsFromLevelPlacements` does the sort and the fallback, and it is
-// covered by `Ringout.SpawnPoints.*` in `BrawlerRingoutSimulationTest.cpp`. This method holds
-// the actor walk, the `FName` -> bytes conversion, and no decisions.
+    // ⛔G-14  docs/SimulationManagerUImpl-guards.md
     void seedRingoutSpawnPointsFromLevel(UWorld& world);
 
-// EXACTLY ONCE, and it is enforced rather than asserted — see the `checkf` at the definition.
-// ⚠ PER MANAGER INSTANCE: a listen server runs TWO of these actors, and each owns its own
-// `m_staticData`, so each seeds its own table once.
     bool m_ringoutSpawnPointsSeeded = false;
 
-
-// ---- TIER INPUT DELAY: RELEASE ----------------------------------------
-//
-// Primitive acquisition plus the core call: upcoming sim tick (mapper +1, §9), the per-id
-// `deliver` callback, the drain, the reap. GAME THREAD. ⛔ No netcode policy. §7
     void releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps);
 
-// ---- CLIENT TIER CACHE INTERNALS --------------------------------------
-//
-// Feed one tier into the cache and republish through the shared recompute.
     void applyReplicatedConnectionTier(uint8 tier);
 
-// Feed one FLOOR into the shared TimeConfig; `payForIncrease` tells an OnRep from a replay.
     void applyReplicatedRelayDelayFloor(uint8 floorTicks, bool payForIncrease);
 
-// ADVISORY-ONLY, from BOTH intake points. ⛔ Never an assert: floor 0 must stay silent. §3
+    // ⛔G-15  docs/SimulationManagerUImpl-guards.md
     void logRelayDelayFloorAdvisory(int32 floorTicks);
 
-// THE SHARED TWO-INPUT RECOMPUTE over the floor and the tier. §5
-//
-// ⛔ ONE SITE, BOTH CHANNELS: two half-formula writers answer stale when OnReps interleave.
-//
-// RETURNS the change in published delay, so a caller that must pay for an increase can.
+    // ⛔G-16  docs/SimulationManagerUImpl-guards.md
     int32 recomputeAndPublishEffectiveInputDelay();
 
-// ⛔ THE DECISION is shouldStallForTierTransition, which has the LLT coverage this lacks. §5
     void applyTierTransitionStall(uint8 oldTier, uint8 newTier, bool hadAnyTier);
 
-// The client's ENTIRE share of the tier system, over the lookups the server also uses. §5
-//
-// ⛔ Emplaced on BOTH roles: a listen-server host runs client paths on an AUTHORITY manager,
-// where an unbound cache would answer 0 and the no-tier fallback is what is correct. §5
     std::optional<ReplicatedTierConsumer> m_replicatedTierConsumer;
 
-// The last published effective delay. ⛔ Kept here, not read back out of the atomic. §1
     int32 m_lastPublishedEffectiveInputDelayTicks = 0;
 
-// THE reception subsystem, relocated whole into the core. Authority-only. §2 §7
-//
-// ⛔ THREADING, LOAD-BEARING: game thread ONLY - no container here synchronizes itself. §1
     std::optional<BrawlerReceptionCoordinator> m_receptionCoordinator;
 
-// PROBE A - sim ticks per game-thread frame, i.e. FRAME HEALTH. Diagnostic only. §8
-//
-// ⛔ WHY HERE AND NOT IN SimulationNetSync with the other three: the only tick source legal
-// on this thread is the ChaosTickMapper offset, which this actor owns and NetSync cannot reach. §9
-//
-// One instance per actor, one actor per role, so nothing is shared across roles. §1
     FrameHealthProbe m_frameHealthProbe;
 
-// PROBES 5 + 6 - the SERVER WRITE PATH. Diagnostic only, like the one above. §8
-//
-// WHAT THEY CLOSE: the relay-loss hypothesis eliminated the server's own write on
-// sim-paced reasoning, but the ring is written from the RPC RECEIPT path and is paced
-// by PACKET ARRIVAL. §8
-// ⛔ A CLIENT CANNOT TELL A COALESCED WRITE FROM A SEND-PATH DROP.
-//
-// m_connectionBudgetProbe replaces the DERIVED half of the budget model with a measured one. §8
-//
-// ⛔ Both fed from the GAME THREAD, server only, and neither has synchronization. §1
-//
-// Capacity is INJECTED: under flush-on-poll the ceiling is min(writesThisFrame, kMaxDepth). §6
+    // ⛔G-17  docs/SimulationManagerUImpl-guards.md
     RelayWriteProbe       m_relayWriteProbe{
         RelayStageCapacity{ static_cast<uint32>(relayedInputRing::kMaxDepth) } };
     ConnectionBudgetProbe m_connectionBudgetProbe;
 
-// Adapter-side delivery resolution: the core claim map is id-keyed, so its `deliver`
-// callback hands back an id and THIS map resolves it to the owning component. §7
-// ⛔ Erased in unregisterFromNewFramework - the contract replacing the core's GC read. §10
     std::unordered_map<unsigned int, TWeakObjectPtr<USimmableUpdateComponent>>
         m_delayedInputComponentsById;
 
-// The display's rings, one per polled character id. GAME THREAD, unsynchronized, like
-// every other diagnostic member here. ⛔ Reaped in unregisterFromNewFramework. §1 §10
     inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
-
 
     FSimulationManagerAsyncCallback* m_asyncCallback;
 
@@ -1014,48 +670,23 @@ private:
     ASimulationTimingRelay* m_timingRelay = nullptr;
     ASimulationTimingRelay* findTimingRelay();
 
-// Adapters require the Chaos solver - emplaced in BeginPlay.
     std::optional<ChaosPhysicsBodyAdapter>   m_physAdapter;
     std::optional<ChaosPhysicsBodyReaderAdapter> m_physReaderAdapter;
     std::optional<ChaosSpatialQueryAdapter>  m_queryAdapter;
 
-// ⭐⭐ THE ONE-TIME CVAR READ - [movement-sim task 16, ruling #3]. DEFINED IN
-// `MovementSchemeCVar.cpp`, NOT in SimulationManagerUImpl.cpp, and that is deliberate: it is
-// the TU that registers the four variables, so the read is a direct load of the very objects
-// the console writes rather than a `FindConsoleVariable` lookup by string that can miss a
-// rename in silence. That TU also owns the "consumed" latch the four sinks test before warning
-// that a mid-session change is being ignored, and the refused-name sweep (a stale ini naming a
-// constant that no longer exists is reported LOUDLY there, per the obligation routed from
-// task 56). Reads the engine's default gravity at the same instant.
     static FMovementStaticDataCVars readMovementStaticDataCVars();
 
-// ---- SIMULATABLE-PACK ALIAS CHAIN -------------------------------------
-//
-// Single source of truth: widen this one alias and every type below inherits it.
-// ⛔ CLASS-scoped so these names cannot leak to global scope from an adapter header. §2
+    // ⛔G-18  docs/SimulationManagerUImpl-guards.md
     using BrawlerSimulatables    = SimulatableList<SimulatableBrawler>;
     using BrawlerStorage         = apply_t<SimulationObjectStorage,     BrawlerSimulatables>;
     using BrawlerNetSync         = apply_t<SimulationNetSync,           BrawlerSimulatables>;
-// The resolution peer's own alias - a composition-root sibling, not a NetSync member.
     using BrawlerInputResolution = apply_t<SimulationInputResolution,   BrawlerSimulatables>;
     using BrawlerReconciliation  = apply_t<SimulationReconciliation,    BrawlerSimulatables>;
 
-// Owned resources + peers, typed from the alias chain. ⛔ Order matters - see below. §2
     BrawlerStorage m_storage;
 
-// ⭐ [movement-sim task 16] THE ONE-TIME CVAR READ, AND IT IS DECLARED HERE FOR A REASON:
-// members construct in DECLARATION order, so this one must sit IMMEDIATELY ABOVE m_staticData,
-// which reads it in its own initializer. Moving it below is not a style change - it is
-// reading an uninitialized object, silently, exactly as the banner below warns. §2
     const FMovementStaticDataCVars m_movementStaticDataCVars = readMovementStaticDataCVars();
 
-// Game static data - the ownership ROOT for StaticData across the whole tree.
-//
-// ⛔ NEVER copied or moved: nested sub-StaticData binds sibling references that a copy dangles. §2
-// ⭐ Its FIVE movement parameters come from the one-time read above; every other constant it
-// holds is still authored in SimulatableBrawlerTypes.h. This is the ONE call site in the tree
-// that passes anything - every test peer default-constructs and therefore measures the
-// authored literals.
     simulatableBrawler::StaticData m_staticData{
         m_movementStaticDataCVars.model,
         m_movementStaticDataCVars.maxWalkSpeed,
@@ -1063,40 +694,23 @@ private:
         m_movementStaticDataCVars.stepSpeed,
         m_movementStaticDataCVars.gravity };
 
-// ⛔ ENFORCED BY ONE THING ONLY: members construct in DECLARATION order, not list order.
-//
-// ⛔ NO `static_assert` and NO `-Wreorder`-as-error in any `.Build.cs`/`.Target.cs` here:
-// a reorder compiles silently and constructs in the new, wrong order.
-//
-// ⛔ LOAD-BEARING the day a ctor BODY calls a sibling: UB, undiagnosed. Trivial today. §2
     BrawlerReconciliation  m_reconciliation{ m_storage };
-// Constructed BEFORE m_netSync - netSync's ctor takes a reference to this peer. §2
     BrawlerInputResolution m_inputResolution{ m_storage, m_reconciliation };
     BrawlerNetSync         m_netSync{ m_storage, m_reconciliation, m_inputResolution };
 
-// apply_t cannot fill the executor's three engine/game-specific slots; a bind wrapper does. §2
     template <typename... SimulatableTs>
     using BrawlerIntegrationExecFor_UE = SimulationIntegrationExecutor<
         simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableTs...>;
     using BrawlerIntegrationExec = apply_t<BrawlerIntegrationExecFor_UE, BrawlerSimulatables>;
 
-// Fourth peer - systems executor over (pack marker, StaticData type, system pack).
     using BrawlerSystemsExec = SimulationSystemsExecutor<
         BrawlerSimulatables,
         simulatableBrawler::StaticData,
         brawlerHitRouting::System,
-// ⛔ [ringout task 19] NO ROLE LOGIC LIVES HERE. Each system declares its own
-// kRoleAffinity and the executor gates every hook on the role SimulationManager hands it at
-// each fire - brawlerHitRouting::System is AllRoles and fires on all three, including every
-// resim replay tick; brawlerRingout::ScoreSystem is AuthorityOnly and fires nowhere else.
-// Nothing is wired at composition and nothing is stored: this alias just names the pack, and
-// its ORDER is the firing order. See OGSimulation/SystemRoleAffinity.h.
         brawlerRingout::ScoreSystem>;
 
-// Value-owned; default-constructs the routing and score systems. Passed by reference at emplace().
     BrawlerSystemsExec m_systemsExec;
 
-// Integration layer and manager require adapters - emplaced in BeginPlay.
     using IntegrationLayerType = BrawlerIntegrationExec;
     std::optional<IntegrationLayerType> m_integrationLayer;
 
@@ -1109,12 +723,6 @@ private:
 
     ChaosTickMapper m_chaosTickMapper;
 
-// ⭐ [movement-sim task 17] `BodyId parentBodyId` IS GONE. It cached the pawn root capsule's
-// body id across the two-phase `tryRegister` for exactly two readers: the two-source tripwire
-// (deleted with it) and the resolvability gate, which now reads the movement declaration's own
-// `bindings.ownBodyId` — the same body, because that declaration's descriptor sets `isRoot`.
-// The capsule id is still derived inside the first-call pass as a LOCAL, where the factory and
-// `decl.bindings.parentBodyId` consume it; nothing needed it to survive the call.
     struct PendingRegistration
     {
         std::optional<SimulatableBrawler> simulatable;
@@ -1123,4 +731,53 @@ private:
         bool isAuthority = false;
     };
     std::unordered_map<unsigned int, PendingRegistration> m_pendingRegistrations;
+
+    static constexpr bool compositionContractsHold()
+    {
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_storage)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_movementStaticDataCVars)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_movementStaticDataCVars)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_staticData)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_staticData)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_reconciliation)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_reconciliation)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_inputResolution)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_inputResolution)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_netSync),
+            "ASimulationManagerUImpl members construct in DECLARATION order, and four of these read a "
+            "sibling declared above them in their own initializer: m_staticData reads "
+            "m_movementStaticDataCVars; m_reconciliation binds m_storage; m_inputResolution binds "
+            "m_storage and m_reconciliation; m_netSync binds all three peers above it. A reorder "
+            "compiles (no -Wreorder-as-error in this tree) and constructs in the new, wrong order. "
+            "Keep m_storage < m_movementStaticDataCVars < m_staticData < m_reconciliation < "
+            "m_inputResolution < m_netSync. Was the CONSTRUCTION ORDER prose fence of "
+            "SimulationManagerUImpl.h (task 11).");
+        static_assert(std::is_same_v<decltype(m_authorityRegisteredIds), std::set<unsigned int>>,
+            "m_authorityRegisteredIds is the pre-diet cap's denominator and must be a SET, not a counter: "
+            "tryRegister inserts only on the Ready path, while unregisterFromNewFramework erases for any "
+            "component ending play - one abandoned mid-Pending included - so a counter drifts downward and "
+            "disarms the cap. Was the 'A SET, not a counter' prose fence of SimulationManagerUImpl.h "
+            "(task 11).");
+        return true;
+    }
+
+    void assertCompositionContracts()
+    {
+        static_assert(compositionContractsHold());
+    }
 };
+
+static_assert(std::is_same_v<decltype(&ASimulationManagerUImpl::getRingoutVizState),
+        std::optional<brawlerRingout::State> (ASimulationManagerUImpl::*)(unsigned int) const>,
+    "ASimulationManagerUImpl::getRingoutVizState must stay a CONST member returning the slice BY VALUE. "
+    "The scoreboard holds a const ASimulationManagerUImpl*, so 'the scoreboard writes no simulation "
+    "state' is a compile error to break; a reference would hand a drawing surface a pointer into live "
+    "storage for as long as it cared to keep it. Was the 'const, AND BY VALUE' prose fence of "
+    "SimulationManagerUImpl.h (task 11).");
+
+static_assert(std::is_same_v<decltype(&ASimulationManagerUImpl::getTimeConfigPtr),
+        const TimeConfig* (ASimulationManagerUImpl::*)() const>,
+    "ASimulationManagerUImpl::getTimeConfigPtr returns a POINTER so that the pre-BeginPlay state - no "
+    "manager, therefore no TimeConfig - is a representable nullptr rather than a reference into an "
+    "empty optional. Callers bind lazily and retry. Was the 'Pointer, so pre-construction is not UB' "
+    "prose fence of SimulationManagerUImpl.h (task 11).");

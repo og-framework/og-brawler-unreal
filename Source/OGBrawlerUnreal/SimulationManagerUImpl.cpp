@@ -1,68 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
-//
-// ===========================================================================
-// ASimulationManagerUImpl - IMPLEMENTATION. Composition root, Chaos callback,
-// log router, transport adapter.
-// ===========================================================================
-// ORIENTATION - read this before the bodies. The header carries the shape; this
-// file carries the wiring. All rationale, provenance and worked derivations are
-// in docs/SimulationManagerUImpl-rationale.md (BUSL-1.1, this subtree); the
-// section marks below are that document.
-//
-// WHAT IS IN HERE, in file order:
-//   1. RouteOGMessage        - one SIMLOG string -> one LogOG* category. §4
-//   2. FSimulationManagerAsyncCallback - the five PHYSICS-THREAD Chaos hooks. §1
-//   3. BeginPlay / EndPlay   - the composition root: ini knobs, both role
-//                              branches, every emplace and every reset. §2 §3
-//   4. The OnRep listeners   - tier and floor consumption. §5
-//   5. tryRegister / unregisterFromNewFramework - the registration contract. §10
-//   6. The two sinks + releaseDelayedInputsForStep - the transport adapter. §7
-//   7. Four probes: frame health, relay writes, connection budget, resim gate. §8
-//
-// THREADS. GAME THREAD unless stated. The five *_Internal hooks in section 2,
-// and everything the core manager runs beneath them, are PHYSICS THREAD.
-// ⛔ The only tick source legal to read on the game thread is ChaosTickMapper's
-// atomic offset - never a clock, on either role. §1 §9
-//
-// ⛔ EVERY SESSION KNOB TAKES THE SAME FOUR STEPS, and a knob missing any one of
-// them is how this tree has shipped three silently-inert settings:
-//     1 INTAKE   read the ini once, before the manager exists where possible
-//     2 CLAMP    or parse/validate; out of range is REPORTED, never silently fixed
-//     3 SET      stamp the effective value into the one shared TimeConfig
-//     4 PROVE    an UNCONDITIONAL Warning line naming the value actually stored
-// ⛔ STEP 4 IS AT WARNING, NOT Log, because Config/DefaultEngine.ini sets
-// LogOGNet=Warning and a Log line therefore DOES NOT EXIST on a dedicated
-// server. ⛔ And it is UNCONDITIONAL, because a line that is absent both when the
-// key was read and when it was not cannot tell those two cases apart. §3
-//
-// ⛔ NO KNOB HERE MAY BECOME A CVAR. Each is read ONCE at composition: the
-// rotation width because a cadence that moves mid-run makes a probe window
-// unattributable, and the resim policy because it is pushed into every
-// correction cache and read unsynchronized on the landing path - which is sound
-// only because it is written before any correction can land. §3
-//
-// PROBE VOLUME CONVENTION: per-window summaries at Warning, per-event detail at
-// Verbose, and NOTHING per-tick or per-write at any verbosity. §8
-//
-// ⛔ THE THREE PROBE FAMILIES EACH OWN THEIR CATEGORY, because that is the only
-// thing that silences a family's per-window summaries independently of its
-// per-event detail; and none may be filed under `[Resim.` (which inherits
-// LogOGSim=Verbose) or `[ResimCheck.` (which is split across two categories). §4
-// ===========================================================================
+// docs/SimulationManagerUImpl-rationale.md · docs/SimulationManagerUImpl-guards.md
 
 #include "SimulationManagerUImpl.h"
 #include "OGSimulation/CompilerControl.h"
 #include "OGSimulation/SimulationComparison.h"
 #include "Runtime/Engine/Public/Net/UnrealNetwork.h"
 #include "EngineUtils.h"
-// [ringout task 9] The level-placed respawn points: TActorIterator over APlayerStart,
-// walked ONCE in BeginPlay. See seedRingoutSpawnPointsFromLevel below.
 #include "GameFramework/PlayerStart.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
 #include "OGSimulationUnreal/SimulationConnectionRelay.h"
-// The relay-ring host - this manager resolves its owner to the consuming component. §6
 #include "OGSimulationUnreal/SimulationInputRelay.h"
 #include "Runtime/PhysicsCore/Public/Chaos/ChaosScene.h"
 #include "Runtime/Engine/Public/Physics/NetworkPhysicsComponent.h"
@@ -82,11 +30,8 @@
 #include "Runtime/Engine/Public/Net/NetPing.h"
 #include "Runtime/Engine/Classes/Engine/NetConnection.h"
 #include "Runtime/Engine/Classes/Engine/NetDriver.h"
-// GConfig - the ONLY GConfig use in this codebase, deliberately confined here. §3
 #include "Misc/ConfigCacheIni.h"
-// relayedInputRing::kMaxDepth - the probe's stage capacity. ⚠ No clampDepth call here. §6 §11
 #include "OGSimulation/RelayedInputRingCodec.h"
-// resimGate:: - the policy kernel. Explicit, not leaned on through SimulationManager.h. §3
 #include "OGSimulation/ResimGatePolicy.h"
 
 #include <algorithm>
@@ -104,119 +49,29 @@ DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
 DEFINE_LOG_CATEGORY(LogOGResimProbe);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
+#define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
+
 namespace
 {
-// kTierReapDeadlineDwellPeriods moved into the core coordinator, beside the reap logic.
-
-// THIS ADAPTER'S HALF OF THE FIELD-DIFF COST GATE. §4
-//
-// ⛔ THE CORE SHIPS THIS GATE CLOSED. `correctionFieldDiff::g_enabledPredicate` is an
-// EMPTY std::function in og-simulation, so a host that never calls this walks no field
-// ever. This function is the ONLY thing that opens it in this project, and what it opens
-// it against is the LIVE routing decision the correction line itself takes.
-//
-// ⛔ A PREDICATE, NOT A LATCHED BOOL, AND THAT IS WHY IT IS A LAMBDA. `UE_LOG_ACTIVE`
-// re-reads the category's CURRENT verbosity, so `LogOGDivergenceProbe Verbose` typed into
-// the console mid-session starts naming fields on the next correction, and Warning stops
-// it again. Reading it once at BeginPlay would pin the session to whatever the ini said.
-//
-// ⛔ IT MUST NAME THE SAME CATEGORY `RouteOGMessage` SENDS `[DivergenceProbe` TO, at the
-// SAME verbosity the line carries (`[Verbose]`). Re-route that prefix and this gate starts
-// answering about a channel the line no longer uses — it would then pay for a walk whose
-// result is dropped, or drop a walk whose line is printed. This predicate and
-// `RouteOGMessage`'s `[DivergenceProbe` arm are the ONLY TWO SITES IN CODE that USE this
-// category — one reads its verbosity, the other logs to it; the DECLARE, the DEFINE and the
-// ini value are the only other mentions. Change one and you must change the other.
+	template <typename QueryAdapterOptional>
+	void emplaceBrawlerQueryAdapter(QueryAdapterOptional& queryAdapter, UWorld* world)
+	{
+		queryAdapter.emplace(world, std::initializer_list<ChaosCategoryMapping>{
+			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
+			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
+			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
+			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
+			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
+			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
+		});
+	}
 	void bindCorrectionFieldDiffGate()
 	{
+		// ⛔G-50  docs/SimulationManagerUImpl-guards.md
 		correctionFieldDiff::setEnabledPredicate(
 			[]() { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
 	}
 
-// ── [netcode-v2 task 10] THE REWIND-PUSH PROBE. Is the pushed target ever read? ──
-//
-// ⭐⭐ BUILT TO BE ABLE TO REFUTE, AND REWORK 1 IS WHERE THAT STOPPED BEING A CLAIM.
-// Backlog task 10 AC 1: on an adoption-terminated swing a MISMATCH confirms that the
-// replay starts from the client's own recorded physics; a MATCH REFUTES the hypothesis
-// and closes task 10 as "not a defect". Both verdicts are ONE grep and
-// `[ResimProbe.PushVerdict]` spells the word, so neither reading asks an operator to
-// re-derive anything from source.
-//
-// ⛔⛔ THE VERDICT READ IS NOT TAKEN BESIDE THE PUSH, AND THE FIRST REVISION OF THIS
-// PROBE WAS WRONG TO TAKE IT THERE. `FRewindData::SetTargetStateAtFrame` ->
-// `PushStateAtFrame` writes the `TargetPositions`/`TargetVelocities`/`TargetStates`
-// history buffers and touches no particle. A read taken immediately after that call
-// therefore equals the read taken immediately before it BY CONSTRUCTION - on every
-// body, on every rewind. That makes `match=1` mean nothing but "the pushed value
-// already equalled the live one", i.e. THE PUSH WAS INERT, and it makes the one shape
-// that could refute the hypothesis - a NON-INERT match - unreachable. It also lets a
-// binary whose target consumer runs after the push and before integrate print exactly
-// the same line as a binary that reads the target never.
-//
-// ⭐ SO THE PROBE IS SPLIT ACROSS TWO HOOKS:
-//   FirstPreResimStep_Internal   read live -> push -> read live again. Those two reads
-//                                give `moved=` (did the push call ITSELF move the
-//                                particle - an eager-apply discriminator, NOT the
-//                                verdict). The pushed value and the pre-push read are
-//                                stashed in `m_pushProbeStash`.
-//   OnPreSimulate_Internal       on the resetting frame, at the TOP of the hook: read
-//                                the live particle a third time and compare it against
-//                                the stashed pushed value. THAT is `match=`. By then
-//                                `ApplyTargets` and anything else the engine runs inside
-//                                ConditionalApplyRewind_Internal has had its chance, and
-//                                OG's own systems (the radial's setIdlePose /
-//                                setInitialConditions) have NOT yet run - they write the
-//                                live body during integrate, and a read after them would
-//                                be measuring OG, not the engine.
-//
-// ⚠ RESIDUAL BLIND SPOT, stated rather than hidden: a consumer that runs INSIDE the
-// evolution after ApplyCallbacks_Internal - i.e. between this hook and Integrate - is
-// still invisible to this read. The probe narrows the window; it does not close it.
-//
-// ⛔⛔ `inert=` IS WHAT MAKES A REFUTATION MEAN ANYTHING. A rewind in which every
-// push happened to equal the state the body was already in tests NOTHING, and its
-// all-matched counters are indistinguishable from a clean refutation. So the verdict is
-// computed over NON-INERT comparisons only: `nonInert=0` is `VACUOUS`, every non-inert
-// comparison matching is `ALL_MATCH`, any non-inert mismatch is `MISMATCH`. A refutation
-// needs at least one `body=WeaponAxis inert=0 match=1` line.
-//
-// ⛔ X/R, NOT P/Q - AND THAT IS THE DIFFERENCE BETWEEN A PROBE AND A CONFIRMATION
-// MACHINE. `ChaosPhysicsBodyAdapter::captureBodyState` reads `GetP()`/`GetQ()`
-// because it runs from PostSolve, where P/Q are the solved pose and X/R still hold
-// the start-of-step pose. Here the phase is the opposite one:
-// `FRewindData::RewindToFrame` restores the pose with `SetXR`,
-// `FRewindData::ApplyTargets` applies a target with `SetXR` - neither writes P/Q -
-// and `FPBDRigidsEvolutionGBF::Integrate` starts the replayed step from
-// `XCom()`/`RCom()`. X/R IS therefore the state the replay starts from, and
-// reading P/Q here would report a stale pre-rewind pose and print a mismatch every
-// single time. `dXP=` carries the X-to-P distance so that skew stays visible.
-//
-// ⛔ THE MATCH PREDICATE IS THE PRODUCTION ONE, never a re-derivation:
-// `isSimilarToField` (`SimulationComparisonGlm.h`) at `kDefaultSimilarityEpsilon`
-// (`SimulationTypes.h`), the same test `isSimilarTo` applies to a correction. Its
-// quaternion arm is |abs(dot) - 1|, so an antipodal-but-identical rotation reads as
-// a match where a component compare would have shouted mismatch. `inert=` runs the
-// SAME predicate over the SAME field set, so "inert but mismatched" can never be an
-// artefact of the two questions looking at different fields.
-//
-// ⛔ ONLY THE FIELDS THE BODY'S WIRE SHAPE ACTUALLY CARRIES ARE COMPARED. A
-// declaration whose `bodyStateOf` yields `LinearBodyState` - the character capsule,
-// `BrawlerMovementSimulation.h` - fabricates an identity rotation and a zero
-// angular velocity on the way to `PhysicsBodyState`, so comparing those two would
-// report a mismatch that means nothing. `cmp=` names the set compared; anything
-// that is not exactly `PhysicsBodyState` takes the conservative
-// position-plus-linear-velocity set. `moved=` is the one deliberate exception: it
-// compares two LIVE reads of the same particle, so the wire shape is irrelevant
-// there and all four fields count.
-//
-// ⛔ AN UNRESOLVED BODY IS COUNTED, NOT SKIPPED, and a stash that reaches its
-// verdict point with nothing testable prints `verdict=VACUOUS` - because all-matched
-// counters otherwise read exactly like a clean refutation. A stash that never reaches
-// its verdict point at all prints `verdict=UNREAD`.
-//
-// Volume: per-event detail plus its per-rewind summary, BOTH at Verbose, and every
-// read and format sits behind one `UE_LOG_ACTIVE`, so the shipped
-// `LogOGResimProbe=Warning` pays for a single branch per body. §8
 	const TCHAR* pushProbeResimTypeText(Chaos::EResimType type)
 	{
 		switch (type)
@@ -239,9 +94,6 @@ namespace
 		}
 	}
 
-// The live particle, read the way the replayed step is going to read it. `solvedP`
-// is NOT part of that answer and is never compared — it exists only so that `dXP=`
-// can show how far the uncommitted P has drifted from the rewound X.
 	struct LivePushProbeRead
 	{
 		PhysicsBodyState startOfStep;
@@ -253,6 +105,7 @@ namespace
 		LivePushProbeRead read;
 		auto* ptApi = proxy.GetPhysicsThreadAPI();
 		const Chaos::FConstGenericParticleHandle particle(proxy.GetHandle_LowLevel());
+		// ⛔G-52  docs/SimulationManagerUImpl-guards.md
 		read.startOfStep.position        = uglm::toGLMVec3(particle->GetX());
 		read.startOfStep.rotation        = uglm::toGLMQuat(FQuat(particle->GetR()));
 		read.startOfStep.linearVelocity  = uglm::toGLMVec3(ptApi->GetV());
@@ -261,9 +114,6 @@ namespace
 		return read;
 	}
 
-// REPORTED MAGNITUDES, each the quantity its own `isSimilarToField` overload tests:
-// worst component for a vec3, |abs(dot) - 1| for a quat. A number that measured
-// something other than what the verdict tested would be worse than no number.
 	float pushProbeVectorDelta(const glm::vec3& a, const glm::vec3& b)
 	{
 		const float dx = std::abs(a.x - b.x);
@@ -280,11 +130,7 @@ namespace
 		return std::abs(std::abs(glm::dot(a, b)) - 1.f);
 	}
 
-// TWO QUESTIONS, ONE FIELD SET, ONE PRODUCTION COMPARATOR. `match` asks whether the
-// replay's starting state equals the pushed value; `inert` asks whether the push could
-// have changed anything at all. Running both through this one helper is what makes
-// "non-inert AND matched" a statement about the engine rather than about which fields
-// each question happened to look at.
+	// ⛔G-53  docs/SimulationManagerUImpl-guards.md
 	bool pushProbeFieldsSimilar(const PhysicsBodyState& a, const PhysicsBodyState& b,
 	                            bool wireCarriesRotationAndSpin)
 	{
@@ -295,10 +141,6 @@ namespace
 					&& isSimilarToField(a.angularVelocity, b.angularVelocity)));
 	}
 
-// The deciding magnitude for `pushProbeFieldsSimilar`, over the SAME field set: every
-// arm is tested against the same `kDefaultSimilarityEpsilon`, so the worst arm is
-// exactly the number whose comparison to eps produces the bool. Reporting anything
-// else would be reporting a quantity the verdict did not use.
 	float pushProbeWorstDelta(const PhysicsBodyState& a, const PhysicsBodyState& b,
 	                          bool wireCarriesRotationAndSpin)
 	{
@@ -315,27 +157,19 @@ namespace
 		return worst;
 	}
 
-// ⛔ `compared` IS NOT THE DENOMINATOR OF THE VERDICT - `nonInert` IS. An inert
-// comparison (the pushed value already equalled the live pre-push state) tests nothing
-// whatever the replay then does, so counting it as a match would let a session in which
-// the shape never reproduced read as a refutation.
 	struct PushProbeTally
 	{
-		int32 bodies             = 0;  // composite bodies the push loop walked
-		int32 compared           = 0;  // bodies that resolved at BOTH push time and verdict time
-		int32 unresolved         = 0;  // bodies that failed to resolve at either point
-		int32 inert              = 0;  // pushed value already equalled the pre-push live state
-		int32 nonInert           = 0;  // compared - inert: the ONLY testable comparisons
+		int32 bodies             = 0;
+		int32 compared           = 0;
+		int32 unresolved         = 0;
+		int32 inert              = 0;
+		int32 nonInert           = 0;
 		int32 nonInertMatched    = 0;
 		int32 nonInertMismatched = 0;
-		int32 movedAtPush        = 0;  // eager-apply discriminator; never part of the verdict
+		int32 movedAtPush        = 0;
 	};
 
-// ⛔ VACUOUS IS A THIRD VERDICT, not a rounding of ALL_MATCH, and rework 1 widened
-// what reaches it. `compared == 0` was never the only way to test nothing: a rewind
-// whose every push was inert compares six bodies, matches six and tests nothing at all.
-// Both now read VACUOUS, because this task's whole value is that a refutation be
-// trustworthy.
+	// ⛔G-54  docs/SimulationManagerUImpl-guards.md
 	const TCHAR* pushProbeVerdictText(const PushProbeTally& tally)
 	{
 		if (tally.nonInert == 0)
@@ -343,9 +177,6 @@ namespace
 		return tally.nonInertMismatched == 0 ? TEXT("ALL_MATCH") : TEXT("MISMATCH");
 	}
 
-// One body's verdict line, emitted from the SECOND read point. `pushFrame` and
-// `readFrame` are printed side by side and must be equal: a difference means the stash
-// outlived the rewind it belongs to and nothing on the line may be read as an answer.
 	void logPushProbeBody(
 		PushProbeTally&                       tally,
 		const Chaos::FGeometryParticleHandle& handle,
@@ -419,14 +250,97 @@ namespace
 			before.linearVelocity.x, before.linearVelocity.y, before.linearVelocity.z);
 	}
 
-// Routes one SIMLOG message to a LogOG* category by its leading [Tag]. §4
+	enum class OGLogRoute : uint8
+	{
+		SimTick, ResimProbe, Sim, Net, RelayProbe, DivergenceProbe, Mgmt
+	};
+
+	struct OGLogRouteEntry
+	{
+		const TCHAR* prefix;
+		OGLogRoute   route;
+	};
+
+	constexpr OGLogRouteEntry kOGLogRoutes[] = {
+		{ TEXT("[Resim.Input]"),                     OGLogRoute::SimTick },
+		{ TEXT("[ResimProbe"),                       OGLogRoute::ResimProbe },
+		{ TEXT("[TimeResync."),                      OGLogRoute::Sim },
+		{ TEXT("[Resim."),                           OGLogRoute::Sim },
+		{ TEXT("[ResimCheck.Divergence]"),           OGLogRoute::Sim },
+		{ TEXT("[ResimCheck.PrepareRestore]"),       OGLogRoute::Sim },
+		{ TEXT("[ResimCheck.Check]"),                OGLogRoute::SimTick },
+		{ TEXT("[ResimCheck.IsSimilar]"),            OGLogRoute::SimTick },
+		{ TEXT("[ResimCheck.TriggerRewind]"),        OGLogRoute::SimTick },
+		{ TEXT("[AuthoritySimulation]"),             OGLogRoute::SimTick },
+		{ TEXT("[ClientPrediction]"),                OGLogRoute::SimTick },
+		{ TEXT("[PredictionSimulation]"),            OGLogRoute::SimTick },
+		{ TEXT("[PostPrediction]"),                  OGLogRoute::SimTick },
+		{ TEXT("[CollectInput]"),                    OGLogRoute::SimTick },
+		{ TEXT("[ServerReceive]"),                   OGLogRoute::Net },
+		{ TEXT("[ReceiveLocalInput]"),               OGLogRoute::Net },
+		{ TEXT("[SendCorrectionStateToClients]"),    OGLogRoute::Net },
+		{ TEXT("[SendRemoteInputToClients]"),        OGLogRoute::Net },
+		{ TEXT("[SendLocalInputToServer]"),          OGLogRoute::Net },
+		{ TEXT("[ReceiveCorrectionState]"),          OGLogRoute::Net },
+		{ TEXT("[ReceiveCorrectionInput]"),          OGLogRoute::Net },
+		{ TEXT("[InjectCorrectionState]"),           OGLogRoute::Net },
+		{ TEXT("[InjectCorrectionInput]"),           OGLogRoute::Net },
+		{ TEXT("[DrainOutOfOrder]"),                 OGLogRoute::Net },
+		{ TEXT("[InputGap]"),                        OGLogRoute::Net },
+		{ TEXT("[InputDrop]"),                       OGLogRoute::Net },
+		{ TEXT("[DelayShift]"),                      OGLogRoute::Net },
+		{ TEXT("[InputStats]"),                      OGLogRoute::Net },
+		{ TEXT("[Park]"),                            OGLogRoute::Net },
+		{ TEXT("[Release]"),                         OGLogRoute::Net },
+		{ TEXT("[InputDomain]"),                     OGLogRoute::Net },
+		{ TEXT("[RelaySkip]"),                       OGLogRoute::Net },
+		{ TEXT("[RelayProbe"),                       OGLogRoute::RelayProbe },
+		{ TEXT("[DivergenceProbe"),                  OGLogRoute::DivergenceProbe },
+		{ TEXT("SimulationManager:"),                OGLogRoute::Mgmt },
+		{ TEXT("tryRegister:"),                      OGLogRoute::Mgmt },
+		{ TEXT("NewFramework:"),                     OGLogRoute::Mgmt }
+	};
+
+	constexpr TCHAR ogLogRouteFoldCase(TCHAR c)
+	{
+		return (c >= TEXT('A') && c <= TEXT('Z')) ? static_cast<TCHAR>(c - TEXT('A') + TEXT('a')) : c;
+	}
+
+	constexpr bool ogLogRouteStartsWith(const TCHAR* text, const TCHAR* prefix)
+	{
+		for (; *prefix != 0; ++text, ++prefix)
+		{
+			if (*text == 0 || ogLogRouteFoldCase(*text) != ogLogRouteFoldCase(*prefix))
+				return false;
+		}
+		return true;
+	}
+
+	constexpr bool ogLogRoutesAreAllReachable()
+	{
+		for (std::size_t later = 0; later < std::size(kOGLogRoutes); ++later)
+		{
+			for (std::size_t earlier = 0; earlier < later; ++earlier)
+			{
+				if (ogLogRouteStartsWith(kOGLogRoutes[later].prefix, kOGLogRoutes[earlier].prefix))
+					return false;
+			}
+		}
+		return true;
+	}
+
+	static_assert(ogLogRoutesAreAllReachable(),
+		"RouteOGMessage: a route's prefix BEGINS WITH an earlier route's prefix, so the earlier "
+		"route always wins and the later one can never be taken. FString::StartsWith ignores "
+		"case and so does this check. Was the ORDER IS LOAD-BEARING fence: [Resim.Input] must be "
+		"matched ahead of the [Resim. catch-all, and widening that catch-all to [Resim would "
+		"swallow every [ResimCheck. line.");
+
 	void RouteOGMessage(const char* msg)
 	{
 		FString fmsg(msg);
 
-// Severity meta-prefix (rare; the framework defaults to Log).
 		ELogVerbosity::Type severity = ELogVerbosity::Log;
-// ⛔ Tag-matching uses `body`, the FULL fmsg is logged - so a message can carry both. §4
 		FString body = fmsg;
 		if (fmsg.StartsWith(TEXT("[Verbose]")))
 		{
@@ -448,71 +362,25 @@ namespace
 			} \
 		} while (0)
 
-// ⛔ ORDER IS LOAD-BEARING: this MUST precede the `[Resim.` catch-all, its own prefix. §4
-//
-// [Resim.Input] is per-character-per-resim-tick and only INHERITED a rare-lifecycle prefix.
-//
-// ⛔ RE-ROUTED, NOT RENAMED: the tag is the string operators are told to grep for.
-		if (body.StartsWith(TEXT("[Resim.Input]")))          { EMIT_OG(LogOGSimTick); }
-// The RESIM-GATE family: [ResimProbe.Gate], .Chaos, .Apply, .Landing, .Request, .Stranded. §8
-//
-// ⛔ AHEAD OF `[Resim.`, DEFENSIVELY: widening it drops this family into LogOGSim=Verbose.
-//
-// ONE StartsWith COVERS THE FAMILY: a future sub-tag needs no router edit.
-		else if (body.StartsWith(TEXT("[ResimProbe")))       { EMIT_OG(LogOGResimProbe); }
-// LogOGSim: rare simulation lifecycle events.
-		else if (body.StartsWith(TEXT("[TimeResync.")))      { EMIT_OG(LogOGSim); }
-		else if (body.StartsWith(TEXT("[Resim.")))           { EMIT_OG(LogOGSim); }
-		else if (body.StartsWith(TEXT("[ResimCheck.Divergence]")))     { EMIT_OG(LogOGSim); }
-		else if (body.StartsWith(TEXT("[ResimCheck.PrepareRestore]"))) { EMIT_OG(LogOGSim); }
-// LogOGSimTick: per-tick simulation chatter, dominates log volume.
-		else if (body.StartsWith(TEXT("[ResimCheck.Check]")))      { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[ResimCheck.IsSimilar]")))  { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[ResimCheck.TriggerRewind]"))) { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[AuthoritySimulation]")))   { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[ClientPrediction]")))      { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[PredictionSimulation]")))  { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[PostPrediction]")))        { EMIT_OG(LogOGSimTick); }
-		else if (body.StartsWith(TEXT("[CollectInput]")))          { EMIT_OG(LogOGSimTick); }
-// LogOGNet: replication-channel events.
-		else if (body.StartsWith(TEXT("[ServerReceive]")))              { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[ReceiveLocalInput]")))          { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[SendCorrectionStateToClients]"))) { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[SendRemoteInputToClients]")))   { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[SendLocalInputToServer]")))     { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[ReceiveCorrectionState]")))     { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[ReceiveCorrectionInput]")))     { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[InjectCorrectionState]")))      { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[InjectCorrectionInput]")))      { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[DrainOutOfOrder]")))            { EMIT_OG(LogOGNet); }
-// [InputGap]/[InputDrop]/[DelayShift]/[InputStats] carry [Warning]; [Park]/[Release] do not.
-		else if (body.StartsWith(TEXT("[InputGap]")))                   { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[InputDrop]")))                  { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[DelayShift]")))                 { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[InputStats]")))                 { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[Park]")))                       { EMIT_OG(LogOGNet); }
-		else if (body.StartsWith(TEXT("[Release]")))                    { EMIT_OG(LogOGNet); }
-// The out-of-domain gate: one [InputDomain] per burst, naming a client outside our domain.
-		else if (body.StartsWith(TEXT("[InputDomain]")))                { EMIT_OG(LogOGNet); }
-// The relay tap: Verbose per skipped capture tick, Warning per [InputStats] window.
-		else if (body.StartsWith(TEXT("[RelaySkip]")))                  { EMIT_OG(LogOGNet); }
-// The relay family: [RelayProbe.Read], .Arrival (in CAPTURE ticks), .Stale, .Miss, .Delta, .Frame. §8
-//
-// ⚠ .Frame IS THE ONE SERVER-SIDE MEMBER: it measures the CAUSE of .Arrival's EFFECT.
-//
-// ⛔ Under LogOGNet it would be inseparable; unrouted its Verbose half is unreachable. §4
-		else if (body.StartsWith(TEXT("[RelayProbe")))                  { EMIT_OG(LogOGRelayProbe); }
-// [DivergenceProbe.Correction] per landed correction at Verbose, .Window per class at Warning. §8
-//
-// ⛔ THE SIGNAL IS NOT NEW - StateCorrectionCache::tryInsertingCorrectState always computed
-// it; what was missing was a ROUTE, since an untagged line falls to LogOG and is silenced. §4
-		else if (body.StartsWith(TEXT("[DivergenceProbe")))             { EMIT_OG(LogOGDivergenceProbe); }
-// LogOGMgmt: manager / simulatable lifecycle.
-		else if (body.StartsWith(TEXT("SimulationManager:"))) { EMIT_OG(LogOGMgmt); }
-		else if (body.StartsWith(TEXT("tryRegister:")))       { EMIT_OG(LogOGMgmt); }
-		else if (body.StartsWith(TEXT("NewFramework:")))      { EMIT_OG(LogOGMgmt); }
-// LogOG: fallback for unrecognized prefixes.
-		else                                                  { EMIT_OG(LogOG); }
+		for (const OGLogRouteEntry& entry : kOGLogRoutes)
+		{
+			if (!body.StartsWith(entry.prefix))
+				continue;
+
+			switch (entry.route)
+			{
+			case OGLogRoute::SimTick:          EMIT_OG(LogOGSimTick); break;
+			case OGLogRoute::ResimProbe:       EMIT_OG(LogOGResimProbe); break;
+			case OGLogRoute::Sim:              EMIT_OG(LogOGSim); break;
+			case OGLogRoute::Net:              EMIT_OG(LogOGNet); break;
+			case OGLogRoute::RelayProbe:       EMIT_OG(LogOGRelayProbe); break;
+			case OGLogRoute::DivergenceProbe:  EMIT_OG(LogOGDivergenceProbe); break;
+			case OGLogRoute::Mgmt:             EMIT_OG(LogOGMgmt); break;
+			}
+			return;
+		}
+
+		EMIT_OG(LogOG);
 
 #undef EMIT_OG
 	}
@@ -520,7 +388,6 @@ namespace
 }
 
 OGSIM_OPTIMIZE_OFF
-
 
 void FSimulationState2::Copy(const FSimulationState2& Value)
 {
@@ -545,24 +412,7 @@ void FSimulationManagerAsyncCallback::OnPreSimulate_Internal()
 	const bool isFirstResimulationFrame = rigidsEvolution->IsResetting(); 
 	SimulationUpdateInfo updateInfo(isResimulating, isFirstResimulationFrame);
 
-// [netcode-v2 task 10 rework 1 - PROBE] THE VERDICT READ. §8
-//
-// ⭐⭐ THIS IS THE WHOLE POINT OF THE SPLIT. The push in FirstPreResimStep_Internal
-// writes a history buffer and moves no particle, so a verdict taken beside it can only
-// ever report the pre-push state back and can never reach a NON-INERT match. Read here
-// instead: the engine has by now run ApplyTargets and the rest of
-// ConditionalApplyRewind_Internal for this step, so a target consumer that ran in that
-// window IS visible in this read.
-//
-// ⛔ IT MUST STAY ABOVE `onGameSimulation`. The radial's setIdlePose /
-// setInitialConditions write the live body during the replayed step; a read taken after
-// them would be measuring OG's own writes and would report a mismatch that says nothing
-// about whether the engine read the target.
-//
-// ⛔ THE `else` IS NOT DEFENSIVE PADDING. A stash that is still pending on a frame that
-// is NOT resetting was never read at its verdict point, and a silently dropped stash is
-// indistinguishable from a rewind that never happened - so it is printed as
-// `verdict=UNREAD`. That branch firing at all is an engine-ordering finding.
+	// ⛔G-51  docs/SimulationManagerUImpl-guards.md
 	if (m_pushProbeStashFrame != INDEX_NONE)
 	{
 		if (isFirstResimulationFrame)
@@ -615,7 +465,6 @@ void FSimulationManagerAsyncCallback::ProcessInputs_External(int32 PhysicsStep)
 int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 LastCompletedStep)
 {
 
-
 	ASimulationManagerUImpl* manager = m_manager;
 	if (manager == nullptr)
 	{
@@ -624,7 +473,6 @@ int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 Last
 		return INDEX_NONE;
 	}
 
-// Authority is the source of truth - nothing to rewind toward, so skip the sweep.
 	if (!manager->runsPrediction())
 		return INDEX_NONE;
 
@@ -637,19 +485,12 @@ int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 Last
 		return INDEX_NONE;
 	}
 
-// Convert from simulation tick space back to Chaos physics tick space.
 	const int32 unrealTickDifferenceAdjustedTick = manager->getChaosTickMapper().toChaosTick(static_cast<int32_t>(correctionTick));
 	UE_LOG(LogOGSimTick, Log, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d correctionTick=%u chaosTick=%d rewind=1"),
 		LastCompletedStep, correctionTick, unrealTickDifferenceAdjustedTick);
 
-// THE REQUEST, counted after the conversion so the frame recorded is the one Chaos gets. §8
-//
-// ⛔ Everything past this `return` is engine-side and silent in a normal build, so this
-// line and noteResimGrant are the whole visibility; `requests - grants` is the refusals.
 	manager->noteResimRequest(correctionTick, LastCompletedStep, unrealTickDifferenceAdjustedTick);
 
-// PER-EVENT DETAIL AT VERBOSE, carrying the mapper OFFSET - the discriminator: a +/-1 skew
-// across Stall/Skip steps refuses a request or replays one frame short. §9
 	UE_LOG(LogOGResimProbe, Verbose,
 		TEXT("[ResimProbe.Request] requestedSimTick=%u requestedChaosFrame=%d lastCompletedStep=%d mapperOffset=%d"),
 		correctionTick, unrealTickDifferenceAdjustedTick, LastCompletedStep,
@@ -665,39 +506,23 @@ void FSimulationManagerAsyncCallback::ApplyCorrections_Internal(int32 PhysicsSte
 
 void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsStep)
 {
-// Server authority never resims - no rewind timeline exists there.
 	if (m_manager == nullptr || !m_manager->runsPrediction())
 		return;
 
-// THE GRANT. Chaos starts at `PhysicsStep`, which can differ from ours only by being DEEPER. §8
-//
-// ⛔ A SHALLOW CLAMP IS STRUCTURALLY IMPOSSIBLE here: validation walks DOWN and the merge
-// can only deepen, so `clampedGrants` reads 0 and a nonzero is an engine-change alarm.
-//
-// ⛔ BEFORE prepareResimulation, so a grant is recorded even if anything below returns
-// early: `grants` and `prepares` straddle this boundary and their agreement is the check.
+	// ⛔G-55  docs/SimulationManagerUImpl-guards.md
 	m_manager->noteResimGrant(PhysicsStep);
 
-// Convert Chaos physics step back to simulation tick for prepareResimulation.
 	const uint32_t simTick = static_cast<uint32_t>(
 		m_manager->getChaosTickMapper().toSimulationTick(static_cast<int32_t>(PhysicsStep)));
 	m_manager->prepareResimulation(PhysicsStep, simTick);
 
-// ⛔ At PostPushData: direct SetX/SetV/SetW is a NO-OP on ResimAsFollower bodies.
 	Chaos::FPBDRigidsSolver& solver = this->GetSolver()->CastChecked();
 	Chaos::FRewindData* rewindData = solver.GetRewindData();
 	if (rewindData == nullptr)
 		return;
 
-// [netcode-v2 task 10 — PROBE] ONE branch decides whether anything is read or
-// formatted; the banner above `pushProbeResimTypeText` says what it measures and why
-// the reads are X/R. ⛔ `UE_LOG_ACTIVE`, not a value latched at BeginPlay, so
-// `LogOGResimProbe Verbose` typed into the console starts the probe on the next rewind.
 	const bool pushProbeActive = UE_LOG_ACTIVE(LogOGResimProbe, Verbose);
 
-// [task 10 rework 1 - PROBE] A stash still pending when a NEW rewind starts was never
-// read at its verdict point. Saying so out loud is the instrument's own self-check; the
-// alternative is a missing line, which reads exactly like "no rewind happened".
 	if (m_pushProbeStashFrame != INDEX_NONE)
 		discardPushProbeStash(TEXT("newPushBeforeRead"));
 
@@ -746,12 +571,6 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 			uglm::toFVector(bs.angularVelocity),
 			/*bShouldSleep=*/false);
 
-// [task 10 rework 1 - PROBE] The after-push read is now an EAGER-APPLY DISCRIMINATOR
-// and nothing else. On public 5.6 it is equal to `beforePush` by construction, so
-// `moved=1` would be an engine-behaviour finding in its own right - and it is exactly
-// the case in which the verdict read below would be reporting the push rather than the
-// replay. It compares all four fields regardless of the wire shape, because both sides
-// are LIVE reads of the same particle.
 		if (pushProbeActive)
 		{
 			const LivePushProbeRead afterPush = readLiveBodyForPushProbe(*proxy);
@@ -771,12 +590,6 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 		}
 	};
 
-// BodyId lookup goes through the m_physics composite bindings (local-only).
-//
-// [task 10] `D::name` is the declaration's own body name, the one the factory
-// creates the body under, so `body=WeaponAxis` needs no table here to stay true.
-// `BodyStateT` is the declaration's ACTUAL wire shape, before the widening
-// conversion into `pushBodyState`'s `const PhysicsBodyState&` erases it.
 	m_manager->editStorage().forEachSimulatable(
 		[&](unsigned int id, SimulatableBrawler& simulatable)
 		{
@@ -794,21 +607,8 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 			});
 		});
 
-// [netcode-v2 task 10 rework 1 - PROBE] NO VERDICT IS EMITTED HERE ANY MORE. Everything
-// this loop learned is in `m_pushProbeStash`; the reading is taken and printed from
-// OnPreSimulate_Internal on this same resetting frame, after the engine has had its
-// chance to consume the target. See readPushProbeVerdict_Internal, just below. §8
 }
 
-// [netcode-v2 task 10 rework 1 - PROBE] THE SECOND READ POINT AND THE QUOTABLE VERDICT,
-// one line per rewind. AC 1 is read off `verdict=`: MISMATCH confirms, ALL_MATCH refutes,
-// VACUOUS means the rewind tested nothing (no body resolved, or every push was inert) and
-// NEITHER reading is available from it.
-//
-// ⛔ THE DENOMINATOR IS `nonInert`, NOT `compared`. A push whose value already equalled
-// the live pre-push state cannot distinguish "the engine read the target" from "the engine
-// read nothing", however the replay behaves. Counting such a comparison as a match is
-// precisely how a session in which the shape never reproduced would read as a refutation.
 void FSimulationManagerAsyncCallback::readPushProbeVerdict_Internal()
 {
 	Chaos::FPBDRigidsSolver& solver = this->GetSolver()->CastChecked();
@@ -849,13 +649,6 @@ void FSimulationManagerAsyncCallback::readPushProbeVerdict_Internal()
 	m_pushProbeStashFrame = INDEX_NONE;
 }
 
-// [netcode-v2 task 10 rework 1 - PROBE] The stash reached the next rewind, or a frame
-// that was not resetting, without ever being read.
-//
-// ⛔ IT IS PRINTED, NOT DROPPED, and it carries the SAME tag so that the runbook's one
-// `grep -v verdict=ALL_MATCH` surfaces it. An absent line is indistinguishable from a
-// rewind that never happened, and a reader who cannot tell those apart cannot trust a
-// refutation. `readFrame=-1` says no verdict read was taken at all.
 void FSimulationManagerAsyncCallback::discardPushProbeStash(const TCHAR* reason)
 {
 	UE_LOG(LogOGResimProbe, Verbose,
@@ -882,7 +675,6 @@ ASimulationManagerUImpl::~ASimulationManagerUImpl()
 	if (GetWorld() != nullptr)
 		GetWorld()->GetPhysicsScene()->OnPhysSceneStep.RemoveAll(this);
 
-// Null whichever slot points at us - avoids re-querying role during teardown.
 	if (s_instances[0] == this)
 	{
 		s_instances[0] = nullptr;
@@ -899,44 +691,6 @@ ASimulationManagerUImpl::~ASimulationManagerUImpl()
 	}
 }
 
-// ⭐⭐ [ringout task 9, 2026-09-13] THE RESPAWN POINTS ARE THE LEVEL'S `APlayerStart` ACTORS.
-//
-// USER RULING, 2026-09-13, out of a PIE session: the authored table in
-// `brawlerRingout::StaticData` is placeholder authoring at (±200, ±200, Z=200), the platform
-// this mode ships on is somewhere else, and every respawn therefore dropped the fighter off
-// the map. Respawn slot N is now PLAYER START N, so moving a spawn point is level design.
-//
-// ══ ⛔⛔ WHY THIS WRITES `StaticData` AFTER CONSTRUCTION, WHICH THE BANNER FORBIDS ══════════
-// §2's ownership rule is that `StaticData` is constructed in place once and never moves. What
-// that rule PROTECTS is that no tick ever sees it change: a constant the simulation reads
-// mid-session is a constant two peers can disagree about and a resim can replay against the
-// wrong value. This is a ONE-TIME INIT that happens before the first tick can exist, which is
-// inside what the rule protects rather than an exception to it. ⛔ DO NOT "FIX" IT BACK INTO
-// A CONSTRUCTOR ARGUMENT: `m_staticData` is brace-initialised in a member initializer, which
-// runs during ACTOR CONSTRUCTION, and no level actor is reachable then. `APlayerStart` exists
-// at `BeginPlay` and not one moment earlier. (`readMovementStaticDataCVars()` has the same
-// shape for the same reason, one member above it.)
-//
-// ══ ⭐ AND THE ORDERING IS ENFORCED, NOT ASSUMED ═══════════════════════════════════════════
-// The two `checkf`s below are the mechanical form of "exactly once, before the first
-// integrate". The second is the load-bearing one: every simulation step in this process runs
-// through `m_manager`, which is emplaced LATER IN THIS SAME `BeginPlay` (both role branches),
-// and the physics delegates that drive it (`OnPhysScenePreTick` / `OnPhysSceneStep` /
-// `OnPhysScenePostTick`) plus the async callback are bound at the very END of it. An empty
-// `m_manager` is therefore proof that no tick has happened yet. ⚠ It is also why this must not
-// drift below the `emplace` calls: `m_integrationLayer` holds a REFERENCE to `m_staticData`,
-// so a later write would still be visible and would still compile — the assertion is what
-// makes the ordering a stated requirement instead of an accident of line order.
-//
-// ══ ⛔ BOTH ROLES, DELIBERATELY ════════════════════════════════════════════════════════════
-// Unlike `m_spawnSlots` (authority-only bookkeeping), this table is read by
-// `brawlerRingout::integrate` on EVERY PEER — a client predicts its own respawn. So a client
-// that skipped this would predict to the placeholder point and be corrected on every respawn.
-// There is no role branch here and there must not be one.
-//
-// ⭐ ALL THE POLICY IS IN THE ENGINE-FREE CORE. The sort, the fallback and the (0,0,0) guard
-// are `brawlerRingout::spawnPointsFromLevelPlacements`, asserted by `Ringout.SpawnPoints.*` in
-// `BrawlerRingoutSimulationTest.cpp`. This function walks actors and converts a name to bytes.
 void ASimulationManagerUImpl::seedRingoutSpawnPointsFromLevel(UWorld& world)
 {
 	checkf(!m_ringoutSpawnPointsSeeded,
@@ -957,23 +711,12 @@ void ASimulationManagerUImpl::seedRingoutSpawnPointsFromLevel(UWorld& world)
 		if (playerStart == nullptr)
 			continue;
 
-// ⛔ THE NAME, AS BYTES, AND THIS CONVERSION IS THE WHOLE REASON THE CORE TAKES A
-// `std::string`. `FName`'s own ordering (`FastLess` / `FNameFastLess` / `CompareIndexes`)
-// compares the NAME TABLE INDEX, which the engine documents as *"only stable during this
-// process' lifetime"* - the order the string was first interned in THIS process. A server and
-// a client never intern in the same order, so sorting FNames would hand two peers different
-// tables while looking exactly like a deterministic sort. `GetName()` is the string saved in
-// the map package; every peer that loaded the map has the same bytes.
 		brawlerRingout::LevelSpawnPoint placement;
 		placement.name     = TCHAR_TO_UTF8(*playerStart->GetName());
 		placement.position = uglm::toGLMVec3(playerStart->GetActorLocation());
 		placements.push_back(std::move(placement));
 	}
 
-// ⛔ THE FALLBACK IS THE TABLE AS IT STANDS RIGHT NOW, which - because nothing else ever
-// writes it and this runs once - is exactly the authored default. So "fewer player starts than
-// slots leaves the rest authored" is literally "leaves the rest alone", and ZERO player starts
-// is a no-op rather than a table of origins.
 	const std::array<glm::vec3, brawlerRingout::kMaxSpawnPoints> authoredFallback =
 		m_staticData.m_ringoutStaticData.spawnPoints;
 
@@ -982,13 +725,6 @@ void ASimulationManagerUImpl::seedRingoutSpawnPointsFromLevel(UWorld& world)
 
 	m_ringoutSpawnPointsSeeded = true;
 
-// ⛔ `UE_LOG`, NOT `OGBLOG_G`, AND THAT IS NOT A STYLE CHOICE. The `ogblog` sink routes
-// everything to `LogOGBrawler`, which the shipped ini pins at `Warning` - which is why the
-// sub-sim's own `[Ringout.respawn]` line appears in NO captured log and could not be used to
-// answer "where did it teleport to?" while this task was being scoped. This is the line that
-// answers that question, at Warning, on its own category, once per session per manager.
-//
-// Volume: one line plus `kMaxSpawnPoints` rows, at composition. Not on any tick path.
 	UE_LOG(LogOGMgmt, Warning,
 		TEXT("[Ringout.spawnPoints] seeded from the level: %d APlayerStart actor(s) found, ")
 		TEXT("%d slot(s) filled, %d left authored (netMode=%d)"),
@@ -1014,24 +750,10 @@ void ASimulationManagerUImpl::BeginPlay()
 {
 	Super::BeginPlay();
 
-
 	UWorld* uWorld = GetWorld();
 	if (uWorld == nullptr)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
-	// ⭐⭐ THE SIM'S GRAVITY MUST AGREE WITH THE ENGINE'S — [movement-sim task 16].
-	//
-	// ⛔ THIS IS NOT A TAUTOLOGY, EVEN THOUGH THE SIM'S VALUE WAS READ FROM THE ENGINE.
-	// `readMovementStaticDataCVars()` runs in a member initializer, during construction, where
-	// no world exists — so it can only read the PROJECT DEFAULT
-	// (`UPhysicsSettings::DefaultGravityZ`). A level is free to override gravity in its
-	// `WorldSettings` (`bGlobalGravitySet` / `GlobalGravityZ`), and `UWorld::GetGravityZ()`
-	// here is the first moment that override is observable. The two disagreeing means the
-	// character falls at one rate while every prop in the level falls at another.
-	//
-	// ⚠ WHY IT MATTERS DESPITE THE BODY'S OWN GRAVITY BEING OFF (ruling #16 a): the sim applies
-	// `StaticData::gravity` itself precisely BECAUSE engine gravity would double-apply on the
-	// character. Everything the character shares a floor with is still on the engine's number.
 	const float engineGravityZ = uWorld->GetGravityZ();
 	const float simGravityZ    = m_staticData.m_movementStaticData.gravity;
 	checkf(FMath::Abs(simGravityZ - engineGravityZ) < 1e-3f,
@@ -1041,15 +763,6 @@ void ASimulationManagerUImpl::BeginPlay()
 		TEXT("override or teach the movement StaticData about per-level gravity."),
 		simGravityZ, engineGravityZ);
 
-// ⭐⭐ [ringout task 9] THE RING-OUT SPAWN TABLE IS SEEDED FROM THE LEVEL, HERE, ONCE.
-//
-// ⛔ POSITION IS LOAD-BEARING AND IS ASSERTED AT THE DEFINITION. This sits ABOVE both
-// role branches, so it runs before `m_integrationLayer` and `m_manager` are emplaced and
-// therefore before any tick can read `StaticData::spawnPoints`. Moving it below either
-// `emplace` still COMPILES - the integration layer holds a reference, so a later write is
-// still visible - which is exactly why the ordering is a `checkf` and not a comment.
-//
-// ⛔ NOT ROLE-GATED: a client predicts its own respawn, so it needs the same table.
 	seedRingoutSpawnPointsFromLevel(*uWorld);
 
 	FPhysScene* physScene = uWorld->GetPhysicsScene();
@@ -1060,19 +773,11 @@ void ASimulationManagerUImpl::BeginPlay()
 	if (solver == nullptr)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
-// World-level authority. ⛔ NOT HasAuthority(): bReplicates=false makes Role always authority.
 	const ENetMode worldNetMode = GetNetMode();
 	const bool worldIsAuthority = (worldNetMode != NM_Client);
 
-// ---- THE RELAY DELAY FLOOR INI OVERRIDE, step 1 of 4 -------------------
-//
-// Read BEFORE the manager exists, so the floor is in place for the first publish. §3
-//
-// ⛔ AUTHORITY ONLY, and that is CORRECTNESS: the floor is REPLICATED, so a client
-// reading its own ini could disagree with the server it is meant to match.
-//
-// ABSENT => the compiled default. Both ini homes accepted, Game wins over Engine.
-	int32 configuredRelayDelayFloorTicks = -1;      // -1 = "not present in the ini"
+	int32 configuredRelayDelayFloorTicks = -1;
+	// ⛔G-57  docs/SimulationManagerUImpl-guards.md
 	if (worldIsAuthority && GConfig != nullptr)
 	{
 		int32 iniFloorTicks = 0;
@@ -1083,27 +788,9 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 	}
 
-// ⛔ RETIRED: there is deliberately no relay ring depth ini intake here any more. It read
-// a session-configurable retention depth for the outbound ring's replace-latest write
-// path; the flush-on-poll replacement takes its capacity from `relayedInputRing::kMaxDepth`,
-// a compile-time constant with no ini key, so the intake, its clamp, its setter and its
-// startup proof line were all removed together. §6
+	// ⛔G-56  docs/SimulationManagerUImpl-guards.md
 
-// ---- THE STATE ROTATION WIDTH OVERRIDE, step 1 of 4 --------------------
-//
-// Second knob through the same door, same four steps. §3
-//
-// CONTROLS how many buffers SimulationNetSync::sendCorrectionAll writes per tick: 60*K/N Hz each.
-//
-// ⛔ AUTHORITY ONLY, but NOT for the floor's reason: K is never replicated, so a client
-// read would have no reader - a receiver reconciles against whatever arrives.
-//
-// ⛔ ONE-SHOT: probe output is READ AGAINST the cadence, so no cvar. §3
-//
-// ⚠ ABSENT => TimeConfig::correctionRotationK. Read the value THERE, never here. §3 §11
-//
-// SENTINEL COLLISION, harmless and knowingly: `=-1` cannot be told from an absent key.
-	int32 configuredCorrectionRotationK = -1;       // -1 = "not present in the ini"
+	int32 configuredCorrectionRotationK = -1;
 	if (worldIsAuthority && GConfig != nullptr)
 	{
 		int32 iniK = 0;
@@ -1114,25 +801,9 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 	}
 
-// ---- THE RESIM-GATE POLICY OVERRIDE, step 1 of 4 -----------------------
-//
-// Third knob through the same door, same four steps. §3
-//
-// CONTROLS which landings open the resim gate: `FrontierExact` (default) or `OnDisagreement`.
-//
-// ⛔ THERE IS DELIBERATELY NO `ResimCooldownTicks` KEY. A trigger-rate ceiling was built
-// here and REMOVED on a user ruling: it defers acting on a correction already known to
-// disagree, which is the defect this mechanism repairs. If a design document names that
-// key, the document predates the ruling. The throttle is structural instead.
-//
-// ⚠ NOT AUTHORITY-GATED, unlike the two above: the gate exists ONLY on a predicting client.
-//
-// ⛔ ONE-SHOT, and here that is THREAD SAFETY: the policy is read unsynchronized at every
-// correction landing, which is sound ONLY because it is written once before any land.
-//
-// PRESENCE IS A BOOL, NOT A SENTINEL: the value is a STRING, so nothing can collide.
 	bool    hasIniResimTriggerPolicy = false;
 	FString configuredResimTriggerPolicy;
+	// ⛔G-58  docs/SimulationManagerUImpl-guards.md
 	if (GConfig != nullptr)
 	{
 		FString iniPolicy;
@@ -1168,85 +839,21 @@ void ASimulationManagerUImpl::BeginPlay()
 				UE_LOG(LogOGBrawler, Log, TEXT("%s"), *fmsg);
 			}
 		};
-// Adapters and integration layer emplaced here, the manager after. Authority never predicts.
 		Chaos::FPBDRigidsSolver& rigidsSolverS = solver->CastChecked();
 		m_physAdapter.emplace(rigidsSolverS);
 		m_physReaderAdapter.emplace(rigidsSolverS);
-		m_queryAdapter.emplace(uWorld, std::initializer_list<ChaosCategoryMapping>{
-			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
-			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
-			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
-// Projectile category - its own trace channel, so projectile overlaps stay distinguishable.
-			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
-// [movement-sim T39] Static level geometry. The movement sub-sim's ground/wall probe and its
-// capsule sweeps search this category; no DAttack-authored shape belongs to it.
-//
-// ⛔ THE LOAD-BEARING EFFECT IS NOT THE RETURN VALUE, IT IS THE TABLE'S SIZE.
-// ChaosSpatialQueryAdapter resizes m_toEngine to (largest mapped category + 1), and
-// toObjectQueryParams iterates `cat < m_toEngine.size()`. With only categories 0-3 mapped the loop
-// stopped at 4, so bit 4 was never tested, AddObjectTypesToQuery was never called, and a
-// `worldOnly` search went out with EMPTY object query params - which is well-formed and matches
-// NOTHING.
-//
-// ⚠ ECC_WorldStatic IS ECollisionChannel(0) - the very value toEngineChannel returns for an
-// UNMAPPED category. So from this line on, "mapped to WorldStatic" and "never mapped" are
-// INDISTINGUISHABLE by return value; only m_toEngine.size() tells them apart. Task 40 exists to
-// make an unmapped category loud instead of silently channel 0. Do not read a WorldStatic result
-// as proof that a mapping exists.
-//
-// ⚠ KEEP IN SYNC with the client-branch table below - the two tables are duplicated with no
-// shared constant, and adding to one silently diverges client from server.
-			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
-// [movement-sim T43] The movement sub-sim's OWN body. `brawlerMovementSimulation::PhysicsSetup::body`
-// (BrawlerMovementSimulation.h) registers its shape under this category, and PhysicsDeclaration is
-// in the shipped composite (SimulatableBrawler.h), so this runs for every character in every
-// session.
-// ⚠ [movement-sim task 17] THE SHAPE IS A CAPSULE, NOT A SPHERE. Task 11 replaced the skeleton's
-// 30 cm sphere with `CapsuleGeometry{42.f, 96.f}` and set `isRoot`, so the factory ADOPTS the
-// pawn's own root capsule rather than creating anything. The category, and every sentence below
-// about what an unmapped category would have done to it, are unaffected — only the noun was stale.
-// Channel is user ruling #6, closed 2026-09-04 and lead-verified free: ch1 is `Damageable` in
-// DefaultEngine.ini and ch2-5 are the four entries above.
-//
-// ⛔ THIS LINE IS A FIX, NOT A NEW CAPABILITY. Without it toEngineChannel(5) fell through to the
-// unmapped fallback ECollisionChannel(0) - which IS ECC_WorldStatic - so
-// ChaosPhysicsFactory::applyDescriptor typed every character's movement body as STATIC LEVEL
-// GEOMETRY. Harmless while nothing searched WorldStatic; LIVE from task 39 on, because a
-// `worldOnly` object query searches exactly that object type and would hand the movement sim
-// OTHER characters' capsules as ground. Task 40's [SpatialQuery.UnmappedCategory] category=5 line
-// in the 2026-09-05 18:11 run is what finally said so out loud.
-//
-// ⚠ TASK 13 OWNS THE FULL CHANNEL MAP. `character -> ECC_GameTraceChannel6` is the ONLY entry
-// task 43 added, at this site and the client one; do not double-add it there.
-//
-// ⚠ The reverse map moves too: the ctor writes m_toDAttack[GTC6] = character, a slot that was
-// kUnmapped before. It collides with nothing (the other five occupy WorldStatic and GTC2-GTC5)
-// and it is unreachable in production today, because no shipped query volume searches
-// `character` and resolveHitIdentity only ever sees channels an object query asked for.
-			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
-		});
+		emplaceBrawlerQueryAdapter(m_queryAdapter, uWorld);
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_manager.emplace(false, solver->GetAsyncDeltaTime(), ManagerType::Params{
 			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmloggerServer) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
-// The resolution peer is a sibling now, so the composition root seeds its logger directly.
 		m_inputResolution.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmloggerServer));
 
-// Inject the game's zero input for the client input delay line. §5
-//
-// ⛔ SET ON THE AUTHORITY BRANCH TOO, and not as a precaution: a DEDICATED server reads this
-// on every tick it substitutes an input for a remote character, and seeds each character's
-// replicated applied-input with it. Deleting it makes the authority simulate - and publish
-// to every peer - a zero forward vector for the whole of every join window.
-//
-// ⛔ ORDER IS LOAD-BEARING: this must precede every registerAuthorityOwner call.
+		// ⛔G-59  docs/SimulationManagerUImpl-guards.md
 		m_inputResolution.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
 
-// THE SESSION FLOOR: stamp the clamped value into TimeConfig, then publish it on the relay. §3 §5
-//
-// ⛔ INTAKE POINT 1 OF 2 for the clamp. Out-of-range config is REPORTED, not silently fixed.
 		if (configuredRelayDelayFloorTicks >= 0)
 		{
 			const int32 clampedFloor = clampRelayDelayFloorTicks(
@@ -1261,17 +868,9 @@ void ASimulationManagerUImpl::BeginPlay()
 			UE_LOG(LogOGNet, Log,
 				TEXT("[RelayDelayFloor] session floor = %d ticks (ini override)"), clampedFloor);
 
-// Advisory-only - see logRelayDelayFloorAdvisory.
 			logRelayDelayFloorAdvisory(clampedFloor);
 		}
 
-// ⛔ RETIRED: there is deliberately no relay ring depth clamp, setter or proof-line block
-// here any more. It published a session-configurable retention depth that flush-on-poll
-// had already made inert - the stage capacity is `relayedInputRing::kMaxDepth`, a
-// compile-time constant - so the whole inert path went rather than keep publishing a
-// number nothing on the live relay path reads. §6
-
-// THE SESSION ROTATION WIDTH. ⛔ The intake clamp stops the proof line below from lying. §3
 		if (configuredCorrectionRotationK != -1)
 		{
 			const int32 clampedK = correctionRotation::clampK(configuredCorrectionRotationK);
@@ -1284,11 +883,6 @@ void ASimulationManagerUImpl::BeginPlay()
 			m_manager->setCorrectionRotationK(clampedK);
 		}
 
-// STEP 4 - THE PROOF LINE. Unconditional, at Warning; the banner gives both reasons. §3
-//
-// ⛔ It makes the cadence checkable: per-character rate should read 60*K/N in DivergenceProbe.
-//
-// Volume: one line per session, authority only, at composition.
 		const int32 sessionCorrectionRotationK = m_manager->getTimeConfig().correctionRotationK;
 		UE_LOG(LogOGNet, Warning,
 			TEXT("[StateRotation] session K = %d (%s)"),
@@ -1302,27 +896,19 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 		else
 		{
-// ⛔ The relay is spawned BEFORE this manager so this write lands; reaching here means
-// no client will ever learn the floor and every one will predict against the wrong delay.
 			UE_LOG(LogOGNet, Warning,
 				TEXT("[RelayDelayFloor] no timing relay at manager BeginPlay — session floor %d NOT published"),
 				sessionRelayDelayFloorTicks);
 		}
 
-// Client tier cache on the AUTHORITY world too - a listen-server host's local player uses it. §5
-//
-// ⛔ No tier ever arrives on an authority world, so this stays at the no-tier fallback.
+		// ⛔G-61  docs/SimulationManagerUImpl-guards.md
 		m_replicatedTierConsumer.emplace(m_manager->getTimeConfig());
 		recomputeAndPublishEffectiveInputDelay();
 		ISimulationConnectionRelayListener::registerInstance(/*isAuthority=*/true, this);
 			ISimulationInputRelayListener::registerInstance(/*isAuthority=*/true, this);
 
-// ---- SERVER RECEPTION COORDINATOR -------------------------------------
-//
-// ⛔ AUTHORITY BRANCH ONLY, and it borrows m_manager's TimeConfig, so it must not outlive it. §7
 		m_receptionCoordinator.emplace(m_manager->getTimeConfig());
 		m_receptionCoordinator->setLogger(std::function<void(const char*)>(pctmloggerServer));
-// Process-global sinks for templates with no logger parameter: simlog, ogblog.
 		simlog::setGlobal(std::function<void(const char*)>(pctmloggerServer));
 		ogblog::setGlobal(std::function<void(const char*)>(ogblogServer));
 		bindCorrectionFieldDiffGate();
@@ -1351,51 +937,25 @@ void ASimulationManagerUImpl::BeginPlay()
 				UE_LOG(LogOGBrawler, Log, TEXT("%s"), *fmsg);
 			}
 		};
-// Non-authority branch = pure client - always runs prediction.
 		Chaos::FPBDRigidsSolver& rigidsSolverC = solver->CastChecked();
 		m_physAdapter.emplace(rigidsSolverC);
 		m_physReaderAdapter.emplace(rigidsSolverC);
-		m_queryAdapter.emplace(uWorld, std::initializer_list<ChaosCategoryMapping>{
-			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
-			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
-			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
-// Projectile category - its own trace channel, as on the authority branch.
-			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
-// [movement-sim T39] Static level geometry, as on the authority branch. Both caveats are spelled
-// out in full there: it is m_toEngine.size() (not the returned channel) that makes
-// toObjectQueryParams test bit 4, and ECC_WorldStatic == ECollisionChannel(0) == the unmapped
-// fallback. KEEP IN SYNC with the authority table above.
-			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
-// [movement-sim T43] The movement sub-sim's own body, as on the authority branch - and the client
-// needs it for the same reason the server does: it predicts the same sub-sim. The full rationale
-// (why an unmapped category silently became ECC_WorldStatic, and what the reverse map does) is
-// spelled out at the authority table above. KEEP IN SYNC with it.
-			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
-		});
+		emplaceBrawlerQueryAdapter(m_queryAdapter, uWorld);
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), ManagerType::Params{
 			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmlogger) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
-// The resolution peer is a sibling now, so the composition root seeds its logger directly.
 		m_inputResolution.setLogger(std::function<void(const char*)>(pctmlogger));
 		m_netSync.setLogger(std::function<void(const char*)>(pctmlogger));
 
-// Fills the [0, effectiveDelay) window. ⛔ NOT PlayerInput{}: (0,0,1) forwards, load-bearing. §5
+		// ⛔G-60  docs/SimulationManagerUImpl-guards.md
 		m_inputResolution.setNeutralInput<SimulatableBrawler>(simulatableBrawler::getZeroPlayerInput());
 
-// Establish the PRE-ARRIVAL baseline delay before any tier has replicated. §5
-//
-// ⛔ ServerInputDelayQueue::effectiveDelay uses the same fallback, so this keeps both ends in step.
-//
-// Published THROUGH the tier cache, so baseline and post-arrival share ONE derivation site.
-//
-// A client's floor is still 0 here; it arrives by OnRep and overwrites this on landing.
 		m_replicatedTierConsumer.emplace(m_manager->getTimeConfig());
 		recomputeAndPublishEffectiveInputDelay();
 
-// Bind the tier listener, then PULL. ⛔ The property dirties only on change, so an earlier
-// OnRep would never be re-notified and the channel would be silently stranded. §5
+		// ⛔G-62  docs/SimulationManagerUImpl-guards.md
 		ISimulationConnectionRelayListener::registerInstance(/*isAuthority=*/false, this);
 		ISimulationInputRelayListener::registerInstance(/*isAuthority=*/false, this);
 		if (ASimulationConnectionRelay* connectionRelay =
@@ -1404,23 +964,14 @@ void ASimulationManagerUImpl::BeginPlay()
 			connectionRelay->replayLatchedTier();
 		}
 
-// Same treatment for the FLOOR, for the same reason; a missing relay means no floor yet.
 		if (ASimulationTimingRelay* timingRelay = findTimingRelay())
 		{
 			timingRelay->replayLatchedRelayDelayFloor();
 		}
-// Process-global sinks as on the authority branch: simlog -> LogOG*, ogblog -> LogOGBrawler.
 		simlog::setGlobal(std::function<void(const char*)>(pctmlogger));
 		ogblog::setGlobal(std::function<void(const char*)>(ogblogClient));
 		bindCorrectionFieldDiffGate();
 
-// STEP 4 - THE PROOF LINE, which makes the other three checkable from a log, not source. §3 §4
-//
-// ⛔ EFFECTIVE RUNTIME VERBOSITY, not a constant, plus the per-window denominator.
-//
-// ⛔ ITS OWN ABSENCE IS INFORMATION: no line means NoLogging, or that this never ran.
-//
-// Volume: one line per session, client only, at composition.
 		UE_LOG(LogOGResimProbe, Warning,
 			TEXT("[ResimProbe.Session] resim-gate probe LIVE — verbosity=%s verboseDetail=%s windowSamples=%u"),
 			ToString(LogOGResimProbe.GetVerbosity()),
@@ -1428,12 +979,8 @@ void ASimulationManagerUImpl::BeginPlay()
 			static_cast<uint32>(kResimGateProbeWindowSamples));
 	}
 
-// ---- APPLY THE RESIM-GATE POLICY, steps 2-4 ---------------------------
-//
-// ⛔ AFTER BOTH ROLE BRANCHES: duplicating apply-plus-proof is how the roles drift. §3
+	// ⛔G-63  docs/SimulationManagerUImpl-guards.md
 	{
-// STEP 2 - PARSE + VALIDATE. ⛔ An unrecognised string is REPORTED and the default kept:
-// a typo silently selecting the other value changes the gate on a build nobody touched. §3
 		if (hasIniResimTriggerPolicy)
 		{
 			if (configuredResimTriggerPolicy.Equals(TEXT("OnDisagreement"), ESearchCase::IgnoreCase))
@@ -1454,15 +1001,6 @@ void ASimulationManagerUImpl::BeginPlay()
 			}
 		}
 
-// STEP 4 - THE PROOF LINE. Unconditional, at Warning; see the banner. §3
-//
-// ⛔ THIS LINE IS THE BEHAVIOUR-NEUTRALITY RECEIPT: a later claim names WHICH POLICY WAS LIVE.
-//
-// ⛔ Values are read back from TimeConfig, so it cannot claim a setting nothing stored.
-//
-// ⛔ `depthPolicy` and `rateLimit` state inertness rather than falling silent. §3
-//
-// Volume: one line per session per role, at composition.
 		const TimeConfig& sessionTimeConfig = m_manager->getTimeConfig();
 		const bool policyIsOnDisagreement =
 			sessionTimeConfig.resimTriggerPolicy == TimeConfig::ResimTriggerPolicy::OnDisagreement;
@@ -1475,6 +1013,13 @@ void ASimulationManagerUImpl::BeginPlay()
 			hasIniResimTriggerPolicy ? TEXT("ini override") : TEXT("compiled default"),
 			*depthPolicyText);
 	}
+
+	checkf(m_ringoutSpawnPointsSeeded,
+		TEXT("SimulationManagerUImpl::BeginPlay: the ring-out spawn table was not seeded on this peer ")
+		TEXT("(netMode=%d). Every peer reads StaticData::spawnPoints - a client predicts its own ")
+		TEXT("respawn - so seedRingoutSpawnPointsFromLevel must not be role-gated. Was the NOT ")
+		TEXT("ROLE-GATED fence at the seed call."),
+		static_cast<int32>(worldNetMode));
 
 	physScene->OnPhysScenePreTick.AddUObject(this, &ASimulationManagerUImpl::OnPhysicsPreTick);
 	physScene->OnPhysSceneStep.AddUObject(this, &ASimulationManagerUImpl::OnPhysicsStep);
@@ -1493,14 +1038,12 @@ void ASimulationManagerUImpl::BeginPlay()
 
 void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-// ⛔ The coordinator borrows m_manager's TimeConfig, so it is reset BEFORE the manager. §2
+	// ⛔G-64  docs/SimulationManagerUImpl-guards.md
 	m_delayedInputComponentsById.clear();
 	m_receptionCoordinator.reset();
 
-// ⛔ Same borrow rule as the coordinator: the tier cache holds m_manager's TimeConfig. §2
 	m_replicatedTierConsumer.reset();
 
-// Clear the singleton slot before teardown so a later PIE session cannot hit the guard.
 	if (s_instances[0] == this)
 	{
 		s_instances[0] = nullptr;
@@ -1547,57 +1090,33 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 }
 
-
-// ---------------------------------------------------------------------------
-// CLIENT TIER CONSUMPTION - the receive end of the per-connection tier channel. §5
-//
-// ⛔ PRESERVED QUIRK: the core never publishes tier 0 as a FIRST value, so a wire that never
-// leaves tier 0 never calls in here - a standing client/server delay divergence, kept. §5
-//
-// ⛔ SECOND CONSEQUENCE: that fabricated `oldTier = 0` used to reach applyTierTransitionStall
-// as a real prior tier, asking for a spurious stall on the FIRST resolution. Fixed by taking
-// `hadAnyTier` explicitly. ⛔ The divergence above is UNCHANGED - it only suppresses.
-// ---------------------------------------------------------------------------
-
 void ASimulationManagerUImpl::onConnectionTierReceived(uint8_t oldTier, uint8_t newTier)
 {
-// ⛔ Read BEFORE applyReplicatedConnectionTier, which sets hasReceivedTier() unconditionally. §5
+    // ⛔G-65  docs/SimulationManagerUImpl-guards.md
     const bool hadAnyTier =
         m_replicatedTierConsumer.has_value() && m_replicatedTierConsumer->hasReceivedTier();
 
     applyReplicatedConnectionTier(newTier);
 
-// The (old -> new) delta IS the transition signal: the client runs no RTT sampling. §5
-//
-// ⛔ A fresh connection's first OnRep reports oldTier = 0, the property default, not a tier
-// ever run at; `hadAnyTier`, captured above, is what tells it from a genuine prior tier 0.
     applyTierTransitionStall(oldTier, newTier, hadAnyTier);
 }
 
 void ASimulationManagerUImpl::onConnectionTierReplayed(uint8_t tier)
 {
-// ⛔ NO stall - the first tier ever applied, so no tick was predicted at a prior delay.
     applyReplicatedConnectionTier(tier);
 }
 
 void ASimulationManagerUImpl::applyReplicatedConnectionTier(uint8 tier)
 {
     if (!m_replicatedTierConsumer.has_value())
-        return;     // pre-BeginPlay ordering; the relay latches and replays at bind
+        return;
 
-// GAME THREAD, matching the cache's single-threaded contract.
     m_replicatedTierConsumer->onReplicatedTierReceived((int32)tier);
     recomputeAndPublishEffectiveInputDelay();
 }
 
-// ---------------------------------------------------------------------------
-// THE RELAY-RING HOST BOUNDARY, client side. ⛔ A bridge only, because OGSimulationUnreal
-// must not depend on OGBrawlerUnreal and so cannot resolve its own owner. §6
-// ---------------------------------------------------------------------------
-
 void ASimulationManagerUImpl::onInputRelayHostReady(ASimulationInputRelay& host)
 {
-// host -> owner -> character -> component. ⛔ Any hop may fail mid-join; the host re-asks. §6
     AActor* ownerActor = host.GetOwner();
     if (ownerActor == nullptr)
         return;
@@ -1609,14 +1128,9 @@ void ASimulationManagerUImpl::onInputRelayHostReady(ASimulationInputRelay& host)
     if (USimmableUpdateComponent* component =
             character->FindComponentByClass<USimmableUpdateComponent>())
     {
-// Idempotent on the component's side - three independent link paths can fire this.
         component->attachInputRelayHost(&host);
     }
 }
-
-// ---------------------------------------------------------------------------
-// THE RELAY DELAY FLOOR, client side. ⛔ Session channel vs per-wire: either lands first. §5
-// ---------------------------------------------------------------------------
 
 void ASimulationManagerUImpl::onRelayDelayFloorReceived(uint8_t floorTicks)
 {
@@ -1625,18 +1139,14 @@ void ASimulationManagerUImpl::onRelayDelayFloorReceived(uint8_t floorTicks)
 
 void ASimulationManagerUImpl::onRelayDelayFloorReplayed(uint8_t floorTicks)
 {
-// ⛔ NO stall here - the pull runs inside BeginPlay, before the first prediction tick.
     applyReplicatedRelayDelayFloor((uint8)floorTicks, /*payForIncrease=*/false);
 }
 
 void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, bool payForIncrease)
 {
     if (!m_manager.has_value())
-        return;     // pre-BeginPlay ordering; the relay latches and replays at bind
+        return;
 
-// ⛔ INTAKE POINT 2 OF 2. Off the wire, so clamped: a corrupt byte must not outrun eviction. §3
-//
-// The setter clamps again; this site exists so an out-of-range value is VISIBLE.
     const TimeConfig& cfg = m_manager->getTimeConfig();
     const int32 clampedFloor = clampRelayDelayFloorTicks((int32)floorTicks, cfg);
     if (clampedFloor != (int32)floorTicks)
@@ -1646,10 +1156,8 @@ void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, b
             (unsigned int)floorTicks, clampedFloor);
     }
 
-// Stamp it into the ONE shared TimeConfig, which every downstream derivation reads. §5
     m_manager->setRelayDelayFloorTicks(clampedFloor);
 
-// Advisory-only - see logRelayDelayFloorAdvisory. Same belt-and-braces as the clamp.
     logRelayDelayFloorAdvisory(clampedFloor);
 
     const int32 deltaDelayTicks = recomputeAndPublishEffectiveInputDelay();
@@ -1662,8 +1170,6 @@ void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, b
         return;
     }
 
-// ⛔ A floor RISE is indistinguishable from an upward tier transition to the client: the
-// frontier must fall back by the difference, which the clock pays down as Stall ticks. §5
     requestInputDelayIncreaseStall(deltaDelayTicks);
 
     UE_LOG(LogOGNet, Warning,
@@ -1671,15 +1177,12 @@ void ASimulationManagerUImpl::applyReplicatedRelayDelayFloor(uint8 floorTicks, b
         clampedFloor, deltaDelayTicks);
 }
 
-// ⛔ ADVISORY ONLY, never an assert: floor 0 is scheduled-regime-OFF, and
-// classifyRelayDelayFloor (ConnectionTierTable.h) never flags it. That file has the table. §3
-//
-// Called from BOTH floor intake points, the same belt-and-braces shape the clamp uses.
 void ASimulationManagerUImpl::logRelayDelayFloorAdvisory(int32 floorTicks)
 {
     if (!m_manager.has_value())
         return;
 
+    // ⛔G-66  docs/SimulationManagerUImpl-guards.md
     switch (classifyRelayDelayFloor(m_manager->getTimeConfig()))
     {
     case RelayDelayFloorAdvisory::BelowHiccupBaseline:
@@ -1702,10 +1205,6 @@ int32 ASimulationManagerUImpl::recomputeAndPublishEffectiveInputDelay()
     if (!m_replicatedTierConsumer.has_value())
         return 0;
 
-// THE FORMULA, in one place: every arm lives in effectiveInputDelayTicks, as on the server. §5
-//
-// ⛔ GAME -> PHYSICS crossing, deliberately ONE scalar: it lands in a std::atomic<int32>
-// that collectInputAll loads once per tick, so a race costs one tick of latency. §1
     const int32 delayTicks = (int32)m_replicatedTierConsumer->effectiveInputDelayTicks();
     const int32 deltaDelayTicks = delayTicks - m_lastPublishedEffectiveInputDelayTicks;
 
@@ -1725,26 +1224,23 @@ int32 ASimulationManagerUImpl::recomputeAndPublishEffectiveInputDelay()
 void ASimulationManagerUImpl::applyTierTransitionStall(uint8 oldTier, uint8 newTier, bool hadAnyTier)
 {
     if (oldTier == newTier)
-        return;     // an OnRep can fire for an unchanged value; nothing transitioned
+        return;
 
     if (!m_manager.has_value())
-        return;     // core manager not constructed yet; no clock to stall
+        return;
 
-// ⛔ THE DECISION is shouldStallForTierTransition in core, which has LLT coverage. §5
     const TimeConfig& cfg = m_manager->getTimeConfig();
     const int32 stallTicks = (int32)shouldStallForTierTransition(
         (int32)oldTier, (int32)newTier, hadAnyTier, cfg);
 
     if (stallTicks <= 0)
     {
-// A downward or delay-neutral transition, which drift reaches by advancing, or a first one.
         UE_LOG(LogOGNet, Log,
             TEXT("[ConnectionTier] tier %u -> %u hadAnyTier=%d, no stall"),
             (unsigned int)oldTier, (unsigned int)newTier, hadAnyTier ? 1 : 0);
         return;
     }
 
-// No-ops on an authority manager, the only role that can reach here with no client clock.
     requestInputDelayIncreaseStall(stallTicks);
 
     UE_LOG(LogOGNet, Warning,
@@ -1776,50 +1272,6 @@ void ASimulationManagerUImpl::onPostSimulationGameThread()
     m_manager->onPostSimulationGameThread();
 }
 
-// =========================================================================================
-// [ringout task 5] ⭐ THE AUTHORITY-SIDE SCORE PUSH
-// =========================================================================================
-//
-// WHAT IT IS. One game-thread pass that copies each character's authority-side ring-out
-// score out of `brawlerRingout::ScoreSystem` and onto that character's replicated
-// `RingoutScore` property, from which UE replicates it to every client. It carries NO
-// POLICY — who scores, how much and when is entirely task 4's law, in engine-free core.
-//
-// ⛔ WHY A FILE-LOCAL FUNCTION AND NOT A MEMBER. Everything it needs is passed in, so it
-// adds no name to the class's surface and no member to its threading table. The class
-// banner's NARROW PASSTHROUGHS list exists precisely to stop this kind of thing becoming an
-// accessor; a free function that the one call site below hands two references to cannot be
-// reached by anything else.
-//
-// ⛔ THE ROUTE TABLE IS `m_delayedInputComponentsById`, AND REUSING IT IS A REAL COUPLING —
-// stated here because nothing else would state it. That map is registered in
-// `USimmableUpdateComponent::tryRegisterWithNewFramework` under `if (isAuthority)` and
-// erased in `unregisterFromNewFramework`, so it is exactly "the authority's live characters,
-// resolvable to their actors" — which is what this push needs and what no other member is.
-// ⚠ IF THAT REGISTRATION EVER NARROWS (a condition beyond `isAuthority`, a later call site,
-// a role that stops registering), THIS PUSH SILENTLY LOSES THOSE CHARACTERS: their score
-// never leaves the server and their scoreboard row freezes at whatever last replicated. It
-// fails quiet, so it is written down rather than left to be rediscovered.
-//
-// ⛔⛔ THIS IS A CROSS-THREAD READ, AND THE ARGUMENT FOR IT IS THE CLASS BANNER'S THIRD
-// CROSSING — read that before touching this. The short form: `ScoreSystem`'s score table is
-// WRITTEN on the physics thread (`postIntegrate`, beneath `OnPreSimulate_Internal`) and read
-// here on the GAME thread. What makes it the same ACCEPTED TEAR the input-history poll takes
-// rather than a new hazard is that the table cannot be RESTRUCTURED under this reader: the
-// only inserting and erasing calls are `onCharacterRegistered` / `onCharacterUnregistered`,
-// both driven from `tryRegister` / `unregisterFromNewFramework`, both GAME THREAD. The award
-// itself reaches an EXISTING entry, so it writes one naturally-aligned four-byte word and
-// cannot rehash. Worst case: a scoreboard number one tick stale, on a display that decides
-// nothing — which is the same bound `BrawlerColor` and this property both rest on.
-//
-// ⭐ THAT ARGUMENT HAS A PRECONDITION, AND THE PRECONDITION IS MACHINE-CHECKED BELOW rather
-// than asserted in prose. `postIntegrate` awards through `operator[]`, which INSERTS — and
-// therefore MAY REHASH — for an id the roster has not got. Task 4 chose that deliberately so
-// an award to an unseeded id is a real award rather than a dropped one. It is unreachable in
-// a legal session because `onCharacterRegistered` seeds every authority-registered id, and
-// it seeds it BEFORE `tryRegister` returns `Ready`, which is before the route entry this
-// walk reads even exists. The `checkf` states exactly that ordering, so a future change that
-// breaks it fails loudly in Development instead of racing silently.
 namespace
 {
     void pushRingoutScoresToCharacters(
@@ -1830,9 +1282,6 @@ namespace
         {
             const unsigned int id = entry.first;
 
-// A stale handle is SKIPPED, not erased. The two transport sinks prune the map when they
-// meet one because they are its owners; this is a reader and pruning here would mutate the
-// container mid-walk for no benefit - `unregisterFromNewFramework` erases it promptly anyway.
             USimmableUpdateComponent* component = entry.second.Get();
             if (component == nullptr)
                 continue;
@@ -1841,7 +1290,6 @@ namespace
             if (character == nullptr)
                 continue;
 
-// ⛔ THE NO-REHASH PRECONDITION, STATED AS A TRIPWIRE. See the banner above.
             checkf(scoreSystem.hasScoreEntry(id),
                    TEXT("Ring-out score push: id=%u is in the authority route table but has no ")
                    TEXT("ScoreSystem roster entry. The game-thread read of the score table is ")
@@ -1850,8 +1298,6 @@ namespace
                    TEXT("operator[] INSERT, and rehash, on the physics thread under this walk."),
                    id);
 
-// ⛔ THE UNCHANGED-VALUE GUARD IS INSIDE THE SETTER, not here. One write site, one guard:
-// a second early-out here could drift out of step with it and neither would be obviously wrong.
             character->SetAuthoritativeRingoutScore(
                 static_cast<int32>(scoreSystem.scoreOf(id)));
         }
@@ -1868,10 +1314,8 @@ void ASimulationManagerUImpl::OnPhysicsStep(FPhysScene* Scene, float DeltaTime)
 
 void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 {
-// Game thread - safe to call RPCs and Unreal API here.
 	onPostSimulationGameThread();
 
-// ⛔ HasAuthority() is unreliable on non-replicated actors - use runsPrediction().
 	if (m_manager.has_value() && !m_manager->runsPrediction())
 	{
 		if (ASimulationTimingRelay* relay = findTimingRelay())
@@ -1880,24 +1324,6 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 
 	updateVisualizationAll(m_storage);
 
-// ---- [ringout task 5] THE SCORE PUSH ----------------------------------
-//
-// ⛔ THE GATE IS `!runsPrediction()`, THE SAME EXPRESSION TWELVE LINES ABOVE, and it is now
-// the layer's ONLY role site for ring-out - [ringout task 19] deleted the BeginPlay wiring
-// line, the flag it wrote, and the two-sided checkf that cross-checked them, because there is
-// no longer a second gate to disagree with: brawlerRingout::ScoreSystem declares
-// kRoleAffinity = AuthorityOnly and SimulationSystemsExecutor skips it off the authority.
-// ⛔ NOT HasAuthority(): `bReplicates = false` pins Role to authority on every peer.
-//
-// ⚠ THIS GATES THE REPLICATION, NOT THE AWARD. A client whose gate here were deleted would
-// push scores its ScoreSystem never computed - an empty roster, so zeroes over the replicated
-// values - which is loud rather than silent. Per F26 nothing mechanical checks this line.
-//
-// WHY HERE, beside updateVisualizationAll. This is the one game-thread point that runs
-// directly after the simulation has advanced, and harvesting a physics-side result for
-// PRESENTATION is exactly what its neighbour already does. The push is a poll, not an event:
-// it costs one int compare per character per pass when nothing changed, and the score
-// changes at most once per death tick.
 	if (m_manager.has_value() && !m_manager->runsPrediction())
 	{
 		pushRingoutScoresToCharacters(m_systemsExec.get<brawlerRingout::ScoreSystem>(),
@@ -1912,7 +1338,6 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     BrawlerInputProviderFn inputProvider,
     bool isAuthority)
 {
-// Look up or insert the per-id pending record.
     auto it = m_pendingRegistrations.find(id);
     if (it == m_pendingRegistrations.end())
     {
@@ -1928,16 +1353,6 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 
     if (!record.bodiesCreated)
     {
-// First-call body creation pass.
-// ⭐ [movement-sim task 19] THIS CAST IS THE REGISTRATION PATH, AND IT IS NOT AN ACCESSOR SWAP.
-// It used to name the engine's walking-pawn base; task 19 rebased `AOGBrawlerUECharacter` on
-// `APawn`, so that base is no longer in the hierarchy and the old cast would return NULL HERE —
-// on the FIRST-CALL body-creation pass — which is registration failing outright: no bodies, no
-// simulation, no character. The root capsule this pass needs is declared by
-// `AOGBrawlerUECharacter` itself now, so that class IS the type the contract requires.
-// ⚠ `checkf` COMPILES OUT IN SHIPPING (task 36). There a wrong owner type is a null dereference
-// on the very next line rather than an assert, which is why the message below names the exact
-// class rather than a family.
         AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(owner.GetOwner());
         checkf(character != nullptr,
                TEXT("USimmableUpdateComponent must be attached to an AOGBrawlerUECharacter — the ")
@@ -1946,32 +1361,15 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
             character->GetCapsuleComponent()->GetBodyInstanceAsyncPhysicsTickHandle();
         const BodyId parentBodyId = m_physAdapter->getBodyId(parentHandle);
 
-// ⚠ CharacterBindings is NO LONGER STAMPED HERE. [movement-sim T13] moved it BELOW the
-// physics fold, because its source is now that fold's output. See the §10 banner there.
-
         AActor* ownerActor = owner.GetOwner();
-// ⛔ Attach and parent-body are the SAME capsule, so ONE handle - two let callers desync. §10
         UPrimitiveComponent* attachParent = character->GetCapsuleComponent();
         const simulatableBrawler::StaticData& staticData = owner.getStaticData();
 
-// The factory's parentBodyId roots every shape, so overlap() emits the capsule id.
         ChaosPhysicsFactory factory(*m_physAdapter, *m_queryAdapter, ownerActor, attachParent);
 
         record.simulatable->editPhysicsComposite().forEach([&](auto& decl)
         {
             using D = std::decay_t<decltype(decl)>;
-// Generic — each declaration names its own slice (PhysicsDeclaration.h). Adding a
-// body-owning sub-simulation therefore edits no engine file to have its body CREATED,
-// BOUND, CAPTURED, REWOUND and CHECKSUMMED.
-//
-// ⚠ [movement-sim T13, from the task-10 review] THAT IS THE WHOLE OF THE CLAIM, and the
-// earlier unqualified wording overstated it. Making that body COLLIDABLE OR QUERYABLE is
-// still hand-written engine work: its `collisionCategory` needs one entry in EACH of the two
-// ChaosCategoryMapping tables in BeginPlay above (authority branch and client branch,
-// duplicated with no shared constant), or ChaosPhysicsFactory::applyDescriptor types the
-// shape by the unmapped fallback and no object query can ask for it. Tasks 39 and 43 paid
-// exactly that cost for `world` and `character`. Generic creation, hand-written collision —
-// state both halves.
             const auto& subStaticData = D::staticDataOf(staticData);
             auto r = factory.createPhysicalObject(D::descriptor(), D::name);
             decl.bindings.ownBodyId        = r.bodyId;
@@ -1995,103 +1393,25 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         });
 #endif
 
-// Stamp the authoritative capsule body id into the brawler's CharacterBindings. §10
-//
-// SOURCE SINCE [movement-sim T13]: the movement sub-simulation's OWN PhysicsDeclaration
-// bindings, not the pawn's own capsule lookup. That is why this stamp sits AFTER the fold —
-// before it, `bindings.ownBodyId` is still zero. (The `#if DO_CHECK` block above catches a
-// zero id in development and test builds; being `checkf`, it is compiled out of Shipping, so
-// it is a development instrument and not a Shipping-build guarantee.)
-//
-// ⭐ THE VALUE IS UNCHANGED, AND THAT IS THE POINT. Task 11's descriptor sets `isRoot`, so
-// the factory ADOPTS the pawn's existing root capsule instead of creating a body; that is
-// what makes `ownBodyId == parentBodyId == capsuleBodyId` true by construction. This
-// identity is exactly what `isRoot` buys, and it is why task 11's review refused to defer
-// `isRoot` to a later task. ⛔ Anyone "simplifying" `isRoot` away silently breaks this line.
         const BodyId movementOwnBodyId =
             record.simulatable->getPhysicsComposite()
                 .get<brawlerMovementSimulation::PhysicsDeclaration>().bindings.ownBodyId;
 
-// ⭐ [movement-sim task 17] THE TWO-SOURCE TRIPWIRE IS GONE. It asserted
-// `movementOwnBodyId == record.parentBodyId` for as long as the two sources coexisted;
-// `PendingRegistration::parentBodyId` — the record field that held the second one — is deleted
-// with it, and the resolvability gate below now reads this same declaration. The identity it
-// watched is UNCHANGED and still stated above: it is `isRoot` that makes it hold, not an
-// assertion.
-//
-// ⭐ AND THE IDENTITY IS STILL ASSERTED, one layer down and by a check this task does not touch:
-// `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root arm ends in
-// `checkf(bodyId == m_parentBodyId, …)` (`ChaosPhysicsFactory.cpp:195`), and its `m_parentBodyId`
-// is derived from the SAME capsule component this function passed as the attach parent. So the
-// removal drops a duplicate, not the only witness.
-// ⚠ Neither was ever a Shipping-build guarantee — `checkf` compiles out there (task 36).
+        checkf(movementOwnBodyId == parentBodyId,
+               TEXT("tryRegister: the movement declaration's own body (%u) is not the pawn's root ")
+               TEXT("capsule (%u), id=%u. Either CharacterBindings is being stamped before the physics ")
+               TEXT("fold populated bindings.ownBodyId, or the factory created a body instead of ")
+               TEXT("adopting the capsule. Was the stamp-after-the-fold and isRoot fences."),
+               movementOwnBodyId.value, parentBodyId.value, id);
 
         record.simulatable->setCharacterBindings({ /*.capsuleBodyId =*/ movementOwnBodyId });
 
-// THE TELEPORT SEED — spawn. BrawlerMovementSimulation.h's InitialConditions is a
-// COUNTER-FREE edge: the UE layer sets `teleportPending` non-zero here, the sub-sim's first
-// step consumes it and clears it back to zero in the same tick. It is ON THE WIRE (16 B) so
-// that a respawn replays identically on a client and through a resim.
-//
-// ⛔ FIRST-CALL PASS ONLY. This branch runs once per character (guarded by
-// `record.bodiesCreated`), and the record is moved wholesale into storage at registration
-// below, so the seed survives to the sub-sim's first integrate. Seeding it per call would
-// re-teleport the character every tick until it registers.
-//
-// The pose comes from the capsule component, which is where the engine has the character
-// standing at spawn — this branch runs on the FIRST tryRegister call, before the sub-sim has
-// integrated once, so nothing has driven the capsule yet whatever `drivesBody` says. (It says
-// `true`: task 15 flipped it together with `simulatePhysics` and retired the CMC. This is
-// still a READ of the engine's authoritative spawn pose, and the reason is the ORDER, not a
-// second authority.)
-//
-// ⚠ THE CONSUMER DOES WRITE BACK. The teleport branch is documented as the ONE body write
-// that ignores `drivesBody` — it calls setBodyTransform + setBodyLinearVelocity(0) on the
-// capsule. Seeded from the capsule's OWN current location that is a value no-op, but it is
-// a real engine call, and a future seed from any other source would MOVE the character.
         auto& movementIC = record.simulatable->editAllState().editState()
             .edit<brawlerMovementSimulation::InitialConditions>();
         movementIC.teleportPending = 1u;
         movementIC.teleportPos     =
             uglm::toGLMVec3(character->GetCapsuleComponent()->GetComponentLocation());
 
-
-// THE SPAWN-SLOT SEED - ring-out, task 3. Same first-call branch, and for the same reason:
-// `brawlerRingout::InitialConditions::spawnSlot` is written ONCE per character and read on
-// every respawn for the life of that character. Unlike the teleport seed above it is NOT a
-// counter-free edge - nothing consumes it and nothing clears it.
-//
-// ⛔ FIRST-CALL PASS ONLY, inherited from the branch it sits in. Re-seeding per call would
-// not merely be wasteful: `acquire` is idempotent, so it would return the same index, but a
-// character whose slot had been RELEASED and handed to someone else would silently change
-// spawn point mid-session. Once, at registration, is the contract.
-//
-// ⛔⛔ AUTHORITY ONLY, AND THIS IS NOT HasAuthority(). `bReplicates = false` makes
-// `GetLocalRole()` report authority on this actor in every role, which is why this file uses
-// the WORLD-level test everywhere. `record.isAuthority` IS that test: the caller
-// (`USimmableUpdateComponent::tryRegisterWithNewFramework`) computes it as
-// `(GetNetMode() != NM_Client)` - literally the expression `BeginPlay` names
-// `worldIsAuthority` - and passes it in. The `checkf` states that equivalence rather than
-// leaving it to a comment, because `tryRegister` is a public entry point.
-//
-// ⭐ WHY A CLIENT MAY SAFELY LEAVE ITS OWN COPY AT THE DEFAULT 0, AND WHY THAT CANNOT BE
-// READ BEFORE THE SERVER'S NUMBER ARRIVES. `tryRegister` runs on BOTH roles, so a client
-// registers its own character locally with `spawnSlot` at its in-class initialiser, 0. That
-// value is read by exactly one thing: the respawn arm of `brawlerRingout::integrate`, which
-// is reached only after the character has (a) crossed the kill plane and (b) waited
-// `StaticData::respawnDelayTicks` - 120 ticks, 2.0 s at 60 Hz - for `tick >= respawnAtTick`.
-// The correction that carries the authority's `InitialConditions` is an ORDINARY state
-// correction on the already-running rotation, arriving within a handful of ticks of
-// registration and restoring the whole struct by assignment. So the client's 0 is
-// overwritten two orders of magnitude before the only code that reads it can run, and a
-// resim RESTORES the authority's value rather than recomputing it. There is no path on
-// which the placeholder is read first: death itself cannot occur earlier than the first
-// correction and still leave 120 ticks of countdown to run before the value matters.
-//
-// ⛔ AND ARRIVAL ORDER DECIDING THE NUMBER IS DELIBERATE - see the ⛔ banner on
-// `brawlerRingout::SpawnSlotAllocator`. Clients never derive this; a replay restores it. Do
-// not "fix" it into a per-peer derivation such as `GetPlayerSlotForActor`, which is per-wire
-// and answers 0 for the primary pawn of every remote client.
         if (record.isAuthority)
         {
             checkf(record.isAuthority == (GetNetMode() != NM_Client),
@@ -2101,10 +1421,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
             auto& ringoutIC = record.simulatable->editAllState().editState()
                 .edit<brawlerRingout::InitialConditions>();
 
-// ⛔ THE OVER-CAPACITY ANSWER IS WRITTEN THROUGH, NOT CLAMPED. `acquire` returns
-// `kNoFreeSlot`, whose value is `kMaxSpawnPoints`, and the sub-sim's defensive index branch
-// turns that into a `[Warning][Ringout.spawnSlot]` and no teleport seed. Clamping to 0 here
-// would put the over-capacity character on top of whoever legitimately holds 0, silently.
+            // ⛔G-67  docs/SimulationManagerUImpl-guards.md
             ringoutIC.spawnSlot = m_spawnSlots.acquire(id);
 
             UE_LOG(LogOGMgmt, Log,
@@ -2116,16 +1433,6 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         return TryRegisterStatus::Pending;
     }
 
-// Resolvability gate.
-//
-// ⭐ [movement-sim task 17] THE SOURCE IS THE MOVEMENT DECLARATION'S OWN `ownBodyId`, which is
-// what `PendingRegistration::parentBodyId` used to hold and no longer exists to hold. The value
-// is the same body — the descriptor's `isRoot` makes the factory ADOPT the pawn's root capsule,
-// so the movement declaration's own id IS the capsule id (stated in full at the stamp above).
-//
-// ⚠ AND IT IS DELIBERATELY REDUNDANT WITH THE FOLD BELOW, which visits every declaration and
-// therefore visits this one too. It is kept as the named, order-first read so the gate says out
-// loud WHICH body a `Pending` is waiting on; it adds no guarantee the fold does not already give.
     const BodyId movementBodyId =
         record.simulatable->getPhysicsComposite()
             .get<brawlerMovementSimulation::PhysicsDeclaration>().bindings.ownBodyId;
@@ -2142,10 +1449,8 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     if (!allResolvable)
         return TryRegisterStatus::Pending;
 
-// All resolvable - perform the actual registration.
     if (record.isAuthority)
     {
-// `m_inputResolution` inserted - the facade gained the parameter with the peer's promotion.
         registerSimulatable<SimulatableBrawler>(
             m_storage, m_reconciliation, m_inputResolution, m_netSync,
             id, std::move(*record.simulatable),
@@ -2162,12 +1467,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
     }
     UE_LOG(LogOGMgmt, Log, TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, isAuthority ? 1 : 0);
 
-// -----------------------------------------------------------------------
-// THE PRE-DIET CAP FENCE, runtime half. Deleted with kPreDietCharacterCap by the diet. §10
-//
-// ⛔ ONCE PER OVER-CAP CHARACTER: a per-session latch would go silent after the fifth.
-//
-// ⛔ WARNING, not Log, and not an assert: an over-cap session still RUNS - report, do not crash. §3
+    // ⛔G-68  docs/SimulationManagerUImpl-guards.md
     if (record.isAuthority)
     {
         m_authorityRegisteredIds.insert(id);
@@ -2181,27 +1481,19 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         }
     }
 
-// Notify the executor: the character is IN STORAGE, so
-// brawlerHitRouting::System::onCharacterRegistered can index it and read capsuleBodyId. §10
-//
-// ⛔ The notify and the drop of the adapter's m_byRootBodyId insert land TOGETHER.
+    // ⛔G-69  docs/SimulationManagerUImpl-guards.md
     m_manager->notifyCharacterRegistered(id);
 
     m_pendingRegistrations.erase(it);
     return TryRegisterStatus::Ready;
 }
 
-// sampleAndDeriveConnectionTier and tryEnqueueDelayedRemoteInput are GONE: their primitive
-// acquisition moved UP to the RPC boundary, and no per-slot path remains manager-side. §7
-
 void ASimulationManagerUImpl::noteDelayedInputComponent(
     unsigned int id, USimmableUpdateComponent& component)
 {
-// Routing registration for the `deliver` callback. ⛔ A plain overwrite, ONCE at register. §7 §10
     m_delayedInputComponentsById[id] = &component;
 }
 
-// Satisfies RemoteInputDeliverySink; asserted here so a signature break surfaces legibly. §7
 static_assert(
     RemoteInputDeliverySink<ASimulationManagerUImpl, simulatableBrawler::PlayerInput>,
     "ASimulationManagerUImpl must satisfy RemoteInputDeliverySink so "
@@ -2210,7 +1502,6 @@ static_assert(
 void ASimulationManagerUImpl::deliverRemoteInput(
     unsigned int id, uint32 captureTick, const simulatableBrawler::PlayerInput& input)
 {
-// Same inbound path as the RPC, ORIGINAL captureTick. ⛔ A stale handle drops both. §7 §10
     const auto it = m_delayedInputComponentsById.find(id);
     if (it == m_delayedInputComponentsById.end())
         return;
@@ -2225,7 +1516,6 @@ void ASimulationManagerUImpl::deliverRemoteInput(
     target->deliverDelayedRemoteInput(captureTick, input);
 }
 
-// ALSO satisfies RemoteInputRelaySink - the outbound tap fired at each newer capture tick. §6
 static_assert(
     RemoteInputRelaySink<ASimulationManagerUImpl, simulatableBrawler::PlayerInput>,
     "ASimulationManagerUImpl must satisfy RemoteInputRelaySink so "
@@ -2235,7 +1525,6 @@ void ASimulationManagerUImpl::relayRemoteInput(
     unsigned int id, uint32 captureTick, uint8 dA,
     const simulatableBrawler::PlayerInput& input)
 {
-// Same register-time route and same stale-handle prune as the delivery sink.
     const auto it = m_delayedInputComponentsById.find(id);
     if (it == m_delayedInputComponentsById.end())
         return;
@@ -2247,33 +1536,8 @@ void ASimulationManagerUImpl::relayRemoteInput(
         return;
     }
 
-// ⛔ STAGE, DO NOT WRITE THE RING: the host's PreReplication publishes the burst per poll. §6
-//
-// ⛔ NO DEPTH IS READ HERE ANY MORE, AND THAT IS THE POINT: a depth passed to `writeLatest`
-// would silently restore replace-latest on the flush path, with no compile error.
-// `stageRelayedInput` has no depth parameter; the fence is Network/RelayRedundancyDepthTest.cpp.
-//
-// The outcome is deliberately unchecked: the stale-write arm is unreachable from here.
-//
-// ⛔ DUAL-WRITE FENCE DISCHARGED: m_replicatedInputSyncedBuffer is gone; this tap is the only path. §6
     target->stageRelayedInput(captureTick, dA, input);
 
-// -----------------------------------------------------------------------
-// PROBE 5 - RELAY WRITES PER GAME-THREAD FRAME. §8
-// -----------------------------------------------------------------------
-//
-// ⚠ WHAT IT SETTLES. WHEN THIS PROBE WAS BUILT the ring shipped at depth 1, so a second
-// write in one polled frame overwrote the first in server memory - indistinguishable from a
-// send-path drop. Flush-on-poll removed that; the QUANTITY is still the unmeasured one. §6 §11
-//
-// ⛔ The relay-loss elimination chain does not cover this: these writes are PACKET-paced.
-//
-// ⛔ GFrameCounter, NOT AN INVOCATION COUNT: a local counter would measure the call rate.
-//
-// ⛔ THREE FRACTIONS, NEVER COLLAPSED: completeness, coalescing ceiling, and their product
-// `deliverableX1000` - the only one comparable to the client's rate. Merged, they pick blind.
-//
-// VOLUME: two Warning lines per 120 WRITING FRAMES per character. ⛔ Nothing per-write.
     {
         RelayWriteWindowSummary w;
         if (m_relayWriteProbe.noteWrite(
@@ -2281,8 +1545,6 @@ void ASimulationManagerUImpl::relayRemoteInput(
         {
             char line[256];
 
-// Line 1 - THE THREE FRACTIONS. `deliverableX1000` is the headline, read against the client's
-// .Arrival gap; `replaceLatestObservableX1000` keeps archived windows comparable. §8
             std::snprintf(line, sizeof(line),
                 "[Warning][RelayProbe.Write] id=%u runs=%u writes=%u observableWrites=%u "
                 "captureSpan=%u receivedX1000=%u observableX1000=%u deliverableX1000=%u "
@@ -2292,7 +1554,6 @@ void ASimulationManagerUImpl::relayRemoteInput(
                 w.replaceLatestObservableX1000);
             RouteOGMessage(line);
 
-// Line 2 - THE SHAPE, plus a capture-tick range: owner ids are per-PROCESS, ticks are not.
             std::snprintf(line, sizeof(line),
                 "[Warning][RelayProbe.Write] id=%u writesPerFrame p50=%u p99=%u%s "
                 "max=%u emptyFrames=%u nonConsecutive=%u missedCaptureTicks=%u "
@@ -2305,65 +1566,17 @@ void ASimulationManagerUImpl::relayRemoteInput(
     }
 }
 
-// ---------------------------------------------------------------------------
-// TICK ALIGNMENT. ⛔ An off-by-one here shifts EVERY player's input, silently and uniformly. §9
-//
-// `physicsStep` is the UPCOMING solver step; the frame counter increments at a tick's END,
-// so step N's OnPreSimulate_Internal sees frame N and writes the mapper offset there,
-// BEFORE onGameSimulation, whose first action on the authority is to advance the clock:
-//
-//     offset = K - S(K-1)     where S(K) is the sim tick simulated at step K
-//     S(K)   = S(K-1) + 1     authority advance is unconditional - no Stall, Skip or
-//                             resim exists on the server
-//  => offset = (K - S(K)) + 1
-//  => toSimulationTick(X) = X - offset = S(X) - 1
-//
-// ⛔ So toSimulationTick(physicsStep) names the tick BEFORE that step's: hence the `+ 1`.
-//
-// ⛔ WHY NOT CROSS-CHECK AGAINST THE SERVER CLOCK: reading it here IS the unsynchronized
-// cross-thread read this design exists to avoid. The mapper's offset is the safe source. §1
-//
-// Sub-stepping: NumSteps > 1 releases per tick; NumSteps == 1 is one drain.
-// ---------------------------------------------------------------------------
 void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps)
 {
-// Thin adapter over the drain and reap: this side supplies the tick and the callback. §7
-//
-// ⛔ The coordinator early-return guards ONLY the drain, never PROBE A, which runs on both. §8
 
+    // ⛔G-71  docs/SimulationManagerUImpl-guards.md
     const int32 firstUpcomingSimTick =
         static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(physicsStep))) + 1;
 
-// -----------------------------------------------------------------------
-// PROBE A - SIM TICKS PER GAME-THREAD FRAME, i.e. FRAME HEALTH. BOTH ROLES. §8
-// -----------------------------------------------------------------------
-//
-// WHAT IT SETTLED ON THE SERVER. Clients measure a ~2-tick relay arrival gap where ~1 is
-// expected, and the net tick rate is a CAP on replication, not a floor - so a 60 Hz sim on
-// a 30 fps server ships two ticks per poll. Ratio == gap means a HOST artefact, not netcode.
-//
-// ⛔ WHY THE CLIENT NEEDED IT TOO: this was the ONLY wall-clock instrument in the netcode
-// surface and was server-only - yet the server never resims, so every client cost figure
-// behind the shipped policy came from a cadence blind to game-thread hitching. §8
-//
-// ⛔ WHY HERE AND NOT OnPostPhysicsStep: that hook has no step number, so no safe tick. §9
-//
-// ⛔ WHY REUSING `firstUpcomingSimTick` IS SAFE ON THE CLIENT although its `+1` derivation
-// assumes authority: the probe consumes only DELTAS, so a constant skew cancels, and a
-// departure is counted as a `kFrameHealthDiscontinuityTicks` discontinuity. ⛔ A DIFFERENT
-// tick source would not be safe. §9
-//
-// THE RATIO IS HOOK-INDEPENDENT - it keys on GFrameCounter - and reports its OWN cadence.
-//
-// ⛔ `numStepsAboveOne > 0` reads "resim ran"; `== 0` with a high ratio, "the thread hitched".
-//
-// ⛔ CATEGORY PER ROLE, NOT INHERITED: server on [RelayProbe.Frame], client on [ResimProbe.Frame]. §4
-//
-// ⛔ TWO DIFFERENT FAMILIES, not one tag with a role suffix; both carry a `role=` field too.
-//
-// ⚠ COMPARABLE WITH ResimGateProbe, NOT IDENTICAL: same 120 samples, different closing event. §8
-//
-// VOLUME UNCHANGED: window summaries at Warning, nothing per-frame, on EACH role.
+    static_assert(kFrameHealthProbeWindowSamples == kResimGateProbeWindowSamples,
+        "PROBE A's window must stay the same length as ResimGateProbe's, so one [ResimProbe.Frame] "
+        "window lines up against the surrounding [ResimProbe.Gate] windows without a resim-tick "
+        "count on the line. Was the COMPARABLE WITH ResimGateProbe caution in PROBE A's banner.");
     {
         FrameHealthWindowSummary frameSummary;
         const bool frameWindowClosed = m_frameHealthProbe.noteFrame(
@@ -2375,13 +1588,11 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
 
         if (frameWindowClosed)
         {
-// ⛔ `runsPrediction()` false covers the server AND standalone, which rides the SERVER tag.
             const bool isClient = m_manager.has_value() && m_manager->runsPrediction();
             char line[256];
 
             if (isClient)
             {
-// Line 1 - THE RATIO, client role. p99 and max are why this exists: a mean hides a hitch.
                 std::snprintf(line, sizeof(line),
                     "[Warning][ResimProbe.Frame] role=Client simTicks=%u frames=%u "
                     "meanTicksPerFrameX100=%u p50=%u p99=%u max=%u meanFrameUs=%u",
@@ -2391,7 +1602,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
                     frameSummary.meanFrameMicros);
                 RouteOGMessage(line);
 
-// Line 2 - cadence + sub-step cross-check, client role.
                 std::snprintf(line, sizeof(line),
                     "[Warning][ResimProbe.Frame] role=Client cadence dFrame1=%u dFrame0=%u "
                     "dFrameGt1=%u discont=%u numSteps total=%u max=%u gt1=%u",
@@ -2403,7 +1613,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
             }
             else
             {
-// Line 1 - THE RATIO, server role. ⛔ Tag unchanged, so archived-run greps keep working.
                 std::snprintf(line, sizeof(line),
                     "[Warning][RelayProbe.Frame] role=Server simTicks=%u frames=%u "
                     "meanTicksPerFrameX100=%u p50=%u p99=%u max=%u meanFrameUs=%u",
@@ -2413,7 +1622,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
                     frameSummary.meanFrameMicros);
                 RouteOGMessage(line);
 
-// Line 2 - cadence + sub-step cross-check, server role.
                 std::snprintf(line, sizeof(line),
                     "[Warning][RelayProbe.Frame] role=Server cadence dFrame1=%u dFrame0=%u "
                     "dFrameGt1=%u discont=%u numSteps total=%u max=%u gt1=%u",
@@ -2426,27 +1634,14 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
         }
     }
 
+    // ⛔G-70  docs/SimulationManagerUImpl-guards.md
     if (!m_receptionCoordinator.has_value())
         return;
 
-// -----------------------------------------------------------------------
-// PROBE 6 - PER-CONNECTION SEND BUDGET. §8
-// -----------------------------------------------------------------------
-//
-// ⛔ WHY ARITHMETIC WAS NOT ENOUGH: EVERY TERM in the allowance formula is DERIVED.
-//
-// It measures all of them, `notReady` frames included - the frames that wrote NOTHING.
-//
-// ⛔ READ BEFORE TickFlush: `QueuedBits` updates at Tick's END, so this is the real credit.
-//
-// ⛔ CUMULATIVE COUNTERS, NOT `OutBytes`/`OutPackets`: the engine zeroes those mid-window.
-//
-// VOLUME: two Warning lines per 120 server frames per client connection.
     if (const UWorld* world = GetWorld())
     {
         if (const UNetDriver* netDriver = world->GetNetDriver())
         {
-// The allowance denominator. ⛔ From the driver, so a config change cannot invalidate it.
             const uint32 tickRateHz =
                 static_cast<uint32>(FMath::Max(1, netDriver->GetNetServerMaxTickRate()));
             const uint64 nowMicros =
@@ -2457,15 +1652,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
                 if (conn == nullptr)
                     continue;
 
-// -----------------------------------------------------------
-// THE CAPACITY PIN - the packet budget, measured. §8
-// -----------------------------------------------------------
-//
-// ⛔ WHY THIS EXISTS: the DERIVED single-bunch capacity does not reproduce. The engine referees.
-//
-// ⛔ It only moves DOWN, so RoundVsPacketBudgetTest.cpp's literal is an UPPER BOUND.
-//
-// ONE-SHOT PER SESSION, at Warning: the value is a property of the build, not the connection. §3
                 {
                     static bool s_loggedPacketBudget = false;
                     if (!s_loggedPacketBudget)
@@ -2475,12 +1661,14 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
                         UE_LOG(LogOGNet, Warning,
                             TEXT("[PacketBudget] usableSingleBunchBytes = %d, handlerBits = %d "
                                  "(maxPacket=%d, usableBits=%d)"),
+                            // ∴D-50  docs/SimulationManagerUImpl-rationale.md
                             (usableBits / 32) * 4, conn->MaxPacketHandlerBits,
                             conn->MaxPacket, usableBits);
                     }
                 }
 
                 ConnectionBudgetWindowSummary budget;
+                // ⛔G-72  docs/SimulationManagerUImpl-guards.md
                 const bool budgetWindowClosed = m_connectionBudgetProbe.noteSample(
                     static_cast<uint32>(conn->GetUniqueID()),
                     conn->CurrentNetSpeed,
@@ -2495,7 +1683,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
 
                 char line[256];
 
-// Line 1 - THE THROUGHPUT. ⛔ `netSpeedBps` is printed: off the ceiling, the budget is wrong.
                 std::snprintf(line, sizeof(line),
                     "[Warning][RelayProbe.Budget] conn=%u frames=%u elapsedMs=%u "
                     "netSpeedBps=%d allowanceBytesPerTick=%u outBytes=%u "
@@ -2505,9 +1692,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
                     budget.outBytes, budget.bytesPerSample, budget.occupancyPctX10);
                 RouteOGMessage(line);
 
-// Line 2 - THE SATURATION STATE and the REAL loss. QueuedBits is a debt counter, so `min` is
-// the MOST headroom and `max` the closest to saturation. ⛔ `lost` is ack-derived: the ACTUAL
-// outgoing loss, not the configured percentage.
                 std::snprintf(line, sizeof(line),
                     "[Warning][RelayProbe.Budget] conn=%u queuedBits min=%d max=%d "
                     "mean=%d notReadyFrames=%u outPackets=%u bytesPerPacket=%u lost=%u",
@@ -2519,9 +1703,6 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
         }
     }
 
-// The per-id drain callback: answers owner liveness, then routes via deliverRemoteInput. §7
-//
-// ⛔ Liveness stays HERE: the drain's prune contract is a bool, the sink returns void.
     auto deliver = [this](unsigned int id, uint32 captureTick,
                           const simulatableBrawler::PlayerInput& input) -> bool
     {
@@ -2542,53 +1723,37 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
     m_receptionCoordinator->releaseDelayedInputs<SimulatableBrawler>(
         firstUpcomingSimTick, numSteps, deliver);
 
-// Reap, off the arrival-gated path: once per physics frame, dwell-gated inside. §7
-//
-// ⛔ The tick comes from the game-thread-safe mapper, NOT the server clock. §9
     m_receptionCoordinator->reapConnections(firstUpcomingSimTick);
 }
 
 void ASimulationManagerUImpl::unregisterFromNewFramework(
     unsigned int id, USimmableUpdateComponent& owner, bool isAuthority)
 {
-// ⛔ Drop the routing entry BEFORE unregisterSimulatable destroys it, while still in storage. §10
-//
-// ⛔ The has<> guard is preserved: an unregistered character's view.get<>(id) is unsafe.
+    // ⛔G-73  docs/SimulationManagerUImpl-guards.md
     if (m_storage.has<SimulatableBrawler>(id))
     {
         m_manager->notifyCharacterUnregistered(id);
     }
 
-// `m_inputResolution` inserted - the facade gained the parameter with the peer's promotion.
     unregisterSimulatable<SimulatableBrawler>(
         m_storage, m_reconciliation, m_inputResolution, m_netSync,
         id,
         /*predictionOwner=*/&owner,
         /*authorityOwner=*/isAuthority ? &owner : nullptr);
 
-// ⛔ The unregister contract that replaces the core's former GC-liveness read: drop this
-// owner's claim, dedup watermark and id->component mapping here, PROMPTLY, rather than
-// waiting for GC to make an engine handle stale. No-op on a pure client. §7 §10
     if (m_receptionCoordinator.has_value())
     {
         m_receptionCoordinator->forgetOwner(id);
     }
     m_delayedInputComponentsById.erase(id);
 
-// Same unregister contract for the write probe. ⛔ A dead owner's half-open run is dropped. §8
     m_relayWriteProbe.forgetOwner(id);
 
-// The cap's denominator, reaped so a churning session is judged on the resident roster. §10
     m_authorityRegisteredIds.erase(id);
 
-// Same unregister contract for the ring-out spawn-slot table (task 3). ⛔ WITHOUT THIS a
-// session that churns characters exhausts a four-entry table and every later join is handed
-// the out-of-range value, respawning nowhere. UNGATED for the same reason the erase above is:
-// nothing on the client role ever acquired, so `release` is a no-op there by construction
-// rather than by a role test.
+    // ⛔G-74  docs/SimulationManagerUImpl-guards.md
     m_spawnSlots.release(id);
 
-// Same unregister contract for the display. ⛔ A kept ring is a leak keyed on a dead id. §10
     m_inputHistory.forgetCharacter(id);
 
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
@@ -2602,10 +1767,9 @@ void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 Num
 	asyncInput->m_world = GetWorld();
 	asyncInput->m_manager = this;
 
-// Release tier-delayed input for the upcoming step's tick(s). GAME THREAD, pre-step hook. §9
-//
-// ⛔ The DRAIN no-ops on a client; the frame-health probe inside it does NOT. §8
 	releaseDelayedInputsForStep(PhysicsStep, NumSteps);
 }
 
 OGSIM_OPTIMIZE_ON
+
+#undef HasAuthority

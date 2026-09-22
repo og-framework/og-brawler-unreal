@@ -7,7 +7,8 @@
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 // ⭐ [movement-sim task 16] For LogOGBrawler, FMovementStaticDataCVars and the
 // ASimulationManagerUImpl::readMovementStaticDataCVars declaration this TU DEFINES. The read
-// lives here, next to the variables it reads; see that declaration's comment for why.
+// lives here, next to the variables it reads; the reason is carried in
+// docs/SimulationManagerUImpl-rationale.md section 12, at readMovementStaticDataCVars.
 #include "SimulationManagerUImpl.h"
 
 #include <atomic>
@@ -307,7 +308,7 @@ namespace
 // the console writes directly. Called from exactly one place: `m_movementStaticDataCVars`'s
 // member initializer, which runs immediately before `m_staticData` is constructed from it.
 //
-// ⚠ IT RUNS ONCE PER MANAGER, NOT ONCE PER PROCESS, AND A LISTEN SERVER HAS TWO MANAGERS.
+// ⚠ IT RUNS ONCE PER MANAGER, NOT ONCE PER PROCESS, AND A PIE SESSION HAS ONE MANAGER PER WORLD.
 // That is still "read once when the manager constructs its StaticData": both read the same
 // values in the same frame, so both peers agree, which is the property ruling #3 is about. The
 // latch is armed by whichever runs first and the refusal sweep is reported once, because the

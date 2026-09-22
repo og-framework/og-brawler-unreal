@@ -625,7 +625,7 @@ can tear. ⭐ **The prediction tick is no longer read here at all**: the marker 
 `liveSimTick`, the value `USimmableUpdateComponent::TickComponent` had already read once for
 the whole visualization block, so this display now takes **one** physics-written read per
 frame where it used to take two. That single read is still the accepted tear argued at the
-CROSSING block in `SimulationManagerUImpl.h` — a four-byte aligned load that cannot tear and
+CROSSING block of `SimulationManagerUImpl-rationale.md` §0 (the header's former banner) — a four-byte aligned load that cannot tear and
 at worst is one tick stale — but a stale tick now moves the axis and the marker together.
 
 ⛔ **THE MARKER IS NEVER CLAMPED AND NEVER HIDDEN.** The lane axis is compacted (§7.7), so
@@ -759,7 +759,7 @@ m_manager->getTimeConfig(), consumer.effectiveInputDelayTicks(),
 m_inputResolution.getClientEffectiveInputDelayTicks())` runs **inside** that same passthrough,
 as its own local `std::optional`, guarded on `includeDelay && m_replicatedTierConsumer &&
 m_manager` exactly like the offset read beside it. ⛔ **NO NEW PUBLIC ACCESSOR AND NO NEW
-PASSTHROUGH NAME.** The NARROW PASSTHROUGHS list in `SimulationManagerUImpl.h` is therefore
+PASSTHROUGH NAME.** The NARROW PASSTHROUGHS list (now `SimulationManagerUImpl-rationale.md` §0 and §1) is therefore
 **unchanged** — `pollInputHistoryLanes` was already the one name on it that this display
 reaches through, and three more same-thread reads inside an existing entry point widen what
 that one entry point does, not the set of entry points.
@@ -772,8 +772,9 @@ reads the atomic that `recomputeAndPublishEffectiveInputDelay` — GAME THREAD �
 that the PHYSICS thread only ever *loads*. `pollInputHistoryLanes` itself runs on the game
 thread, driven from `USimmableUpdateComponent::TickComponent`. Three GAME-THREAD readers of
 three GAME-THREAD writers is not a crossing at all, let alone a tear — it is the same
-same-thread shape §1 already argues for the offset. **The CROSSING block's read clause in
-`SimulationManagerUImpl.h` now says so explicitly**, and `SimulationManagerUImpl-rationale.md`
+same-thread shape §1 already argues for the offset. **The CROSSING block's read clause —
+then in `SimulationManagerUImpl.h`, carried since its task-11 conversion into
+`SimulationManagerUImpl-rationale.md` §0 — says so explicitly**, and `SimulationManagerUImpl-rationale.md`
 §1 states why the passthrough list did not need a fourth name.
 
 **The verdict, total over one cell** (`InputDelayVerdict`, `delayVerdictOf` —
