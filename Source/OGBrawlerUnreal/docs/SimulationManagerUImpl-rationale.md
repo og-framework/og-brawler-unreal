@@ -18,6 +18,13 @@ two files point here.
 <!-- lint-external-ref: GameEngine::GetMaxTickRate -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: FRewindData::FindValidResimFrame -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FPBDRigidsSolver::ConditionalApplyRewind_Internal -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: FRewindData::SetTargetStateAtFrame -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: FRewindData::RewindToFrame -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: FRewindData::ApplyTargets -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: FPBDRigidsEvolutionGBF::Integrate -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: SetXR -- Chaos engine particle-handle method, outside every scan root -->
+<!-- lint-external-ref: PushStateAtFrame -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: ApplyCallbacks_Internal -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: TickFlush -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: OutBytes -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: OutPackets -- Unreal Engine connection stat, outside every scan root -->
@@ -535,6 +542,53 @@ computed the verdict on every correction for as long as that method has existed.
 was a **route**: the cache's own line carries no tag, so it lands on the `LogOG` fallback at
 `Log` severity and `LogOG=Warning` suppresses it. The router branch is the whole of that fix.
 
+### The field-diff cost gate — this adapter's half
+
+Routing that family is only half of what `LogOGDivergenceProbe` decides here. Since
+og-netcode-v2-field-defects task 6 the correction line carries a TAIL naming the first
+disagreeing FIELD and its magnitude, and producing that tail costs a per-field walk of the
+whole composite — roughly ten times the boolean fold it re-asks. **og-simulation ships that
+walk closed**: its enabling predicate is an empty `std::function`, so a host that installs
+none walks no field on any correction, ever. That default is a property of the core, not of
+this adapter, and it is what keeps every other game that links the submodule paying nothing.
+
+`bindCorrectionFieldDiffGate` is the only thing that opens it in this project. It is called
+on **both** the authority and the client branch, beside the `setGlobal` sink installs, and
+what it installs is:
+
+```
+correctionFieldDiff::setEnabledPredicate(
+    []() { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
+```
+
+**What it guarantees.** At the shipped `LogOGDivergenceProbe=Warning` the predicate answers
+false; `tryInsertingCorrectState` tests it as the last of three `&&` operands, *before* the
+walk's arguments are formed, so `describeFirstDivergingField` is never entered and
+`correctionFieldDiff::walkCount` stays at ZERO across a run of disagreeing corrections. The
+`[DivergenceProbe.Correction]` line is then byte-for-byte its pre-task-6 self and the tail
+costs nothing. At `Verbose` the walk runs once per disagreeing correction and the line gains
+`field=` and a magnitude. Both halves are asserted, not argued, in
+`Network/CorrectionFieldDivergenceTest.cpp` — including the anti-vacuity arm in which the
+predicate counts its own invocations, so "zero walks because the gate was never consulted"
+cannot be mistaken for "zero walks because the gate was shut".
+
+**A predicate, not a latched bool, and that is why it is a lambda.** `UE_LOG_ACTIVE` re-reads
+the category's CURRENT verbosity, so `LogOGDivergenceProbe Verbose` typed into the console
+mid-session starts naming fields on the next correction, and `Warning` stops it again.
+Reading the verbosity once at BeginPlay would pin the session to whatever the ini said.
+
+⛔ **It must name the same category, at the same verbosity, that `RouteOGMessage` sends the
+`[DivergenceProbe` prefix to.** Re-route that prefix without moving this predicate and the
+adapter either pays for a walk whose line is then dropped, or drops a walk whose line is
+printed. This predicate and `RouteOGMessage`'s `[DivergenceProbe` arm are the only two sites in
+code that USE this category — one reads its verbosity, the other logs to it; the `DECLARE`, the
+`DEFINE` and the ini value are the only other mentions. Change one and you must change the
+other — and the binding's own fence in `SimulationManagerUImpl.cpp` says so.
+
+⚠ **Not yet confirmed in PIE.** The binding compiles and the gate is unit-tested against a
+stand-in predicate; that the live `UE_LOG_ACTIVE` answers as expected under PIE is unverified,
+so the first `Verbose` run should check that `field=` actually appears before any conclusion
+is drawn from its absence.
 
 ### The tag families, in full
 
@@ -543,7 +597,7 @@ The source names each family by its prefix; the members are:
 | category | tags |
 |---|---|
 | `LogOGRelayProbe` | `[RelayProbe.Read]`, `[RelayProbe.Arrival]`, `[RelayProbe.Stale]`, `[RelayProbe.Miss]`, `[RelayProbe.Delta]`, `[RelayProbe.Frame]` |
-| `LogOGResimProbe` | `[ResimProbe.Gate]`, `[ResimProbe.Chaos]`, `[ResimProbe.Apply]`, `[ResimProbe.Landing]`, `[ResimProbe.Request]`, `[ResimProbe.Stranded]`, `[ResimProbe.Session]`, `[ResimProbe.Frame]` |
+| `LogOGResimProbe` | `[ResimProbe.Gate]`, `[ResimProbe.Chaos]`, `[ResimProbe.Apply]`, `[ResimProbe.Landing]`, `[ResimProbe.Request]`, `[ResimProbe.Stranded]`, `[ResimProbe.Session]`, `[ResimProbe.Frame]`, `[ResimProbe.PushTarget]`, `[ResimProbe.PushVerdict]` |
 | `LogOGDivergenceProbe` | `[DivergenceProbe.Correction]`, `[DivergenceProbe.Window]` |
 
 `[RelayProbe.Miss]` says *why* each miss missed — an in-span coverage hole, asking above the
@@ -995,6 +1049,131 @@ which is the single most likely thing to be silently off when somebody goes look
 rather than retyped. **Its own absence is also information:** no `[ResimProbe.Session]` line in a
 client log means either the category was set to `NoLogging` or the branch never ran, and both are
 worth knowing before reading a zero off any counter.
+
+### The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only
+
+**What it exists to decide, and that a REFUTATION is the point.** og-netcode-v2-field-defects
+task 10 asks whether the body-state push `FirstPreResimStep_Internal` makes is ever read.
+That initiative's bug report infers that it is not; AC 1 makes that inference
+falsifiable. **A mismatch on an adoption-terminated swing confirms; a match REFUTES and closes
+the task as "not a defect".** The probe is therefore built so the refuting reading is exactly as
+easy to quote as the confirming one: `verdict=ALL_MATCH` on one line, no re-derivation.
+
+⛔⛔ **CORRECTED, rework cycle 1.** The paragraph that stood here said: *"The AFTER read is
+the verdict value. Taking it after the push is what keeps the refutation reachable."* **It does
+not, and the claim was wrong in the one way that mattered.** `FRewindData::SetTargetStateAtFrame`
+delegates to `PushStateAtFrame`, which writes the target history buffers and touches no particle.
+So the after-read equals the before-read BY CONSTRUCTION, on every body, on every rewind — which
+means `match=1` could only ever mean *the pushed value already equalled the live one*, i.e. the
+push was inert, and the one shape that could REFUTE the hypothesis, a **non-inert match**, was
+unreachable. Worse, a binary whose target consumer runs after the push and before integrate would
+have printed exactly the same line as a binary that reads the target never. The reading moved; the
+sentence is kept here rather than deleted because a reader who saw the old revision is entitled to
+know which claim was withdrawn and why.
+
+**Where the reading is taken, since rework cycle 1 — TWO HOOKS, THREE READS.**
+
+| read | where | what it yields |
+|---|---|---|
+| 1 | `FirstPreResimStep_Internal`, immediately BEFORE `FRewindData::SetTargetStateAtFrame` | `beforePush`, stashed. Feeds `inert=` and `dBefore=` |
+| 2 | the same hook, immediately AFTER that call | `moved=` only — an EAGER-APPLY discriminator, never the verdict |
+| 3 | `OnPreSimulate_Internal`, on the frame where `IsResetting()` holds, at the TOP of the hook | `match=`, the verdict |
+
+The pushed value and read 1 wait in `m_pushProbeStash` (`FRewindPushProbeStashedBody`, physics
+thread only) between hook one and hook two. By the time read 3 is taken,
+`FPBDRigidsSolver::ConditionalApplyRewind_Internal` has run `FRewindData::ApplyTargets` and
+everything else it runs for this step, and the solver task has reached
+`ApplyCallbacks_Internal` — so a target consumer anywhere in that window IS visible here.
+
+⛔ **Read 3 must stay above `onGameSimulation`.** The radial's own `setIdlePose` /
+`setInitialConditions` write the live body during the replayed step. A reading taken after them
+measures OG's writes, not the engine's, and would report a mismatch that says nothing about
+whether the target was read.
+
+⚠ **The residual blind spot, stated rather than hidden.** A consumer that runs INSIDE the
+evolution after `ApplyCallbacks_Internal` — between read 3 and `FPBDRigidsEvolutionGBF::Integrate`
+— is still invisible. The rework narrows the window; it does not close it. A `verdict=ALL_MATCH`
+refutation is a statement about consumers up to that point, and the runbook says so.
+
+⛔⛔ **`inert=` IS WHAT MAKES A REFUTATION MEAN ANYTHING, and it is why the verdict rule
+changed.** A push whose value already equals the state the body is in cannot distinguish "the
+engine read the target" from "the engine read nothing" — whatever the replay then does, the
+comparison matches. A rewind in which every push was inert therefore used to read
+`compared=6 matched=6 verdict=ALL_MATCH`: a session in which the shape never reproduced,
+presenting itself as a clean refutation. So `inert=` is printed per body, over the same `cmp=`
+field set and through the same production predicate as `match=`, and **the verdict is computed
+over NON-INERT comparisons only**:
+
+| | verdict |
+|---|---|
+| `nonInert=0` (nothing resolved, or every push inert) | `VACUOUS` — the rewind tested nothing, and NEITHER reading may be taken from it |
+| every non-inert comparison matched | `ALL_MATCH` — refutes |
+| any non-inert comparison mismatched | `MISMATCH` — confirms |
+
+⭐ A refutation therefore needs at least one `body=WeaponAxis inert=0 match=1` line. "No
+mismatches in the log" is **not** a refutation on its own.
+
+⛔ **A stash that never reaches read 3 is PRINTED, not dropped** — `verdict=UNREAD` with
+`readFrame=-1` and `reason=newPushBeforeRead` or `reason=notResetting`, under the same tag so the
+runbook's single `grep -v verdict=ALL_MATCH` surfaces it. An absent line is indistinguishable from
+a rewind that never happened, and a reader who cannot tell those apart cannot trust a refutation.
+That branch firing at all is an engine-ordering finding in its own right.
+
+⚠ **One mismatch source the probe does NOT exclude: mapper skew.** `toChaosTick(Tc)` uses the
+CURRENT offset, so a Stall or Skip between frame S(Tc) and the rewind moves F by ±1 and
+`RewindToFrame(F)` restores a different instant than `slot[Tc]` — at which point EVERY body
+mismatches for a reason that has nothing to do with ordering (§9's hazard). The per-body rows are
+the control: on a genuinely confirming rewind, `CharacterCapsule` and `GuardAxis` must **not** all
+read `match=0`. If they do, read `[ResimProbe.Request] mapperOffset=` before concluding anything.
+
+⛔ **It reads X/R, and `ChaosPhysicsBodyAdapter::captureBodyState` reads P/Q, and both are
+right.** That adapter runs from PostSolve, where P/Q hold the solved pose and X/R still hold the
+start-of-step pose. This probe runs at the opposite phase: on UE 5.6's public source
+`FRewindData::RewindToFrame` restores the pose with `SetXR`, `FRewindData::ApplyTargets` applies a
+target with `SetXR`, neither writes P/Q, and `FPBDRigidsEvolutionGBF::Integrate` begins the
+replayed step from `XCom()`/`RCom()`. X/R is therefore the state the replay starts from. A P/Q
+read here would report a stale pre-rewind pose and print a mismatch on every body on every
+rewind — a probe that cannot fail is worth nothing, and this one was one line away from being
+that. `dXP=` carries the X-to-P distance so the skew stays visible rather than assumed.
+
+⛔ **The match predicate is the production one.** `isSimilarToField`
+(`SimulationComparisonGlm.h`) at `kDefaultSimilarityEpsilon` (`SimulationTypes.h`) — the same
+test `isSimilarTo` applies to a correction, so "the probe disagrees but the cache does not" is
+not a state this can reach. Its quaternion arm is `|abs(dot) - 1|`, which matters: an
+antipodal-but-identical rotation is a match, and a hand-rolled component compare would have
+called it a large mismatch. **Measured, not argued** — the task-10 notes carry a standalone run
+in which two plausible wrong rules (component-wise quaternion; ignore the wire shape) are scored
+against the same cases, and **both err toward MISMATCH**, i.e. both would have confirmed the
+hypothesis for free.
+
+⛔ **Only the fields the body's wire shape carries are compared.** A declaration whose
+`bodyStateOf` yields `LinearBodyState` — the character capsule — fabricates an identity rotation
+and a zero angular velocity on the way to `PhysicsBodyState`. Comparing those two would report a
+mismatch about a value no wire ever carried. `cmp=` names the set that was compared, and
+anything that is not exactly `PhysicsBodyState` takes the conservative position-plus-linear-
+velocity set.
+
+⛔ **`verdict=VACUOUS` is a third answer, not a rounding of `ALL_MATCH`.** With `compared=0` the
+counters read all-zero, which is indistinguishable from a clean refutation. An unresolved proxy or
+handle is counted in `unresolved=`, never silently skipped. ⛔ **Rework cycle 1 widened what
+reaches this verdict**: `compared=0` was never the only way to test nothing — see the `nonInert`
+table above, which is now the rule.
+
+**Volume and cost.** Per-body detail and the per-rewind summary, both at `Verbose`, and every
+read and format sits behind one `UE_LOG_ACTIVE(LogOGResimProbe, Verbose)`, so at the shipped
+`LogOGResimProbe=Warning` the whole probe is one predicate per body. It is deliberately NOT a
+per-window summary: the question is per-rewind and an aggregate would hide which body disagreed.
+
+⚠ **The engine facts are about the API, not about the running binary.** `ApplyTargets(Step,
+bFirst)` before `PreResimStep_Internal(Step, bFirst)`, and the repeat gated on
+`np2.Resim.ApplyTargetsWhileResimulating` (default `false`), are read off public
+`EpicGames/UnrealEngine@5.6`. This project builds against a local source engine, and the two can
+differ. **That gap is precisely what the probe measures**, so nothing here may be quoted as the
+answer AC 1 asks for.
+
+⚠ **Not yet run.** Confirming or refuting needs a PIE session with an adoption-terminated swing
+and task 2's fix off, which only the user can produce. The runbook is in that task's
+implementation notes.
 
 ---
 

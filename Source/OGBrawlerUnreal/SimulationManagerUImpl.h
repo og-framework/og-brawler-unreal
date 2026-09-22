@@ -254,6 +254,36 @@ private:
 
 class ASimulationManagerUImpl;
 
+// ── [netcode-v2 task 10 rework 1] ONE BODY'S HALF OF THE REWIND-PUSH PROBE ─────
+//
+// ⭐⭐ THIS TYPE EXISTS BECAUSE THE VERDICT READ HAD TO MOVE, and moving it split
+// the probe across two physics-thread hooks. `FRewindData::SetTargetStateAtFrame`
+// writes a history buffer; it does NOT touch the particle. So a read taken beside
+// the push returns the pre-push state BY CONSTRUCTION, and a "match" read there
+// could only ever mean the pushed value already equalled the live one - it can
+// never mean "the engine read the target". The verdict read is therefore taken one
+// hook later, at the top of OnPreSimulate_Internal on the resetting frame, after
+// the engine has had its chance to consume the target and before OG's own systems
+// write the body. These are the values that have to survive that gap.
+//
+// ⛔ PHYSICS THREAD ONLY, and written only while LogOGResimProbe is at Verbose.
+// Nothing reads it from the game thread, so it is not a fourth crossing.
+//
+// ⛔ `bodyName` IS A STRING LITERAL (a declaration's `D::name`), never owned and
+// never freed. Storing a `const char*` is safe only for that reason.
+//
+// Rationale, the token table and the residual blind spot: docs/SimulationManagerUImpl-rationale.md §8
+struct FRewindPushProbeStashedBody
+{
+	PhysicsBodyState pushed;      // what FirstPreResimStep_Internal pushed into the timeline
+	PhysicsBodyState beforePush;  // the live X/R/V/W read immediately BEFORE that push
+	BodyId           bodyId{};
+	unsigned int     simulatableId = 0;
+	const char*      bodyName = nullptr;
+	bool             wireCarriesRotationAndSpin = false;
+	bool             movedAtPush = false;   // the push call itself moved the particle
+};
+
 // ⛔ THE OPTION SET IS A CONTRACT, NOT A WISH LIST. Every bit named below
 // registers this object into one more Chaos dispatch list, and each list calls
 // the matching *_Internal hook. A bit whose hook is NOT overridden here reaches
@@ -296,6 +326,23 @@ private:
 	virtual void FirstPreResimStep_Internal(int32 PhysicsStep);
 
 	ASimulationManagerUImpl* m_manager = nullptr;
+
+// ── [netcode-v2 task 10 rework 1] THE PROBE'S STASH AND ITS TWO READ POINTS ────
+//
+// ⛔ `m_pushProbeStashFrame == INDEX_NONE` IS THE "NOTHING PENDING" STATE, and it is
+// the ONLY thing that decides whether the drain runs. A stash still pending when the
+// next rewind starts, or when OnPreSimulate_Internal runs on a frame that is not
+// resetting, was NEVER READ at its verdict point - discardPushProbeStash says so out
+// loud as `verdict=UNREAD` rather than dropping it, because a silently dropped stash
+// is indistinguishable from a rewind that never happened. §8
+	TArray<FRewindPushProbeStashedBody> m_pushProbeStash;
+	int32    m_pushProbeStashFrame      = INDEX_NONE;
+	uint32_t m_pushProbeStashSimTick    = 0;
+	int32    m_pushProbeStashBodies     = 0;
+	int32    m_pushProbeStashUnresolved = 0;
+
+	void readPushProbeVerdict_Internal();
+	void discardPushProbeStash(const TCHAR* reason);
 };
 
 UCLASS()

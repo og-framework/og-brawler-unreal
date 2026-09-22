@@ -52,6 +52,7 @@
 
 #include "SimulationManagerUImpl.h"
 #include "OGSimulation/CompilerControl.h"
+#include "OGSimulation/SimulationComparison.h"
 #include "Runtime/Engine/Public/Net/UnrealNetwork.h"
 #include "EngineUtils.h"
 // [ringout task 9] The level-placed respawn points: TActorIterator over APlayerStart,
@@ -106,6 +107,317 @@ DEFINE_LOG_CATEGORY(LogOGBrawler);
 namespace
 {
 // kTierReapDeadlineDwellPeriods moved into the core coordinator, beside the reap logic.
+
+// THIS ADAPTER'S HALF OF THE FIELD-DIFF COST GATE. §4
+//
+// ⛔ THE CORE SHIPS THIS GATE CLOSED. `correctionFieldDiff::g_enabledPredicate` is an
+// EMPTY std::function in og-simulation, so a host that never calls this walks no field
+// ever. This function is the ONLY thing that opens it in this project, and what it opens
+// it against is the LIVE routing decision the correction line itself takes.
+//
+// ⛔ A PREDICATE, NOT A LATCHED BOOL, AND THAT IS WHY IT IS A LAMBDA. `UE_LOG_ACTIVE`
+// re-reads the category's CURRENT verbosity, so `LogOGDivergenceProbe Verbose` typed into
+// the console mid-session starts naming fields on the next correction, and Warning stops
+// it again. Reading it once at BeginPlay would pin the session to whatever the ini said.
+//
+// ⛔ IT MUST NAME THE SAME CATEGORY `RouteOGMessage` SENDS `[DivergenceProbe` TO, at the
+// SAME verbosity the line carries (`[Verbose]`). Re-route that prefix and this gate starts
+// answering about a channel the line no longer uses — it would then pay for a walk whose
+// result is dropped, or drop a walk whose line is printed. This predicate and
+// `RouteOGMessage`'s `[DivergenceProbe` arm are the ONLY TWO SITES IN CODE that USE this
+// category — one reads its verbosity, the other logs to it; the DECLARE, the DEFINE and the
+// ini value are the only other mentions. Change one and you must change the other.
+	void bindCorrectionFieldDiffGate()
+	{
+		correctionFieldDiff::setEnabledPredicate(
+			[]() { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
+	}
+
+// ── [netcode-v2 task 10] THE REWIND-PUSH PROBE. Is the pushed target ever read? ──
+//
+// ⭐⭐ BUILT TO BE ABLE TO REFUTE, AND REWORK 1 IS WHERE THAT STOPPED BEING A CLAIM.
+// Backlog task 10 AC 1: on an adoption-terminated swing a MISMATCH confirms that the
+// replay starts from the client's own recorded physics; a MATCH REFUTES the hypothesis
+// and closes task 10 as "not a defect". Both verdicts are ONE grep and
+// `[ResimProbe.PushVerdict]` spells the word, so neither reading asks an operator to
+// re-derive anything from source.
+//
+// ⛔⛔ THE VERDICT READ IS NOT TAKEN BESIDE THE PUSH, AND THE FIRST REVISION OF THIS
+// PROBE WAS WRONG TO TAKE IT THERE. `FRewindData::SetTargetStateAtFrame` ->
+// `PushStateAtFrame` writes the `TargetPositions`/`TargetVelocities`/`TargetStates`
+// history buffers and touches no particle. A read taken immediately after that call
+// therefore equals the read taken immediately before it BY CONSTRUCTION - on every
+// body, on every rewind. That makes `match=1` mean nothing but "the pushed value
+// already equalled the live one", i.e. THE PUSH WAS INERT, and it makes the one shape
+// that could refute the hypothesis - a NON-INERT match - unreachable. It also lets a
+// binary whose target consumer runs after the push and before integrate print exactly
+// the same line as a binary that reads the target never.
+//
+// ⭐ SO THE PROBE IS SPLIT ACROSS TWO HOOKS:
+//   FirstPreResimStep_Internal   read live -> push -> read live again. Those two reads
+//                                give `moved=` (did the push call ITSELF move the
+//                                particle - an eager-apply discriminator, NOT the
+//                                verdict). The pushed value and the pre-push read are
+//                                stashed in `m_pushProbeStash`.
+//   OnPreSimulate_Internal       on the resetting frame, at the TOP of the hook: read
+//                                the live particle a third time and compare it against
+//                                the stashed pushed value. THAT is `match=`. By then
+//                                `ApplyTargets` and anything else the engine runs inside
+//                                ConditionalApplyRewind_Internal has had its chance, and
+//                                OG's own systems (the radial's setIdlePose /
+//                                setInitialConditions) have NOT yet run - they write the
+//                                live body during integrate, and a read after them would
+//                                be measuring OG, not the engine.
+//
+// ⚠ RESIDUAL BLIND SPOT, stated rather than hidden: a consumer that runs INSIDE the
+// evolution after ApplyCallbacks_Internal - i.e. between this hook and Integrate - is
+// still invisible to this read. The probe narrows the window; it does not close it.
+//
+// ⛔⛔ `inert=` IS WHAT MAKES A REFUTATION MEAN ANYTHING. A rewind in which every
+// push happened to equal the state the body was already in tests NOTHING, and its
+// all-matched counters are indistinguishable from a clean refutation. So the verdict is
+// computed over NON-INERT comparisons only: `nonInert=0` is `VACUOUS`, every non-inert
+// comparison matching is `ALL_MATCH`, any non-inert mismatch is `MISMATCH`. A refutation
+// needs at least one `body=WeaponAxis inert=0 match=1` line.
+//
+// ⛔ X/R, NOT P/Q - AND THAT IS THE DIFFERENCE BETWEEN A PROBE AND A CONFIRMATION
+// MACHINE. `ChaosPhysicsBodyAdapter::captureBodyState` reads `GetP()`/`GetQ()`
+// because it runs from PostSolve, where P/Q are the solved pose and X/R still hold
+// the start-of-step pose. Here the phase is the opposite one:
+// `FRewindData::RewindToFrame` restores the pose with `SetXR`,
+// `FRewindData::ApplyTargets` applies a target with `SetXR` - neither writes P/Q -
+// and `FPBDRigidsEvolutionGBF::Integrate` starts the replayed step from
+// `XCom()`/`RCom()`. X/R IS therefore the state the replay starts from, and
+// reading P/Q here would report a stale pre-rewind pose and print a mismatch every
+// single time. `dXP=` carries the X-to-P distance so that skew stays visible.
+//
+// ⛔ THE MATCH PREDICATE IS THE PRODUCTION ONE, never a re-derivation:
+// `isSimilarToField` (`SimulationComparisonGlm.h`) at `kDefaultSimilarityEpsilon`
+// (`SimulationTypes.h`), the same test `isSimilarTo` applies to a correction. Its
+// quaternion arm is |abs(dot) - 1|, so an antipodal-but-identical rotation reads as
+// a match where a component compare would have shouted mismatch. `inert=` runs the
+// SAME predicate over the SAME field set, so "inert but mismatched" can never be an
+// artefact of the two questions looking at different fields.
+//
+// ⛔ ONLY THE FIELDS THE BODY'S WIRE SHAPE ACTUALLY CARRIES ARE COMPARED. A
+// declaration whose `bodyStateOf` yields `LinearBodyState` - the character capsule,
+// `BrawlerMovementSimulation.h` - fabricates an identity rotation and a zero
+// angular velocity on the way to `PhysicsBodyState`, so comparing those two would
+// report a mismatch that means nothing. `cmp=` names the set compared; anything
+// that is not exactly `PhysicsBodyState` takes the conservative
+// position-plus-linear-velocity set. `moved=` is the one deliberate exception: it
+// compares two LIVE reads of the same particle, so the wire shape is irrelevant
+// there and all four fields count.
+//
+// ⛔ AN UNRESOLVED BODY IS COUNTED, NOT SKIPPED, and a stash that reaches its
+// verdict point with nothing testable prints `verdict=VACUOUS` - because all-matched
+// counters otherwise read exactly like a clean refutation. A stash that never reaches
+// its verdict point at all prints `verdict=UNREAD`.
+//
+// Volume: per-event detail plus its per-rewind summary, BOTH at Verbose, and every
+// read and format sits behind one `UE_LOG_ACTIVE`, so the shipped
+// `LogOGResimProbe=Warning` pays for a single branch per body. §8
+	const TCHAR* pushProbeResimTypeText(Chaos::EResimType type)
+	{
+		switch (type)
+		{
+		case Chaos::EResimType::FullResim:       return TEXT("FullResim");
+		case Chaos::EResimType::ResimAsFollower: return TEXT("ResimAsFollower");
+		default:                                 return TEXT("?");
+		}
+	}
+
+	const TCHAR* pushProbeObjectStateText(Chaos::EObjectStateType state)
+	{
+		switch (state)
+		{
+		case Chaos::EObjectStateType::Static:    return TEXT("Static");
+		case Chaos::EObjectStateType::Kinematic: return TEXT("Kinematic");
+		case Chaos::EObjectStateType::Dynamic:   return TEXT("Dynamic");
+		case Chaos::EObjectStateType::Sleeping:  return TEXT("Sleeping");
+		default:                                 return TEXT("?");
+		}
+	}
+
+// The live particle, read the way the replayed step is going to read it. `solvedP`
+// is NOT part of that answer and is never compared — it exists only so that `dXP=`
+// can show how far the uncommitted P has drifted from the rewound X.
+	struct LivePushProbeRead
+	{
+		PhysicsBodyState startOfStep;
+		glm::vec3        solvedP{0.f};
+	};
+
+	LivePushProbeRead readLiveBodyForPushProbe(Chaos::FSingleParticlePhysicsProxy& proxy)
+	{
+		LivePushProbeRead read;
+		auto* ptApi = proxy.GetPhysicsThreadAPI();
+		const Chaos::FConstGenericParticleHandle particle(proxy.GetHandle_LowLevel());
+		read.startOfStep.position        = uglm::toGLMVec3(particle->GetX());
+		read.startOfStep.rotation        = uglm::toGLMQuat(FQuat(particle->GetR()));
+		read.startOfStep.linearVelocity  = uglm::toGLMVec3(ptApi->GetV());
+		read.startOfStep.angularVelocity = uglm::toGLMVec3(ptApi->GetW());
+		read.solvedP                     = uglm::toGLMVec3(particle->GetP());
+		return read;
+	}
+
+// REPORTED MAGNITUDES, each the quantity its own `isSimilarToField` overload tests:
+// worst component for a vec3, |abs(dot) - 1| for a quat. A number that measured
+// something other than what the verdict tested would be worse than no number.
+	float pushProbeVectorDelta(const glm::vec3& a, const glm::vec3& b)
+	{
+		const float dx = std::abs(a.x - b.x);
+		const float dy = std::abs(a.y - b.y);
+		const float dz = std::abs(a.z - b.z);
+		float worst = dx;
+		if (dy > worst) worst = dy;
+		if (dz > worst) worst = dz;
+		return worst;
+	}
+
+	float pushProbeRotationDelta(const glm::quat& a, const glm::quat& b)
+	{
+		return std::abs(std::abs(glm::dot(a, b)) - 1.f);
+	}
+
+// TWO QUESTIONS, ONE FIELD SET, ONE PRODUCTION COMPARATOR. `match` asks whether the
+// replay's starting state equals the pushed value; `inert` asks whether the push could
+// have changed anything at all. Running both through this one helper is what makes
+// "non-inert AND matched" a statement about the engine rather than about which fields
+// each question happened to look at.
+	bool pushProbeFieldsSimilar(const PhysicsBodyState& a, const PhysicsBodyState& b,
+	                            bool wireCarriesRotationAndSpin)
+	{
+		return isSimilarToField(a.position,       b.position)
+			&& isSimilarToField(a.linearVelocity, b.linearVelocity)
+			&& (!wireCarriesRotationAndSpin
+				|| (isSimilarToField(a.rotation,        b.rotation)
+					&& isSimilarToField(a.angularVelocity, b.angularVelocity)));
+	}
+
+// The deciding magnitude for `pushProbeFieldsSimilar`, over the SAME field set: every
+// arm is tested against the same `kDefaultSimilarityEpsilon`, so the worst arm is
+// exactly the number whose comparison to eps produces the bool. Reporting anything
+// else would be reporting a quantity the verdict did not use.
+	float pushProbeWorstDelta(const PhysicsBodyState& a, const PhysicsBodyState& b,
+	                          bool wireCarriesRotationAndSpin)
+	{
+		float worst = pushProbeVectorDelta(a.position, b.position);
+		const float lin = pushProbeVectorDelta(a.linearVelocity, b.linearVelocity);
+		if (lin > worst) worst = lin;
+		if (wireCarriesRotationAndSpin)
+		{
+			const float rot = pushProbeRotationDelta(a.rotation,        b.rotation);
+			const float ang = pushProbeVectorDelta  (a.angularVelocity, b.angularVelocity);
+			if (rot > worst) worst = rot;
+			if (ang > worst) worst = ang;
+		}
+		return worst;
+	}
+
+// ⛔ `compared` IS NOT THE DENOMINATOR OF THE VERDICT - `nonInert` IS. An inert
+// comparison (the pushed value already equalled the live pre-push state) tests nothing
+// whatever the replay then does, so counting it as a match would let a session in which
+// the shape never reproduced read as a refutation.
+	struct PushProbeTally
+	{
+		int32 bodies             = 0;  // composite bodies the push loop walked
+		int32 compared           = 0;  // bodies that resolved at BOTH push time and verdict time
+		int32 unresolved         = 0;  // bodies that failed to resolve at either point
+		int32 inert              = 0;  // pushed value already equalled the pre-push live state
+		int32 nonInert           = 0;  // compared - inert: the ONLY testable comparisons
+		int32 nonInertMatched    = 0;
+		int32 nonInertMismatched = 0;
+		int32 movedAtPush        = 0;  // eager-apply discriminator; never part of the verdict
+	};
+
+// ⛔ VACUOUS IS A THIRD VERDICT, not a rounding of ALL_MATCH, and rework 1 widened
+// what reaches it. `compared == 0` was never the only way to test nothing: a rewind
+// whose every push was inert compares six bodies, matches six and tests nothing at all.
+// Both now read VACUOUS, because this task's whole value is that a refutation be
+// trustworthy.
+	const TCHAR* pushProbeVerdictText(const PushProbeTally& tally)
+	{
+		if (tally.nonInert == 0)
+			return TEXT("VACUOUS");
+		return tally.nonInertMismatched == 0 ? TEXT("ALL_MATCH") : TEXT("MISMATCH");
+	}
+
+// One body's verdict line, emitted from the SECOND read point. `pushFrame` and
+// `readFrame` are printed side by side and must be equal: a difference means the stash
+// outlived the rewind it belongs to and nothing on the line may be read as an answer.
+	void logPushProbeBody(
+		PushProbeTally&                       tally,
+		const Chaos::FGeometryParticleHandle& handle,
+		const FRewindPushProbeStashedBody&    stashed,
+		const LivePushProbeRead&              live,
+		int32                                 pushFrame,
+		int32                                 readFrame,
+		uint32_t                              simTick)
+	{
+		const PhysicsBodyState& now    = live.startOfStep;
+		const PhysicsBodyState& pushed = stashed.pushed;
+		const PhysicsBodyState& before = stashed.beforePush;
+		const bool              wire   = stashed.wireCarriesRotationAndSpin;
+
+		const bool inert = pushProbeFieldsSimilar(before, pushed, wire);
+		const bool match = pushProbeFieldsSimilar(now,    pushed, wire);
+
+		++tally.compared;
+		if (stashed.movedAtPush)
+			++tally.movedAtPush;
+		if (inert)
+		{
+			++tally.inert;
+		}
+		else
+		{
+			++tally.nonInert;
+			if (match)
+				++tally.nonInertMatched;
+			else
+				++tally.nonInertMismatched;
+		}
+
+		UE_LOG(LogOGResimProbe, Verbose,
+			TEXT("[ResimProbe.PushTarget] pushFrame=%d readFrame=%d simTick=%u id=%u body=%hs bodyId=%u ")
+			TEXT("inert=%d match=%d moved=%d cmp=%hs resimType=%s objState=%s eps=%.6f ")
+			TEXT("dBefore=%.6f dBeforePos=%.6f dBeforeRot=%.6f dBeforeLin=%.6f dBeforeAng=%.6f ")
+			TEXT("dPos=%.6f dRot=%.6f dLin=%.6f dAng=%.6f dXP=%.6f ")
+			TEXT("pushedPos=(%.4f,%.4f,%.4f) livePos=(%.4f,%.4f,%.4f) ")
+			TEXT("pushedRot=(%.4f,%.4f,%.4f,%.4f) liveRot=(%.4f,%.4f,%.4f,%.4f) ")
+			TEXT("pushedLin=(%.4f,%.4f,%.4f) liveLin=(%.4f,%.4f,%.4f) ")
+			TEXT("pushedAng=(%.4f,%.4f,%.4f) liveAng=(%.4f,%.4f,%.4f) ")
+			TEXT("beforePos=(%.4f,%.4f,%.4f) beforeLin=(%.4f,%.4f,%.4f)"),
+			pushFrame, readFrame, simTick, stashed.simulatableId,
+			stashed.bodyName != nullptr ? stashed.bodyName : "?",
+			static_cast<uint32>(stashed.bodyId.value),
+			inert ? 1 : 0, match ? 1 : 0, stashed.movedAtPush ? 1 : 0,
+			wire ? "pos,rot,lin,ang" : "pos,lin",
+			pushProbeResimTypeText(handle.ResimType()),
+			pushProbeObjectStateText(handle.ObjectState()),
+			kDefaultSimilarityEpsilon,
+			pushProbeWorstDelta   (before, pushed, wire),
+			pushProbeVectorDelta  (before.position,        pushed.position),
+			pushProbeRotationDelta(before.rotation,        pushed.rotation),
+			pushProbeVectorDelta  (before.linearVelocity,  pushed.linearVelocity),
+			pushProbeVectorDelta  (before.angularVelocity, pushed.angularVelocity),
+			pushProbeVectorDelta  (now.position,        pushed.position),
+			pushProbeRotationDelta(now.rotation,        pushed.rotation),
+			pushProbeVectorDelta  (now.linearVelocity,  pushed.linearVelocity),
+			pushProbeVectorDelta  (now.angularVelocity, pushed.angularVelocity),
+			pushProbeVectorDelta  (now.position,        live.solvedP),
+			pushed.position.x, pushed.position.y, pushed.position.z,
+			now.position.x,    now.position.y,    now.position.z,
+			pushed.rotation.x, pushed.rotation.y, pushed.rotation.z, pushed.rotation.w,
+			now.rotation.x,    now.rotation.y,    now.rotation.z,    now.rotation.w,
+			pushed.linearVelocity.x,  pushed.linearVelocity.y,  pushed.linearVelocity.z,
+			now.linearVelocity.x,     now.linearVelocity.y,     now.linearVelocity.z,
+			pushed.angularVelocity.x, pushed.angularVelocity.y, pushed.angularVelocity.z,
+			now.angularVelocity.x,    now.angularVelocity.y,    now.angularVelocity.z,
+			before.position.x,       before.position.y,       before.position.z,
+			before.linearVelocity.x, before.linearVelocity.y, before.linearVelocity.z);
+	}
 
 // Routes one SIMLOG message to a LogOG* category by its leading [Tag]. §4
 	void RouteOGMessage(const char* msg)
@@ -233,6 +545,32 @@ void FSimulationManagerAsyncCallback::OnPreSimulate_Internal()
 	const bool isFirstResimulationFrame = rigidsEvolution->IsResetting(); 
 	SimulationUpdateInfo updateInfo(isResimulating, isFirstResimulationFrame);
 
+// [netcode-v2 task 10 rework 1 - PROBE] THE VERDICT READ. §8
+//
+// ⭐⭐ THIS IS THE WHOLE POINT OF THE SPLIT. The push in FirstPreResimStep_Internal
+// writes a history buffer and moves no particle, so a verdict taken beside it can only
+// ever report the pre-push state back and can never reach a NON-INERT match. Read here
+// instead: the engine has by now run ApplyTargets and the rest of
+// ConditionalApplyRewind_Internal for this step, so a target consumer that ran in that
+// window IS visible in this read.
+//
+// ⛔ IT MUST STAY ABOVE `onGameSimulation`. The radial's setIdlePose /
+// setInitialConditions write the live body during the replayed step; a read taken after
+// them would be measuring OG's own writes and would report a mismatch that says nothing
+// about whether the engine read the target.
+//
+// ⛔ THE `else` IS NOT DEFENSIVE PADDING. A stash that is still pending on a frame that
+// is NOT resetting was never read at its verdict point, and a silently dropped stash is
+// indistinguishable from a rewind that never happened - so it is printed as
+// `verdict=UNREAD`. That branch firing at all is an engine-ordering finding.
+	if (m_pushProbeStashFrame != INDEX_NONE)
+	{
+		if (isFirstResimulationFrame)
+			readPushProbeVerdict_Internal();
+		else
+			discardPushProbeStash(TEXT("notResetting"));
+	}
+
 	if (!isResimulating)
 	{
 		const unsigned int chaosTick = solver.GetCurrentFrame();
@@ -351,15 +689,54 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 	if (rewindData == nullptr)
 		return;
 
-	auto pushBodyState = [&](BodyId bodyId, const PhysicsBodyState& bs)
+// [netcode-v2 task 10 — PROBE] ONE branch decides whether anything is read or
+// formatted; the banner above `pushProbeResimTypeText` says what it measures and why
+// the reads are X/R. ⛔ `UE_LOG_ACTIVE`, not a value latched at BeginPlay, so
+// `LogOGResimProbe Verbose` typed into the console starts the probe on the next rewind.
+	const bool pushProbeActive = UE_LOG_ACTIVE(LogOGResimProbe, Verbose);
+
+// [task 10 rework 1 - PROBE] A stash still pending when a NEW rewind starts was never
+// read at its verdict point. Saying so out loud is the instrument's own self-check; the
+// alternative is a missing line, which reads exactly like "no rewind happened".
+	if (m_pushProbeStashFrame != INDEX_NONE)
+		discardPushProbeStash(TEXT("newPushBeforeRead"));
+
+	if (pushProbeActive)
 	{
+		m_pushProbeStash.Reset();
+		m_pushProbeStashFrame      = PhysicsStep;
+		m_pushProbeStashSimTick    = simTick;
+		m_pushProbeStashBodies     = 0;
+		m_pushProbeStashUnresolved = 0;
+	}
+
+	auto pushBodyState = [&](BodyId bodyId, const PhysicsBodyState& bs,
+	                         const char* bodyName, bool wireCarriesRotationAndSpin,
+	                         unsigned int simulatableId)
+	{
+		if (pushProbeActive)
+			++m_pushProbeStashBodies;
+
 		Chaos::FSingleParticlePhysicsProxy* proxy =
 			solver.GetParticleProxy_PT(Chaos::FUniqueIdx{static_cast<int32>(bodyId.value)});
 		if (proxy == nullptr)
+		{
+			if (pushProbeActive)
+				++m_pushProbeStashUnresolved;
 			return;
+		}
 		Chaos::FGeometryParticleHandle* handle = proxy->GetHandle_LowLevel();
 		if (handle == nullptr)
+		{
+			if (pushProbeActive)
+				++m_pushProbeStashUnresolved;
 			return;
+		}
+
+		LivePushProbeRead beforePush;
+		if (pushProbeActive)
+			beforePush = readLiveBodyForPushProbe(*proxy);
+
 		rewindData->SetTargetStateAtFrame(
 			*handle, PhysicsStep,
 			Chaos::FFrameAndPhase::EParticleHistoryPhase::PostPushData,
@@ -368,20 +745,129 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 			uglm::toFVector(bs.linearVelocity),
 			uglm::toFVector(bs.angularVelocity),
 			/*bShouldSleep=*/false);
+
+// [task 10 rework 1 - PROBE] The after-push read is now an EAGER-APPLY DISCRIMINATOR
+// and nothing else. On public 5.6 it is equal to `beforePush` by construction, so
+// `moved=1` would be an engine-behaviour finding in its own right - and it is exactly
+// the case in which the verdict read below would be reporting the push rather than the
+// replay. It compares all four fields regardless of the wire shape, because both sides
+// are LIVE reads of the same particle.
+		if (pushProbeActive)
+		{
+			const LivePushProbeRead afterPush = readLiveBodyForPushProbe(*proxy);
+			FRewindPushProbeStashedBody stashed;
+			stashed.pushed                     = bs;
+			stashed.beforePush                 = beforePush.startOfStep;
+			stashed.bodyId                     = bodyId;
+			stashed.simulatableId              = simulatableId;
+			stashed.bodyName                   = bodyName;
+			stashed.wireCarriesRotationAndSpin = wireCarriesRotationAndSpin;
+			stashed.movedAtPush = !(
+				   isSimilarToField(afterPush.startOfStep.position,        beforePush.startOfStep.position)
+				&& isSimilarToField(afterPush.startOfStep.rotation,        beforePush.startOfStep.rotation)
+				&& isSimilarToField(afterPush.startOfStep.linearVelocity,  beforePush.startOfStep.linearVelocity)
+				&& isSimilarToField(afterPush.startOfStep.angularVelocity, beforePush.startOfStep.angularVelocity));
+			m_pushProbeStash.Add(stashed);
+		}
 	};
 
 // BodyId lookup goes through the m_physics composite bindings (local-only).
+//
+// [task 10] `D::name` is the declaration's own body name, the one the factory
+// creates the body under, so `body=WeaponAxis` needs no table here to stay true.
+// `BodyStateT` is the declaration's ACTUAL wire shape, before the widening
+// conversion into `pushBodyState`'s `const PhysicsBodyState&` erases it.
 	m_manager->editStorage().forEachSimulatable(
-		[&](unsigned int /*id*/, SimulatableBrawler& simulatable)
+		[&](unsigned int id, SimulatableBrawler& simulatable)
 		{
 			const simulatableBrawler::State& state = simulatable.getAllState().getState();
 			simulatable.getPhysicsComposite().forEach([&](const auto& decl) {
 				using D = std::decay_t<decltype(decl)>;
 				using S = typename D::StateType;
+				using BodyStateT = std::remove_cvref_t<
+					decltype(D::bodyStateOf(state.template get<S>()))>;
 				pushBodyState(decl.bindings.ownBodyId,
-				              D::bodyStateOf(state.template get<S>()));
+				              D::bodyStateOf(state.template get<S>()),
+				              D::name,
+				              std::is_same_v<BodyStateT, PhysicsBodyState>,
+				              id);
 			});
 		});
+
+// [netcode-v2 task 10 rework 1 - PROBE] NO VERDICT IS EMITTED HERE ANY MORE. Everything
+// this loop learned is in `m_pushProbeStash`; the reading is taken and printed from
+// OnPreSimulate_Internal on this same resetting frame, after the engine has had its
+// chance to consume the target. See readPushProbeVerdict_Internal, just below. §8
+}
+
+// [netcode-v2 task 10 rework 1 - PROBE] THE SECOND READ POINT AND THE QUOTABLE VERDICT,
+// one line per rewind. AC 1 is read off `verdict=`: MISMATCH confirms, ALL_MATCH refutes,
+// VACUOUS means the rewind tested nothing (no body resolved, or every push was inert) and
+// NEITHER reading is available from it.
+//
+// ⛔ THE DENOMINATOR IS `nonInert`, NOT `compared`. A push whose value already equalled
+// the live pre-push state cannot distinguish "the engine read the target" from "the engine
+// read nothing", however the replay behaves. Counting such a comparison as a match is
+// precisely how a session in which the shape never reproduced would read as a refutation.
+void FSimulationManagerAsyncCallback::readPushProbeVerdict_Internal()
+{
+	Chaos::FPBDRigidsSolver& solver = this->GetSolver()->CastChecked();
+	const int32 readFrame = static_cast<int32>(solver.GetCurrentFrame());
+
+	PushProbeTally tally;
+	tally.bodies     = m_pushProbeStashBodies;
+	tally.unresolved = m_pushProbeStashUnresolved;
+
+	for (const FRewindPushProbeStashedBody& stashed : m_pushProbeStash)
+	{
+		Chaos::FSingleParticlePhysicsProxy* proxy =
+			solver.GetParticleProxy_PT(Chaos::FUniqueIdx{static_cast<int32>(stashed.bodyId.value)});
+		Chaos::FGeometryParticleHandle* handle =
+			proxy != nullptr ? proxy->GetHandle_LowLevel() : nullptr;
+		if (handle == nullptr)
+		{
+			++tally.unresolved;
+			continue;
+		}
+
+		const LivePushProbeRead live = readLiveBodyForPushProbe(*proxy);
+		logPushProbeBody(tally, *handle, stashed, live,
+		                 m_pushProbeStashFrame, readFrame, m_pushProbeStashSimTick);
+	}
+
+	UE_LOG(LogOGResimProbe, Verbose,
+		TEXT("[ResimProbe.PushVerdict] pushFrame=%d readFrame=%d simTick=%u verdict=%s ")
+		TEXT("bodies=%d compared=%d inert=%d nonInert=%d nonInertMatched=%d ")
+		TEXT("nonInertMismatched=%d unresolved=%d moved=%d eps=%.6f reason=-"),
+		m_pushProbeStashFrame, readFrame, m_pushProbeStashSimTick,
+		pushProbeVerdictText(tally),
+		tally.bodies, tally.compared, tally.inert, tally.nonInert, tally.nonInertMatched,
+		tally.nonInertMismatched, tally.unresolved, tally.movedAtPush,
+		kDefaultSimilarityEpsilon);
+
+	m_pushProbeStash.Reset();
+	m_pushProbeStashFrame = INDEX_NONE;
+}
+
+// [netcode-v2 task 10 rework 1 - PROBE] The stash reached the next rewind, or a frame
+// that was not resetting, without ever being read.
+//
+// ⛔ IT IS PRINTED, NOT DROPPED, and it carries the SAME tag so that the runbook's one
+// `grep -v verdict=ALL_MATCH` surfaces it. An absent line is indistinguishable from a
+// rewind that never happened, and a reader who cannot tell those apart cannot trust a
+// refutation. `readFrame=-1` says no verdict read was taken at all.
+void FSimulationManagerAsyncCallback::discardPushProbeStash(const TCHAR* reason)
+{
+	UE_LOG(LogOGResimProbe, Verbose,
+		TEXT("[ResimProbe.PushVerdict] pushFrame=%d readFrame=-1 simTick=%u verdict=UNREAD ")
+		TEXT("bodies=%d compared=0 inert=0 nonInert=0 nonInertMatched=0 ")
+		TEXT("nonInertMismatched=0 unresolved=%d moved=0 eps=%.6f reason=%s"),
+		m_pushProbeStashFrame, m_pushProbeStashSimTick,
+		m_pushProbeStashBodies, m_pushProbeStashUnresolved,
+		kDefaultSimilarityEpsilon, reason);
+
+	m_pushProbeStash.Reset();
+	m_pushProbeStashFrame = INDEX_NONE;
 }
 
 ASimulationManagerUImpl* ASimulationManagerUImpl::s_instances[] = {nullptr, nullptr};
@@ -839,6 +1325,7 @@ void ASimulationManagerUImpl::BeginPlay()
 // Process-global sinks for templates with no logger parameter: simlog, ogblog.
 		simlog::setGlobal(std::function<void(const char*)>(pctmloggerServer));
 		ogblog::setGlobal(std::function<void(const char*)>(ogblogServer));
+		bindCorrectionFieldDiffGate();
 	}
 	else
 	{
@@ -925,6 +1412,7 @@ void ASimulationManagerUImpl::BeginPlay()
 // Process-global sinks as on the authority branch: simlog -> LogOG*, ogblog -> LogOGBrawler.
 		simlog::setGlobal(std::function<void(const char*)>(pctmlogger));
 		ogblog::setGlobal(std::function<void(const char*)>(ogblogClient));
+		bindCorrectionFieldDiffGate();
 
 // STEP 4 - THE PROOF LINE, which makes the other three checkable from a log, not source. §3 §4
 //
