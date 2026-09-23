@@ -160,22 +160,76 @@ Kept as history; compare nothing against it unless it is re-scored.
 
 ### 9.1 What earns a `yes` — scored by EDIT SHAPE
 
-Score **the forbidden edit the entry names** — its primary wrong edit — by **where that edit is
-typed relative to the tag**. Nothing else enters the score: not how tempting the edit looks, not how
+Score **each forbidden edit the entry names** (clause A below) by **where that edit is typed
+relative to the tag**. Nothing else enters the score: not how tempting the edit looks, not how
 harmless it seems, not how tired of the glyph the reader is. Those are why two careful scorers
 disagreed.
 
 *The tagged statement* is the statement the tag immediately precedes, **including its continuation
-lines** up to its terminating `;` or `{`. A tag above a two-line condition covers both lines.
+lines** up to its terminating `;` or `{`. A tag above a two-line condition covers both lines. Clause B
+fixes what that means for blocks, spans and blank lines.
 
 | shape | score | why |
 |---|---|---|
 | **substitution** on the tagged token | **yes** | the tag is in view at the moment the edit is typed |
 | **addition** on the tagged statement | **yes** | same |
 | **deletion** of the tagged statement | **yes** | ⭐ **mechanically enforced** when the tag goes with it — see below |
-| **reorder** of a tagged pair | **no (ordering)** | the tag moves with its own line, so it is absent from where the wrong edit is typed |
-| edit **typed elsewhere** — another file, or a line the tag does not cover | **no (elsewhere)** | e.g. a declaration tag trying to govern a `.cpp`-body edit |
-| none of the above, or the entry names more than one primary edit | **uncertain** | record the shape; a recurring one earns a row here. Two primary edits usually mean two ids. |
+| **addition at an absence tag** — the entry forbids re-adding something, and the tag stands on the line where it would go (clause D) | **yes** | the edit is typed directly under the tag: the strongest in-view case there is |
+| **reorder** — the tagged statement and the statement its entry pairs it with change order (clause E) | **no (ordering)** | the tag moves with its own line, so it is absent from where the wrong edit is typed |
+| edit **typed elsewhere** — another file, or a line the tag does not cover (clause B) | **no (elsewhere)** | e.g. a declaration tag trying to govern a `.cpp`-body edit |
+| the entry's edits score **differently** from each other (clause A) | **split** | the entry is scored as its parts, one per shape. §9.3 splits the id. |
+| an edit that is none of the above | **uncertain** | record the shape; a recurring one earns a row here. ⛔ Never used for an entry just because it names more than one edit: that is clause A. |
+
+**The five clauses. Each one closes a case that admitted two readings. For each case the rule picks one
+reading, and a second scorer must reach the same row.**
+
+**A — more than one edit: score each edit; if they disagree, ⭐ SPLIT FIRST.** An *edit* is one change
+the entry forbids: a verb (delete, add, substitute, move) applied to one statement or token. List every
+change the entry's text names, from its heading, prohibition, consequence and "what breaks" paragraphs.
+The same change named twice is one edit. A change the entry presents as *the means of* another ("X to fix
+Y", "the obvious fix is X") is not a second edit. It is a realization of the first (clause C). A
+sentence that states a fact and names no change ("they land TOGETHER", "structurally impossible") is not
+an edit. Score each edit. **If every edit scores the same, that is the entry's score. If they differ, the
+entry scores `split`:** record each part's score, tally the parts rather than the entry, and triage by
+splitting the id (§9.3). The rule does **not** use "worst shape wins": that would drop the tag from an
+entry whose deletion the tag does stop, just because the same entry also names an ordering edit.
+Enumerate only the changes the entry's text names. If a scorer thinks the entry under-describes its
+edit, record that as a finding against the entry and still score the entry as written.
+
+**B — blocks and spans: a tag covers ONE statement, and a compound statement's HEADER only.** An
+expression statement ends at its `;`. Braces *inside* it (a lambda body, a braced initializer) are part
+of it. A compound statement (`if`, `else`, `for`, `while`, `do`, `switch`, `try`, or a bare `{`
+scope) ends at the `{` that opens its body. **The body is not covered.** An edit typed inside it is
+`elsewhere`. That includes the `else`, a braceless body line, and everything inside a bare `{`.
+Deleting or moving a compound statement deletes or moves its header, so those two edits *are* on the tagged statement. **A tag that
+precedes a run of statements covers the first statement only**, whatever the entry's Site line says
+("the first two statements", "the first of seven reads"). Every later statement in the run is
+`elsewhere`. So a tag whose first statement is not the one the entry is about sits on the wrong line.
+
+**C — one edit, several realizations: score the realization typed FARTHEST from the tag.** When the
+entry names more than one way of making the same edit, score each way. The edit takes the score of the
+farthest one, ranked: at the tag (`yes`), then `no (ordering)`, then `no (elsewhere)`. So a tag earns
+`yes` only when **every** named way of making the edit is typed on the tagged statement. One way that
+types several contiguous lines counts as typed on the tagged statement when one of its lines is on it.
+
+**D — absence tags: a fixed `yes`.** If the line directly under the tag is **blank**, the tag covers no
+statement. It is an *absence tag*. The addition the entry forbids (re-adding the retired thing) scores
+**`yes`** on the absence row. An absence entry names **one** edit, re-adding the retired thing, however
+many parts of it the entry lists (an intake *and* its clamp, setter and proof line). Neither clause A
+nor clause C reaches past it. The absent thing has no site other than the one the tag marks, and
+enumerating everywhere else it could be re-added has no bound.
+
+**E — what "reorder" means.** A move scores `no (ordering)` **only** when (i) the statement the entry
+names as moving is the tagged statement, a compound statement headed by it, or a group of statements
+that includes it ("the reads", "the chain"), and (ii) the entry names
+the specific statement it must not cross. A *destination* ("into the client branch", "to file scope")
+is not a statement to cross. When the entry's words could name either the tagged statement or a statement
+in its body ("it", "the read"), the entry's **Site** line decides: the Site names what the tag is
+about. Any other move is scored by what is typed at the tag:
+* a move of the tagged statement that crosses no named statement is a cut at the tag. Score it as a
+  **deletion (`yes`)**. That includes a "move" to a place that already holds the same statement.
+* a move of any other statement, including one inside the tagged statement's body, is typed
+  **`elsewhere`**.
 
 ⭐ **The deletion row is the one property this apparatus actually guarantees.** Tags sit on their own
 line above the statement, so a deletion takes one of two forms:
@@ -208,8 +262,9 @@ of them is the failure this clause exists to prevent.
 |---|---|---|
 | `yes` | **keep it** | unchanged |
 | `no (ordering)` | **drop it** | **keep it.** Push it to a `static_assert` / `OG_CHECK` / `checkf` where expressible (§2 step 1 — answer by compiling). ⭐ Two ordering fences on one file got *stronger* exactly this way. Otherwise leave it in `docs/<File>-rationale.md` with **no site tag**. |
-| `no (elsewhere)` | **move it** to the site where the edit is typed, if one exists — it is misplaced, not worthless. If no such site exists, treat as `no (ordering)`. | unchanged |
-| `uncertain` | leave it; revisit when the file is next touched | unchanged |
+| `no (elsewhere)` | **move it** to the site where the edit is typed, if one exists — it is misplaced, not worthless. That is the site of the realization that set the score (§9.1 C). If the edit is typed at more than one site, give one id per site: split it, as in the `split` row. If no such site exists, treat as `no (ordering)`. | unchanged |
+| `split` | **split the id**: one new id per shape, each triaged by its own row above. Retire the old id (§3) in the same change. | unchanged — every part carries its share of the text |
+| `uncertain` | leave it; revisit when the file is next touched. Only for a shape §9.1's table does not know, never for an entry that names several edits (§9.1 A). | unchanged |
 
 ⛔⛔ **Deleting the CONTENT because its carrier scored badly is the mirror image of the R0 failure.**
 §8 forbids laundering a *false* claim into a doc; the symmetric error is discarding a *true* one
