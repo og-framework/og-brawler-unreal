@@ -333,8 +333,9 @@ On a genuine mismatch the server logs and returns. **It does not disconnect the 
 disconnect path is engine-managed and is a dedicated-server-validation concern, not this fence's.
 
 The wire fence for the state channel is `FSimulationStateSyncBuffer::kWireFormatVersion`, which is
-**3** today: 1 → 2 for the applied-capture-tick reference, and 2 → 3 when the ring-out
-sub-simulation joined the state composite (ring-out task 2). The second bump is the interesting
+**4** today: 1 → 2 for the applied-capture-tick reference, 2 → 3 when the ring-out
+sub-simulation joined the state composite (ring-out task 2), and 3 → 4 when the brawler radial's
+`hasHitGuard` left the middle of the composite (og-netcode-v2-field-defects task 9). The second bump is the interesting
 one — the composite only *grew*, every pre-existing offset held, and the bump was made anyway
 because an older archived build does not compile the new sub-simulation in at all and the payload
 layout cannot express that. The reasoning is written at the constant in

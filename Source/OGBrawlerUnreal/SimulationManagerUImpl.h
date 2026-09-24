@@ -43,6 +43,7 @@
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
+#include "OGBrawler/BrawlerHitDetectionSystem.h"
 #include "OGBrawler/BrawlerHitRoutingSystem.h"
 #include "OGBrawler/BrawlerRingoutSimulation.h"
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
@@ -703,13 +704,25 @@ private:
         simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableTs...>;
     using BrawlerIntegrationExec = apply_t<BrawlerIntegrationExecFor_UE, BrawlerSimulatables>;
 
+    using BrawlerHitDetectionSystem =
+        brawlerHitDetection::System<ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter>;
+
     using BrawlerSystemsExec = SimulationSystemsExecutor<
         BrawlerSimulatables,
         simulatableBrawler::StaticData,
+        BrawlerHitDetectionSystem,
         brawlerHitRouting::System,
         brawlerRingout::ScoreSystem>;
+    static_assert(brawlerHitDetection::firesBefore<BrawlerSystemsExec,
+                      BrawlerHitDetectionSystem, brawlerHitRouting::System>,
+        "BrawlerSystemsExec must fire brawlerHitDetection::System BEFORE brawlerHitRouting::System "
+        "(firing order is template order): routing branch 2 reads the hitsThisTick the detector "
+        "writes this tick, and branch 5 the guard block. Reversed, routing reads them after the "
+        "radial's integrate cleared them and before the detector refilled them, so NO melee hit "
+        "and NO guard block is ever routed - og-netcode-v2-field-defects task 9.");
 
-    BrawlerSystemsExec m_systemsExec;
+    // ⛔G-75  docs/SimulationManagerUImpl-guards.md
+    std::optional<BrawlerSystemsExec> m_systemsExec;
 
     using IntegrationLayerType = BrawlerIntegrationExec;
     std::optional<IntegrationLayerType> m_integrationLayer;

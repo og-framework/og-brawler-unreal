@@ -42,7 +42,7 @@ tags. The prohibitions in it went five ways. Only the first row is in this file.
 ⚠ **The census is closed.** It records what task 11 converted. A guard added later is listed
 below this line with the task that added it; it is not folded into the table above.
 
-*(No guards added after the conversion yet.)*
+* **G-75** — og-netcode-v2-field-defects task 9, 2026-09-23: the systems executor's detection adapters.
 
 ---
 
@@ -1005,6 +1005,37 @@ never finished registering.
 
 **The consequence.** After four joins in a session, every later character is handed
 `kNoFreeSlot` and gets no respawn point.
+
+---
+
+## G-75 — the systems executor is emplaced beside the adapters, and hands detection the PHYSICS-THREAD body adapter
+
+**Tag site:** `SimulationManagerUImpl.h`, directly above `std::optional<BrawlerSystemsExec> m_systemsExec;`.
+The two emplace sites it governs are in `SimulationManagerUImpl.cpp`, one per role branch, each between
+`m_integrationLayer.emplace(...)` and `m_manager.emplace(...)`.
+
+**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<ChaosPhysicsBodyAdapter,
+ChaosSpatialQueryAdapter>`) is constructed from `*m_physAdapter` and `*m_queryAdapter` — the SAME two
+objects `m_integrationLayer` integrates with. ⛔ Never from `m_physReaderAdapter`, and never before the
+adapters are emplaced or after `m_manager` is.
+
+**Verified 2026-09-23.** `ChaosPhysicsBodyAdapter::getBodyTransform` reads
+`proxy->GetPhysicsThreadAPI()`; `ChaosPhysicsBodyReaderAdapter::getBodyTransform` reads
+`proxy->GetGameThreadAPI()` (its own banner: "Reads GT-interpolated state"). Both satisfy
+`PhysicsBodyReaderAdapter`, so the wrong one compiles. The detector runs on the physics thread, in
+`firePostIntegrate`, and reads the TARGET's guard transform that the target's integrate wrote this tick
+on the physics-thread particle.
+
+**What breaks if the edit is made.**
+* Handed the reader adapter, the detector classifies every guard block against the game-thread copy of
+  the guard transform — an interpolated value from an earlier push, not this tick's — which is
+  read (b) of task 9's defect reintroduced, with a staleness that now depends on game-thread timing
+  instead of integrate order. Nothing fails to compile and no LLT can see it: the LLT targets do not
+  compile the UE layer.
+* The executor cannot be a plain member any more: the system stores pointers to the adapters, which are
+  `std::optional`s emplaced in the role branches, so a default-constructed executor would hold pointers
+  into empty optionals. Emplaced after `m_manager`, the manager would bind a reference to an empty
+  `std::optional`'s storage.
 
 ---
 

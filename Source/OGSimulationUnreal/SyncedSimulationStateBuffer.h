@@ -231,6 +231,10 @@ public:
 	// it. It was made because an older archived build does not compile the
 	// sub-simulation in at all, which no byte of the payload can express. Full
 	// reasoning at the constant in CorrectionStateBufferCodec.h.
+	//
+	// [og-netcode-v2-field-defects task 9, 2026-09-23] BUMPED 3 -> 4. 4 = a field (the
+	// brawler radial's hasHitGuard) left the MIDDLE of the state composite, so every
+	// later offset moved -- the ordinary layout case this fence exists for.
 	static constexpr uint8 kWireFormatVersion = correctionStateBuffer::kWireFormatVersion;
 
 	FSimulationStateSyncBuffer()

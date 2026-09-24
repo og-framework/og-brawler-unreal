@@ -844,8 +844,11 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_physReaderAdapter.emplace(rigidsSolverS);
 		emplaceBrawlerQueryAdapter(m_queryAdapter, uWorld);
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
+		m_systemsExec.emplace(std::piecewise_construct,
+			BrawlerHitDetectionSystem(*m_physAdapter, *m_queryAdapter),
+			brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{});
 		m_manager.emplace(false, solver->GetAsyncDeltaTime(), ManagerType::Params{
-			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, m_systemsExec,
+			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, *m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmloggerServer) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
 		m_inputResolution.setLogger(std::function<void(const char*)>(pctmloggerServer));
@@ -942,8 +945,11 @@ void ASimulationManagerUImpl::BeginPlay()
 		m_physReaderAdapter.emplace(rigidsSolverC);
 		emplaceBrawlerQueryAdapter(m_queryAdapter, uWorld);
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
+		m_systemsExec.emplace(std::piecewise_construct,
+			BrawlerHitDetectionSystem(*m_physAdapter, *m_queryAdapter),
+			brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{});
 		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), ManagerType::Params{
-			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, m_systemsExec,
+			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, *m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmlogger) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
 		m_inputResolution.setLogger(std::function<void(const char*)>(pctmlogger));
@@ -1324,9 +1330,9 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 
 	updateVisualizationAll(m_storage);
 
-	if (m_manager.has_value() && !m_manager->runsPrediction())
+	if (m_manager.has_value() && m_systemsExec.has_value() && !m_manager->runsPrediction())
 	{
-		pushRingoutScoresToCharacters(m_systemsExec.get<brawlerRingout::ScoreSystem>(),
+		pushRingoutScoresToCharacters(m_systemsExec->get<brawlerRingout::ScoreSystem>(),
 			m_delayedInputComponentsById);
 	}
 }
