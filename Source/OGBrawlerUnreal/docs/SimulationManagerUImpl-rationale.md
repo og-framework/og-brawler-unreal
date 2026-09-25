@@ -920,11 +920,12 @@ every `registerAuthorityOwner` call**, and registration happens per character, l
 ### Inbound-hit routing
 
 Cross-character inbound-hit routing runs **inside** `m_manager->onGameSimulation`, via
-`brawlerHitRouting::System::postIntegrate`, fired by the systems executor after `integrateAll` on
-every tick — including each resim replay tick — so the routed `HitFlinch` flags stay
-deterministic. There is no adapter-side routing wrapper any more: the former `routeInboundHits()`
-shim and its map were removed once the routing system owned the whole pass, and no reset-order
-hazard remains because the single routing pass *is* the system's `postIntegrate`.
+`brawlerHitRouting::System::preIntegrate` (since og-netcode-v2-field-defects task 20; it was
+`postIntegrate`), fired by the systems executor before `integrateAll` on every tick — including each
+resim replay tick, whose first step now re-routes what the restored tick produced — so the routed
+`HitFlinch` flags stay deterministic. There is no adapter-side routing wrapper any more: the former
+`routeInboundHits()` shim and its map were removed once the routing system owned the whole pass, and
+no reset-order hazard remains because the single routing pass *is* the system's `preIntegrate`.
 
 ---
 

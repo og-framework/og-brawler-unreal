@@ -1023,8 +1023,9 @@ adapters are emplaced or after `m_manager` is.
 `proxy->GetPhysicsThreadAPI()`; `ChaosPhysicsBodyReaderAdapter::getBodyTransform` reads
 `proxy->GetGameThreadAPI()` (its own banner: "Reads GT-interpolated state"). Both satisfy
 `PhysicsBodyReaderAdapter`, so the wrong one compiles. The detector runs on the physics thread, in
-`firePostIntegrate`, and reads the TARGET's guard transform that the target's integrate wrote this tick
-on the physics-thread particle.
+`firePreIntegrate` of the next tick (og-netcode-v2-field-defects task 20; `firePostIntegrate` before
+it), and reads the TARGET's guard transform that the target's integrate wrote on the physics-thread
+particle, as the physics step left it.
 
 **What breaks if the edit is made.**
 * Handed the reader adapter, the detector classifies every guard block against the game-thread copy of

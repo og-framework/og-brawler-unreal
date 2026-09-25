@@ -716,10 +716,11 @@ private:
     static_assert(brawlerHitDetection::firesBefore<BrawlerSystemsExec,
                       BrawlerHitDetectionSystem, brawlerHitRouting::System>,
         "BrawlerSystemsExec must fire brawlerHitDetection::System BEFORE brawlerHitRouting::System "
-        "(firing order is template order): routing branch 2 reads the hitsThisTick the detector "
-        "writes this tick, and branch 5 the guard block. Reversed, routing reads them after the "
-        "radial's integrate cleared them and before the detector refilled them, so NO melee hit "
-        "and NO guard block is ever routed - og-netcode-v2-field-defects task 9.");
+        "(firing order is template order): both run in preIntegrate, and routing branch 2 reads "
+        "the hitsThisTick the detector writes earlier in the SAME pass, branch 5 the guard block. "
+        "Reversed, routing reads them after the radial's integrate cleared them and before the "
+        "detector refilled them, so NO melee hit and NO guard block is ever routed - "
+        "og-netcode-v2-field-defects tasks 9 and 20.");
 
     // ⛔G-75  docs/SimulationManagerUImpl-guards.md
     std::optional<BrawlerSystemsExec> m_systemsExec;
