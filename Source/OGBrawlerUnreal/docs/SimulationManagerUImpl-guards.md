@@ -392,6 +392,8 @@ The second fence block is the orientation banner's statement of the same rule (l
 <!-- ================= DECLARED LINT ESCAPES — entries G-50 and up ==========
      Every token below is CORRECT and cannot resolve. ========================= -->
 <!-- lint-external-ref: FRewindData::RewindToFrame -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: FRewindData::SetTargetStateAtFrame -- Chaos engine method, outside every scan root -->
+<!-- lint-external-ref: FPBDRigidsSolver::ConditionalApplyRewind_Internal -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FRewindData::ApplyTargets -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FPBDRigidsEvolutionGBF::Integrate -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: SetXR -- Chaos engine particle-handle method, outside every scan root -->
@@ -1037,6 +1039,68 @@ particle, as the physics step left it.
   `std::optional`s emplaced in the role branches, so a default-constructed executor would hold pointers
   into empty optionals. Emplaced after `m_manager`, the manager would bind a reference to an empty
   `std::optional`'s storage.
+
+---
+
+## G-76 — the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target
+
+**Site:** the `writeRestoredBodyState(*ptApi, bs, wireCarriesRotationAndSpin);` call inside
+`pushBodyState`, in `FSimulationManagerAsyncCallback::FirstPreResimStep_Internal`.
+
+**The prohibition.** Written by og-netcode-v2-field-defects task 10's fix (2026-09-25). No shipped
+comment preceded it.
+
+* ⛔ **Do not turn this back into `FRewindData::SetTargetStateAtFrame`**, or any other rewind-target write
+  for the frame being replayed. In public UE 5.6, `FPBDRigidsSolver::ConditionalApplyRewind_Internal`
+  calls `FRewindData::ApplyTargets` for a step **before** it calls `PreResimStep_Internal`, and this
+  hook runs from there. `FRewindData::ApplyTargets` is repeated on later steps only when
+  `np2.Resim.ApplyTargetsWhileResimulating` is set, and that setting defaults to false. So a target
+  written from this hook arrives after the only read of it. Task 10's probe measured this on the
+  running binary: **185 of 185 rewinds `verdict=MISMATCH`, `nonInertMatched=0`.**
+* ⛔ **Do not move it above `m_manager->prepareResimulation(...)`.** That call restores the synced
+  composite from the correction cache, and the composite is where `bs` comes from. Above it, the write
+  carries the pre-restore state.
+* ⛔ **Do not move it into `OnPreSimulate_Internal` or below `onGameSimulation`.** There it would run
+  after the probe's verdict read (`⛔G-51`), or after the sub-sims' own writes for the replayed step.
+* ⛔ **Keep it between the probe's two reads in this lambda.** `beforePush` is read before the write and
+  gives `inert=`. The read after the write gives `moved=`, which shows the write took effect.
+
+**Why a direct write is sound here.** The four calls are the physics-thread API's `SetX` / `SetV` /
+`SetR` / `SetW`. `ChaosPhysicsBodyAdapter` makes the same calls every tick (`setBodyTransform`,
+`setBodyLinearVelocity`, `setBodyAngularVelocity`). The sub-sims make them during replayed steps too.
+They land in the same phase as `FRewindData::ApplyTargets`: after `FRewindData::RewindToFrame` and before the replayed step
+integrates. They also do what an applied target would have done: set X/R (and P/Q), set V/W, and wake a
+sleeping body, matching the old target, which always requested an awake body.
+
+**The consequence.** Every rewind replays the client's own recorded body history instead of the
+restored state. In the knockback-revert capture this left the weapon's swing spin alive across a correction
+that had already adopted idle. Each correction re-stated the same disagreement (the `DivergenceProbe`'s
+constant 0.0359505 rotation component), and the storm ended only at the next swing edge.
+
+**What breaks if the tag moves.** Nothing mechanical. `SimulationManagerUImpl.cpp` is a UE module file
+that neither LLT target compiles, so this tag and the probe's PIE run are the only checks.
+
+---
+
+## G-77 — the restored-state write sets only the fields the body's wire shape carries
+
+**Site:** the `if (wireCarriesRotationAndSpin)` branch in `writeRestoredBodyState`.
+
+**The prohibition.** ⛔ **Never write rotation or angular velocity for a body whose `bodyStateOf` is not
+exactly `PhysicsBodyState`.** A `LinearBodyState` (the character capsule) reaches `pushBodyState` through
+its widening conversion. That conversion **fabricates** an identity rotation and a zero angular velocity,
+and no wire ever carried either. Writing them would replace the rewound rotation and spin with
+constants. Without the write, those two fields keep the client's own recorded history, which is the
+only value available for them.
+
+⛔ **The flag is shared with the probe on purpose.** `wireCarriesRotationAndSpin` also picks the probe's
+`cmp=` field set (`⛔G-53`). So the probe compares exactly the fields this function writes. Give the
+write its own rule and the two sets drift. The probe then either compares a field that was never written,
+which reads `match=0` on every rewind, or ignores a field that was.
+
+**What breaks if the tag moves.** Nothing mechanical checks the branch. The flag is computed from the
+declaration with `std::is_same_v` at the `forEach` call site. An edit that drops the branch, or passes
+`true`, still compiles, and no LLT target builds this file.
 
 ---
 

@@ -17,6 +17,8 @@ collide.
   What those sections did not carry is quoted in §13, with the compile-time checks that replaced
   six of its prose fences (§13.9) and the claims it made that were not true (§13.10)
   (og-netcode-v2-field-defects task 12).
+* **§14** records a later code change: how the first replayed step hands the restored body state to
+  the engine (og-netcode-v2-field-defects task 10's fix).
 
 <!-- ================= DECLARED LINT ESCAPES =================================
      Every token below is CORRECT and cannot resolve. None is here to silence a
@@ -1272,9 +1274,15 @@ know which claim was withdrawn and why.
 
 | read | where | what it yields |
 |---|---|---|
-| 1 | `FirstPreResimStep_Internal`, immediately BEFORE `FRewindData::SetTargetStateAtFrame` | `beforePush`, stashed. Feeds `inert=` and `dBefore=` |
-| 2 | the same hook, immediately AFTER that call | `moved=` only — an EAGER-APPLY discriminator, never the verdict |
+| 1 | `FirstPreResimStep_Internal`, immediately BEFORE the push (`writeRestoredBodyState` since task 10's fix; `FRewindData::SetTargetStateAtFrame` before it) | `beforePush`, stashed. Feeds `inert=` and `dBefore=` |
+| 2 | the same hook, immediately AFTER that call | `moved=` only, never the verdict. Before the fix it was an EAGER-APPLY discriminator. Since the fix it shows the direct write took effect (§14) |
 | 3 | `OnPreSimulate_Internal`, on the frame where `IsResetting()` holds, at the TOP of the hook | `match=`, the verdict |
+
+⭐ **Since task 10's fix (§14), `moved=1` is the expected reading on every non-inert push.** The push is
+now a direct write onto the particle, so the read after it differs from the read before it. The
+verdict is unchanged: read 3 still asks whether the replayed step starts from the pushed value, and it
+still reports `MISMATCH` when the answer is no. That is what the pre-fix binary printed on 185 of 185
+rewinds.
 
 The pushed value and read 1 wait in `m_pushProbeStash` (`FRewindPushProbeStashedBody`, physics
 thread only) between hook one and hook two. By the time read 3 is taken,
@@ -1368,9 +1376,13 @@ bFirst)` before `PreResimStep_Internal(Step, bFirst)`, and the repeat gated on
 differ. **That gap is precisely what the probe measures**, so nothing here may be quoted as the
 answer AC 1 asks for.
 
-⚠ **Not yet run.** Confirming or refuting needs a PIE session with an adoption-terminated swing
+~~⚠ **Not yet run.** Confirming or refuting needs a PIE session with an adoption-terminated swing
 and task 2's fix off, which only the user can produce. The runbook is in that task's
-implementation notes.
+implementation notes.~~ **Superseded 2026-09-25.** The probe ran on 2026-09-22 (floor-3 PIE session)
+and **confirmed**: 185 of 185 rewinds read `verdict=MISMATCH` with `nonInertMatched=0`, on every body.
+At the phantom tick the weapon's line read `pushedAng=(0,0,0) liveAng=(0,0,6.1088) moved=0
+resimType=FullResim objState=Dynamic`. The fix is §14. The probe stays as its regression check, and
+the post-fix PIE run has not happened yet.
 
 ---
 
@@ -3522,6 +3534,10 @@ state.*
 > replay. It compares all four fields regardless of the wire shape, because both sides
 > are LIVE reads of the same particle.
 
+⚠ **Outdated by task 10's fix (2026-09-25), not wrong when written.** The push is now a direct write
+onto the particle (§14), so the after-push read differs from `beforePush` on every non-inert push, and
+`moved=1` is the expected reading. The verdict still comes from read 3, one hook later.
+
 > BodyId lookup goes through the m_physics composite bindings (local-only).
 >
 > [task 10] `D::name` is the declaration's own body name, the one the factory
@@ -3535,12 +3551,13 @@ There is no member named `m_physics`; the lookup goes through `getPhysicsComposi
 > ⛔ At PostPushData: direct SetX/SetV/SetW is a NO-OP on ResimAsFollower bodies.
 
 ⚠ **Correction C13-15.** This sentence justified pushing the rewind state through
-`SetTargetStateAtFrame` rather than writing the particle directly. It does not apply to this
+`FRewindData::SetTargetStateAtFrame` rather than writing the particle directly. It does not apply to this
 tree's bodies. On UE 5.6 `RewindToFrame` re-stamps every dynamic body's resim type on every
 rewind, so none is `ResimAsFollower` during a replay. The push it justifies was also measured
-never read (task 10's capture: 185 of 185 rewinds `MISMATCH`, `nonInertMatched=0`). The call
-stays, because task 10's fix will decide what replaces it. The sentence has no guard, because
-it no longer describes a reason.
+never read (task 10's capture: 185 of 185 rewinds `MISMATCH`, `nonInertMatched=0`). ~~The call
+stays, because task 10's fix will decide what replaces it.~~ Task 10's fix (2026-09-25) removed the
+call and writes the particle directly (§14, `⛔G-76`). The sentence has no guard, because it no
+longer describes a reason.
 
 At `b9f6d81` `Config/DefaultEngine.ini` sets `LogOGResimProbe=Verbose`, so the "shipped
 `LogOGResimProbe=Warning`" in the probe banner's volume paragraph (quoted in §8) does not
@@ -3668,6 +3685,100 @@ int32 movedAtPush        = 0;  // eager-apply discriminator; never part of the v
 and on four early returns: `// pre-BeginPlay ordering; the relay latches and replays at bind`
 (tier and floor), `// an OnRep can fire for an unchanged value; nothing transitioned`, and
 `// core manager not constructed yet; no clock to stall`.
+
+---
+
+## §14 The first replayed step — the restored body state is written, not targeted
+
+*og-netcode-v2-field-defects task 10's fix, 2026-09-25. The prohibitions are `⛔G-76` (where and how
+the write happens) and `⛔G-77` (which fields it writes).*
+
+**What the hook does.** A granted rewind makes `FirstPreResimStep_Internal` do three things, in this
+order:
+
+1. It records the grant.
+2. It calls `prepareResimulation`, which restores the synced composite from the correction cache.
+3. It walks every composite body and hands its restored state to the engine.
+
+Before the fix, step 3 was `FRewindData::SetTargetStateAtFrame` at the replayed frame. Since the fix,
+step 3 is `writeRestoredBodyState`: the physics-thread API's `SetX` and `SetV`, plus `SetR` and `SetW`
+when the body's wire shape carries them.
+
+**Why the target was never read.** This is public UE 5.6's order for the first replayed step:
+
+1. `FRewindData::RewindToFrame` restores X/R/V/W from the client's own recorded history. It recomputes
+   each dirty particle's follower-ness from its object state and overwrites its resim type.
+2. `FRewindData::ApplyTargets` reads the targets stored at that frame.
+3. `PreResimStep_Internal` runs, and this hook runs inside it.
+4. The solver task runs. On the way to the evolution it passes `ApplyCallbacks_Internal`, which is
+   where `OnPreSimulate_Internal` fires.
+5. The evolution integrates, starting from X/R.
+
+On later replayed steps `FRewindData::ApplyTargets` runs only if `np2.Resim.ApplyTargetsWhileResimulating` is set,
+and it defaults to false. So a target written from this hook for the frame being replayed is read by
+nothing in that cycle. Task 10's probe measured that on the running binary before the fix.
+
+**Why the fix is a direct write.** `FRewindData::ApplyTargets` itself does no more than this. For a non-follower
+particle it calls `SetXR`, then `SetV`/`SetW`, and it sets the object state from the target. The fix
+makes the same kind of write, from the same phase: after `FRewindData::ApplyTargets`, before the step integrates. It
+uses the physics-thread handle API that `ChaosPhysicsBodyAdapter` and the sub-sims use on every tick,
+replayed steps included. Two consequences:
+
+* **P/Q.** That API's `SetX`/`SetR` also set P/Q. So after the write the body's X and P agree, and
+  the probe's `dXP=` reads 0 for it.
+* **Sleep.** It wakes a sleeping body, which is what the old target asked for: every push requested an awake body.
+
+Nothing in og-simulation changed. The restore still happens in `prepareResimulation`, before the
+write, where it always happened.
+
+**Candidates that were not taken.**
+
+* **Pushing from `TriggerRewindIfNeeded_Internal`, before `RewindToFrame`.** `FRewindData::ApplyTargets` would read
+  such a target. But this callback's frame is only a request. The engine takes the minimum over every
+  rewindable callback and the replication frame. It then runs `FRewindData::FindValidResimFrame`,
+  which can move the frame or refuse it. A target written at the requested frame can therefore land
+  on a frame that is not replayed. It then stays in the target history and is applied by some later
+  rewind to that frame.
+
+  This path also needs the restored state before `prepareResimulation` has produced it. That means
+  either reading the correction cache from the adapter, or moving og-simulation's restore earlier.
+* **Pushing at injection time.** It has the same frame problem, and a worse one. A correction is
+  injected before `onCheckIsSimilar` decides whether it triggers a rewind at all, and to which tick.
+* **The `np2.Resim.ApplyTargetsWhileResimulating` cvar.** It re-applies targets on later steps, but
+  the target for the first replayed step is still written after that step's `FRewindData::ApplyTargets`.
+
+**What the removed call also did.** `FRewindData::SetTargetStateAtFrame` had three side effects the fix drops:
+
+* **Lerped targets.** It fills gaps: a push to frame F whose previous target sat up to five frames
+  earlier also writes interpolated targets for the frames in between.
+* **The rewind-frame search.** It gives each body a target history, and `FRewindData::FindValidResimFrame` consults
+  that history when it picks a rewind frame.
+* **Object state.** Every target carries "dynamic, enabled", and `FRewindData::ApplyTargets` applies that state
+  whenever it does read a target.
+
+This file no longer writes any rewind target, so none of the three happens on its account.
+
+**The wire shape decides the fields (`⛔G-77`).** A `LinearBodyState` body writes position and linear
+velocity only. Its rotation and spin keep the rewound history, the only value available for fields
+no wire carried. This could be made a compile-time rule, with typed overloads and a deleted fallback
+template. It deliberately is not: that would make every new body-state type edit this call site. The
+push's generic `const PhysicsBodyState&` call site is the zero-edit property `LinearBodyState`'s
+widening conversion exists for.
+
+**What the probe says after the fix (§8).** Non-inert pushes read `moved=1` at read 2 and `match=1`
+at read 3, so the verdict can read `ALL_MATCH`. It can still read `MISMATCH`. That happens when
+something between this hook and `OnPreSimulate_Internal` overwrites the body, or when the write is
+skipped or writes the wrong field set. The pre-fix binary is that case, and it printed `MISMATCH` on
+every rewind.
+
+⚠ **The probe does not prove convergence.** The residual blind spot in §8 still stands: a writer
+inside the evolution after `ApplyCallbacks_Internal` is invisible to read 3. Convergence is proved only
+by the corrections stopping.
+
+**The authored resim policy stays inert.** `ChaosPhysicsFactory` stamps `ResimAsFollower` on the
+weapon through the game-thread API, and `RewindToFrame` overwrites it to `FullResim` on every rewind
+of a dynamic body. The direct write does not consult resim type, so that stamp has no bearing on this
+fix. It was left unchanged.
 
 ---
 

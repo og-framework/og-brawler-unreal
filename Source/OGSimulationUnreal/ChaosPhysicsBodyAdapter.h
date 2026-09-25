@@ -196,7 +196,7 @@ public:
 	// what makes the captured tuple internally consistent -- pose and velocity from the
 	// same instant -- and what makes slot[T] mean "the state AFTER tick T", which is what
 	// the rollback push consumes (`SimulationManagerUImpl.cpp` `FirstPreResimStep_Internal`
-	// writes it as the PostPushData pose of the frame that replays tick T+1).
+	// writes it straight onto the particle before the frame that replays tick T+1 integrates).
 	//
 	// WHY NOT `ptApi->GetP()`: `FRigidBodyHandle_Internal` HAS NO `GetP()`/`GetQ()`
 	// (`PhysicsProxy/SingleParticlePhysicsProxy.h` @5.6 -- the class is PreV/PreW/SetX/

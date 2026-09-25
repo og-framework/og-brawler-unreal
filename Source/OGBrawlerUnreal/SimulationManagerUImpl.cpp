@@ -72,6 +72,19 @@ namespace
 			[]() { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
 	}
 
+	void writeRestoredBodyState(Chaos::FRigidBodyHandle_Internal& ptApi, const PhysicsBodyState& restored,
+	                            bool wireCarriesRotationAndSpin)
+	{
+		ptApi.SetX(uglm::toFVector(restored.position));
+		ptApi.SetV(uglm::toFVector(restored.linearVelocity));
+		// ⛔G-77  docs/SimulationManagerUImpl-guards.md
+		if (wireCarriesRotationAndSpin)
+		{
+			ptApi.SetR(uglm::toFQuat(restored.rotation));
+			ptApi.SetW(uglm::toFVector(restored.angularVelocity));
+		}
+	}
+
 	const TCHAR* pushProbeResimTypeText(Chaos::EResimType type)
 	{
 		switch (type)
@@ -517,9 +530,6 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 	m_manager->prepareResimulation(PhysicsStep, simTick);
 
 	Chaos::FPBDRigidsSolver& solver = this->GetSolver()->CastChecked();
-	Chaos::FRewindData* rewindData = solver.GetRewindData();
-	if (rewindData == nullptr)
-		return;
 
 	const bool pushProbeActive = UE_LOG_ACTIVE(LogOGResimProbe, Verbose);
 
@@ -550,8 +560,8 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 				++m_pushProbeStashUnresolved;
 			return;
 		}
-		Chaos::FGeometryParticleHandle* handle = proxy->GetHandle_LowLevel();
-		if (handle == nullptr)
+		Chaos::FRigidBodyHandle_Internal* ptApi = proxy->GetPhysicsThreadAPI();
+		if (ptApi == nullptr)
 		{
 			if (pushProbeActive)
 				++m_pushProbeStashUnresolved;
@@ -562,14 +572,8 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 		if (pushProbeActive)
 			beforePush = readLiveBodyForPushProbe(*proxy);
 
-		rewindData->SetTargetStateAtFrame(
-			*handle, PhysicsStep,
-			Chaos::FFrameAndPhase::EParticleHistoryPhase::PostPushData,
-			uglm::toFVector(bs.position),
-			uglm::toFQuat(bs.rotation),
-			uglm::toFVector(bs.linearVelocity),
-			uglm::toFVector(bs.angularVelocity),
-			/*bShouldSleep=*/false);
+		// ⛔G-76  docs/SimulationManagerUImpl-guards.md
+		writeRestoredBodyState(*ptApi, bs, wireCarriesRotationAndSpin);
 
 		if (pushProbeActive)
 		{
