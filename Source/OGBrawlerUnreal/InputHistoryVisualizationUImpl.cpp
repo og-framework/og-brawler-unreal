@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+// docs/InputHistoryDisplay-rationale.md · docs/InputHistoryVisualizationUImpl-guards.md
 
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 
@@ -12,13 +13,12 @@
 
 #include "OGBrawler/BrawlerInputHistoryVisualizationPanel.h"
 
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 
 namespace
 {
 
-// ⛔ THE MASTER, DEFAULT OFF -- every other input-history CVar folds through this one.
 bool GInputHistory = false;
 
 static FAutoConsoleVariableRef CVarInputHistory(
@@ -28,7 +28,6 @@ static FAutoConsoleVariableRef CVarInputHistory(
 	TEXT("has its own CVar, all of which default on, so setting this to 1 turns them all on."),
 	ECVF_Default);
 
-// ⭐ DEFAULT ON: the child toggles are ALL on, so the master alone is what a reader flips.
 bool GInputHistoryDisplay = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryDisplay(
@@ -39,7 +38,6 @@ static FAutoConsoleVariableRef CVarInputHistoryDisplay(
 	TEXT("master OGBrawler.InputHistory is also on."),
 	ECVF_Default);
 
-// ⭐ DEFAULT ON, same reasoning as the panel's toggle above.
 bool GInputHistoryProvenance = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryProvenance(
@@ -49,7 +47,6 @@ static FAutoConsoleVariableRef CVarInputHistoryProvenance(
 	TEXT("the lane poll that feeds it, when the master OGBrawler.InputHistory is also on."),
 	ECVF_Default);
 
-// ⭐ DEFAULT ON, same reasoning as the panel's toggle above.
 bool GInputHistoryCharacterState = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryCharacterState(
@@ -59,7 +56,6 @@ static FAutoConsoleVariableRef CVarInputHistoryCharacterState(
 	TEXT("runs the lane poll that feeds it, when the master OGBrawler.InputHistory is also on."),
 	ECVF_Default);
 
-// ⭐ DEFAULT ON, and it is the bar the relay-health investigation is for.
 bool GInputHistoryRelayHealth = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryRelayHealth(
@@ -72,9 +68,6 @@ static FAutoConsoleVariableRef CVarInputHistoryRelayHealth(
 	TEXT("at all. Needs the master OGBrawler.InputHistory and OGBrawler.InputHistoryNearest."),
 	ECVF_Default);
 
-// It is an escape hatch rather than a feature flag: at 0 the meter draws exactly the one
-// stack it drew before the second one existed.
-// ⭐ DEFAULT ON while the remote weapon-swing investigation it was built for is open.
 bool GInputHistoryNearest = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryNearest(
@@ -89,7 +82,6 @@ static FAutoConsoleVariableRef CVarInputHistoryNearest(
 	TEXT("OGBrawler.InputHistory is also on."),
 	ECVF_Default);
 
-// ⛔ THIS BOUNDS THE READ, NEVER THE ALLOCATION -- the lanes are always 240 ticks wide.
 int32 GInputHistoryLaneTicks = static_cast<int32>(
 	brawlerInputHistoryVisualization::kTickLaneDefaultRetainedTicks);
 
@@ -102,8 +94,6 @@ static FAutoConsoleVariableRef CVarInputHistoryLaneTicks(
 	TEXT("allocate 240 ticks, so changing this reallocates nothing and drops no cell."),
 	ECVF_Default);
 
-// ⛔ DEFAULT ON, unlike the two toggles above: this is a behaviour knob rather than a
-// developer overlay, and full-fidelity recording is what you ask for explicitly.
 bool GInputHistoryPauseIdle = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryPauseIdle(
@@ -119,7 +109,6 @@ static FAutoConsoleVariableRef CVarInputHistoryPauseIdle(
 	TEXT("recording -- that is how a desync that only happens while idle is investigated."),
 	ECVF_Default);
 
-// ⭐ DEFAULT ON, same reasoning as the panel's toggle above.
 bool GInputHistoryInputDelay = true;
 
 static FAutoConsoleVariableRef CVarInputHistoryInputDelay(
@@ -132,11 +121,6 @@ static FAutoConsoleVariableRef CVarInputHistoryInputDelay(
 	TEXT("OGBrawler.InputHistory is also on."),
 	ECVF_Default);
 
-// The panel's look, live. Three separate variables because they are three separate
-// questions -- how big, how solid, how much history -- and a user settling the display
-// moves one at a time. Every default below is the pure header's own constant, so the
-// shipped look and the code's idea of the shipped look cannot drift apart.
-// ⭐ TUNING THE DISPLAY IS A CONSOLE LINE, NOT A REBUILD.
 float GInputHistoryPanelScale = brawlerInputHistoryVisualization::kPanelDefaultScale;
 
 static FAutoConsoleVariableRef CVarInputHistoryPanelScale(
@@ -160,7 +144,6 @@ static FAutoConsoleVariableRef CVarInputHistoryPanelAlpha(
 	TEXT("it. The rows' own colours are unaffected."),
 	ECVF_Default);
 
-// ⛔ THIS BOUNDS THE READ, NEVER THE ALLOCATION -- the ring is always 64 rows.
 int32 GInputHistoryPanelRows = static_cast<int32>(
 	brawlerInputHistoryVisualization::kPanelVisibleRows);
 
@@ -178,15 +161,15 @@ static FAutoConsoleVariableRef CVarInputHistoryPanelRows(
 namespace inputHistoryVisualizationUImpl
 {
 
-// ⛔ THE ACCESSOR BLOCK -- THE ONLY PLACE ANY `G*` DISPLAY BOOL IS READ. Folding the
-// master in HERE, once each, is what makes "every site looks at it" true by construction.
 bool masterEnabled()
 {
+	// ⛔G-08  docs/InputHistoryVisualizationUImpl-guards.md
 	return GInputHistory;
 }
 
 bool displayEnabled()
 {
+	// ⛔G-03  docs/InputHistoryVisualizationUImpl-guards.md
 	return GInputHistory && GInputHistoryDisplay;
 }
 
@@ -216,16 +199,14 @@ brawlerInputHistoryVisualization::FrameMeterBarSelection barSelection(bool isNea
 	selection.provenance     = provenanceEnabled();
 	selection.inputDelay     = inputDelayEnabled();
 	selection.characterState = characterStateEnabled();
-	// ⛔ THE ONLY PLACE THE RELAY BAR IS TIED TO A STACK. The primary follows a character
-	//   this client controls, which resolves no relayed input at all.
+	// ⛔G-01  docs/InputHistoryVisualizationUImpl-guards.md
 	selection.relayHealth    = isNearestStack && relayHealthEnabled();
 	return selection;
 }
 
 bool anyBarEnabled()
 {
-	// ⛔ ASKED OF THE STACK THAT CAN DRAW THE MOST BARS: a session running the relay bar
-	//   alone still needs the lane poll that feeds it.
+	// ⛔G-02  docs/InputHistoryVisualizationUImpl-guards.md
 	return brawlerInputHistoryVisualization::frameMeterEnabledBarCount(barSelection(true)) != 0u;
 }
 
@@ -233,7 +214,6 @@ bool nearestStackEnabled()
 {
 	return GInputHistory && GInputHistoryNearest;
 }
-// ⛔ END OF THE ACCESSOR BLOCK.
 
 bool pauseLanesWhileIdle()
 {
@@ -242,13 +222,10 @@ bool pauseLanesWhileIdle()
 
 uint32_t retainedLaneTicks()
 {
-	// Clamped at READ, so the console still echoes whatever the user typed.
 	return brawlerInputHistoryVisualization::clampRetainedLaneTicks(
 		static_cast<int64_t>(GInputHistoryLaneTicks));
 }
 
-// All three clamp at READ, like the lane window above: the console keeps echoing what
-// the user typed, and the drawn frame is bounded whatever that turns out to be.
 float panelScale()
 {
 	return brawlerInputHistoryVisualization::clampPanelScale(GInputHistoryPanelScale);
@@ -275,9 +252,7 @@ APlayerController* firstLocalPlayerController(const UWorld* world)
 	if (gameInstance == nullptr || gameInstance->GetLocalPlayers().Num() == 0)
 		return nullptr;
 
-	// GetLocalPlayers() is append-only, and LeaveLocalPlayer already refuses to remove
-	// the primary local player.
-	// ⛔ INDEX 0 IS THEREFORE THE FIRST-JOINED LOCAL PLAYER, deterministically.
+	// ⛔G-07  docs/InputHistoryVisualizationUImpl-guards.md
 	ULocalPlayer* localPlayer = gameInstance->GetLocalPlayers()[0];
 	if (localPlayer == nullptr)
 		return nullptr;
@@ -292,13 +267,11 @@ std::optional<unsigned int> firstLocalCharacterId(const UWorld* world)
 	if (pawn == nullptr)
 		return std::nullopt;
 
-	// ⛔ FindComponentByClass, not a getter: the character declares the component private.
-	USimmableUpdateComponent* simmable = pawn->FindComponentByClass<USimmableUpdateComponent>();
-	if (simmable == nullptr)
+	const AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(pawn);
+	if (character == nullptr)
 		return std::nullopt;
 
-	// The same expression tryRegisterWithNewFramework uses as the registration key.
-	return static_cast<unsigned int>(simmable->GetUniqueID());
+	return toStorageKey(character->GetSimCharacterId());
 }
 
 std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* manager,
@@ -318,8 +291,7 @@ std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* 
 
 	if (chosen.has_value())
 	{
-		// ⛔ OFF THE SAME LIST THE CHOICE WAS MADE FROM. A second gather could be taken a
-		//   frame later and would report a range the choice was not made at.
+		// ⛔G-05  docs/InputHistoryVisualizationUImpl-guards.md
 		if (const std::optional<float> distance =
 				brawlerInputHistoryVisualization::nearestCharacterDistanceCm(
 					candidates, localId, *chosen))

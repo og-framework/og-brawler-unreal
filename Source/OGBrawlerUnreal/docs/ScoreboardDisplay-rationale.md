@@ -104,12 +104,19 @@ iteration hands you first.
 
 ### 2.1 ⛔ The key is the SIM id, not the pawn's
 
-The join key is `AOGBrawlerUECharacter::GetSimCharacterId`, which returns the
-`USimmableUpdateComponent`'s unique id. **Every id inside the simulation is that one** —
-the storage map's key, `brawlerRingout::ScoreSystem`'s roster key, the spawn-slot table,
-every `id=%u` in every ring-out log line — because that is the value the component passes
-when it registers. The pawn's own unique id is a **different number** — and it is the one a
-`TActorIterator` walk puts in front of you first.
+The join key is `AOGBrawlerUECharacter::GetSimCharacterId`, which returns the pawn's
+replicated `SimCharacterId` (task 25: authority-assigned, the same on every peer, never
+reused). The gather converts it with `toStorageKey`. **Every id inside the simulation is that
+one**: the storage map's key, `brawlerRingout::ScoreSystem`'s roster key, the spawn-slot table,
+and every `id=%u` in every ring-out log line, because that is the value the component passes
+when it registers. The pawn's own unique id is a **different number**, and it is the one a
+`TActorIterator` walk puts in front of you first. Since task 25 the typed return makes joining
+on it a compile error wherever a `SimCharacterId` is expected. Before the id replicates it reads
+0, which matches no storage entry, so that row is a legitimate miss, like any
+mid-registration character.
+
+**Row order.** Rows sort by `characterId`, which is now the join order on the authority,
+identical on every peer. Before task 25 it was per-process unique-id order.
 
 ⚠ **This is the defect the layer was most likely to ship, and it would not have looked like
 one.** Joining on the pawn's id matches nothing, every lookup misses, and the board draws a
@@ -224,7 +231,8 @@ shows `OUT 0` for that frame rather than a wrapped number.
 
 Two opposing disciplines coexist in this project, and the reasoning is written at both
 sites so neither can be "fixed" in isolation. The original statement is in
-`SimmableUpdateComponent.cpp`, at the movement debug draw's master switch.
+`SimmableUpdateComponent-rationale.md` §10 (the movement debug draw), guarded at the master
+switch's site by G-26 of `SimmableUpdateComponent-guards.md`.
 
 * A **`StaticData`** CVar is read **once, at construction**, so a tunable cannot move under
   a running session and put two peers on different numbers. ⛔ **Nothing simulated is read
@@ -256,7 +264,8 @@ geometric field into NaN and drawing the board nowhere — comes along for free.
 
 ### 4.2 ⚠ The model file's "fold" degenerates here, and imitating it would be worse
 
-`InputHistoryVisualizationUImpl.h` folds its master into four child booleans, so that no
+`InputHistoryVisualizationUImpl.cpp` folds its master into each of its display toggles (guard G-03 of
+`InputHistoryVisualizationUImpl-guards.md`), so that no
 call site can read a child toggle and forget the master. This board has **one** display:
 the master *is* its toggle, there is no second boolean to fold it into, and a boolean
 cannot be folded into either float — "off" is not a scale and not an opacity.

@@ -1034,7 +1034,8 @@ a `TWeakObjectPtr` — so the coordinator's `deliver` callback hands back an id 
 it. It is populated by `noteDelayedInputComponent` from the RPC adapter
 (`USimmableUpdateComponent::tryRegisterWithNewFramework`, which has both the id and the
 component), pruned in the deliver callback when a weak handle goes stale, and erased in
-`unregisterFromNewFramework`. `id == component GetUniqueID()`.
+`unregisterFromNewFramework`. The id is the pawn's replicated `SimCharacterId`, keyed through
+`toStorageKey` (§15); before task 25 it was the component's per-process `GetUniqueID()`.
 
 The per-id `deliver` callback answers "is this owner still alive", so the coordinator can drop a
 stale claim — mirroring the retired drain's own `target.Get()==nullptr` prune, and routes a live delivery through `deliverRemoteInput`. **The liveness check stays
@@ -1610,15 +1611,17 @@ use (`SimulationManagerUImpl.h` initialises `m_relayWriteProbe` with it), and st
 Both halves are false in the current tree:
 
 - the replicated ring is **`ASimulationInputRelay::m_relayedInputRing`**. `USimmableUpdateComponent`
-  holds `m_detachedRelayRing`, whose own comment says it is the *no-host fallback* and that a write
-  landing there *"would be invisible to every client"*;
+  holds `m_detachedRelayRing`, the *no-host read fallback*. A server write with no host lands in
+  `m_detachedRelayStagingRing` instead (`SimmableUpdateComponent-rationale.md` §6 and §12; the
+  header comment this line used to quote was removed in task 25's conversion and was itself false,
+  F-25-5);
 - the registration is **`DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing,
-  COND_SkipOwner)`**. `SimmableUpdateComponent.cpp` states in its own words that the old
-  `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` "stood on" the component and was
-  replaced.
+  COND_SkipOwner)`**. The old `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` stood
+  on the component and was replaced; its absence is fenced by G-33 of
+  `SimmableUpdateComponent-guards.md`.
 
 A third clause was stale in a third way: it said this *writes* the ring, where the write path has
-since become **staging** and the `.cpp` at the same call site says so explicitly.
+since become **staging** (`SimmableUpdateComponent-rationale.md` §6, "Staging, not writing").
 
 ⛔ This is the fourth site of a relay-ring mis-attribution class that two earlier reviews of this
 initiative found and routed as unowned. **Grep every symbol before carrying it into a comment**:
@@ -3343,7 +3346,7 @@ is 16 B. `drivesBody` defaults to `true`. The teleport arm calls `setBodyTransfo
 
 ⚠ **Not reachable as stated.** The only `release(id)` call for a character is its own
 `unregisterFromNewFramework`, after which no further `tryRegister` call for that id occurs
-(ids are component `GetUniqueID()`s). A re-seed per call would therefore just return the same
+(ids are authority-assigned `SimCharacterId`s and never reused, §15). A re-seed per call would therefore just return the same
 slot. The contract of seeding once is still right; the failure described cannot happen.
 
 > ⛔⛔ AUTHORITY ONLY, AND THIS IS NOT HasAuthority(). `bReplicates = false` makes
@@ -3644,6 +3647,10 @@ Two more claims were **true as written but described something that cannot happe
 annotated at their quotes in §13.4 (re-seeding a released slot) and §13.7 (the `ResimAsFollower`
 premise, which is also C13-15).
 
+✅ **Discharged by netcode task 25:** the comment was removed in the conversion of `OGBrawlerUECharacter.cpp`,
+the correction lives in `OGBrawlerUECharacter-rationale.md` §7 (C-6), and the `checkf` message
+now names the `!runsPrediction()` gate. The original routing note follows.
+
 ⚠ **Routed, not fixed: a claim in another file about this one.** `OGBrawlerUECharacter.cpp`,
 in `SetAuthoritativeRingoutScore`, says this file "warns about it twice and the push uses the
 world-level `GetNetMode()` test instead". Neither half is true. The push is gated on
@@ -3781,6 +3788,45 @@ of a dynamic body. The direct write does not consult resim type, so that stamp h
 fix. It was left unchanged.
 
 ---
+
+## §15 The simulation character id — assigned here, replicated on the pawn (task 25)
+
+**What changed.** Until task 25 every id in this file was the registering component's
+`GetUniqueID()`, a per-process number: the same character was 42357 on a client and 39920 on the
+server. Since task 25 the id is a `SimCharacterId` (og-brawler, `SimCharacterId.h`). The
+authority's manager assigns it from `m_simCharacterIds`, the pawn replicates it, and every
+peer registers under the same number. `tryRegister`, `noteDelayedInputComponent` and
+`unregisterFromNewFramework` take a `SimCharacterId`, so an engine object id passed to them is a
+compile error. Inside, `toStorageKey` turns it into the `unsigned int` key every container already
+used. No container changed type. There is no wire change, because the id rides the pawn's
+replication, not the correction composite.
+
+**`allocateSimCharacterId`** is the only call that issues one. It `checkf`s the world-level net
+mode, so a client world's manager can never assign. It returns `SimCharacterId::None` once the
+allocator is exhausted, after logging a `LogOGMgmt` Error and failing an `OG_CHECK`. That check is
+fatal in Development and compiled out in Shipping, where the character simply does not register
+(guard G-78; the permanence rule itself is G-01 of `SimCharacterId-guards.md`).
+
+**Why the counter is a member and not a process static** (user ruling, 2026-09-26). The ids must
+be unique for as long as the storage and wire that use them live, and that is exactly this
+manager's lifetime. Only one authority manager exists at a time (`instanceFor(true)`). The PIE
+server is the editor process, so a process static would carry the count across every PIE session
+and refuse registrations after roughly 60-120 runs. A new manager (a new PIE run or a map load)
+restarts at 1. The tree has no seamless travel, so no pawn outlives the manager that numbered it.
+
+**PIE's two managers in one process.** The authority manager and a client world's manager each
+have their own storage. Only the authority's ever calls `allocateSimCharacterId`: the component
+allocates only on its authority path, and the `checkf` enforces it. The client instance's
+allocator is never used. The same id appearing in both storages is correct, since that is the
+peer-stable property.
+
+**Couch co-op.** Several pawns share one connection. Each pawn is its own actor, so each gets its
+own id at its own registration. The property is a plain `DOREPLIFETIME` (not `COND_OwnerOnly`),
+so every client sees every pawn's id, the siblings on its own connection included. The tier and
+input paths keyed by ROOT connection are unaffected.
+
+**A rejoin** is a new pawn, so it gets a new component with id 0, a new allocation and a new id.
+The departed pawn's id was unregistered at its EndPlay and is never handed out again.
 
 ## Provenance
 

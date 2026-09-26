@@ -33,6 +33,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "OGSimulation/RelayedInputRingCodec.h"
 #include "OGSimulation/ResimGatePolicy.h"
+#include "OGSimulation/OGAssert.h"
 
 #include <algorithm>
 #include <array>
@@ -1341,13 +1342,42 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 	}
 }
 
+SimCharacterId ASimulationManagerUImpl::allocateSimCharacterId()
+{
+    checkf(GetNetMode() != NM_Client,
+           TEXT("allocateSimCharacterId called on a client world's manager. Only the authority assigns ")
+           TEXT("simulation character ids; a client learns each one through the pawn's replicated ")
+           TEXT("SimCharacterIdValue."));
+
+    const SimCharacterId simId = m_simCharacterIds.allocate();
+    // ⛔G-78  docs/SimulationManagerUImpl-guards.md
+    if (simId == SimCharacterId::None)
+    {
+        UE_LOG(LogOGMgmt, Error,
+            TEXT("allocateSimCharacterId: registration REFUSED. This authority has already assigned all %u ")
+            TEXT("simulation character ids and never reuses one, so this character does not register. ")
+            TEXT("Widening SimCharacterId or reusing ids is a user ruling (R2), not a fix to make here."),
+            static_cast<unsigned int>(SimCharacterIdAllocator::kLastAssignable));
+        OG_CHECK(false, "allocateSimCharacterId: all SimCharacterIds are spent; registration refused (R2)");
+        return SimCharacterId::None;
+    }
+
+    UE_LOG(LogOGMgmt, Log, TEXT("allocateSimCharacterId: assigned id=%u"), toStorageKey(simId));
+    return simId;
+}
+
 TryRegisterStatus ASimulationManagerUImpl::tryRegister(
-    unsigned int id,
+    SimCharacterId simId,
     SimulatableBrawler simulatable,
     USimmableUpdateComponent& owner,
     BrawlerInputProviderFn inputProvider,
     bool isAuthority)
 {
+    checkf(simId != SimCharacterId::None,
+           TEXT("tryRegister called with SimCharacterId::None; the component must wait until its ")
+           TEXT("pawn's id is assigned (authority) or replicated (client)."));
+    const unsigned int id = toStorageKey(simId);
+
     auto it = m_pendingRegistrations.find(id);
     if (it == m_pendingRegistrations.end())
     {
@@ -1499,9 +1529,9 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 }
 
 void ASimulationManagerUImpl::noteDelayedInputComponent(
-    unsigned int id, USimmableUpdateComponent& component)
+    SimCharacterId simId, USimmableUpdateComponent& component)
 {
-    m_delayedInputComponentsById[id] = &component;
+    m_delayedInputComponentsById[toStorageKey(simId)] = &component;
 }
 
 static_assert(
@@ -1737,8 +1767,10 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
 }
 
 void ASimulationManagerUImpl::unregisterFromNewFramework(
-    unsigned int id, USimmableUpdateComponent& owner, bool isAuthority)
+    SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority)
 {
+    const unsigned int id = toStorageKey(simId);
+
     // ⛔G-73  docs/SimulationManagerUImpl-guards.md
     if (m_storage.has<SimulatableBrawler>(id))
     {

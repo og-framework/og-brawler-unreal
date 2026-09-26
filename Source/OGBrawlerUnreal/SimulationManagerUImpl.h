@@ -45,6 +45,7 @@
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/BrawlerHitDetectionSystem.h"
 #include "OGBrawler/BrawlerHitRoutingSystem.h"
+#include "OGBrawler/SimCharacterId.h"
 #include "OGBrawler/BrawlerRingoutSimulation.h"
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
 
@@ -337,14 +338,16 @@ public:
     void OnPhysicsStep(FPhysScene* Scene, float DeltaTime);
     void OnPostPhysicsStep(FChaosScene* Scene);
 
+    SimCharacterId allocateSimCharacterId();
+
     TryRegisterStatus tryRegister(
-        unsigned int id,
+        SimCharacterId simId,
         SimulatableBrawler simulatable,
         USimmableUpdateComponent& owner,
         BrawlerInputProviderFn inputProvider,
         bool isAuthority);
 
-    void unregisterFromNewFramework(unsigned int id, USimmableUpdateComponent& owner, bool isAuthority);
+    void unregisterFromNewFramework(SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority);
 
     void InjectInputs_External(int32 PhysicsStep, int32 NumSteps);
 
@@ -601,7 +604,7 @@ public:
         return static_cast<int32>(getServerClock().getSimulationStep().getTick());
     }
 
-    void noteDelayedInputComponent(unsigned int id, USimmableUpdateComponent& component);
+    void noteDelayedInputComponent(SimCharacterId simId, USimmableUpdateComponent& component);
 
     void deliverRemoteInput(unsigned int id, uint32 captureTick,
                             const simulatableBrawler::PlayerInput& input);
@@ -623,6 +626,8 @@ private:
     std::set<unsigned int> m_authorityRegisteredIds;
 
     brawlerRingout::SpawnSlotAllocator m_spawnSlots;
+
+    SimCharacterIdAllocator m_simCharacterIds;
 
     // ⛔G-14  docs/SimulationManagerUImpl-guards.md
     void seedRingoutSpawnPointsFromLevel(UWorld& world);

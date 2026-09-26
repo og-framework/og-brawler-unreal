@@ -133,7 +133,7 @@ std::vector<brawlerScoreboardVisualization::ScoreboardRow> gatherScoreboardRows(
 
 		ScoreboardRow row;
 
-		row.characterId = character->GetSimCharacterId();
+		row.characterId = toStorageKey(character->GetSimCharacterId());
 
 		const int32 replicatedScore = character->GetRingoutScore();
 		row.score = (replicatedScore > 0) ? static_cast<uint32_t>(replicatedScore) : 0u;

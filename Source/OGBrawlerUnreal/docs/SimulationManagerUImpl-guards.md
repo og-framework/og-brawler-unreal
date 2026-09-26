@@ -1104,6 +1104,35 @@ declaration with `std::is_same_v` at the `forEach` call site. An edit that drops
 
 ---
 
+## G-78 — a refused `SimCharacterId` allocation is final: never wrap, reset or fall back to another id source
+
+**Site:** `if (simId == SimCharacterId::None)` in `allocateSimCharacterId`.
+
+**The prohibition** (task 25, user ruling R2 2026-09-26): when `m_simCharacterIds` is exhausted
+(255 ids issued by this manager), the registration is REFUSED. The branch logs an Error, fails an
+`OG_CHECK` and returns `SimCharacterId::None`. ⛔ Do not "recover" here by:
+
+* resetting or replacing `m_simCharacterIds`;
+* wrapping to a low id;
+* scanning for an id no longer registered;
+* falling back to the component's or pawn's `GetUniqueID()`.
+
+Widening the type or reusing ids is the user's ruling to make when the ceiling is reached.
+
+**The consequence of getting it wrong.** Each of these hands out an id some consumer still
+associates with another character. The consumer list is guard G-01 of `SimCharacterId-guards.md`:
+storage, the pending-registration record, the spawn-slot table, the score table, the log joins
+and the planned hit ledger. A `GetUniqueID()` fallback is also per-process again, so the peers
+disagree on the number and every client registers the character under a different id from the
+server. That puts back exactly the defect task 25 removed.
+
+**What breaks if the tag moves.** Nothing mechanical checks the branch body. The allocator
+itself cannot be reset by assignment, a `static_assert` in `SimCharacterId.h` makes that a compile
+error, but a fallback typed in this branch compiles. Deleting the branch takes the tag with it and
+orphans this entry.
+
+---
+
 ## §R — Retired ids
 
 *(None. No id has been retired. The compile-time conversions above never held an id — the header

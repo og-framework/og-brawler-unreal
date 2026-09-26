@@ -1,9 +1,11 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 # `USimmableUpdateComponent` — rationale
 
-Companion to `Source/OGBrawlerUnreal/SimmableUpdateComponent.cpp`. **The source file carries the
-guards; this file carries the reasoning, the provenance and the worked derivations.** The `§N`
-marks in that file point here.
+Companion to `Source/OGBrawlerUnreal/SimmableUpdateComponent.h` and `SimmableUpdateComponent.cpp`.
+Since the task-25 conversion both files carry only code and one-line tags. **The prohibitions are in
+`SimmableUpdateComponent-guards.md`, one id per site; this file carries the reasoning, the provenance
+and the worked derivations.** The old `§N` marks are gone from the source; §12 records where every
+pre-conversion comment went.
 
 Sibling document: `Source/OGBrawlerUnreal/docs/SimulationManagerUImpl-rationale.md`, which owns the
 manager side of every boundary named below. Where a fact belongs to the manager it is cited there
@@ -25,13 +27,63 @@ rather than restated here.
 <!-- lint-external-ref: m_simulationStateSyncedBuffer -- ⛔ MUST NOT RESOLVE. F-34-8: a member named only by the deleted dead scratch code; it never existed -->
 <!-- lint-external-ref: EpicGamesAssignment -- ⛔ MUST NOT RESOLVE. F-34-8: a namespace named only by the deleted dead scratch code; it exists nowhere -->
 <!-- lint-external-ref: StructeredLog -- ⛔ MUST NOT RESOLVE. F-34-8: a misspelled engine header named by two deleted commented-out includes; no file of that name exists -->
+<!-- lint-external-ref: getSyncedCorrectionInputBuffer -- RETIRED (Sec 12): the authority accessor for the retired correction-input buffer. It must NOT resolve -->
+<!-- lint-external-ref: getMachineVizState -- RETIRED (Sec 12): deleted with the pawn flinch-freeze predicate that was its only caller. It must NOT resolve -->
+<!-- lint-external-ref: m_onCorrectionInputReceivedCallback -- RETIRED (Sec 12): removed with the correction-input channel. It must NOT resolve -->
 
 > **Licence.** This tier is **BUSL-1.1**, matching the code it describes. It is deliberately not in
 > the `og-simulation` docs tier, which is MPL-2.0 and travels with a different repository.
 
-**Read the orientation block at the top of `SimmableUpdateComponent.cpp` first.** It states the
-shape — one instance per character, the role test, the four channels, the phase order, the concept
-surface — in about fifty lines. Everything below assumes it.
+**Read §0 first.** It states the shape — one instance per character, the role test, the four
+channels, the phase order, the concept surface. Everything below assumes it.
+
+---
+
+## §0 Orientation — `USimmableUpdateComponent`
+
+*Moved from the orientation banner at the top of the `.cpp` (task 25), with the phase order brought up to
+date.*
+
+One instance per simulated character, on the character actor. This is the **adapter**: it registers
+the character with the simulation, owns that character's wire surfaces, and is the RPC boundary for
+client→server input. It holds no netcode policy of its own — all of it is core, reached through the
+manager.
+
+**Binding declaration — this is UE adapter code.** Every engine or project type these files name —
+`USimmableUpdateComponent`, `ASimulationManagerUImpl`, `GEngine`, `ASimulationInputRelay`,
+`ASimulationConnectionRelay`, `AOGBrawlerUECharacter`, and equally the replication vocabulary
+(`UChildConnection`, `FNetPing`, `COND_SkipOwner`, `COND_OwnerOnly`, `NetSerialize`, Iris, `UObject`,
+`FSimulationStateSyncBuffer`, `FSimulationInputSyncBuffer`) — is one adapter's binding for the role it
+names, and another adapter substitutes its own. The engine-free core never sees any of them.
+
+**Role.** One instance runs on each side and they are not the same object. The role test is
+`GetNetMode() != NM_Client`, world-level, the same predicate the manager picks its own role with
+(guard G-02).
+
+**Phase order.** Every step polls, because every step can legitimately not be ready yet, and "not
+yet" is never an error:
+
+```
+BeginPlay
+  -> tryInitializeWithManager      until the manager exists; then the query volumes and the
+                                   visualization state
+  -> tryRegisterWithNewFramework   until the manager exists; then (authority) allocate the pawn's
+                                   SimCharacterId, or (client) wait for it to replicate; then until
+                                   the bodies resolve; then register, latch the provider decision,
+                                   spawn (or find) the relay host, and -- authority only -- register
+                                   the id -> component route
+TickComponent                      visualization only, both roles
+EndPlay
+  -> unregister, then destroy (authority) or unbind (client) the relay host
+```
+
+**The concept surface**, and it is why this file contains forwarders: the core reaches this object
+through an accessor pair and a callback pair, and nothing else. The relayed-input ring itself lives on
+a separate per-character actor, and the core never learns that (§6).
+
+**Provider presence is the identity test.** A locally-controlled character gets an input provider;
+every other character gets none, and provider-*absence* is what gives it a relay store for the core
+to predict from (§4).
 
 ---
 
@@ -70,9 +122,18 @@ below it, and **the string `LiveLink` occurs nowhere in this project's source ou
 — no such component exists to be ordered behind. What survives is the choice itself: the tick group
 is `TG_DuringPhysics`, and nothing in this file depends on a prerequisite.
 
-`kMaxRegistrationAttempts = 600` is ten seconds at 60 Hz: long enough for scene startup on a slow
-load, short enough that a genuine wiring bug fails loudly rather than hanging forever. Both polling
-loops (§3) count against it independently, and both end in a `checkf` rather than a silent give-up.
+`kMaxRegistrationAttempts = 600` bounds both polling loops (§3). Each attempt is one
+`SetTimerForNextTick`, i.e. one **game frame**, so the budget is ten seconds only at 60 fps (2.5 s at
+240 fps). ⚠ The shipped comment said "~10 seconds at 60 Hz", which reads as the 60 Hz simulation tick;
+it is not (§11, F-25-1). Long enough for scene startup on a slow load, short enough that a genuine
+wiring bug fails loudly rather than hanging forever. Both loops count against it independently
+(`m_initializationAttempts`, `m_registrationAttempts`), and both end in a `checkf` rather than a silent
+give-up. Within loop two, the manager wait, the task-25 id wait (§13) and the bodies-resolvable wait
+all share the one `m_registrationAttempts` count.
+
+**Deleted commented-out code (task 25).** Two commented-out overrides stood under the constructor in
+the header, `ShouldCreatePhysicsState() const override { return true; }` and `OnCreatePhysicsState()`.
+Neither was restorable intent anyone had recorded; they were removed as commented-out code.
 
 **The optimize pair.** The file opens `OGSIM_OPTIMIZE_OFF` and — since the pragma-gate pass — closes
 `OGSIM_OPTIMIZE_ON` at true end-of-file. It carried no closing pragma from its first commit, so the
@@ -92,9 +153,9 @@ pair at the end changed no scope (there was no code after that point either); it
 owner's input-collection component, register the target-visualization query volume with the
 manager's query adapter, construct the three visualization states, and schedule loop two.
 
-**Loop two — `tryRegisterWithNewFramework`.** Waits for the character's physics bodies to become
-resolvable — `tryRegister` answers `Pending` until they are — and on success does four things in a
-deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
+**Loop two — `tryRegisterWithNewFramework`.** Waits for the manager, then for the pawn's
+`SimCharacterId` (§13), then for the character's physics bodies to become resolvable — `tryRegister`
+answers `Pending` until they are — and on success does four things in a deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
 host (§6), and, on the authority only, register the id → component delivery route (§7).
 
 Every step of both loops can legitimately answer "not yet", repeatedly, and "not yet" is never an
@@ -225,8 +286,14 @@ publishes the whole staged burst once per replication poll, so two arrivals in o
 reach the wire instead of the second overwriting the first. It takes **no depth parameter**, and that
 absence is the fence — a depth passed down here would cap every round at one entry and silently
 restore the replace-latest behaviour the staging exists to remove, with no compile error anywhere.
-The declaration in `SimmableUpdateComponent.h` states this at length; the `.cpp` guard points at it
-rather than restating it.
+Since task 25 this is a compile-time check: a `static_assert` beside the definition pins
+`stageRelayedInput`'s exact signature, and was seen to fire (`C2338`) when a defaulted `uint32 depth`
+parameter was added to both the declaration and the definition. The history the header carried: before
+staging, the sink wrote the replicated ring directly at a session-configurable retention depth, so a
+second arrival in one server frame overwrote the first in memory before replication ever compared the
+property — about 11.6 % of relayed inputs, measured at the time; a depth parameter here would cap every
+round at one entry and reproduce exactly that. The return value's `droppedOldest` means the burst
+exceeded `relayedInputRing::kMaxDepth` in one frame and has already been counted on the host.
 
 A burst longer than the stage drops its oldest entry, and that drop is **counted on the host** rather
 than absorbed: it is the one input loss this side of a zero-redundancy configuration can actually
@@ -333,9 +400,14 @@ On a genuine mismatch the server logs and returns. **It does not disconnect the 
 disconnect path is engine-managed and is a dedicated-server-validation concern, not this fence's.
 
 The wire fence for the state channel is `FSimulationStateSyncBuffer::kWireFormatVersion`, which is
-**4** today: 1 → 2 for the applied-capture-tick reference, 2 → 3 when the ring-out
-sub-simulation joined the state composite (ring-out task 2), and 3 → 4 when the brawler radial's
-`hasHitGuard` left the middle of the composite (og-netcode-v2-field-defects task 9). The second bump is the interesting
+**5** today: 1 → 2 for the applied-capture-tick reference, 2 → 3 when the ring-out
+sub-simulation joined the state composite (ring-out task 2), 3 → 4 when the brawler radial's
+`hasHitGuard` left the middle of the composite (og-netcode-v2-field-defects task 9), and 4 → 5 when the
+projectile slot's `hitRootBodyId` left the wire (og-netcode-v2-field-defects task 17). ⚠ This section
+said **4** until task 25's re-verification (§11, F-25-2). The header's latch comment called the case
+"a pre/post-Stage-1 build mismatch"; the latch fires on **any** disagreement with the version constant.
+The toast uses one stable key (`kWireFormatMismatchToastKey`), so a repeated call replaces the message
+rather than stacking it. The second bump is the interesting
 one — the composite only *grew*, every pre-existing offset held, and the bump was made anyway
 because an older archived build does not compile the new sub-simulation in at all and the payload
 layout cannot express that. The reasoning is written at the constant in
@@ -375,7 +447,8 @@ covered in §6 and §5 respectively.
 ## §10 The render-side input echo, and the visualization sites
 
 `TickComponent` draws only. It resolves the manager for its role, skips if the character is not in
-storage, and runs five visualization passes.
+storage, and runs six visualization passes — radial, aim, projectile, movement (cvar-gated), target and
+block-prediction — then the input-history poll. (This line said "five" before task 25's re-count.)
 
 **One input source, resolved once per render frame.** `vizPlayerInput` is computed once and shared by
 every input-carrying visualization site, so the aim indicator and the block-prediction wedge can
@@ -423,6 +496,46 @@ the nullopt contract preserves.
 the prediction step on a client, the server simulation step on the authority — so the residual-
 lifetime arithmetic lines up with the simulation's own pruning.
 
+
+### The movement draw and the input-history poll
+
+*Moved from `TickComponent` (task 25).*
+
+**The movement draw reads a sim-tick snapshot on the render clock.** `attackSimAllState` is
+`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes once per completed sim tick in
+`ASimulationManagerUImpl::OnPostPhysicsStep`. So every drawn `State` / `DerivedState` value is stale by
+up to one 60 Hz tick, and a render frame above 60 Hz redraws the same snapshot; `StaticData` is authored
+once per session. The State and DerivedState halves come from the **same** copy, so the probe reading
+and the body pose describe one tick and can be combined — which the servo-error arithmetic in
+`BrawlerMovementVisualization.h` rests on. The call is a pure reader: every argument is a `const&`.
+
+**The movement cvar is read per frame, deliberately (guard G-26).** Task 16 made `StaticData` cvars
+read once, at construction, so a tunable cannot move under a running session and put two peers on
+different numbers. A viz cvar is the opposite case: it feeds nothing simulated, and its value is that a
+tuner can type `OGBrawler.Viz.Movement 1` mid-session and see the next frame change. The draw is ~60
+debug-line calls per character per frame, so off must cost one bool read. The same reasoning is written
+at `brawlerMovementVisualization::visualize` and in `ScoreboardDisplay-rationale.md` §4.
+
+**The input-history poll is the display's only feed.** The rings are keyed per character id, so a
+couch sibling gets its own the moment anything polls it. The **lanes** are polled for every registered
+character (each component runs the block for itself, exactly once, guard G-30), and the display picks
+which to draw at draw time — binding the feed to the selection is what once made a remote proxy's
+corrections invisible. The **row** poll keeps its gate (G-29): its source is this client's own capture
+line, which a remote proxy does not have. The machine state comes off the same `attackSimState` the
+block-prediction pass reads; there is no per-tick machine-state history, so a missed tick stays a hole
+and is never back-filled. Each lanes ledger is bounded at `kTickLaneCapacity` (240 ticks). The poll is a
+render-rate game-thread read of a physics-written capture line — the accepted tear argued in
+`SimulationManagerUImpl-rationale.md`'s CROSSING table. Nothing decides on it.
+
+**The aim and block-prediction passes** both consume the shared `vizPlayerInput`; a remote proxy with
+nothing relayed yet is skipped for that frame. The block-prediction pass shares the target pass's
+query-volume list (`m_targetVisualizationVolumeIds`). The legacy per-enemy range arcs
+(`DAttackTargetVisualization.legacyEnemyRangeArcsEnabled`) are off by default; the block-prediction
+pass is the primary view and the arcs remain for A/B comparison.
+
+**`selectVisualizationInput`'s echo carries continuous fields only** (§10); **no tier consult** is wired
+here — muting on a degraded tier is a separate, optional change.
+
 ---
 
 ## §11 Corrections — claims this file carried that were not true
@@ -442,7 +555,20 @@ exists — they verify existence, never truth.
 | **F-34-6** | *"the first writes would land in `m_detachedRelayRing`"* | **WRONG MEMBER.** The staged write path falls back to `m_detachedRelayStagingRing`. Both members exist, which is what makes the error invisible to any check that only asks whether a name resolves. §6. |
 | **F-34-7** | the block-prediction guard: *"render-rate live sample locally, **server correction ~1 RTT behind** for remote simulated proxies"* | **STALE, AND THE FILE CONTRADICTED ITSELF SEVENTY LINES APART.** The re-source block above it already said the remote source is the relay store's last-known relayed input, *"fresher by roughly the return leg"*. This guard still described the retired correction-cache column. §10. |
 | **F-34-9** | *"the registration-time `ROLE_AutonomousProxy` test used in `tryRegisterWithManager`"* | **A SYMBOL THAT DOES NOT EXIST.** The only occurrence of `tryRegisterWithManager` anywhere in the tree was that comment. The two real functions are `tryInitializeWithManager` and `tryRegisterWithNewFramework`, and the test in question is in the second. Re-anchored on §4 rather than on a name a reader would grep for and never find. |
-| **F-34-8** | seventeen lines of commented-out code | **UNRESTORABLE.** `m_simulationStateSyncedBuffer`, `EpicGamesAssignment`, `LiveLinkComponent` and the two `StructeredLog` headers (a misspelling) exist **nowhere** in this tree or the engine include paths. Un-commenting any of them is a compile error, so none is code that could be brought back. Deleted; the one fact they carried — that no tick prerequisite is installed — is stated in §2 and fenced at the site. |
+| **F-34-8** | seventeen lines of commented-out code | **UNRESTORABLE.** `m_simulationStateSyncedBuffer`, `EpicGamesAssignment`, `LiveLinkComponent` and the two `StructeredLog` headers (a misspelling) exist **nowhere** in this tree or the engine include paths. Un-commenting any of them is a compile error, so none is code that could be brought back. Deleted; the one fact they carried — that no tick prerequisite is installed — is stated in §2. (Task 25: no longer tagged — re-adding a prerequisite on a component that does not exist is a compile error, so there is no edit left to fence.) |
+| **F-25-1** | *"~10 seconds at 60 Hz"* at `kMaxRegistrationAttempts` | **WRONG CLOCK.** One attempt per `SetTimerForNextTick`, i.e. per game frame, not per 60 Hz sim tick. §2. |
+| **F-25-2** | this file's §8: *"`kWireFormatVersion` … is **4** today"* | **STALE.** It is **5** (`CorrectionStateBufferCodec.h`), bumped when `hitRootBodyId` left the wire. §8. |
+| **F-25-3** | *"SPAWN THE HOST BEFORE THE noteDelayedInputComponent ROUTE -- until that route exists, relayRemoteInput stages into m_detachedRelayStagingRing"* | **WINDOW REVERSED.** Until the route exists `relayRemoteInput` finds no component and returns. The hazard is the route existing while no host is linked. Guard G-06. |
+| **F-25-4** | *"NEVER HasAuthority() HERE -- it is always true on a non-replicated actor"* | **WRONG ACTOR.** That describes the manager (`bReplicates = false`); this component's owner is a replicated pawn. The prohibition survives on the other half: the predicate must match the one `ASimulationManagerUImpl::BeginPlay` fills its instance slot with. Guard G-02. |
+| **F-25-5** | header, `m_detachedRelayRing`: *"A server-side write that landed here would be invisible to every client, so the spawn is sequenced BEFORE the relay tap's id->component route"* | **WRONG MEMBER, AGAIN.** F-34-6's error, still standing in the header: server writes are staged, and with no host they land in `m_detachedRelayStagingRing`. Nothing writes `m_detachedRelayRing` on the server path; it is the read fallback. §6. |
+| **F-25-6** | header, the callbacks: *"Null until Task 7 wires the new path; OnRep_ handlers fall through to old logic when null"* | **FALSE.** There is no old logic. `OnRep_CorrectionState` calls the callback if bound and otherwise does nothing further. |
+| **F-25-7** | header, the host's forward declaration: *"the two accessors that dereference it are defined in the .cpp"* | **UNDERCOUNTED.** Six members dereference the host in the `.cpp`: both `getRelayedInputRing` overloads, `stageRelayedInput`, `setOnRelayedInputReceivedCallback`, `attachInputRelayHost`, `EndPlay`. The forward declaration's reason (a widely included header) stands. |
+| **F-25-8** | header, the tier sink: *"this component is its own target, so it asserts `id == GetUniqueID()`"* | **FALSE SINCE TASK 25.** The `check` compares `id` with the storage key of the pawn's replicated `SimCharacterId`. §13. |
+| **F-25-9** | *"THE DELAY BAR IS A THIRD BAR ON THE METER, so it implies the LANE poll runs even when the other two bars are off"* | **STALE COUNT.** `anyBarEnabled()` counts four selections: provenance, input delay, character state, and relay health (nearest stack only). The conclusion — any bar implies the lane poll — holds. §10. |
+| **F-25-10** | *"findOrSpawnForConnection logged the reason"* | **PARTLY.** It logs on its reachable null path (no owning actor on the wire). A null world or connection returns silently; the connection cannot be null here. |
+| **F-25-11** | header, the correction-input absence: *"a remote character's input reaches peers on the relay ring below"* | **NOT BELOW.** The ring is a property of `ASimulationInputRelay`. Guard G-36. |
+| **F-25-12** | *"the accepted tear argued at ASimulationManagerUImpl's CROSSING block"* | **RE-POINTED.** The manager header was converted; the CROSSING table now lives in `SimulationManagerUImpl-rationale.md`. §10. |
+| **F-25-13** | the tier block's citation of a relay-delay-spectrum design document, §12 | **UNRESOLVABLE HERE.** That document is in a private workspace outside this repository (as R-34-d). Dropped; the reasoning it pointed at is in §5. |
 
 ### Routed — not this file's to fix
 
@@ -460,3 +586,115 @@ exists — they verify existence, never truth.
 - **R-34-d.** Two comments cite `risks_and_plan.md §5.2`, a document in a private research workspace
   outside this repository. Removed from this file; the same citation survives in five other files
   with no owner. The wire-format fence's reasoning is now in §8, which resolves standalone.
+
+---
+
+## §12 The task-25 conversion — where every pre-conversion comment went
+
+Both files went from the Phase C convention (one-line `⛔ … §N` fences, long header banners) to
+code plus tags. Nothing was discarded without a destination. **Guards** are
+`SimmableUpdateComponent-guards.md` G-01 … G-37 (G-01 was written with task 25's code; the rest quote
+the shipped fence they replaced). **One fence became a `static_assert`**: the header's "NO DEPTH
+PARAMETER" (§6). Everything else is here.
+
+| pre-conversion comment | where it went |
+|---|---|
+| `.cpp` orientation banner | §0 (phase order updated for §13) |
+| movement-cvar block; `TickComponent` movement, poll, echo, aim, projectile and block-prediction prose | §10 and its movement/poll subsection; the prohibitions in them are G-24 … G-31 |
+| `kMaxRegistrationAttempts` "~10 seconds at 60 Hz" | §2, corrected (F-25-1) |
+| tick group / LiveLink one-liner | §2 (already there, F-34-5) |
+| `BeginPlay` / "Kick off body creation" / loop comments | §3 |
+| `⛔` one-liners in `tryInitializeWithManager`, `tryRegisterWithNewFramework`, `EndPlay` | G-02 … G-08, G-15; the CLIENT pull-half note is §6 "Linking" |
+| `OnRep_CorrectionState` fences; the version-byte note | G-09; §8 |
+| retired `OnRep_*` one-liners; `GetLifetimeReplicatedProps` absence fences | G-10, G-11, G-32 … G-34; §9 |
+| relay forwarders (section banner, re-read at bind, idempotent link, weak capture, replay) | §6; G-12 … G-14 |
+| owner-skip precondition, `num() > 0`, `ensure` | §6 "The owner-skip precondition"; G-15, G-16 |
+| RPC-boundary one-liners; the `ConnectionTierSink` `static_assert` note | G-17 … G-23; §7 |
+| tier sink one-liners (pure transport, relay actor, defensive null) | §5; F-25-10 |
+| `OGSIM_OPTIMIZE_ON` fence | G-35; §2 |
+| trailing labels (`GEngine` include, legacy arcs default, `RemoveDependentActor, then Destroy`, idempotent, "logged the reason"), the `//Component` banner, the relay-carrier include note | deleted as labels; their facts are in §6, §10 and G-08 |
+| header: concept typedefs, the callbacks, forwarders, attach/arrival declarations | §6, §7 and "Carried header prose" below |
+| header: tier block (Option A, why the sink stayed on the component) | "Carried header prose" below; §5 |
+| header: `stageRelayedInput` banner | `static_assert` + §6 |
+| header: retired members (correction-input property and callbacks, `getSyncedCorrectionInputBuffer`, the ring property, the tier property and consumer, `getMachineVizState`) | G-36, G-37; §9 and below |
+| header: wire-format latch, toast key | §8 (latch wording corrected) |
+| header: `m_inputRelayHost`, detached rings, `m_hasLocalInputProvider` | §6; G-12; F-25-5 |
+| header: `UObject` constructor doc, `//Physics`, `//Visualization`, "To add mapping context" | deleted as labels |
+| header: two commented-out physics-state overrides | deleted; recorded in §2 |
+
+### Carried header prose (verified before the move)
+
+**The concept typedefs.** `SyncedCorrectionBufferType` is the correction-state role
+(`FSimulationStateSyncBuffer`); `SyncedRemoteInputBufferType` names **one** role since the correction-
+input channel retired — the client→server buffer. `RelayedInputRingType` is named through a typedef for
+the same reason: `SimulationNetSync` binds the arrival callback and reads the ring at registration, and
+must do so without naming a UE type. `SimulatableOwnerTraits<SimulatableBrawler>` is specialised in
+`SimulatableBrawlerOwnerTraits.h`; any site that instantiates `SimulationNetSync<SimulatableBrawler>`
+includes that header.
+
+**`sendLocalInputToAuthority`** builds an `FInputRedundancyBundle` from the most recent
+`redundancyDepth` ticks still in the core's `PendingInputQueue` (the builder clamps the depth to the
+bundle's slot capacity) and fires the unreliable `ServerReceiveRemoteMove`. It is defined in the `.cpp`
+so the bundle-builder include stays out of this widely included header. The RPC is **unreliable**
+since Stage 1: no head-of-line blocking on input RPCs, and a dropped datagram self-heals because each
+send repeats the last `redundancyDepthTicks` ticks.
+
+**`deliverDelayedRemoteInput`** is the delivery entry point for an input released from the server's
+`ServerInputDelayQueue`, reached on the game thread from `ASimulationManagerUImpl::deliverRemoteInput`
+before the authority physics step. It routes through the **same** callback the RPC's no-wire fallback
+uses, with the **original** capture tick, so from `RemoteMoveQueue` onward a delayed input is
+indistinguishable from an undelayed one and the capture-tick dedup keeps working. The delay is
+expressed only as *when* this is called (G-23).
+
+**The tier (Option A, server-authoritative).** The server derives the tier from its own per-connection
+round-trip time (`ServerReceiveRemoteMove` resolves the primitive and forwards it to
+`ServerReceptionCoordinator::noteRttSample`) and publishes it; the client only reads it. With one
+producer there is no second estimator to disagree with, so the boundary-RTT tier split and its
+recurring one-tick corrections cannot happen. The replicated property, its notification and the client
+consumer moved off this per-character component onto the per-connection `ASimulationConnectionRelay`:
+one actor per wire makes "one wire, one tier" structural. **Why the sink stayed here**: it must
+resolve id → owning wire, and this object holds that link unconditionally. The manager's
+id → component map is populated at registration, several frames after the first input RPC can
+arrive, and the core records a tier as published **before** calling the sink
+(`ServerReceptionCoordinator` updates its last-published table, then calls
+`sendConnectionTierToOwningClient`), so a publish the sink could not route would never be retried. The
+`ConnectionTierSink` `static_assert` pins that this component is the sink.
+
+**The host link.** `m_inputRelayHost` is weak because the host is destroyed with the character and the
+teardown order between the two is not guaranteed. It is set on the authority at spawn — registration
+completion, strictly before the first relay write (G-06) — and on a client by whichever link path gets
+there first. `m_detachedRelayRing` is the **read** fallback: the core reads the ring once at
+registration bind on both roles and the concept types it as a reference, so an unlinked component
+returns this never-replicated, always-empty ring (version 0, so the bind-time ingest no-ops).
+
+**Retired, and not fenced by a tag:** `set/clearOnCorrectionInputReceivedCallback` and
+`m_onCorrectionInputReceivedCallback` (retired with the correction-input channel);
+`getSyncedCorrectionInputBuffer` (the authority's outbound surface is now the correction-state buffer,
+carrying the applied-capture-tick ref, plus the relay ring); the tier property, its notification, the
+pre-notification latch and the `ReplicatedTierConsumer` (now the manager's); `getMachineVizState()`
+(its only caller was the pawn's flinch-freeze predicate on the retired movement-component path; the
+freeze now happens inside `brawlerMovementSimulation::integrate`). The fenced retirements are G-10,
+G-11, G-32 … G-37.
+
+---
+
+## §13 The simulation character id (task 25)
+
+Every id this component hands the core — `tryRegister`, `noteDelayedInputComponent`,
+`unregisterFromNewFramework`, the provider lambda, every `id=%u` log line, the storage lookup in
+`TickComponent`, the relayed-input read, the input-history polls — is the pawn's replicated
+`SimCharacterId`, read through the private helper `simCharacterId()` (which answers
+`SimCharacterId::None` if the owner is not an `AOGBrawlerUECharacter`). It is **not** this component's
+`GetUniqueID()`, which is a different number on every peer.
+
+**How the id arrives.** In `tryRegisterWithNewFramework`, after the manager exists:
+
+* **Authority:** if the pawn's id is still `None`, allocate one from
+  `ASimulationManagerUImpl::allocateSimCharacterId` (count-up 1 … 255, never reused) and set it with
+  `AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId`. A refusal (all ids spent) is final —
+  guard G-01; the manager logs it at Error and `OG_CHECK`s.
+* **Client:** while the replicated id is still `None`, stay pending on the same retry loop and the same
+  `m_registrationAttempts` budget, ending in a `checkf` if it never arrives.
+
+The id is replicated with the pawn, not on the correction wire, so no wire format changes. The
+`sendConnectionTierToOwningClient` `check` compares its `id` argument with the same storage key.

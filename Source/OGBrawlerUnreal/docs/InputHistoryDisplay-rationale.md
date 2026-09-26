@@ -7,6 +7,8 @@
 <!-- lint-external-ref: GInputHistoryFrameMeter -- RETIRED NAME (§7.10): the CVar-backed bool behind the name above; deleted alongside it -->
 <!-- lint-external-ref: InputHistoryFrameMeter -- RETIRED NAME (§7.10): the bare stem both retired names above share; must not resolve on its own either -->
 <!-- lint-external-ref: frameMeterEnabled -- RETIRED NAME (§7.10): the accessor for the CVar above; deleted, its callers now read anyBarEnabled() -->
+<!-- lint-external-ref: UGameInstance::AddLocalPlayer -- Unreal Engine method (GameInstance.cpp), outside every scan root; quoted in the R0 correction of the index-0 claim -->
+<!-- lint-external-ref: UGameInstance::RemoveLocalPlayer -- Unreal Engine method (GameInstance.cpp), outside every scan root; its RemoveAt is why the local-player array is not append-only -->
 # The input-history display — rationale
 
 Companion to the three pure `og-brawler` headers that hold the display's logic —
@@ -14,7 +16,10 @@ Companion to the three pure `og-brawler` headers that hold the display's logic �
 `BrawlerInputHistoryVisualizationPanel.h` — and to the four `Source/OGBrawlerUnreal`
 files that own, feed, gate and draw them: `InputHistoryVisualizationUImpl.h`,
 `InputHistoryVisualizationUImpl.cpp`, `OGBrawlerUEHUD.h` and `OGBrawlerUEHUD.cpp`.
-**The source files carry the guards; this file carries the reasoning.**
+**This file carries the reasoning.** The guards live in two places. `InputHistoryVisualizationUImpl.*` was
+converted to the one-line-tag convention (og-netcode-v2-field-defects task 25), so its prohibitions are entries in
+`InputHistoryVisualizationUImpl-guards.md`, and its former comment prose is in §8. `OGBrawlerUEHUD.*` and the pure
+headers are not converted, and still carry their guards as source comments.
 
 <!-- ================= WHY THIS FILE LIVES HERE ==============================
      Recorded as a decision, not left to be re-derived. See §0.
@@ -213,7 +218,7 @@ contiguity test — and not a field change — can prevent the fold.
 | pure, engine-free (BUSL-1.1) | `BrawlerInputHistoryVisualizationLanes.h` | `MachineStateCell`, `machineStateCellOf`, `TickLane`, `InputHistoryTickLanes`, `kTickLaneCapacity`, `clampRetainedLaneTicks` — the per-tick storage the bars read; and the idle gate — `laneTickIsInactive`, `LaneIdleGate`, `LaneAdmission`, `LaneAxisEvent`, `LaneAxisEventKind`, `kLanePauseEngageTicks`, `kLaneElisionLedgerCapacity` — §7.7; and the clock reading — `ClockDriftReading`, `noteClockDriftReading`, `clockDriftReading`, `authorityStaticSimTicks` — §7.12 |
 | pure, engine-free (BUSL-1.1) | `BrawlerInputHistoryVisualizationBars.h` | `provenanceCellStyleOf`, `machineCellStyleOf`, `frameMeterGeometryFor`, `frameMeterCellX`, `frameMeterBarTopY`, `collectLaneRuns`, `runLabelFits`, `frameMeterHorizonOf` — §7; and the axis-event markers — `FrameMeterAxisEvent`, `FrameMeterAxisEventList`, `collectFrameMeterAxisEvents`, `frameMeterElisionLabelTopY`, `kLaneElisionColor`, `kLaneResyncColor` — §7.7; and the clock readout — `ClockDriftReadout`, `buildClockDriftReadout` — §7.12 |
 | read seams (MPL-2.0) | `SimulationInputResolution.h`, `SimulationReconciliation.h` | `localInputCache`, `slotStateProvenance`; the join `getAppliedCaptureTickRef` already existed |
-| UE (BUSL-1.1) | `InputHistoryVisualizationUImpl.*` | the id-keyed rings and lanes, `firstLocalCharacterId`, `firstLocalPlayerController`, `masterEnabled`, `displayEnabled`, `provenanceEnabled`, `inputDelayEnabled`, `characterStateEnabled`, `barSelection`, `anyBarEnabled`, `retainedLaneTicks`, `panelScale`, `panelBackgroundAlpha`, `panelVisibleRows`, `pauseLanesWhileIdle` — §7.10 |
+| UE (BUSL-1.1) | `InputHistoryVisualizationUImpl.*` | the id-keyed rings and lanes (`InputHistoryStore`), the same-tick seam reader (`ReconciliationSlotReader`), `firstLocalCharacterId`, `firstLocalPlayerController`, `nearestCharacterIdTo`, `masterEnabled`, `displayEnabled`, `provenanceEnabled`, `inputDelayEnabled`, `characterStateEnabled`, `relayHealthEnabled`, `nearestStackEnabled`, `barSelection`, `anyBarEnabled`, `retainedLaneTicks`, `panelScale`, `panelBackgroundAlpha`, `panelVisibleRows`, `pauseLanesWhileIdle` — §7.10, §8 |
 | UE (BUSL-1.1) | `OGBrawlerUEHUD.*` | draw calls only; every number, endpoint and sign comes from the pure header |
 
 Two rules the split exists to serve. First, **no test target links `OGBrawlerUnreal`**, so
@@ -875,6 +880,12 @@ touches and requires every occurrence to be either that variable's own declarati
 proved to discriminate by its checker control (a seeded read inside `panelScale()`, outside
 the block, fires exactly one violation).
 
+⚠ **THE TWO MARKERS NO LONGER EXIST (task 25, 2026-09-26).** The comment conversion of
+`InputHistoryVisualizationUImpl.cpp` deleted both banner lines, because section banners are not allowed in
+converted source. The checker above bounded its block by those two strings, so as written it now finds no block at
+all. Re-key it on the accessor function names before trusting another run. The property itself is unchanged. Guard
+G-03 of `InputHistoryVisualizationUImpl-guards.md` carries the fold, and the anonymous namespace carries "no other translation unit reads a `G*`" as a compile-time fact. See §8.2.
+
 **Retiring `InputHistoryFrameMeter` properly.** The CVar, `GInputHistoryFrameMeter` and
 `frameMeterEnabled()` are all deleted, not merely unused — a surviving accessor nothing calls
 would be a second, silent source of truth about whether the meter draws. The checker's
@@ -1234,3 +1245,174 @@ a COUNT and the LAST tick of each kind, which is why a poll that saw three skips
 saying three rather than three marks it cannot place. What `next` shows is the drift STATE that
 decides them, sampled once per poll: a poll landing between two decisions can miss a `SKIP`
 entirely, and the line makes no claim that it did not. The `skips` count still sees it.
+
+---
+
+## 8. The UE layer, `InputHistoryVisualizationUImpl.*`: the converted source's prose
+
+Until og-netcode-v2-field-defects task 25 (2026-09-26), `InputHistoryVisualizationUImpl.h` and `.cpp` carried the
+text below as comments. The conversion verified every claim against the tree (R0) before moving it. What was false
+is corrected in place and listed in §8.5. The prohibitions are entries in `InputHistoryVisualizationUImpl-guards.md`,
+each reached by a one-line tag at its site. This section holds everything else. The files belong to the
+`brawler-input-history-visualizer` initiative. Task 25 changed one expression in them (the key, §8.1) and converted
+their comments, and nothing else.
+
+### 8.1 What the layer owns, and what it is keyed on
+
+The UE side of the display is ownership, selection and the poll. `InputHistoryStore` owns one
+`InputHistoryRowRing` and one `InputHistoryTickLanes` **per character id**, both held in one `CharacterHistory`
+under one key (guard G-04), and feeds them. The folding, the join and the classification are all pure og-brawler
+code, reached through `BrawlerInputHistoryVisualizationPoll.h` (`pollInputHistory`, `pollInputHistoryLanes`). This
+layer supplies only what the engine knows: which character, which tick, and the adapter onto the peers' diagnostic
+seams (`ReconciliationSlotReader`, §8.4).
+
+**Keyed on the character id, never on the connection.** Couch co-op siblings share one root `UNetConnection`, and a
+listen-server host's local player has none at all. A connection-keyed store would give every sibling the same
+history, or fail outright on the host.
+
+**The key, since task 25.** It is `toStorageKey(AOGBrawlerUECharacter::GetSimCharacterId())`: the pawn's replicated
+`SimCharacterId`. The authority assigns it, counting up from 1 to 255, and never reuses one. It is the same number
+on every peer, and it is the id the registration hands `tryRegister`, so it is the simulation's storage key. Two
+edge cases follow from the code:
+
+* **0 until assigned.** Before the authority assigns it, or before it replicates to a client, it reads 0.
+  `firstLocalCharacterId` then answers 0 rather than `nullopt`. No capture line is keyed 0, so
+  `ASimulationManagerUImpl::pollInputHistory` returns on the missing line, as it does for any id without one.
+  `getInputHistoryRows(0)` answers `nullptr`, so the HUD draws nothing.
+* **`nullopt`** means there is no world, game instance, local player, controller or pawn (a dedicated server, or a
+  client before possession), or the pawn is not an `AOGBrawlerUECharacter`.
+
+**Single character is a selection, not a structure.** The row panel is fed for the first local player's character
+alone: `USimmableUpdateComponent::TickComponent` polls rows only when `firstLocalCharacterId` equals its own id.
+The lanes are fed by every registered character's own component. The store is a map either way, so a second local
+character gets its own independent ring by being polled, and nothing here has to be reshaped.
+
+**Reads only.** Nothing in these files writes simulation state. Nothing they fold is replicated, enters a correction
+payload, or reaches `compute_checksum` (§3).
+
+**Lifetime.** A character's entry is created on its first poll (`m_byId[id]`) and erased by `forgetCharacter`.
+`ASimulationManagerUImpl::unregisterFromNewFramework` calls that once, mirroring the peer's own erase of the capture
+line (`SimulationInputResolution::unregisterCharacter`, reached through `unregisterSimulatable`). An entry left
+behind is a leak keyed on an id that, since task 25, no character will ever hold again.
+
+### 8.2 The gates and the knobs
+
+`OGBrawler.InputHistory` (`GInputHistory`) is the master and defaults **off**. `masterEnabled` reads it raw and
+alone. Its only caller is the input-history early-out in `USimmableUpdateComponent::TickComponent` (guard G-08).
+
+Six display toggles sit under it, and all default **on**, so that the master alone is what a reader flips:
+
+| CVar | accessor | what it draws |
+|---|---|---|
+| `OGBrawler.InputHistoryDisplay` | `displayEnabled` | the row panel |
+| `OGBrawler.InputHistoryProvenance` | `provenanceEnabled` | the provenance bar |
+| `OGBrawler.InputHistoryInputDelay` | `inputDelayEnabled` | the server-lag verdict bar and its decomposition readout |
+| `OGBrawler.InputHistoryCharacterState` | `characterStateEnabled` | the attack-machine-state bar |
+| `OGBrawler.InputHistoryRelayHealth` | `relayHealthEnabled` | the relay-health bar, on the nearest stack only (G-01). It is the bar the relay-health investigation was built for. |
+| `OGBrawler.InputHistoryNearest` | `nearestStackEnabled` | the second stack, for the brawler nearest the first local one |
+
+Each toggle accessor folds the master in (guard G-03). `OGBrawler.InputHistoryNearest` is an escape hatch rather
+than a feature flag: at 0 the meter draws exactly the one stack it drew before the second one existed. The source
+said it defaults on "while the remote weapon-swing investigation it was built for is open". That investigation's
+status was not re-verified by this conversion.
+
+⚠ §7.10 predates the relay-health and nearest toggles. Its "four children", its census list and its cost table
+name only the first four. The fold rule it states covers all six.
+
+`barSelection` folds the toggles into the pure header's `FrameMeterBarSelection`, which is the only shape
+`frameMeterEnabledBarCount` / `frameMeterBarSlotOf` accept. The one thing the toggles cannot say alone is which
+stack is asking, because the relay-health bar belongs to the stack following someone else's character (G-01).
+`anyBarEnabled` asks `frameMeterEnabledBarCount` of the stack that can draw the most bars (G-02). It is the lane
+poll's own gate (`feedAnyBar` in the component) and the HUD's frame-meter gate, and it is asked instead of OR-ing
+the bar accessors at the call site. With zero bars on, no lane data is needed at all.
+
+**The knobs** do not fold the master. They are read only on paths the toggles have already gated.
+
+| CVar | accessor | default | clamp (pure) |
+|---|---|---|---|
+| `OGBrawler.InputHistoryLaneTicks` | `retainedLaneTicks` | 120 (`kTickLaneDefaultRetainedTicks`) | `clampRetainedLaneTicks`, [1, 240] |
+| `OGBrawler.InputHistoryPauseIdle` | `pauseLanesWhileIdle` | on | none (a bool) |
+| `OGBrawler.InputHistoryPanelScale` | `panelScale` | 1.0 (`kPanelDefaultScale`) | `clampPanelScale`, [0.25, 4]; NaN lands on the minimum |
+| `OGBrawler.InputHistoryPanelAlpha` | `panelBackgroundAlpha` | 0 (`kPanelDefaultBackgroundAlpha`) | `clampPanelBackgroundAlpha`, [0, 1] |
+| `OGBrawler.InputHistoryPanelRows` | `panelVisibleRows` | 24 (`kPanelVisibleRows`) | `clampPanelVisibleRows`, [1, 64] |
+
+* **Clamped at read, by the pure header's own clamps, never at the console and never re-implemented here.** The
+  console keeps echoing what the user typed, and the drawn frame is bounded whatever that turns out to be.
+  og-brawler's `BrawlerScoreboardVisualization-rationale.md` and a comment in `BrawlerScoreboardPanelTest.cpp` cite
+  this discipline as stated "in `InputHistoryVisualizationUImpl.h`". Since task 25 it is stated here.
+  (`ScoreboardDisplay-rationale.md` §4.2 cites the same header for the master fold, which is now G-03 and §8.2.)
+* **Every default is the pure header's own constant**, so the shipped look and the code's idea of the shipped look
+  cannot drift apart. Tuning the display is a console line, not a rebuild. There are three panel knobs because they
+  are three separate questions (how big, how solid, how much history), and a user settling the display moves one at
+  a time. Scale is the one factor behind both the panel's geometry and its text.
+* **None of them resizes anything, and the types enforce it.** `InputHistoryRowRing` is a `std::array` of
+  `kInputHistoryRowCapacity` (64) rows, and `TickLane` holds a `std::array` of `kTickLaneCapacity` (240) slots.
+  Both are fixed at compile time, so the row and lane-tick knobs can only bound a *read*.
+* **Alpha 0 draws no backdrop at all.** `AOGBrawlerUEHUD` skips the `DrawRect` unless `backgroundAlpha > 0.f`,
+  because an invisible rectangle is still a draw call. At 1 the backdrop hides the scene. It never changes the rows'
+  own colours.
+* **The idle pause** is a behaviour knob rather than a developer overlay, which is why it defaults on. On, the lanes
+  stop recording once the player has been idle for a short run, so the retained window holds activity rather than a
+  wall of Idle. The cost is that a correction or resimulation landing while idle is elided with everything else.
+  Setting it to 0 restores full-fidelity recording, which is how an idle-only desync is investigated (§7.7).
+
+### 8.3 Selecting the character: the first local player, and the nearest brawler
+
+`firstLocalPlayerController` answers the game instance's local player at index 0 (guard G-07), or `nullptr` when
+there is none. The HUD draws only when its owning controller equals that answer, so exactly one local player's HUD
+draws the display rather than every sibling's.
+
+`nearestCharacterIdTo` returns the brawler nearest `localId`, the character the second stack draws, or `nullopt`
+when the world holds no other. The gather is the manager's (`gatherNearestCandidates`) and the choice is the pure
+header's (`brawlerInputHistoryVisualization::nearestCharacterIdTo`). This function owns neither, and it is the one
+place they are put together. `previousChoice` is last frame's answer. The pure selector's hysteresis
+(`kNearestHysteresisCm`) holds it, so two candidates at nearly equal range do not swap the stack every frame.
+`outDistanceCm` is the range the answer was chosen at, taken off the same candidate list (guard G-05). It is an
+out-parameter rather than a second call, and it is left untouched when there is no answer.
+
+### 8.4 The seam reader, and the store's two polls
+
+`ReconciliationSlotReader` puts two diagnostic seams behind one reader: `getAppliedCaptureTickRef` and
+`slotStateProvenance`. The pure poll asks both at the **same** simulation tick (`observation.appliedTick` in
+`rebuildAppliedCaptureInversion`). Same-tick is the load-bearing part: it is what licenses the join's rule that an
+observation naming no capture speaks for the tick it was asked about. The reader is templated on the peer types, so
+this header names no reconciliation type of its own. The composition root, `ASimulationManagerUImpl::pollInputHistoryLanes`,
+binds `SimulatableBrawler` through `makeReconciliationSlotReader`. It holds a **borrowed** reference that lives for
+one poll, because it is built at that call site. `hasCorrectionCache` is a same-thread presence test (guard G-06).
+
+`InputHistoryStore::poll` sweeps `id`'s resident capture window into its own ring at render rate. Its two
+`static_assert`s carry the accepted-tear argument, and their messages are the record. A capture slot is read from
+the game thread while the physics thread may be writing it, so a capture that owned memory would turn that tear
+from a wrong glyph into a crash.
+
+`InputHistoryStore::pollLanes` sweeps `id`'s resident correction window into its provenance lane, plus the single
+live machine-state sample the lane poll can take this tick. Its parameters:
+
+* `liveInput` is the panel's own classification of this tick's capture, or `nullopt` when the caller had none to
+  read. The pure poll's gate decides on it, not this layer.
+* `predictionOffsetTicks` (the estimator's offset), `delay` (this poll's input-delay decomposition) and `clock` (this
+  poll's one read of the client clock) are each `nullopt` on a role that does not have one. The pure poll pairs
+  each with `liveSimTick`, so a marker and the lane axis it is measured against are one snapshot rather than two
+  reads.
+* `remoteObservations` are the relayed reads this client served for a **remote** character, and they supply the
+  delay lane's client half. `remoteArrivals` (when each relayed capture finally arrived) and `rollbackWindowTicks`
+  (how far back a resim may still reach) together make the relay-health lane. A locally controlled character uses
+  the nine-argument overload, which forwards `NoRemoteDelayObservations`, `NoRemoteInputArrivals` and 0. The manager
+  makes that choice: it takes the twelve-argument form only when both relay rings exist. The pure poll selects the
+  source by **type**, and a `static_assert` pairs the two type choices, so this layer forwards a choice rather than
+  making a second one.
+
+The `AppliedCaptureInversion` is a local that is rebuilt on every poll. See §8.5, C25-6: keeping it local is
+locality, not a fence.
+
+### 8.5 Corrections (R0): claims the source carried that were not true
+
+| id | the source said | the tree says |
+|---|---|---|
+| C25-1 | the key is "the same `(unsigned int)USimmableUpdateComponent::GetUniqueID()` the registration uses" | False since task 25. The key is the pawn's replicated `SimCharacterId`, and the registration passes that id (§8.1). |
+| C25-2 | every accessor "on this page" folds the master in | Only the six toggle accessors do. The five knob accessors never did (§8.2, guard G-03). |
+| C25-3 | `anyBarEnabled` is asked "instead of ORing the three bar accessors" | There are four bars since the relay-health bar landed. |
+| C25-4 | the idle pause defaults on "unlike the two toggles above" | Every toggle above it also defaults on. Only the master defaults off. |
+| C25-5 | "`GetLocalPlayers()` is append-only" | `UGameInstance::AddLocalPlayer` appends, but `UGameInstance::RemoveLocalPlayer` erases with `RemoveAt` and shifts later entries. Index 0 is still the first-joined player, because this project's only removal path, `AOGBrawlerPlayerController::LeaveLocalPlayer`, refuses controller id 0 (guard G-07). |
+| C25-6 | ⛔ "a kept inversion would outlive the slots it describes" (a fence on the local) | `rebuildAppliedCaptureInversion` calls `inversion.clear()` on entry, and `pollInputHistoryLanes` rebuilds it before either lane reads it. A hoisted member would be cleared the same way, so the fence prevented nothing and was dropped rather than tagged. |
+| C25-7 | `firstLocalCharacterId` is `nullopt` for "a dedicated server, or a client before its pawn has been possessed" | Incomplete. It is also `nullopt` for a pawn that is not an `AOGBrawlerUECharacter`, and it answers **0**, not `nullopt`, while the pawn's id is unassigned (§8.1). |
