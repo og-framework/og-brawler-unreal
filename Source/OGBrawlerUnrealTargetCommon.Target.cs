@@ -28,5 +28,20 @@ public static class OGBrawlerUnrealTargetCommon
 		Rules.ExtraModuleNames.Add("DVolumeModule");
 		Rules.ExtraModuleNames.Add("JoltPhysicsModule");
 		Rules.ExtraModuleNames.Add("ProceduralMountainSide");
+
+		// [movement-sim T90] Chaos::IsInPhysicsThreadContext() is compiled out of Shipping and Test
+		// (Chaos/Public/Framework/Threading.h: PHYSICS_THREAD_CONTEXT defaults to 0 there, behind an
+		// #ifndef). ChaosSpatialQueryAdapter.cpp reads it on every query to choose the physics-thread vs
+		// game-thread particle view, and the answer is load-bearing (MEASURED true inside the pre-simulate
+		// callback; impl/arch_pt_static_query.md Q1). Keep the engine's own tracking in the two
+		// configurations that would drop it. Scoped so Development/DebugGame action graphs are untouched.
+		// Requires the Unique build environment (source engine, monolithic target): the tracking's TLS
+		// singleton is defined inside the Chaos module under the same macro, so the define must reach the
+		// engine modules compiled into this target. impl/design_shipping_thread_context.md.
+		if (Rules.Configuration == UnrealTargetConfiguration.Shipping ||
+		    Rules.Configuration == UnrealTargetConfiguration.Test)
+		{
+			Rules.GlobalDefinitions.Add("PHYSICS_THREAD_CONTEXT=1");
+		}
 	}
 }

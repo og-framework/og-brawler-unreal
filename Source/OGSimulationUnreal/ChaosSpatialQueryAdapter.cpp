@@ -17,6 +17,16 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "Runtime/Experimental/Chaos/Public/Framework/Threading.h"
+
+// Chaos::IsInPhysicsThreadContext() exists only when the engine's PHYSICS_THREAD_CONTEXT is 1. The
+// engine defaults it to 0 in Shipping and Test; OGBrawlerUnrealTargetCommon.Target.cs re-enables it
+// there because the two reads below are load-bearing (impl/design_shipping_thread_context.md).
+// Fail here, with the contract named, rather than as a bare C2039 at the call site.
+#if !defined(PHYSICS_THREAD_CONTEXT) || !PHYSICS_THREAD_CONTEXT
+#error "ChaosSpatialQueryAdapter needs Chaos::IsInPhysicsThreadContext(); add PHYSICS_THREAD_CONTEXT=1 to GlobalDefinitions for this configuration (see OGBrawlerUnrealTargetCommon.Target.cs)."
+#endif
+
 OGSIM_OPTIMIZE_OFF
 
 DEFINE_LOG_CATEGORY(LogOGSpatialQuery);
@@ -791,6 +801,7 @@ void ChaosSpatialQueryAdapter::filterDisabledAndUnreadyHits(TArray<FHitResult>& 
 {
 	// Post-filter disabled shapes — the Chaos acceleration structure can only be
 	// updated on the game thread, so we post-filter on the physics thread.
+	// Available in Shipping/Test only via the Target.cs define — see the #error guard at the top of this file.
 	const bool bPhysicsThread = Chaos::IsInPhysicsThreadContext();
 
 	FilterTally tally;
@@ -917,6 +928,7 @@ void ChaosSpatialQueryAdapter::resolveHitIdentity(FHitResult& hit,
 	};
 
 	ECollisionChannel chaosChannel;
+	// Available in Shipping/Test only via the Target.cs define — see the #error guard at the top of this file.
 	if (Chaos::IsInPhysicsThreadContext())
 	{
 		// ⭐ [movement-sim T38] ANSWER TO QUESTION 4: yes, this site shared the
