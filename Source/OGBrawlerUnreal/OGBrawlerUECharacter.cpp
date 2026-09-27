@@ -83,7 +83,7 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	CapsulePhysicalMaterial->Friction = 0.f;
 	// ⛔G-04  docs/OGBrawlerUECharacter-guards.md
 	CapsulePhysicalMaterial->Restitution = 0.f;
-	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
+	// ⛔G-17  docs/OGBrawlerUECharacter-guards.md
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
@@ -138,6 +138,7 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 void AOGBrawlerUECharacter::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
+	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
 	RebuildHumanoidMesh();
 }
 

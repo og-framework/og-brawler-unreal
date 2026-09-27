@@ -9,6 +9,14 @@
 <!-- lint-external-ref: AnimInstance -- quoted verbatim as an ABSENCE claim: no such class is used in this module -->
 <!-- lint-external-ref: m_weaponVis -- deleted commented-out code, recorded as history; it must NOT resolve -->
 <!-- lint-external-ref: AddCustomPhysics -- Unreal Engine body-instance method; named because this module never calls it -->
+<!-- lint-external-ref: UpdatePhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: UpdateMassProperties -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: GetSimplePhysicalMaterial -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: GetComplexPhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: FObjectInitializer::CreateDefaultSubobject -- Unreal Engine method, outside every scan root -->
+<!-- lint-external-ref: CoreUObject/Private/UObject/UObjectGlobals.cpp -- Unreal Engine source file, outside every scan root -->
+<!-- lint-external-ref: ComponentInits -- Unreal Engine FObjectInitializer member, outside every scan root -->
+<!-- lint-external-ref: InitSubobjectProperties -- Unreal Engine FObjectInitializer method, outside every scan root -->
 # `AOGBrawlerUECharacter` — rationale
 
 Companion to `Source/OGBrawlerUnreal/OGBrawlerUECharacter.h` and
@@ -117,6 +125,64 @@ converted, and the `simulatePhysics` half of the pair is now a `static_assert` o
 > the movement path).
 
 The restitution prohibition is guard G-04.
+
+### 2.1 Where the override is applied: `PostInitializeComponents`, not the constructor (shrink-install task 9)
+
+**Correction to the first quote above.** The material subobject and its friction and restitution
+are still authored in the constructor. The `SetPhysMaterialOverride` call moved to
+`PostInitializeComponents` on 2026-09-26, and "in the constructor" is no longer true of it. Guard
+G-17 forbids moving it back.
+
+**Why the constructor was wrong.** The engine call chain, read in the engine source (UE 5.6,
+`Engine/Source/Runtime/Engine/Private/`):
+
+```
+AOGBrawlerUECharacter::AOGBrawlerUECharacter()                 (native CDO: module load, GEngine == nullptr)
+ └ UPrimitiveComponent::SetPhysMaterialOverride                PrimitiveComponentPhysics.cpp
+    └ FBodyInstance::SetPhysMaterialOverride                   PhysicsEngine/BodyInstance.cpp
+       ├ PhysMaterialOverride = NewPhysMaterial
+       ├ UpdatePhysicalMaterials()
+       │   ├ GetSimplePhysicalMaterial()    → !GEngine → LogPhysics Error #1, returns nullptr
+       │   └ GetComplexPhysicalMaterials()  → !GEngine → LogPhysics Error #2, returns
+       └ UpdateMassProperties()
+           └ GetSimplePhysicalMaterial()    → !GEngine → LogPhysics Error #3
+```
+
+That gives exactly the three lines every process logged. Nothing else in `Source/` or `Plugins/`
+calls `SetPhysMaterialOverride`, `UpdatePhysicalMaterials`, `GetSimplePhysicalMaterial` or
+`GetComplexPhysicalMaterials` (grep, 2026-09-26). On a spawned instance `GEngine` exists, so the
+same call worked. Only the class default object logged, but the cook counts those lines as errors
+and fails.
+
+**Why not `if (!HasAnyFlags(RF_ClassDefaultObject))` around the constructor call.** The engine's
+error text suggests that fix, and for this class spawned directly (`DefaultPawnClass` is the C++
+class, §3) it would behave the same. It would also leave the override `None` on every class default
+object, Blueprint ones included. In `FObjectInitializer::CreateDefaultSubobject`
+(`CoreUObject/Private/UObject/UObjectGlobals.cpp`), a subobject whose owner's archetype is a
+Blueprint (or any template that is not the class default object) is queued in `ComponentInits`.
+`InitSubobjectProperties` then runs after the constructor and copies every property of the capsule
+from the archetype's capsule, `BodyInstance` included. The override set in the constructor would be
+overwritten with `None`. That would silently break the "cannot be un-set by a Blueprint" claim
+quoted above. This is read from the engine source, not run: no Blueprint subclass is spawned today.
+Applying the override from code in `PostInitializeComponents` runs on every instance, whatever its
+archetype.
+
+**Why `PostInitializeComponents` is early enough.** The capsule's body is created at component
+registration, with the default material. `SetPhysMaterialOverride` on a registered body pushes the
+material onto the existing shapes (`UpdatePhysicalMaterials`) and recomputes mass
+(`UpdateMassProperties`). Both happen before `BeginPlay`, and `USimmableUpdateComponent::BeginPlay`
+is where the physics factory adopts the capsule. So the adopted body, and the first simulated step,
+already carry friction 0 and restitution 0. No code in this project sets a mass override, so the
+recomputed mass is what the engine derives from the override material.
+
+**Evidence (runtime, not reasoning).** Headless standalone runs of ThirdPersonMap
+(`UnrealEditor-Cmd <uproject> /Game/ThirdPerson/Maps/ThirdPersonMap -game -nullrhi -unattended`
+with `-ExecCmds="getall CapsuleComponent BodyInstance, …, quit"`):
+
+| run | `LogPhysics: Error` lines | spawned pawn `…OGBrawlerUECharacter_0.CollisionCylinder.BodyInstance` | capsule material restitution / density |
+|---|---|---|---|
+| before (constructor call), 20:31 | 3 | `PhysMaterialOverride="BrawlerCapsulePhysMat"` | 0.000000 / not read |
+| after (`PostInitializeComponents`), 20:52 | 0 (and no `Error:` line of any kind) | `PhysMaterialOverride="BrawlerCapsulePhysMat"` | 0.000000 / 1.000000 (the engine default material is also 1.000000, so the recomputed mass is unchanged) |
 
 ## 3. Constructor settings: camera, networking, cosmetic components
 

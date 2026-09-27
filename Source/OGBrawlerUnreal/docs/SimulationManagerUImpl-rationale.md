@@ -26,6 +26,8 @@ collide.
      escaped (§11 F-32-5 and F-32-6).
      ========================================================================= -->
 <!-- lint-external-ref: AActor::Owner -- Unreal Engine type, outside every scan root; the engine is not vendored into this repository -->
+<!-- lint-external-ref: bUseLoggingInShipping -- Unreal Engine target-rules flag (Shipping logging); this project does not set it -->
+<!-- lint-external-ref: FNoLoggingCategory -- Unreal Engine type (LogMacros.h), outside every scan root -->
 <!-- lint-external-ref: UNetConnection::Tick -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: UDataStreamChannel::Tick -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: UDataStreamChannel::WriteData -- Unreal Engine method, outside every scan root -->
@@ -1249,6 +1251,24 @@ which is the single most likely thing to be silently off when somebody goes look
 rather than retyped. **Its own absence is also information:** no `[ResimProbe.Session]` line in a
 client log means either the category was set to `NoLogging` or the branch never ran, and both are
 worth knowing before reading a zero off any counter.
+
+**The statement is compiled only `#if !NO_LOGGING`** (og-brawler-shrink-install task 9,
+2026-09-26). Its arguments call `LogOGResimProbe.GetVerbosity()` and `.IsSuppressed(...)`. In a
+build with `NO_LOGGING` (Shipping without `bUseLoggingInShipping`) every log category is an
+`FNoLoggingCategory`, which has neither member. `UE_LOG` still type-checks its arguments there, so
+without the `#if` the Shipping client does not compile (`error C2039` ×2). With logging on, the
+preprocessor keeps the statement byte-for-byte, so Development and Debug behave as before. In a
+`NO_LOGGING` build the line could never print anyway.
+
+For the same reason, the field-diff predicate in `bindCorrectionFieldDiffGate` declares its return
+type as `-> bool` (same task). Under `NO_LOGGING`, `UE_LOG_ACTIVE(...)` expands to `(0)`, so the lambda
+returned `int`. `std::function<bool()>` then converts that `int` to `bool` inside the standard
+library, and warning C4800 is an error in this build (`error C4800` at `functional(810)`). The
+Shipping client first reported it once the two C2039 errors above were gone. With the return type
+declared, the conversion is a constant `0` in the lambda's own `return`, like the
+`const bool pushProbeActive = UE_LOG_ACTIVE(...)` initialisation in the same file, which compiles
+cleanly. With logging on, `UE_LOG_ACTIVE` already yields a `bool`, so nothing changes. The
+predicate still reads the category live (guard G-50).
 
 ### The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only
 

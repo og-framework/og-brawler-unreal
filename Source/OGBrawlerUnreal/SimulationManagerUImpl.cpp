@@ -70,7 +70,7 @@ namespace
 	{
 		// ⛔G-50  docs/SimulationManagerUImpl-guards.md
 		correctionFieldDiff::setEnabledPredicate(
-			[]() { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
+			[]() -> bool { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
 	}
 
 	void writeRestoredBodyState(Chaos::FRigidBodyHandle_Internal& ptApi, const PhysicsBodyState& restored,
@@ -983,11 +983,13 @@ void ASimulationManagerUImpl::BeginPlay()
 		ogblog::setGlobal(std::function<void(const char*)>(ogblogClient));
 		bindCorrectionFieldDiffGate();
 
+#if !NO_LOGGING
 		UE_LOG(LogOGResimProbe, Warning,
 			TEXT("[ResimProbe.Session] resim-gate probe LIVE — verbosity=%s verboseDetail=%s windowSamples=%u"),
 			ToString(LogOGResimProbe.GetVerbosity()),
 			LogOGResimProbe.IsSuppressed(ELogVerbosity::Verbose) ? TEXT("off") : TEXT("on"),
 			static_cast<uint32>(kResimGateProbeWindowSamples));
+#endif
 	}
 
 	// ⛔G-63  docs/SimulationManagerUImpl-guards.md

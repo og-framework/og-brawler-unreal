@@ -1,4 +1,8 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: FBodyInstance::UpdatePhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: FBodyInstance::UpdateMassProperties -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: GetSimplePhysicalMaterial -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: GetComplexPhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
 # `OGBrawlerUECharacter.h` and `.cpp` — guards
 
 Every prohibition that survived the task-25 conversion of the pawn's two files. Each entry has an
@@ -254,6 +258,37 @@ only read and its only write.
 **Consequence.** Deleting it leaves a mid-game-joined local player with no mapping context and
 no input. Nothing logs: `InputMappingUETranslator::addToSubsystem` returns silently on a null
 context.
+
+---
+
+## G-17 — the capsule's phys-material override is applied in `PostInitializeComponents`, never in the constructor
+
+**Site:** an absence tag in the constructor, directly after `CapsulePhysicalMaterial->Restitution = 0.f;`,
+where the `SetPhysMaterialOverride` call used to be and where it would be typed back.
+The call itself is the first statement after `Super::PostInitializeComponents();`.
+
+New guard (og-brawler-shrink-install task 9, 2026-09-26). It replaced no comment, so it has no `>`
+block.
+
+⛔ **DO NOT MOVE `GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);` BACK INTO
+THE CONSTRUCTOR**, and do not call anything else there that reaches
+`FBodyInstance::UpdatePhysicalMaterials` or `FBodyInstance::UpdateMassProperties`. The native class
+default object is constructed when the module loads, before `GEngine` exists, and both functions
+read `GEngine->DefaultPhysMaterial`.
+
+**Consequence.** Every process that loads this module logs three `LogPhysics: Error` lines from the
+class default object (`GetSimplePhysicalMaterial` twice, `GetComplexPhysicalMaterials` once). That
+includes the editor, `-game` and the cook commandlet. The cook counts them as errors, so **every
+package of the project fails** (`Error_UnknownCookFailure`, UAT exit code 25).
+
+⛔ **Wrapping the constructor call in `if (!HasAnyFlags(RF_ClassDefaultObject))` is NOT the
+equivalent fix**, even though the engine's error text suggests it. That wrap leaves the override
+`None` on every class default object. A pawn whose archetype is a Blueprint then gets its capsule's
+properties re-copied from that archetype after the constructor has run, so it loses the override.
+The derivation is in the rationale §2.
+
+**What breaks if the tag moves.** Nothing mechanical. The engine's `LogPhysics: Error` at startup
+and the failing cook are the only detectors, and the cook is the one that fails loudly.
 
 ---
 
