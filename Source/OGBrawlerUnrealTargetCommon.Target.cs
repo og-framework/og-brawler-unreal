@@ -43,5 +43,17 @@ public static class OGBrawlerUnrealTargetCommon
 		{
 			Rules.GlobalDefinitions.Add("PHYSICS_THREAD_CONTEXT=1");
 		}
+
+		// [uploadtosteam T20] The attack circle / aim visualization is drawn with DrawDebug*, which
+		// Engine/Public/EngineDefines.h compiles out of Shipping and Test (UE_ENABLE_DEBUG_DRAWING, behind
+		// an #ifndef). Keep it for the Client target only: the dedicated server renders nothing, and
+		// Development/DebugGame/Editor action graphs stay untouched. Temporary until gameplay visuals
+		// move off the debug-draw API.
+		if (Rules.Type == TargetType.Client &&
+		    (Rules.Configuration == UnrealTargetConfiguration.Shipping ||
+		     Rules.Configuration == UnrealTargetConfiguration.Test))
+		{
+			Rules.GlobalDefinitions.Add("UE_ENABLE_DEBUG_DRAWING=1");
+		}
 	}
 }

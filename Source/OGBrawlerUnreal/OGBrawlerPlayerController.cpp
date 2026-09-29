@@ -4,6 +4,7 @@
 #include "SimulationManagerUImpl.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/ChildConnection.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Camera/PlayerCameraManager.h"
@@ -11,6 +12,8 @@
 #include "OGBrawlerUECharacter.h"
 #include "OGBrawlerPlayerCameraManager.h"
 #include "SharedIsometricCameraActor.h"
+#include "JoinScreenUImpl.h"
+#include "OGBrawlerJoinSessionSubsystem.h"
 
 AOGBrawlerPlayerController::AOGBrawlerPlayerController()
 {
@@ -33,7 +36,26 @@ void AOGBrawlerPlayerController::JoinLocalPlayer()
     UWorld* world = GetWorld();
     if (world == nullptr) return;
 
+    UGameInstance* const gameInstance        = GetGameInstance();
+    const int32          localPlayersBefore  = (gameInstance != nullptr) ? gameInstance->GetNumLocalPlayers() : 0;
+
     UGameplayStatics::CreatePlayer(world, /*ControllerId=*/-1, /*bSpawnPlayerController=*/true);
+
+    // The engine allows at most MaxSplitscreenPlayers local players per client (4 by
+    // default) and refuses the next one client-side, before anything reaches the server.
+    // Tell the player instead of failing silently [og-brawler-uploadtosteam task 13].
+    // ⚠ The local-player COUNT decides, not CreatePlayer's return value: on a network
+    // client it returns null even on success, because the new player's controller only
+    // arrives later from the server (measured). Rationale:
+    // Source/OGBrawlerUnreal/docs/JoinScreen-rationale.md section 14.
+    UGameViewportClient* const viewportClient = world->GetGameViewport();
+    if (viewportClient != nullptr && gameInstance != nullptr
+        && gameInstance->GetNumLocalPlayers() == localPlayersBefore
+        && localPlayersBefore >= viewportClient->MaxSplitscreenPlayers)
+    {
+        if (UOGBrawlerJoinSessionSubsystem* session = gameInstance->GetSubsystem<UOGBrawlerJoinSessionSubsystem>())
+            session->noteLocalPlayerLimitReached(viewportClient->MaxSplitscreenPlayers);
+    }
 
     // Belt-and-suspenders splitscreen disable: re-flush at join time in case
     // any per-LP-add path reactivated splitscreen state.
@@ -63,18 +85,45 @@ void AOGBrawlerPlayerController::LeaveLocalPlayer()
     UWorld* world = GetWorld();
     if (world == nullptr) return;
 
-    ULocalPlayer* lp = GetLocalPlayer();
-    if (lp == nullptr) return;
+    UGameInstance* gameInstance = GetGameInstance();
+    if (gameInstance == nullptr || GetLocalPlayer() == nullptr) return;
 
-    // Don't allow LP0 (the primary) to remove itself — UE's primary LP is
-    // load-bearing for the viewport. Bail if this exec was invoked on the primary.
-    if (UGameplayStatics::GetPlayerControllerID(this) == 0)
+    // Insert removes the LAST local player (the highest-numbered), whichever local PC
+    // received it, and never LP0 -- UE's primary LP is load-bearing for the viewport
+    // (user ruling 2026-09-29, og-brawler-uploadtosteam task 13). Keyboard Insert always
+    // arrives on LP0, which owns the keyboard.
+    // ⛔ ONLY THE LAST ONE. Client and server pair a split player's controller with its
+    //   local player by ARRAY INDEX (NetPlayerIndex = index in UNetConnection::Children
+    //   on both sides, and in the client's local-player list), so removing a middle one
+    //   would mis-pair the next joiner and the engine closes the whole connection
+    //   (BadChildConnectionIndex). Rationale: Source/OGBrawlerUnreal/docs/JoinScreen-rationale.md
+    //   section 14.
+    const TArray<ULocalPlayer*>& localPlayers = gameInstance->GetLocalPlayers();
+    if (localPlayers.Num() <= 1)
     {
-        UE_LOG(LogOG, Warning, TEXT("LeaveLocalPlayer: refusing to remove primary LP"));
+        UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: Insert: no other local player to remove; local player 0 stays"));
         return;
     }
 
-    UGameplayStatics::RemovePlayer(this, /*bDestroyPawn=*/true);
+    ULocalPlayer* const leavingPlayer = localPlayers.Last();
+    AOGBrawlerPlayerController* const leaving =
+        (leavingPlayer != nullptr) ? Cast<AOGBrawlerPlayerController>(leavingPlayer->GetPlayerController(world)) : nullptr;
+    if (leaving == nullptr)
+    {
+        UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: Insert: the last local player has no controller yet; nothing removed"));
+        return;
+    }
+
+    UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: Insert: removing local player %d of %d"),
+        localPlayers.Num() - 1, localPlayers.Num());
+
+    // UGameplayStatics::RemovePlayer alone never tells a server: on a network client it
+    // only drops the local player, and the server keeps the character. So the leaving
+    // player's own controller asks the server to remove its split connection first.
+    if (leaving->GetLocalRole() != ROLE_Authority)
+        leaving->ServerLeaveLocalPlayer();
+
+    UGameplayStatics::RemovePlayer(leaving, /*bDestroyPawn=*/true);
 
     // After the leaving LP's pawn is destroyed, fan out refreshViewTarget to
     // remaining local PCs so each one re-evaluates policy with the new Num().
@@ -89,6 +138,29 @@ void AOGBrawlerPlayerController::LeaveLocalPlayer()
             }
         }
     }
+}
+
+void AOGBrawlerPlayerController::ServerLeaveLocalPlayer_Implementation()
+{
+    // Server side of LeaveLocalPlayer. Only a split player (a child connection) can
+    // leave this way -- the primary leaves by disconnecting -- and only the LAST child
+    // of its connection, for the index pairing explained in LeaveLocalPlayer.
+    // Removal is what the engine's own disconnect does for each child
+    // (UChildConnection::CleanUp -> OnNetCleanup -> Destroy -> GameMode Logout), minus
+    // the rest of the connection. Rationale: Source/OGBrawlerUnreal/docs/JoinScreen-rationale.md
+    // section 14.
+    UChildConnection* const child  = Cast<UChildConnection>(NetConnection);
+    UNetConnection* const   parent = (child != nullptr) ? child->Parent.Get() : nullptr;
+    if (parent == nullptr || parent->Children.Num() == 0 || parent->Children.Last() != child)
+    {
+        UE_LOG(LogOGJoinScreen, Warning,
+            TEXT("OGJoinScreen: refused a local-player leave from %s: not the last split player of its connection"),
+            *GetName());
+        return;
+    }
+
+    parent->Children.Remove(child);
+    child->CleanUp();
 }
 
 void AOGBrawlerPlayerController::BeginPlayingState()
@@ -126,10 +198,15 @@ void AOGBrawlerPlayerController::SetupInputComponent()
     // Hard-key bindings for the local player join/leave so we don't depend on
     // the in-game console (which is unavailable in some standalone build
     // configurations).
+    // The keys are built from brawlerJoinScreen::kLocalCoopKeyNames -- the same
+    // constant the join screen's local co-op hint is written from -- so the hint
+    // and the binding cannot disagree; a name that is not an engine key fails a
+    // checkf at the first game start (og-brawler BrawlerJoinScreen-guards.md G-01,
+    // Source/OGBrawlerUnreal/docs/JoinScreen-rationale.md section 7).
     if (InputComponent)
     {
-        InputComponent->BindKey(EKeys::Tab,    IE_Pressed, this, &AOGBrawlerPlayerController::JoinLocalPlayer);
-        InputComponent->BindKey(EKeys::Insert, IE_Pressed, this, &AOGBrawlerPlayerController::LeaveLocalPlayer);
+        InputComponent->BindKey(joinScreenUImpl::localCoopAddPlayerKey(),    IE_Pressed, this, &AOGBrawlerPlayerController::JoinLocalPlayer);
+        InputComponent->BindKey(joinScreenUImpl::localCoopRemovePlayerKey(), IE_Pressed, this, &AOGBrawlerPlayerController::LeaveLocalPlayer);
     }
 }
 

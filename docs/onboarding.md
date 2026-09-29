@@ -114,3 +114,5 @@ CMake path.
 ## Next steps for active development
 
 Once the project builds and runs, see [`docs/cross-repo-dev-loop.md`](cross-repo-dev-loop.md) for the multi-repo development workflow: submodule push order, handling pin bumps, recommended git config, and the "three commits, three PRs" pattern.
+
+To package the game, publish it to Steam and run playtests, see [`docs/steam-publishing.md`](steam-publishing.md).

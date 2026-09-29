@@ -1003,9 +1003,9 @@ never finished registering.
 > nothing on the client role ever acquired, so `release` is a no-op there by construction
 > rather than by a role test.
 
-**Verified.** `brawlerRingout::kMaxSpawnPoints` is `4`.
+**Verified.** `brawlerRingout::kMaxSpawnPoints` is `8` (raised from 4 by og-brawler-uploadtosteam T18, 2026-09-29; the release still matters, because churn past 8 concurrent characters would exhaust it the same way).
 
-**The consequence.** After four joins in a session, every later character is handed
+**The consequence.** Without the release, after `kMaxSpawnPoints` (8) joins in a session every later character is handed
 `kNoFreeSlot` and gets no respawn point.
 
 ---
@@ -1130,6 +1130,31 @@ server. That puts back exactly the defect task 25 removed.
 itself cannot be reset by assignment, a `static_assert` in `SimCharacterId.h` makes that a compile
 error, but a fallback typed in this branch compiles. Deleting the branch takes the tag with it and
 orphans this entry.
+
+---
+
+## G-79 — the destructor touches no `UObject`: it clears the static instance table and nothing else
+
+**Site:** the first statement of `~ASimulationManagerUImpl` (the `s_instances[0]` test).
+
+**The prohibition** (og-brawler-uploadtosteam task 12, 2026-09-29). ⛔ Do not call `GetWorld()`,
+`GetPhysicsScene()` or any other method that reaches the actor's outer, its world or another
+`UObject` from the destructor. Unbinding from engine objects belongs in `EndPlay`, which runs for
+every world teardown while the world still exists. The physics-scene pre-tick and step bindings are
+removed there, next to the post-tick handle.
+
+**The consequence of getting it wrong.** The destructor runs inside the garbage collector's purge,
+after the actor's outer level may already have been destroyed. The destructor used to call
+`GetWorld()` to unbind `OnPhysSceneStep`, and that read freed memory: a packaged Development client
+crashed with `EXCEPTION_ACCESS_VIOLATION reading address 0xffffffffffffffff` in
+UObjectBaseUtility::GetTypedOuter ← AActor::GetWorld ← this destructor, called from
+UEngine::LoadMap → TrimMemory → CollectGarbage (engine frames). That happened the first time it travelled from
+the standalone join-screen world, which has a manager, to a server (measured 2026-09-29). An editor
+`-game` run of the same travel did not crash, so only a packaged client shows it.
+
+**What breaks if the tag moves.** The tag marks the destructor's body. A `GetWorld()` typed above
+the tagged statement is typed directly under the tag. Nothing mechanical checks the destructor: the
+crash depends on the collector's purge order.
 
 ---
 

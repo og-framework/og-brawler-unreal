@@ -12,7 +12,8 @@
 //
 // Every layout number, colour and endpoint comes from pure og-brawler code, which is
 // the part a Catch2 case can reach; this class holds only the canvas calls.
-// ⛔ MINIMAL ON PURPOSE. It draws the two input-history displays and nothing else.
+// ⛔ MINIMAL ON PURPOSE. It draws the two input-history displays, the scoreboard and,
+// while the front-end is up, the join screen -- nothing else.
 //
 // READS ONLY. It borrows the row ring through a pointer to const and touches no
 // simulation state; nothing it reads is written back anywhere.
@@ -30,6 +31,11 @@
 #include "OGBrawlerUEHUD.generated.h"
 
 class ASimulationManagerUImpl;
+
+namespace brawlerJoinScreen
+{
+class JoinScreenModel;
+}
 
 UCLASS()
 class AOGBrawlerUEHUD : public AHUD
@@ -184,4 +190,16 @@ private:
 	// ⛔ EVERY LAYOUT NUMBER, THE ORDERING AND BOTH CLAMPS COME FROM PURE CODE. This holds
 	//   the canvas calls and the gather, and decides no geometry of its own.
 	void drawScoreboard();
+
+	// The join screen [og-brawler-uploadtosteam task 12], drawn INSTEAD of every display
+	// above while the front-end is up. The model, its texts and every rectangle come from
+	// the pure og-brawler header; this holds only the canvas calls.
+	// Rationale: Source/OGBrawlerUnreal/docs/JoinScreen-rationale.md.
+	void drawJoinScreen(const brawlerJoinScreen::JoinScreenModel& model);
+
+	// A short notice when this PC's next local player was refused because the engine's
+	// per-client limit (MaxSplitscreenPlayers) is reached [og-brawler-uploadtosteam task 13].
+	// Text and visibility come from the pure og-brawler header; drawn by the first local
+	// player's HUD only. Rationale: Source/OGBrawlerUnreal/docs/JoinScreen-rationale.md.
+	void drawLocalPlayerLimitNotice();
 };

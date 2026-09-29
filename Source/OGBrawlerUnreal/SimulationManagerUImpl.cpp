@@ -677,9 +677,7 @@ ASimulationManagerUImpl::ASimulationManagerUImpl()
 
 ASimulationManagerUImpl::~ASimulationManagerUImpl()
 {
-	if (GetWorld() != nullptr)
-		GetWorld()->GetPhysicsScene()->OnPhysSceneStep.RemoveAll(this);
-
+	// ⛔G-79  docs/SimulationManagerUImpl-guards.md
 	if (s_instances[0] == this)
 	{
 		s_instances[0] = nullptr;
@@ -1076,6 +1074,9 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		if (FPhysScene* PhysScene = World->GetPhysicsScene())
 		{
+			PhysScene->OnPhysScenePreTick.RemoveAll(this);
+			PhysScene->OnPhysSceneStep.RemoveAll(this);
+
 			if (Chaos::FPhysicsSolver* Solver = PhysScene->GetSolver())
 			{
 				if (m_injectInputsExternalCallbackHandle.IsValid())

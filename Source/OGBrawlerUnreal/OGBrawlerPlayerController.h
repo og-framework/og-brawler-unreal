@@ -21,6 +21,11 @@ public:
     UFUNCTION(Exec)
     void LeaveLocalPlayer();
 
+    // Sent by a client's split player that is leaving (LeaveLocalPlayer); the server
+    // removes that child connection and its character [og-brawler-uploadtosteam task 13].
+    UFUNCTION(Server, Reliable)
+    void ServerLeaveLocalPlayer();
+
     // Computes the view target this PC SHOULD have right now based on locally-
     // controlled brawler count. Pure — no side effects. Returns nullptr when no
     // local brawler exists yet (caller should wait for possession to wire up).

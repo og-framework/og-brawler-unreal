@@ -147,8 +147,9 @@ physics-thread-written slots. That is a crossing this reader was argued free of.
 
 **Correction (R0).** "Append-only" was false. `UGameInstance::AddLocalPlayer` appends (`AddUnique`), but
 `UGameInstance::RemoveLocalPlayer` erases with `RemoveAt`, which shifts every later entry down. The conclusion still
-holds, for a narrower reason. The project's own removal path, `AOGBrawlerPlayerController::LeaveLocalPlayer`, refuses
-the controller whose player controller id is 0, so a removal only ever shifts entries *after* index 0.
+holds, for a narrower reason. The project's own removal path, `AOGBrawlerPlayerController::LeaveLocalPlayer`, never
+removes local player 0. Since og-brawler-uploadtosteam task 13 it always removes the LAST local player (whichever local
+controller received Insert), so a removal shifts no entry at all.
 
 **Consequence.** Picking another index, or iterating every local player, breaks the one-HUD rule.
 `AOGBrawlerUEHUD` draws only when its owning controller equals this function's answer, so each couch co-op sibling's

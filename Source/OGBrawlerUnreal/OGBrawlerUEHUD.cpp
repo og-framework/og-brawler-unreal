@@ -3,13 +3,18 @@
 #include "OGBrawlerUnreal/OGBrawlerUEHUD.h"
 
 #include <optional>
+#include <string_view>
+#include <vector>
 
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
+#include "OGBrawlerUnreal/JoinScreenUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerJoinSessionSubsystem.h"
 #include "OGBrawlerUnreal/ScoreboardVisualizationUImpl.h"
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 
@@ -248,6 +253,15 @@ void AOGBrawlerUEHUD::DrawHUD()
 {
 	Super::DrawHUD();
 
+	// The front-end has no character, no manager and no match, so while the join screen
+	// is up it is the only thing drawn. Off the front-end this is one null check.
+	if (const UOGBrawlerJoinSessionSubsystem* joinSession =
+			UOGBrawlerJoinSessionSubsystem::forShownFrontEnd(GetWorld()))
+	{
+		drawJoinScreen(joinSession->model());
+		return;
+	}
+
 	// Each display hangs off one branch here, so a toggle that is off costs a flag read
 	// and the HUD does nothing else at all for it.
 	if (inputHistoryVisualizationUImpl::displayEnabled())
@@ -270,6 +284,8 @@ void AOGBrawlerUEHUD::DrawHUD()
 	//   ⛔ THE BRANCH ITSELF IS UNTOUCHED -- this is a comment-only correction.
 	if (scoreboardVisualizationUImpl::enabled())
 		drawScoreboard();
+
+	drawLocalPlayerLimitNotice();
 }
 
 const ASimulationManagerUImpl* AOGBrawlerUEHUD::findHistorySource(
@@ -1123,4 +1139,139 @@ void AOGBrawlerUEHUD::drawScoreboard()
 				layout.textScale);
 		}
 	}
+}
+
+// [og-brawler-uploadtosteam task 12] THE JOIN SCREEN.
+// ⛔ EVERY RECTANGLE, INK AND STRING IS THE PURE HEADER'S. This method turns a placed
+//   layout and the model's state into canvas calls, and decides no geometry of its own
+//   beyond centring a label in the button and sizing the caret from the measured text.
+void AOGBrawlerUEHUD::drawJoinScreen(const brawlerJoinScreen::JoinScreenModel& model)
+{
+	using namespace brawlerJoinScreen;
+
+	if (Canvas == nullptr || GEngine == nullptr)
+		return;
+
+	const auto inkColor = [](const JoinScreenInk& ink) { return FLinearColor(ink.r, ink.g, ink.b, 1.f); };
+
+	const std::vector<JoinListEntry> entries = model.listEntries();
+	const JoinScreenLayout layout = placedJoinScreenLayout(entries.size(), joinScreenUImpl::scale(),
+		static_cast<float>(Canvas->SizeX), static_cast<float>(Canvas->SizeY));
+
+	UFont* const font = GEngine->GetSmallFont();
+	const JoinFocus focus = model.focus();
+	const std::string_view buildLabel = joinScreenUImpl::ownBuildLabel();
+
+	const auto drawLine = [&](const JoinScreenRect& rect, const FString& text, const FLinearColor& color, float textScale)
+	{
+		DrawText(text, color, rect.x + layout.textInsetX, rect.y + layout.textOffsetY, font, textScale);
+	};
+
+	DrawRect(FLinearColor(kJoinScreenBackdropInk.r, kJoinScreenBackdropInk.g, kJoinScreenBackdropInk.b,
+		         kJoinScreenBackdropAlpha),
+		layout.panel.x, layout.panel.y, layout.panel.width, layout.panel.height);
+
+	drawLine(layout.title, joinScreenUImpl::toFString(kJoinScreenTitle), inkColor(kJoinScreenTextInk),
+		layout.titleTextScale);
+	drawLine(layout.buildLabel, joinScreenUImpl::toFString(buildLabelLine(buildLabel)),
+		inkColor(kJoinScreenDimTextInk), layout.scale);
+
+	for (std::size_t row = 0u; row < layout.listRowCount && row < entries.size(); ++row)
+	{
+		const JoinListEntry&  entry   = entries[row];
+		const JoinScreenRect& rect    = layout.listRows[row];
+		const bool            focused = focus.area == JoinFocusArea::List && focus.listIndex == row;
+
+		// A focus bar at the row's left edge, so the focused row reads without colour alone.
+		if (focused)
+			DrawRect(inkColor(kJoinScreenFocusInk), rect.x, rect.y, layout.textInsetX * 0.5f, rect.height);
+
+		const FString label = entry.isThisPc
+			? FString::Printf(TEXT("%s   %s"), *joinScreenUImpl::toFString(entry.label),
+			      *joinScreenUImpl::toFString(entry.address))
+			: joinScreenUImpl::toFString(entry.label);
+		drawLine(rect, label, inkColor(focused ? kJoinScreenFocusInk : kJoinScreenTextInk), layout.scale);
+	}
+
+	const bool fieldFocused = focus.area == JoinFocusArea::Field;
+	DrawRect(inkColor(kJoinScreenFieldInk), layout.field.x, layout.field.y, layout.field.width, layout.field.height);
+	drawLine(layout.field, joinScreenUImpl::toFString(model.field().text()), inkColor(kJoinScreenTextInk),
+		layout.scale);
+
+	if (fieldFocused && model.acceptsInput())
+	{
+		float caretOffset = 0.f;
+		float textHeight  = 0.f;
+		GetTextSize(joinScreenUImpl::toFString(model.field().textBeforeCursor()), caretOffset, textHeight, font,
+			layout.scale);
+		DrawRect(inkColor(kJoinScreenFocusInk),
+			layout.field.x + layout.textInsetX + caretOffset, layout.field.y + layout.textOffsetY,
+			FMath::Max(1.f, layout.scale * 2.f), layout.field.height - 2.f * layout.textOffsetY);
+	}
+
+	const bool buttonFocused = focus.area == JoinFocusArea::JoinButton;
+	DrawRect(inkColor(buttonFocused ? kJoinScreenFocusInk : kJoinScreenFieldInk),
+		layout.joinButton.x, layout.joinButton.y, layout.joinButton.width, layout.joinButton.height);
+	{
+		const FString buttonText = joinScreenUImpl::toFString(kJoinButtonLabel);
+		float textWidth  = 0.f;
+		float textHeight = 0.f;
+		GetTextSize(buttonText, textWidth, textHeight, font, layout.scale);
+		DrawText(buttonText, inkColor(buttonFocused ? kJoinScreenBackdropInk : kJoinScreenTextInk),
+			layout.joinButton.x + (layout.joinButton.width - textWidth) * 0.5f,
+			layout.joinButton.y + layout.textOffsetY, font, layout.scale);
+	}
+
+	const JoinStatusLine status = model.statusLine(buildLabel);
+	const FLinearColor   statusColor = inkColor(joinStatusInk(status.tone));
+	drawLine(layout.statusHeadline, joinScreenUImpl::toFString(status.text.headline), statusColor, layout.scale);
+	drawLine(layout.statusDetail, joinScreenUImpl::toFString(status.text.detail), statusColor, layout.scale);
+
+	drawLine(layout.hint, joinScreenUImpl::toFString(localCoopHintText()), inkColor(kJoinScreenDimTextInk),
+		layout.scale);
+}
+
+void AOGBrawlerUEHUD::drawLocalPlayerLimitNotice()
+{
+	if (Canvas == nullptr || GEngine == nullptr)
+		return;
+
+	// One local player's HUD draws, the same guard as the scoreboard: every local player
+	// owns a HUD, and the notice is about the whole PC.
+	if (GetOwningPlayerController()
+		!= inputHistoryVisualizationUImpl::firstLocalPlayerController(GetWorld()))
+	{
+		return;
+	}
+
+	const UGameInstance* gameInstance = GetGameInstance();
+	const UOGBrawlerJoinSessionSubsystem* session =
+		(gameInstance != nullptr) ? gameInstance->GetSubsystem<UOGBrawlerJoinSessionSubsystem>() : nullptr;
+	if (session == nullptr)
+		return;
+
+	const TOptional<FString> notice = session->localPlayerLimitNotice();
+	if (!notice.IsSet())
+		return;
+
+	using namespace brawlerJoinScreen;
+
+	// Sized like the join screen (the same scale console variable and 720-pixel reference),
+	// centred horizontally near the top of the screen.
+	const float scale = joinScreenUImpl::scale() * static_cast<float>(Canvas->SizeY) / kJoinScreenReferenceCanvasHeight;
+	UFont* const font = GEngine->GetSmallFont();
+
+	float textWidth  = 0.f;
+	float textHeight = 0.f;
+	GetTextSize(notice.GetValue(), textWidth, textHeight, font, scale);
+
+	const float padding = 8.f * scale;
+	const float x       = (static_cast<float>(Canvas->SizeX) - textWidth) * 0.5f;
+	const float y       = static_cast<float>(Canvas->SizeY) * 0.12f;
+
+	DrawRect(FLinearColor(kJoinScreenBackdropInk.r, kJoinScreenBackdropInk.g, kJoinScreenBackdropInk.b,
+		         kJoinScreenBackdropAlpha),
+		x - padding, y - padding, textWidth + 2.f * padding, textHeight + 2.f * padding);
+	DrawText(notice.GetValue(), FLinearColor(kJoinScreenFocusInk.r, kJoinScreenFocusInk.g, kJoinScreenFocusInk.b, 1.f),
+		x, y, font, scale);
 }

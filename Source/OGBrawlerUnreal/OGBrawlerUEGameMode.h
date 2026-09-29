@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "SessionLogUImpl.h"
 #include "OGBrawlerUEGameMode.generated.h"
 
 UCLASS(minimalapi)
@@ -15,6 +16,15 @@ public:
 	AOGBrawlerUEGameMode();
 
 	virtual void BeginPlay() override;
+
+	// The server's join/leave log for the host launcher [og-brawler-uploadtosteam task 13].
+	// Lines and rules: Source/OGBrawlerUnreal/docs/SessionLog-guards.md and -rationale.md.
+	virtual void PostLogin(APlayerController* newPlayer) override;
+
+	virtual void Logout(AController* exiting) override;
+
+private:
+	sessionLogUImpl::SessionLog m_sessionLog;
 };
 
 

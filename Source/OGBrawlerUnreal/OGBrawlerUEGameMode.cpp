@@ -27,6 +27,9 @@ void AOGBrawlerUEGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
+    // The world already listens here (UEngine::LoadMap calls Listen before BeginPlay).
+    m_sessionLog.noteListening(*this);
+
     if (UGameViewportClient* viewport = GetWorld()->GetGameViewport())
     {
         viewport->SetForceDisableSplitscreen(true);
@@ -49,4 +52,19 @@ void AOGBrawlerUEGameMode::BeginPlay()
         // Spawn the second player at the second PlayerStart
         //GetWorld()->SpawnActor<APawn>(DefaultPawnClass, PlayerStarts[1]->GetActorLocation(), PlayerStarts[0]->GetActorRotation());
     }
+}
+
+void AOGBrawlerUEGameMode::PostLogin(APlayerController* newPlayer)
+{
+    Super::PostLogin(newPlayer);
+
+    if (newPlayer != nullptr)
+        m_sessionLog.noteJoined(*this, *newPlayer);
+}
+
+void AOGBrawlerUEGameMode::Logout(AController* exiting)
+{
+    m_sessionLog.noteLeft(*this, exiting);
+
+    Super::Logout(exiting);
 }

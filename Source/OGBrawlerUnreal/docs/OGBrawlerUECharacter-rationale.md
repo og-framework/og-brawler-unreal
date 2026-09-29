@@ -288,7 +288,7 @@ Verified: `AOGBrawlerPlayerController::JoinLocalPlayer` calls
 
 The palette entries carried trailing colour names: red, blue, amber, green, violet, cyan,
 orange, pink, lime, indigo. ⚠ "a 6-brawler target" disagrees with every other figure in the
-tree (the advisory `kPreDietCharacterCap` and `brawlerRingout::kMaxSpawnPoints` are both 4, and
+tree (the advisory `kPreDietCharacterCap` is 4 and `brawlerRingout::kMaxSpawnPoints` was 4 until T18 raised it to 8, and
 the block below says "≤ 4-player session"); recorded as stale (§13).
 
 > ⭐⭐ [ringout task 10] THE SCOREBOARD NOW DRAWS THIS TINT INSTEAD OF A RAW CHARACTER
@@ -318,7 +318,7 @@ the block below says "≤ 4-player session"); recorded as stale (§13).
 > can read). Shrinking the palette below the row cap is a compile error, not a review
 > finding.
 
-Verified: `kScoreboardMaxRows = 8u`, `kPreDietCharacterCap = 4`, `kMaxSpawnPoints = 4u`, and
+Verified: `kScoreboardMaxRows = 8u`, `kPreDietCharacterCap = 4`, `kMaxSpawnPoints = 8u` (4u until og-brawler-uploadtosteam T18, 2026-09-29), and
 `BrawlerScoreboardVisualization-rationale.md` §8 is the `kScoreboardMaxRows` section. The
 `static_assert` enforces the bound, so it has no guard.
 

@@ -5,6 +5,8 @@ Goal: a teammate's PC hosts the server **and** runs a local PC client, while a
 phone joins as the third player over LAN. The dev PC is not in the loop during
 the playtest.
 
+For playtests through Steam (Host Local/Online Playtest, join screen), see [docs/steam-publishing.md](docs/steam-publishing.md) section 7.
+
 ```
         +-------------------+
         |   HOST PC         |

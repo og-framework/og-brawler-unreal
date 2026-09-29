@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGBrawlerUnreal.h"
+#include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
 #include "Modules/ModuleManager.h"
 #include <OGBrawler/ConsoleCommandsNamedPipeServer.h>
 
@@ -16,6 +17,8 @@ class FOGBrawlerUEModule : public FDefaultGameModuleImpl
 public:
     virtual void StartupModule() override
     {
+        buildIdentityUImpl::registerNetworkVersionHook();
+
 #if PLATFORM_WINDOWS
         // Start the named pipe server in a detached thread
         std::thread(DAttackPipeServer::NamedPipeServer).detach();

@@ -1561,10 +1561,17 @@ because a cap you can quietly widen is not a cap.
 
 ⛔ **The cap is coupled to `brawlerRingout::kMaxSpawnPoints`, and since task 11 the header asserts
 it:** `static_assert(kPreDietCharacterCap <= kMaxSpawnPoints)`. The cap only WARNS — it allocates
-nothing. The ring-out spawn table has exactly `kMaxSpawnPoints` entries, so a character that
-registers while the table is full gets `SpawnSlotAllocator::kNoFreeSlot` and respawns with **no
-teleport seed**, logging one `[Warning][Ringout.spawnSlot]` per respawn. A cap above the table
-would stop warning about exactly the characters that cannot be placed. *(The header's prose said
+nothing.
+- The ring-out spawn table has exactly `kMaxSpawnPoints` entries. A character that registers while the table is full gets `SpawnSlotAllocator::kNoFreeSlot`.
+- It then respawns with **no teleport seed**, logging one `[Warning][Ringout.spawnSlot]` per respawn.
+- Its body is still below the kill plane, so it dies again on the next tick, every respawn delay: a death loop that feeds everyone else's score (T10 spike flag 1).
+- A cap above the table would stop warning about exactly the characters that cannot be placed.
+
+**Since og-brawler-uploadtosteam T18 (2026-09-29) the table is 8 and the cap stays 4.**
+- The cap is the packet-budget number derived above; the table is sized by a playtest ruling: 8 characters, and nobody refused for numbers.
+- Characters 5-8 therefore get real slots and trigger the `[PreDietCap]` warning, which is the truthful "above the tested size" signal.
+- The assertion still holds (4 ≤ 8) and still forbids the one dangerous direction: the cap above the table.
+- The 9th concurrent character is back in the loop above. The engine allows up to 16 per server. *(The header's prose said
 raising the cap alone "SILENTLY STOPS RESPAWNING EVERY CHARACTER PAST THE 4th". Both halves were
 wrong — §11 C7.)*
 
@@ -1685,7 +1692,9 @@ SILENTLY STOPS RESPAWNING EVERY CHARACTER PAST THE 4th."* Three things are wrong
 * the cap **allocates nothing** — it only compares a count and warns — so raising it changes
   nothing about who gets a spawn slot. A fifth resident character gets no slot at cap 4 too;
 * such a character **does** respawn: `brawlerRingout::integrate` clears the dead bit and writes no
-  teleport seed;
+  teleport seed; ⚠ but that "respawn" leaves the body below the kill plane and it dies again on
+  the next tick. This bullet undersold it; that is the death loop T18 fixed for characters 5-8
+  (§10);
 * it is **not silent**: every such respawn logs `[Warning][Ringout.spawnSlot]`.
 
 What *is* true is the coupling itself. A cap above the table stops warning about exactly the

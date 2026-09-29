@@ -33,12 +33,21 @@
                     Name               = 'server-win64'
                     DepotId            = 0
                     TargetType         = 'Server'
-                    Configuration      = 'Development'
+                    Configuration      = 'Shipping'
                     ExpectedExecutable = 'OGBrawlerUnrealServer.exe'
-                    FileExclusions     = @('*.pdb', 'Manifest_*.txt')
+                    FileExclusions     = @('*.pdb', 'Manifest_*.txt', 'HostLogs\*', 'join_info.txt', 'Engine\Saved\*', 'OGBrawlerUnreal\Saved\*')
                     ExtraFiles         = @(
                         @{ Source = '..\run_server_template.bat'; Destination = 'run_server.bat' }
                     )
+                    ServerLauncher     = @{
+                        ServerArguments  = '/Game/ThirdPerson/Maps/ThirdPersonMap -ini:Engine:[Core.Log]:LogOGNet=Warning -ini:Engine:[Core.Log]:LogOGBrawler=Warning -ini:Engine:[Core.Log]:LogOGSimTick=Warning'
+                        Port             = 7777
+                        JoinLinePattern  = 'OGBrawlerSession: (?:(?<joined>joined)|(?<left>left)) players=(?<players>\d+) tested=(?<tested>\d+)(?: local=(?<local>\d+))?'
+                        ReadyLinePattern = 'OGBrawlerSession: listening port=(?<port>\d+)'
+                        Title            = 'OGBrawler dedicated server'
+                        ClientLaunch     = 'steam://rungameid/{AppId:client}'
+                        LocalHint        = 'After joining: Tab adds a local player, Insert removes one'
+                    }
                 }
             )
         }
