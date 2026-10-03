@@ -279,6 +279,35 @@ foreach ($f in $srcFiles) {
 $symbolText = if ($NoCommentStrip) { $fileText } else { $fileCode }
 $blobCode = ($symbolText.Values) -join "`n"
 
+# Word sets - the same answer as the whole-word regex, without the scan.
+#
+# Almost every symbol lookup below is `\bSYM\b` over the whole blob, and SYM is
+# almost always one run of word characters. Measured: one such regex over the
+# blob costs ~100 ms and a full run makes thousands of them: most of the old
+# ~16 minute runtime (2026-10-03). For an all-word SYM the regex can only match a
+# MAXIMAL run of .NET's `\b` word characters that equals SYM exactly - both of
+# its ends must sit against a non-word character or the end of the text - so
+# membership in the set of every such run is the same verdict, not an
+# approximation. The class must be EXACTLY the one `\b` uses: `\w` PLUS
+# U+200C and U+200D (UTS#18 RL1.4). `\w` alone would split `aZWJb` into two
+# words that the regex never sees, and resolve an anchor it does not. Measured
+# over all 65,536 BMP characters on the .NET this runs on: `[\w\u200C\u200D]`
+# and `\b` agree on every one. Any symbol that is NOT all word characters keeps
+# the regex (Test-SymbolFast below), because for it this argument does not hold.
+#
+# One set per file serves the PAIR arm and pre-filters the QSYM arm; the global
+# set is their union. The blob joins files with "`n", a non-word character, so
+# no run ever spans two files and the union IS the blob's set.
+$wordSplitter = [regex]::new('[^\w\u200C\u200D]+')
+$fileWords = @{}
+$allWords = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+foreach ($kv in $symbolText.GetEnumerator()) {
+    $set = [System.Collections.Generic.HashSet[string]]::new([string[]]$wordSplitter.Split($kv.Value), [StringComparer]::Ordinal)
+    [void]$set.Remove('')   # Split yields '' at a leading/trailing separator; no symbol is empty
+    $fileWords[$kv.Key] = $set
+    $allWords.UnionWith($set)
+}
+
 # ---------------------------------------------------------------------------
 # 2. Grammar
 # ---------------------------------------------------------------------------
@@ -306,13 +335,35 @@ function Expand-Alias {
     return $Path
 }
 
+# Resolve-FilePath is a linear suffix walk over every indexed path, and the
+# same path is cited over and over across the docs. The answer depends only on
+# the input string and on $byPath/$PathAlias, which never change after
+# indexing, so it is memoised per INPUT string - ordinally, because a
+# case-insensitive key would hand `foo.h` the answer computed for `Foo.h`. A
+# miss ($null) is memoised too. The walk itself is unchanged, so the FIRST
+# match in $byPath order still wins.
+$resolveMemo = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
 function Resolve-FilePath {
     param([string]$Path)
+    $hit = $null
+    if ($resolveMemo.TryGetValue($Path, [ref]$hit)) { return $hit }
     $p = (Expand-Alias -Path $Path) -replace '\\', '/'
     foreach ($k in $byPath.Keys) {
-        if ($k -eq $p -or $k.EndsWith('/' + $p)) { return $k }
+        if ($k -eq $p -or $k.EndsWith('/' + $p)) { $hit = $k; break }
     }
-    return $null
+    $resolveMemo[$Path] = $hit
+    return $hit
+}
+
+# The LINE-range check needs the target's line count; read each file once.
+$lineCountMemo = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+function Get-LineCount {
+    param([string]$IndexedPath)
+    $n = 0
+    if ($lineCountMemo.TryGetValue($IndexedPath, [ref]$n)) { return $n }
+    $n = [IO.File]::ReadAllLines($byPath[$IndexedPath].FullName).Count
+    $lineCountMemo[$IndexedPath] = $n
+    return $n
 }
 
 function Test-DeclaresType {
@@ -344,6 +395,63 @@ function Test-SymbolInCode {
     return [regex]::IsMatch($Code, ('\b' + [regex]::Escape($Symbol) + '\b'))
 }
 
+# Test-SymbolInCode's verdict, answered from $Words (the word set of exactly the
+# text in $Code - see "Word sets" above) whenever the symbol is one run of `\w`.
+# `\A...\z`, not `^...$`: `$` also matches before a trailing newline.
+$rxAllWord = [regex]::new('\A\w+\z')
+function Test-SymbolFast {
+    param([string]$Code, [System.Collections.Generic.HashSet[string]]$Words, [string]$Symbol)
+    if ($rxAllWord.IsMatch($Symbol)) { return $Words.Contains($Symbol) }
+    return Test-SymbolInCode -Code $Code -Symbol $Symbol
+}
+
+# The QSYM verdict. Same two paths, same answer, but each regex now runs only
+# on files that COULD match it, decided from the per-file word sets:
+#   (a) Test-DeclaresType's pattern puts whitespace immediately before the type
+#       name and `\b` after it, so a file it matches has that name as a whole
+#       word; and the member test is itself a whole-word test. A file whose set
+#       lacks either word cannot satisfy (a); its regex is never run.
+#   (b) `\bA::B::C\b` needs every segment as a whole word (each one sits
+#       between `::`, or a `\b`, and `:`) in the file holding the match - and
+#       the match lies inside one file, since it holds no "`n". So the regex
+#       runs only over files whose set has every segment, and not at all when
+#       the global set lacks one.
+# The verdict depends only on the token, so it is memoised per token (ordinal).
+$qsymMemo = [System.Collections.Generic.Dictionary[string, bool]]::new([StringComparer]::Ordinal)
+function Test-QualifiedSymbol {
+    param([string]$Token)
+    $ok = $false
+    if ($qsymMemo.TryGetValue($Token, [ref]$ok)) { return $ok }
+    $seg = $Token -split '::'
+    $cls = $seg[0]; $mem = $seg[-1]
+    # (a) a file declares the type AND mentions the member in code
+    if ($allWords.Contains($cls) -and $allWords.Contains($mem)) {
+        foreach ($kv in $symbolText.GetEnumerator()) {
+            $w = $fileWords[$kv.Key]
+            if (-not ($w.Contains($cls) -and $w.Contains($mem))) { continue }
+            if (Test-DeclaresType -Code $kv.Value -TypeName $cls) { $ok = $true; break }
+        }
+    }
+    # (b) or some file carries the qualified name itself in code
+    #     (out-of-line definitions, split .h/.cpp, namespaced free
+    #     functions - all live shapes in this tree)
+    if (-not $ok) {
+        $everySegment = $true
+        foreach ($s in $seg) { if (-not $allWords.Contains($s)) { $everySegment = $false; break } }
+        if ($everySegment) {
+            $rx = [regex]::new('\b' + [regex]::Escape($Token) + '\b')
+            foreach ($kv in $symbolText.GetEnumerator()) {
+                $w = $fileWords[$kv.Key]
+                $candidate = $true
+                foreach ($s in $seg) { if (-not $w.Contains($s)) { $candidate = $false; break } }
+                if ($candidate -and $rx.IsMatch($kv.Value)) { $ok = $true; break }
+            }
+        }
+    }
+    $qsymMemo[$Token] = $ok
+    return $ok
+}
+
 # ---------------------------------------------------------------------------
 # 3. Walk the documents
 # ---------------------------------------------------------------------------
@@ -361,6 +469,9 @@ function Add-Violation {
         Doc = (Split-Path $Doc -Leaf); Line = $Line; Token = $Token; Why = $Why
     })
 }
+
+# Length-preserving HTML-comment blanking, used per line below.
+$blankHtmlComment = [System.Text.RegularExpressions.MatchEvaluator] { param($m) ' ' * $m.Value.Length }
 
 foreach ($doc in $resolvedDocs) {
     $lines = [IO.File]::ReadAllLines($doc)
@@ -412,10 +523,14 @@ foreach ($doc in $resolvedDocs) {
         # line up). An escape's REASON text may itself name the token it excuses;
         # counting that as a suppressed hit would let an escape that suppresses
         # nothing real still look used, defeating the unused-escape check below.
-        $line = [regex]::Replace($line, '<!--[\s\S]*?-->', { param($m) ' ' * $m.Value.Length })
+        # The evaluator is built ONCE, above the walk: a script block handed
+        # straight to Replace is converted to a delegate on EVERY call, and that
+        # conversion alone measured ~29 s of a full run (41,726 doc lines). A line
+        # without `<!--` cannot match, so it skips the Replace entirely.
+        if ($line.Contains('<!--')) { $line = [regex]::Replace($line, '<!--[\s\S]*?-->', $blankHtmlComment) }
         $toks = [regex]::Matches($line, '`([^`\n]+)`')
         if ($toks.Count -eq 0) { continue }
-        $consumed = New-Object bool[] $toks.Count
+        $consumed = [bool[]]::new($toks.Count)
         $pairs = [System.Collections.Generic.List[object]]::new()
 
         # ---- PAIR spelling 1: `File.h` :: `sym`[, `sym2`] -------------------
@@ -477,7 +592,7 @@ foreach ($doc in $resolvedDocs) {
             # `Class::member` in a pair cell resolves on its last segment: this
             # tree declares members unqualified inside header-only classes.
             $leaf = ($p.Symbol -split '::')[-1]
-            if (-not (Test-SymbolInCode -Code $code -Symbol $leaf)) {
+            if (-not (Test-SymbolFast -Code $code -Words $fileWords[$full] -Symbol $leaf)) {
                 Add-Violation $doc $lineNo ("{0} :: {1}" -f $p.File, $p.Symbol) 'PAIR: symbol absent from that file, or present only in comments'
             }
         }
@@ -499,7 +614,7 @@ foreach ($doc in $resolvedDocs) {
                     Add-Violation $doc $lineNo $tok 'FILE does not resolve under any scan root'
                 }
                 elseif ($l1raw) {
-                    $n = [IO.File]::ReadAllLines($byPath[$hit].FullName).Count
+                    $n = Get-LineCount -IndexedPath $hit
                     $l1 = [int]$l1raw
                     $l2 = if ($l2raw) { [int]$l2raw } else { $l1 }
                     if ($l1 -lt 1 -or $l2 -gt $n -or $l2 -lt $l1) {
@@ -527,18 +642,13 @@ foreach ($doc in $resolvedDocs) {
 
             if ($tok -match $rxQSym) {
                 $seg = $tok -split '::'
-                $cls = $seg[0]; $mem = $seg[-1]
+                $cls = $seg[0]
                 if ($ExternalNamespaces -contains $cls) { $externalSkipped[$tok] = $true; continue }
                 $checked++
-                $ok = $false
-                # (a) a file declares the type AND mentions the member in code
-                foreach ($kv in $symbolText.GetEnumerator()) {
-                    if ((Test-DeclaresType -Code $kv.Value -TypeName $cls) -and (Test-SymbolInCode -Code $kv.Value -Symbol $mem)) { $ok = $true; break }
-                }
-                # (b) or some file carries the qualified name itself in code
-                #     (out-of-line definitions, split .h/.cpp, namespaced free
-                #     functions - all live shapes in this tree)
-                if (-not $ok -and [regex]::IsMatch($blobCode, ('\b' + [regex]::Escape($tok) + '\b'))) { $ok = $true }
+                # (a) a file declares the type AND mentions the member in code,
+                # (b) or some file carries the qualified name itself in code -
+                # both inside Test-QualifiedSymbol, pre-filtered and memoised.
+                $ok = Test-QualifiedSymbol -Token $tok
                 if (-not $ok) {
                     Add-Violation $doc $lineNo $tok 'QUALIFIED SYMBOL: no file declares that type and carries that member in code'
                 }
@@ -547,7 +657,7 @@ foreach ($doc in $resolvedDocs) {
 
             if ($tok -cmatch $rxMember) {
                 $checked++
-                if (-not (Test-SymbolInCode -Code $blobCode -Symbol $tok)) {
+                if (-not (Test-SymbolFast -Code $blobCode -Words $allWords -Symbol $tok)) {
                     Add-Violation $doc $lineNo $tok 'MEMBER not found in non-comment code under any scan root'
                 }
                 continue
@@ -556,7 +666,7 @@ foreach ($doc in $resolvedDocs) {
             # -cmatch, not -match: `Diagnostic` must NOT read as lowerCamelCase.
             if (-not $NoBareIdentifiers -and $tok -cmatch $rxIdent) {
                 $checked++
-                if (-not (Test-SymbolInCode -Code $blobCode -Symbol $tok)) {
+                if (-not (Test-SymbolFast -Code $blobCode -Words $allWords -Symbol $tok)) {
                     Add-Violation $doc $lineNo $tok 'IDENTIFIER not found in non-comment code under any scan root'
                 }
                 continue
@@ -567,7 +677,7 @@ foreach ($doc in $resolvedDocs) {
             # `A`, `GT`, `PT` and other ALLCAPS/one-letter labels stay prose.
             if (-not $NoBareIdentifiers -and $tok -cmatch $rxType) {
                 $checked++
-                if (-not (Test-SymbolInCode -Code $blobCode -Symbol $tok)) {
+                if (-not (Test-SymbolFast -Code $blobCode -Words $allWords -Symbol $tok)) {
                     Add-Violation $doc $lineNo $tok 'TYPE/ENUMERATOR not found in non-comment code under any scan root'
                 }
                 continue
@@ -589,7 +699,7 @@ foreach ($doc in $resolvedDocs) {
                         $seenInner[$id] = $true
                         if ($declByToken.ContainsKey($id)) { $declByToken[$id].Hits++; continue }
                         $checked++
-                        if (-not (Test-SymbolInCode -Code $blobCode -Symbol $id)) {
+                        if (-not (Test-SymbolFast -Code $blobCode -Words $allWords -Symbol $id)) {
                             Add-Violation $doc $lineNo $id "IDENTIFIER not found in non-comment code (inside snippet ``$tok``)"
                         }
                     }

@@ -559,6 +559,28 @@ public:
 		return tick;
 	}
 
+	template <typename T>
+		requires Serializable<T>
+	void write(const T& value, uint32_t tick)
+	{
+		usedBytes = 0;
+		uint32 offset = 0;
+		writeToBuffer(offset, tick);
+		offset += sizeof(uint32);
+		writeToSyncedBuffer(value, *this, offset);
+	}
+
+	template <typename T>
+		requires Serializable<T>
+	uint32_t readInto(T& outValue) const
+	{
+		uint32 offset = 0;
+		const uint32 tick = readFromBuffer<uint32>(offset);
+		offset += sizeof(uint32);
+		readFromSyncedBuffer(outValue, *this, offset);
+		return tick;
+	}
+
 	// Watermark-trimmed network serialization: emit the uint16 used-byte count
 	// then only that many payload bytes — never the full kBufferBytes.
 	bool NetSerialize(FArchive& Ar, class UPackageMap* /*Map*/, bool& bOutSuccess)

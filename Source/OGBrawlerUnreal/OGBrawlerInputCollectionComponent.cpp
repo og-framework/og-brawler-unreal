@@ -59,9 +59,9 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	// the engine's stock movement component is gone (ruling #1 = defer jump to a later task).
 	// ⭐ [movement-sim task 19] AND THE ENGINE-SIDE CALLEE WENT WITH IT: this pawn no longer
 	// derives from the engine's walking-pawn base, so there is no inherited `Jump()` left to
-	// bind to even if somebody wanted to. When jump returns it becomes a bit in
-	// `brawlerMovementSimulation::PlayerInput::flags` (task 21's reserved bit) — see the
-	// standing input-wire rule on that type.
+	// bind to even if somebody wanted to. When jump returns (movement-sim task 21) it becomes a
+	// bit in `simulatableBrawler::SyncedPlayerInput::flags`, where bits 1-7 are unassigned — see
+	// the input recipe in og-brawler's BrawlerSyncedPlayerInput-rationale.md.
 	UInputAction* SetSchemeCameraRelativeAction  = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeCameraRelative);
 	UInputAction* SetSchemeAimRelativeAction     = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeAimRelative);
 	UInputAction* SetSchemeMoveRelativeAimAction = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeMoveRelativeAim);
@@ -405,7 +405,7 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 
 	// [movement-sim task 14] THE POINT WHERE holdGuard REACHES THE SIMULATION. This is the
 	// field's first and only writer onto the wire: makeSimPlayerInput turns this bool into
-	// brawlerMovementSimulation::kInputFlagHoldGuard (bit 0 of the movement sub-sim's input
+	// brawlerMovementSimulation::kInputFlagHoldGuard (bit 0 of SyncedPlayerInput's input
 	// flags byte), and step 1's `frozen` gate in brawlerMovementSimulation::integrate is the
 	// only thing that reads it back. Before this line the gate was inert — task 51 shipped the
 	// reader with no writer on purpose, so that landing the writer was one reviewable change.
@@ -439,7 +439,7 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 
 	// --- Motion-sequence matching (predicting client only) ---
 	// Runs over the client's RAW CAPTURE history and produces a triggeredActionId carried on
-	// the machine PlayerInput. The result replicates to the server through the normal
+	// the synced PlayerInput. The result replicates to the server through the normal
 	// PlayerInput RPC path — same trust model as attackLeft.
 	//
 	// [T15] Everything below the argument list is engine-free and lives in
@@ -475,7 +475,7 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	UE_LOG(LogOGSimTick, Log,
 		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u movementFlags=0x%02X"),
 		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId,
-		static_cast<uint32>(packed.get<brawlerMovementSimulation::PlayerInput>().flags));
+		static_cast<uint32>(packed.flags));
 
 	return packed;
 }

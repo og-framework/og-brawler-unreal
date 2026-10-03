@@ -588,7 +588,10 @@ retired: `Engine.SomeRetiredCase`
                 $r = Invoke-Lint -Root $root
                 $r.Code | Should -Be 0
                 $r.Out  | Should -Match 'docs linted\s+: 2'
-                $r.Out  | Should -Match 'default doc tiers\s+: 2'
+                # THREE tiers are configured since the og-brawler plugin tier
+                # joined -DefaultDocDirs; this fixture builds two, so the third
+                # reports ABSENT and still counts as a reported tier.
+                $r.Out  | Should -Match 'default doc tiers\s+: 3'
             } finally { Remove-Item -LiteralPath $root -Recurse -Force }
         }
 
@@ -640,6 +643,69 @@ retired: `Engine.SomeRetiredCase`
                 $r.Out  | Should -Match 'RESULT: 1 UNRESOLVED ANCHOR'
                 $r.Out  | Should -Match '<brawler>NotHere\.h'
                 $r.Out  | Should -Not -Match '<brawler>ManagerUImpl\.h\s+--'
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+    }
+
+    Context 'The word-set fast path gives the regex verdict at the \b boundary' {
+
+        # Whole-word symbols resolve from a set of word runs, not from a
+        # `\bSYM\b` scan. That is only the same verdict if the set's word class
+        # is EXACTLY the one .NET's `\b` uses: `\w` PLUS U+200C (ZWNJ) and
+        # U+200D (ZWJ). Split on `\w` alone and `zwjHead<ZWJ>Tail` yields the
+        # word `zwjHead`, which the regex never matches - a false resolve. So
+        # each verdict below is asserted against the regex ITSELF, and the
+        # regex's answers are pinned too, so the case cannot pass vacuously.
+        # U+200B (zero-width space) is NOT a `\b` word character: the control.
+
+        It 'resolves an identifier next to U+200C / U+200D exactly as the regex does' {
+            $root = New-FixtureRoot
+            try {
+                $zwj = [string][char]0x200D; $zwnj = [string][char]0x200C; $zwsp = [string][char]0x200B
+                $code = "int zwjHead${zwj}Tail = 0;`nint zwnjHead${zwnj}Tail = 0;`nint zwspHead${zwsp}Tail = 0;`n"
+                Set-Content -LiteralPath (Join-Path $root 'src/Boundary.h') -Value $code -Encoding utf8NoBOM
+
+                $names = 'zwjHead', 'zwnjHead', 'zwspHead'
+                $regex = @{}
+                foreach ($n in $names) { $regex[$n] = [regex]::IsMatch($code, '\b' + $n + '\b') }
+                $regex['zwjHead']  | Should -BeFalse
+                $regex['zwnjHead'] | Should -BeFalse
+                $regex['zwspHead'] | Should -BeTrue
+
+                # The same three names through BOTH set-backed arms: IDENT (the
+                # global set) and PAIR (the per-file set).
+                $doc = (($names | ForEach-Object { "ident ``$_``" }) +
+                        ($names | ForEach-Object { "pair ``src/Boundary.h`` :: ``$_``" })) -join "`n"
+                Set-Content -LiteralPath (Join-Path $root 'doc/b.md') -Value $doc
+                $r = Invoke-Lint -Root $root -Docs @('doc/b.md')
+                foreach ($n in $names) {
+                    $identFired = $r.Out -match ('b\.md:\d+\s+' + $n + '\s+--\s+IDENTIFIER not found')
+                    $pairFired  = $r.Out -match ('b\.md:\d+\s+src/Boundary\.h :: ' + $n + '\s+--\s+PAIR: symbol absent')
+                    $identFired | Should -Be (-not $regex[$n]) -Because "IDENT $n must follow the regex"
+                    $pairFired  | Should -Be (-not $regex[$n]) -Because "PAIR $n must follow the regex"
+                }
+                $r.Out  | Should -Match 'RESULT: 4 UNRESOLVED ANCHOR'
+                $r.Code | Should -Be 1
+            } finally { Remove-Item -LiteralPath $root -Recurse -Force }
+        }
+
+        It 'keeps the regex for a symbol that is not one word run' {
+            # `void pushPredictionTick` is two words. It is no member of any word
+            # set, so a lint that routed it through one would reject a symbol
+            # the regex finds. It must resolve, and its false twin must not.
+            $root = New-FixtureRoot
+            try {
+                $code = [IO.File]::ReadAllText((Join-Path $root 'src/CorrectionCache.h'))
+                [regex]::IsMatch($code, '\bvoid\ pushPredictionTick\b')       | Should -BeTrue
+                [regex]::IsMatch($code, '\bvoid\ m_pendingResimAnchorTick\b') | Should -BeFalse
+
+                Set-Content -LiteralPath (Join-Path $root 'doc/p.md') -Value "``src/CorrectionCache.h`` :: ``void pushPredictionTick``"
+                (Invoke-Lint -Root $root -Docs @('doc/p.md')).Code | Should -Be 0
+
+                Set-Content -LiteralPath (Join-Path $root 'doc/p.md') -Value "``src/CorrectionCache.h`` :: ``void m_pendingResimAnchorTick``"
+                $r = Invoke-Lint -Root $root -Docs @('doc/p.md')
+                $r.Code | Should -Be 1
+                $r.Out  | Should -Match 'PAIR: symbol absent from that file'
             } finally { Remove-Item -LiteralPath $root -Recurse -Force }
         }
     }

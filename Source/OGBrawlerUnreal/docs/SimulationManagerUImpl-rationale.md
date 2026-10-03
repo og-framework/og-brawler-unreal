@@ -281,11 +281,14 @@ on the diagnostics view, `getAppliedCaptureTickRef` on the peer itself) — so t
 back at all, and nothing downstream of the ring decides anything.
 
 **Why it cannot fault.** A torn read yields wrong values, never a wrong pointer: a
-`static_assert` at the poll pins `simulatableBrawler::PlayerInput` trivially destructible (it owns
-no memory) and the sub-input the display actually reads trivially copyable. A member that owned an
+`static_assert` at the poll pins `simulatableBrawler::PlayerInput` trivially copyable (it owns
+no memory). A member that owned an
 allocation would turn this tear into a crash, and that assert is what stops one landing quietly.
-*(The composite fails `is_trivially_copyable` through `std::tuple`'s implementation alone, not
-through any member of its own — `std::tuple<int, float>` fails the same trait identically.)*
+*(Until og-syncedInput-rework task 3 there were two asserts: the input was a six-slice composite,
+which fails `is_trivially_copyable` through `std::tuple`'s implementation alone, so the composite
+was pinned trivially destructible and the machine sub-input the display read trivially copyable.
+Since task 3 `simulatableBrawler::PlayerInput` is the flat `SyncedPlayerInput`, and one
+trivially-copyable assert, whose message names the two it replaced, covers both.)*
 
 **And it is bounded in time.** The read is diagnostics-only and gated on one predicate at its call
 site, so it can be switched off outright without reshaping anything.
@@ -1531,14 +1534,27 @@ the adapter map and the system map were populated and an inbound-hit stream coul
 provably runs every session, once per character. **A cap that depends on nobody spawning a fifth
 character is not a fence**, and this tree has already shipped three things that were silently inert.
 
-**Why 4, derived.** The binding constraint is the **input guarantee**: all the remote characters'
-relay rings must fit one packet by themselves — pre-diet, `81*SumE + 13.1*(N-1) <= 943 B`, because a ring that gets scheduled out under
-redundancy 0 loses its whole staged burst with no recovery path. Modelling a join as "the joiner's
-ring at the measured settling burst, everyone else at the measured average", N = 4 clears that
-bound with about nine tenths of one entry to spare and N = 5 does **not** — at five characters an
-*ordinary* join crosses the bound, with no server hitch required. The same arithmetic is asserted
-from inside the suite by `Source/OGBrawlerTests/extern/og-brawler-tests/Source/OGBrawlerTests/RoundVsPacketBudgetTest.cpp`'s pre-diet table. The
+**Where 4 came from, and what the same arithmetic gives now.** The binding constraint is the
+**input guarantee**: all the remote characters' relay rings must fit one packet by themselves,
+because a ring that gets scheduled out under redundancy 0 loses its whole staged burst with no
+recovery path. In the test's own terms that is `44*SumE + 11*(N-1) <= 943 B`: 44 B is the relay
+ring's entry stride (capture tick 4 + dA 1 + the 39 B `simulatableBrawler::SyncedPlayerInput`), 11 B
+is each ring object's fixed cost (u16 length prefix, 2 B codec header, 7 B batch framing), and
+943 B is the 952 B bunch less 9 B of per-packet overhead. Modelling a join as "the joiner's ring at
+the stage cap (8 entries), everyone else at the measured average (1.132)", the largest N whose
+join still fits is **11** (N = 11 needs 919.272 B, 32.728 B or 0.744 of an entry to spare); N = 12
+needs 980.080 B and does **not** fit. The same arithmetic is asserted from inside the suite by
+`Source/OGBrawlerTests/extern/og-brawler-tests/Source/OGBrawlerTests/RoundVsPacketBudgetTest.cpp`'s pre-diet table. The
 other half of the pre-diet configuration is `TimeConfig::correctionRotationK` (§3).
+
+⚠ **R0, og-syncedInput-rework task 3 (2026-10-03).** This paragraph used to derive 4: it priced
+the entry at `81*SumE` (the stride was 82 B by then) and concluded *"N = 4 clears that bound with
+about nine tenths of one entry to spare and N = 5 does **not**"*. That was true of the six-slice
+77 B input composite. Task 3 replaced it with the flat 39 B `SyncedPlayerInput` (stride 82 -> 44 B),
+and the bound moved from 4 to 11. **`kPreDietCharacterCap` is retained at 4 anyway**: the constant
+and its check are unchanged, and lifting the cap is unscheduled — og-netcode-v2-input-relay item
+40, which owned it, was closed on 2026-10-03 without doing so. Until someone lifts it, 4 is a
+tested-size statement rather than the packet-budget boundary.
 
 **Emission is once per over-cap character**, not per frame and not per session: registration runs
 exactly once per character, so the emission site is its own throttle. No memoization is needed and
@@ -1555,9 +1571,10 @@ silently drift downwards and disarm the cap. Reaping on unregister means a sessi
 characters is judged on the roster actually resident rather than on a high-water mark, and erasing
 an id that never completed registration is a no-op — which is exactly why a set is the right shape.
 
-**Both the constant and its check are deleted by the wire diet**, and their **absence** afterwards
+**Lifting the cap means deleting both the constant and its check**, and their **absence** afterwards
 is the "cap lifted" statement: there is no flag to flip and no value to raise, which is deliberate,
-because a cap you can quietly widen is not a cap.
+because a cap you can quietly widen is not a cap. (This was written as the wire diet's job,
+og-netcode-v2-input-relay item 40; that item closed on 2026-10-03, so nobody owns it today.)
 
 ⛔ **The cap is coupled to `brawlerRingout::kMaxSpawnPoints`, and since task 11 the header asserts
 it:** `static_assert(kPreDietCharacterCap <= kMaxSpawnPoints)`. The cap only WARNS — it allocates
@@ -1568,7 +1585,7 @@ nothing.
 - A cap above the table would stop warning about exactly the characters that cannot be placed.
 
 **Since og-brawler-uploadtosteam T18 (2026-09-29) the table is 8 and the cap stays 4.**
-- The cap is the packet-budget number derived above; the table is sized by a playtest ruling: 8 characters, and nobody refused for numbers.
+- The cap was the packet-budget number derived above (it is 11 since og-syncedInput-rework task 3, and the cap was kept at 4); the table is sized by a playtest ruling: 8 characters, and nobody refused for numbers.
 - Characters 5-8 therefore get real slots and trigger the `[PreDietCap]` warning, which is the truthful "above the tested size" signal.
 - The assertion still holds (4 ≤ 8) and still forbids the one dangerous direction: the cap above the table.
 - The 9th concurrent character is back in the loop above. The engine allows up to 16 per server. *(The header's prose said
@@ -1576,7 +1593,7 @@ raising the cap alone "SILENTLY STOPS RESPAWNING EVERY CHARACTER PAST THE 4th". 
 wrong — §11 C7.)*
 
 ⚠ **This heading carries `∴D-01`**, the derivation tag on `kPreDietCharacterCap`'s declaration.
-When the diet deletes the constant, it deletes that tag's site, so the diet must retire `D-01` in
+Whoever deletes the constant deletes that tag's site, so they must retire `D-01` in
 the same change. The tag lint's orphan check will say so if it does not.
 
 ---

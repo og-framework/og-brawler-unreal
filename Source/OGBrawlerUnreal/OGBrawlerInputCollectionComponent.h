@@ -149,7 +149,7 @@ public:
 	// passes it through dInput::stickRouting::guardFreezeRequested, which keeps it only while
 	// the scheme's own movement input (or the actual routed move) is below the move deadzone.
 	// That result goes to makeSimPlayerInput, which sets
-	// brawlerMovementSimulation::kInputFlagHoldGuard — bit 0 of the movement sub-sim's input
+	// brawlerMovementSimulation::kInputFlagHoldGuard — bit 0 of SyncedPlayerInput's input
 	// flags byte, ON THE WIRE, replicated and resimulated like any other PlayerInput field.
 	// Its reader is step 1's `frozen` gate in brawlerMovementSimulation::integrate.
 	// [movement-sim task 15] THE SECOND READER IS GONE. `AOGBrawlerUECharacter::Move`'s

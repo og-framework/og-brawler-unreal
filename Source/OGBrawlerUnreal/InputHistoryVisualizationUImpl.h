@@ -108,14 +108,15 @@ public:
 		uint32_t                                               newestTick,
 		float                                                  deadzone)
 	{
-		static_assert(std::is_trivially_destructible_v<simulatableBrawler::PlayerInput>,
+		static_assert(std::is_trivially_copyable_v<simulatableBrawler::PlayerInput>,
 			"A capture slot is read from the game thread while the physics thread may be "
 			"writing it. A capture that owned memory would make that tear a crash rather "
-			"than a wrong glyph, so the read must be re-argued before such a member lands.");
-		static_assert(std::is_trivially_copyable_v<dAttackMachineSimulation::PlayerInput>,
-			"The sub-input the display actually reads must stay plain values, for the same "
-			"reason. (The COMPOSITE fails this trait through std::tuple alone, not through "
-			"any member of its own -- std::tuple<int, float> fails it identically.)");
+			"than a wrong glyph, so the read must be re-argued before such a member lands. "
+			"This one check replaces two (og-syncedInput-rework task 3, when PlayerInput became "
+			"the flat SyncedPlayerInput): is_trivially_destructible on the old input composite, "
+			"which failed is_trivially_copyable through std::tuple alone, and "
+			"is_trivially_copyable on the machine sub-simulation's PlayerInput slice (deleted by "
+			"og-syncedInput-rework task 4), the sub-input the display read.");
 
 		const simulatableBrawler::DelayLineMotionHistory history(captures);
 

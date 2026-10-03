@@ -700,13 +700,12 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		{
 			if (vizPlayerInput.has_value())
 			{
-				const auto& machineInput = vizPlayerInput->get<dAttackMachineSimulation::PlayerInput>();
 				dAttackAimVisualization::Input aimInput(DeltaTime,
-					machineInput.aimDirection,
+					vizPlayerInput->aimDirection,
 					rendererFunctorImpl,
 					loggingFunctor,
-					machineInput.moveDirection,
-					machineInput.moveDirectionWorld);
+					vizPlayerInput->moveStick,
+					vizPlayerInput->moveDirectionWorld);
 
 				dAttackAimVisualization::visualize(aimInput,
 					(*attackSimState).get<dAttackRadialSimulation::State>(),
@@ -761,11 +760,10 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		{
 			if (vizPlayerInput.has_value())
 			{
-				const auto& machineInput = vizPlayerInput->get<dAttackMachineSimulation::PlayerInput>();
 				dAttackBlockPredictionVisualization::Input blockPredInput(DeltaTime,
-					machineInput.aimDirection,
-					machineInput.moveDirection,
-					machineInput.moveDirectionWorld,
+					vizPlayerInput->aimDirection,
+					vizPlayerInput->moveStick,
+					vizPlayerInput->moveDirectionWorld,
 					vizManager->getPhysicsBodyReaderAdapter(),
 					vizManager->editQueryAdapter(),
 					rendererFunctorImpl);
@@ -812,7 +810,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				{
 					// ⛔G-31  docs/SimmableUpdateComponent-guards.md
 					liveInput = brawlerInputHistoryVisualization::captureRowFieldsOf(
-						vizPlayerInput->get<dAttackMachineSimulation::PlayerInput>(),
+						*vizPlayerInput,
 						dAttackMachineSimulation::g_moveStickDeadzone.load());
 				}
 
