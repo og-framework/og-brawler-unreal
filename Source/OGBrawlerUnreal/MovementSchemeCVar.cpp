@@ -32,13 +32,17 @@ namespace
 		{
 			dAttackMachineSimulation::g_movementScheme = dAttackMachineSimulation::MovementScheme::MoveRelativeAim;
 		}
+		else if (Val == static_cast<int32>(dAttackMachineSimulation::MovementScheme::AimRelativeSwapped))
+		{
+			dAttackMachineSimulation::g_movementScheme = dAttackMachineSimulation::MovementScheme::AimRelativeSwapped;
+		}
 		// Silently ignore invalid values — the atomic is not updated.
 	}
 
 	static FAutoConsoleVariableRef CVarMovementScheme(
 		TEXT("OGBrawler.MovementScheme"),
 		GMovementSchemeInt,
-		TEXT("0 = CameraRelative, 1 = AimRelative, 2 = MoveRelativeAim"),
+		TEXT("0 = CameraRelative, 1 = AimRelative, 2 = MoveRelativeAim, 3 = AimRelativeSwapped (gamepad sticks swapped: right stick moves, left stick aims)"),
 		FConsoleVariableDelegate::CreateStatic(&OnMovementSchemeChanged),
 		ECVF_Default);
 
@@ -81,7 +85,7 @@ namespace
 	static FAutoConsoleVariableRef CVarSwapMoveAndAimSticks(
 		TEXT("OGBrawler.SwapMoveAndAimSticks"),
 		GSwapMoveAndAimSticks,
-		TEXT("0 = left stick = move, right stick = aim (default). 1 = swapped: right stick feeds the move direction, left stick feeds the aim direction."),
+		TEXT("0 = left stick = move, right stick = aim (default). 1 = swapped: right stick feeds the move direction, left stick feeds the aim direction. Ignored in MovementScheme 3 (AimRelativeSwapped), which defines its own stick routing."),
 		FConsoleVariableDelegate::CreateStatic(&OnSwapMoveAndAimSticksChanged),
 		ECVF_Default);
 

@@ -665,7 +665,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				tmpAimInput,
 				rendererFunctorImpl,
 				loggingFunctor);
-			if (dAttackMachineSimulation::g_movementScheme == dAttackMachineSimulation::MovementScheme::AimRelative)
+			if (dAttackMachineSimulation::isAimRelativeFamily(dAttackMachineSimulation::g_movementScheme.load()))
 			{
 				dAttackRadialVisualization::visualize2(attackCircularVisualizationInput,
 					(*attackSimState).get<dAttackRadialSimulation::State>(),

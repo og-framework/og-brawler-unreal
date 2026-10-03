@@ -53,6 +53,8 @@ public:
 	glm::vec3 resolveMouseAim() const { return m_mouseAimCache; }
 
 	// Direction-build helpers — physics-thread-safe (read caches + statics only).
+	// buildAimDirection is always unit length. buildMoveDirectionWorld is zero below the move
+	// deadzone, otherwise unit length (getInputDirectionInCameraSpace normalizes).
 	glm::vec3 buildAimDirection() const;
 	glm::vec3 buildMoveDirectionWorld() const;
 	static glm::vec3 getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection);
@@ -126,14 +128,15 @@ public:
 	// the tick/history context the motion matcher would need — the matcher is not run.
 	simulatableBrawler::PlayerInput buildLatestVisualizationInput() const;
 
-	// Logical stick accessors. Both raw members end up with the same "stick-up = -Y in
-	// storage" convention but get there differently: onMove explicitly negates v.Y (left
-	// stick raw is +Y for stick-up); onAim stores raw (right stick raw is already -Y for
-	// stick-up per the IMC asset). With both members in the same storage convention, the
-	// swap is a straight pointer swap with no sign flips. When g_swapMoveAndAimSticks is
-	// true, getMoveStick() returns the raw aim stick and getAimStick() returns the raw
-	// move stick. All consumers (Move, buildMoveDirectionWorld, buildAimDirection,
-	// buildPlayerInput) must route through these accessors so the swap is observed uniformly.
+	// Logical stick accessors. Both return the matching half of
+	// dInput::stickRouting::routeSticks({m_moveKeys, m_leftStick, m_rightStick}, ...),
+	// fed with g_movementScheme, g_swapMoveAndAimSticks, g_gamepadMoveStickFeedsAim and
+	// g_moveStickDeadzone; which raw source feeds which logical stick per scheme is decided
+	// there and nowhere else. All three raw members are stored in the same "stick-up = -Y"
+	// convention (see the handlers), so routing needs no sign flips. All consumers
+	// (buildMoveDirectionWorld, buildAimDirection, buildPlayerInput, the character's camera
+	// and SimmableUpdateComponent) must go through these accessors so the routing is
+	// observed uniformly.
 	glm::vec2 getMoveStick() const;
 	glm::vec2 getAimStick() const;
 	// Returns the current mouse delta and resets it to zero (consumed each frame by character Tick).
@@ -141,8 +144,11 @@ public:
 	bool getLeftAttack() const { return m_leftAttack; }
 	bool getRightAttack() const { return m_rightAttack; }
 	bool getBlockLook() const { return m_blockLook; }
-	// [movement-sim task 14] NOW A SIM INPUT, not only a CMC gate. buildPlayerInput reads this
-	// every tick and hands it to makeSimPlayerInput, which sets
+	// The RAW guard button (Left Shift / gamepad left bumper). [movement-sim task 14] It is a sim
+	// input: buildPlayerInput reads it every tick and, since og-brawler-3rdControllerMode task 5,
+	// passes it through dInput::stickRouting::guardFreezeRequested, which keeps it only while
+	// the scheme's own movement input (or the actual routed move) is below the move deadzone.
+	// That result goes to makeSimPlayerInput, which sets
 	// brawlerMovementSimulation::kInputFlagHoldGuard — bit 0 of the movement sub-sim's input
 	// flags byte, ON THE WIRE, replicated and resimulated like any other PlayerInput field.
 	// Its reader is step 1's `frozen` gate in brawlerMovementSimulation::integrate.
@@ -162,19 +168,22 @@ private:
 	glm::vec3 m_camForwardCache = glm::vec3(1.f, 0.f, 0.f);
 	glm::vec3 m_mouseAimCache   = glm::vec3(0.f, 0.f, 0.f);
 
-	// Cached raw input state
-	glm::vec2 m_moveStick  = glm::vec2(0.f, 0.f);
-	glm::vec2 m_aimStick   = glm::vec2(0.f, 0.f);
+	// Cached raw input state. m_moveKeys = WASD + D-pad (Move action), m_leftStick = gamepad
+	// left stick (MoveStick action), m_rightStick = gamepad right stick (Aim action).
+	glm::vec2 m_moveKeys   = glm::vec2(0.f, 0.f);
+	glm::vec2 m_leftStick  = glm::vec2(0.f, 0.f);
+	glm::vec2 m_rightStick = glm::vec2(0.f, 0.f);
 	glm::vec2 m_lookStick  = glm::vec2(0.f, 0.f);
 	bool m_leftAttack  = false;
 	bool m_rightAttack = false;
 	bool m_blockLook   = false;
 	bool m_holdGuard   = false;
 
-	// Source-of-move latch updated each onMove call. true ⇒ most recent non-zero move
-	// input came from the gamepad left stick; false ⇒ from WASD (or initial state).
-	// Used by buildAimDirection to gate the "move stick feeds aim" fallback so the rule
-	// only fires in the gamepad case, leaving mouse+kbd's mouse-aim behavior untouched.
+	// Input-device latch, updated on non-zero onMove / onMoveStick / onAim events. true ⇒
+	// the most recent such input came from the gamepad (either stick, or the D-pad);
+	// false ⇒ from WASD (or initial state). Used by buildAimDirection and
+	// buildMoveDirectionWorld to gate the "move stick feeds aim" fallback so the rule only
+	// fires in the gamepad case, leaving mouse+kbd's mouse-aim behavior untouched.
 	bool m_lastMoveInputWasGamepad = false;
 
 	UEnhancedInputComponent* m_inputComponent = nullptr;
@@ -182,6 +191,7 @@ private:
 	glm::vec3 buildMoveDirectionWorldFor(const glm::vec3& referenceForward) const;
 
 	void onMove(const FInputActionValue& Value);
+	void onMoveStick(const FInputActionValue& Value);
 	void onAim(const FInputActionValue& Value);
 	void onLook(const FInputActionValue& Value);
 	void onBlockLook(const FInputActionValue& Value);
@@ -191,4 +201,5 @@ private:
 	void onSetSchemeCameraRelative(const FInputActionValue& Value);
 	void onSetSchemeAimRelative(const FInputActionValue& Value);
 	void onSetSchemeMoveRelativeAim(const FInputActionValue& Value);
+	void onSetSchemeAimRelativeSwapped(const FInputActionValue& Value);
 };
