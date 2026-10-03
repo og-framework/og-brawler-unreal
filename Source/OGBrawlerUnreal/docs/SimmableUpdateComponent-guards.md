@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 <!-- lint-external-ref: m_replicatedInputSyncedBuffer -- ABSENCE FENCE (G-32, G-36): the retired replicated correction-input property. It must NOT resolve -->
 <!-- lint-external-ref: OnRep_CorrectionInput -- ABSENCE FENCE (G-10, G-36): the retired notification of that property. It must NOT resolve -->
+<!-- lint-external-ref: m_clientToServerInputSyncedBuffer -- RETIRED at og-syncedInput-rework task 9 (2026-10-03): the client->server input buffer member, quoted verbatim in G-36 and named in its dated Site history. It must NOT resolve -->
 # `SimmableUpdateComponent.h` and `.cpp` — guards
 
 Every prohibition that survived the task-25 conversion of both files. Each entry has an **opaque,
@@ -523,8 +524,9 @@ the pair (verified: no script there names `OGSIM_OPTIMIZE_ON`), so this tag is t
 
 ## G-36 — absence (header): the replicated correction-input property
 
-**Site:** absence tag in the private section of `SimmableUpdateComponent.h`, after
-`m_clientToServerInputSyncedBuffer`.
+**Site:** absence tag in the private section of `SimmableUpdateComponent.h`, after the
+`ServerReceiveRemoteMove` declaration. (Until og-syncedInput-rework task 9, 2026-10-03, it followed
+`m_clientToServerInputSyncedBuffer`, which sat between the two.)
 
 **As shipped:**
 > [og-netcode-v2-input-relay T8] THE REPLICATED CORRECTION-INPUT PROPERTY IS
@@ -542,6 +544,12 @@ the pair (verified: no script there names `OGSIM_OPTIMIZE_ON`), so this tag is t
 
 **Correction (R0).** "on the relay ring below" — the ring is no longer declared below; it is a
 property of `ASimulationInputRelay` (G-37).
+
+**Correction (R0, og-syncedInput-rework task 9, 2026-10-03).** The NOTE's "surviving
+`m_clientToServerInputSyncedBuffer`" no longer survives: that member, its accessor, its typedef and
+the input sync buffer type itself were deleted together with the core concept requirement that was
+their only reason to exist. The component holds no input sync buffer in either direction now; the
+input leaves through `sendLocalInputToAuthority`.
 
 ---
 

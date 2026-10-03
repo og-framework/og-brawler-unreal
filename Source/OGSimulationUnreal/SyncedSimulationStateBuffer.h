@@ -212,8 +212,9 @@ public:
 	//   discipline signal tight). Re-measure if the State composite grows.
 	static constexpr int32 kBufferBytes = 384;
 
-	// Wire-format version. Parallels FSimulationInputSyncBuffer::kWireFormatVersion
-	// and FInputRedundancyBundle::kWireFormatVersion (Stage 1 wire format = 1).
+	// Wire-format version. Parallels FInputRedundancyBundle::kWireFormatVersion
+	// (Stage 1 wire format = 1; the input sync buffer that also paralleled it was
+	// retired in og-syncedInput-rework task 9).
 	// The version-byte prepend + pre/post-Stage-1 compat fence landed in Task 11
 	// (see OGBrawlerNetworkModelResearch risks_and_plan §5.2); the refusal path is
 	// USimmableUpdateComponent::OnRep_CorrectionState.
@@ -303,8 +304,9 @@ public:
 		correctionStateBuffer::write(*this, value, tick, appliedCaptureTick);
 	}
 
-	// Ref-less publish. Kept so the buffer still satisfies the shared
-	// CompositeSyncedBufferConcept (and so any non-correction publisher can use
+	// Ref-less publish. Kept so the buffer still satisfies
+	// CompositeSyncedBufferConcept, which CorrectionStateSyncedBufferConcept
+	// refines (and so any non-correction publisher can use
 	// it); it writes the SENTINEL rather than leaving a previous publish's ref in
 	// place, because "this publisher named no capture" and "the authority applied
 	// no real input" are the same statement to every reader.
@@ -454,185 +456,6 @@ private:
 // EDIT. This one is registered.
 template<>
 struct TStructOpsTypeTraits<FSimulationStateSyncBuffer> : public TStructOpsTypeTraitsBase2<FSimulationStateSyncBuffer>
-{
-	enum { WithNetSerializer = true };
-};
-
-// ---------------------------------------------------------------------------
-// [Task 8 / Phase 1 — Stage 1] FSimulationInputSyncBuffer
-//
-// Input-only sync buffer, split out from FSimulationStateSyncBuffer per
-// proposal §1.1 row 3. The input role carries only a simulatable's PlayerInput
-// composite, which is far smaller than the full State correction payload, so
-// the wire budget is kBufferBytes = 128 (vs the correction buffer's 384).
-//
-// Mirrors FSimulationStateSyncBuffer's template surface
-// (writeToBuffer / readFromBuffer / write(composite, tick) / readInto) so a
-// call-site can swap one buffer type for the other with no other change — this
-// is what lets SimmableUpdateComponent re-type the input-role members without
-// touching their use-sites.
-//
-// Watermark trim: only the written prefix is replicated. A uint16 usedBytes
-// header precedes the payload on the wire; custom NetSerialize emits
-// sizeof(uint16) + usedBytes, never the full kBufferBytes
-// (spike_input_rpc_saturation.md Option 2).
-// ---------------------------------------------------------------------------
-USTRUCT()
-struct OGSIMULATIONUNREAL_API FSimulationInputSyncBuffer
-{
-public:
-	GENERATED_BODY()
-
-	// Input-only wire budget (~128 B per proposal §1.1 row 3). Do NOT bump
-	// without coordinating with the OGBrawlerNetworkModelResearch wire-format
-	// decisions.
-	static constexpr int32 kBufferBytes = 128;
-
-	// Wire-format version — parallels FSimulationStateSyncBuffer::kWireFormatVersion
-	// and FInputRedundancyBundle::kWireFormatVersion. Version-byte prepend +
-	// compat fence land in Task 11.
-	static constexpr uint8 kWireFormatVersion = 1;
-
-	FSimulationInputSyncBuffer()
-		: buffer( {0} )
-	{
-		buffer.SetNum(kBufferBytes);
-	}
-
-	template <typename T>
-	void writeToBuffer(uint32 ByteIndex, const T& Value)
-	{
-		checkf(ByteIndex + sizeof(T) <= static_cast<uint32>(buffer.Num()),
-			TEXT("FSimulationInputSyncBuffer write OOB: offset=%u size=%llu capacity=%d (raise kBufferBytes)"),
-			ByteIndex, static_cast<uint64>(sizeof(T)), buffer.Num());
-
-		// Copy the value into the buffer as raw bytes
-		const uint8* ValueAsBytes = reinterpret_cast<const uint8*>(&Value);
-		for (int32 i = 0; i < sizeof(T); ++i)
-			buffer[ByteIndex + i] = ValueAsBytes[i];
-
-		// Track the high-water mark so NetSerialize only emits the used prefix.
-		const uint32 endByte = ByteIndex + static_cast<uint32>(sizeof(T));
-		if (endByte > usedBytes)
-			usedBytes = static_cast<uint16>(endByte);
-	}
-
-	template <typename T>
-	T readFromBuffer(uint32 ByteIndex) const
-	{
-		checkf(ByteIndex + sizeof(T) <= static_cast<uint32>(buffer.Num()),
-			TEXT("FSimulationInputSyncBuffer read OOB: offset=%u size=%llu capacity=%d"),
-			ByteIndex, static_cast<uint64>(sizeof(T)), buffer.Num());
-
-		// Read the value from the buffer as raw bytes
-		T Value;
-		uint8* ValueAsBytes = reinterpret_cast<uint8*>(&Value);
-		for (int32 i = 0; i < sizeof(T); ++i)
-		{
-			ValueAsBytes[i] = buffer[ByteIndex + i];
-		}
-		return Value;
-	}
-
-	// Wire format: tick (uint32) at offset 0, then per-field serialized composite.
-	// Generic on SimulationComposite<Ts...> — identical contract to
-	// FSimulationStateSyncBuffer::write so the two are drop-in interchangeable.
-	template <typename... Ts>
-	void write(const SimulationComposite<Ts...>& value, uint32_t tick)
-	{
-		usedBytes = 0;  // fresh publish — reset the watermark before (re)writing
-		uint32 offset = 0;
-		writeToBuffer(offset, tick);
-		offset += sizeof(uint32);
-		writeCompositeToSyncedBuffer(value, *this, offset);
-	}
-
-	// Symmetric counterpart to write(composite, tick). Returns the tick read from
-	// byte 0.
-	template <typename... Ts>
-	uint32_t readInto(SimulationComposite<Ts...>& outValue) const
-	{
-		uint32 offset = 0;
-		const uint32 tick = readFromBuffer<uint32>(offset);
-		offset += sizeof(uint32);
-		readCompositeFromSyncedBuffer(outValue, *this, offset);
-		return tick;
-	}
-
-	template <typename T>
-		requires Serializable<T>
-	void write(const T& value, uint32_t tick)
-	{
-		usedBytes = 0;
-		uint32 offset = 0;
-		writeToBuffer(offset, tick);
-		offset += sizeof(uint32);
-		writeToSyncedBuffer(value, *this, offset);
-	}
-
-	template <typename T>
-		requires Serializable<T>
-	uint32_t readInto(T& outValue) const
-	{
-		uint32 offset = 0;
-		const uint32 tick = readFromBuffer<uint32>(offset);
-		offset += sizeof(uint32);
-		readFromSyncedBuffer(outValue, *this, offset);
-		return tick;
-	}
-
-	// Watermark-trimmed network serialization: emit the uint16 used-byte count
-	// then only that many payload bytes — never the full kBufferBytes.
-	bool NetSerialize(FArchive& Ar, class UPackageMap* /*Map*/, bool& bOutSuccess)
-	{
-		if (buffer.Num() != kBufferBytes)
-			buffer.SetNum(kBufferBytes);
-
-		uint16 used = usedBytes;
-		if (used > kBufferBytes)
-			used = static_cast<uint16>(kBufferBytes);
-		Ar << used;  // saving writes the count; loading overwrites it from the wire
-
-		if (Ar.IsLoading())
-		{
-			if (used > kBufferBytes)
-				used = static_cast<uint16>(kBufferBytes);
-			usedBytes = used;
-		}
-
-		if (used > 0)
-			Ar.Serialize(buffer.GetData(), used);
-
-		bOutSuccess = true;
-		return true;
-	}
-
-private:
-	UPROPERTY()
-	TArray<uint8> buffer;
-
-	// High-water mark of written bytes; replicated as the wire payload length.
-	// Not a UPROPERTY — NetSerialize carries it explicitly on the wire.
-	uint16 usedBytes = 0;
-};
-
-// ⛔⛔ [T29] READ THE SAME WARNING ON FSimulationStateSyncBuffer'S TRAITS BLOCK
-// ABOVE — AND NOTE THAT THIS TYPE IS THE SHARPEST CASE IN THE MODULE.
-//
-// It declares WithNetSerializer = true and is NOT registered in
-// IrisNetSerializerRegistrations.cpp, which is correct ONLY because nothing
-// replicates it today: T8 retired `m_replicatedInputSyncedBuffer`, and the one
-// surviving instance (USimmableUpdateComponent::m_clientToServerInputSyncedBuffer)
-// carries no UPROPERTY macro and appears in no DOREPLIFETIME and no RPC signature,
-// so no descriptor is ever built for it. That is also why it never warned.
-//
-// It is therefore ONE `UPROPERTY` — or one RPC parameter — AWAY FROM BEING A
-// SILENT CASUALTY of the exact defect T29 fixed. Whoever adds that must add the
-// registration in Source/OGSimulationUnreal/IrisNetSerializerRegistrations.cpp in
-// the same edit, and must expect the wire framing around the payload to change
-// (see §5.2 of the T29 impl notes for what that costs).
-template<>
-struct TStructOpsTypeTraits<FSimulationInputSyncBuffer> : public TStructOpsTypeTraitsBase2<FSimulationInputSyncBuffer>
 {
 	enum { WithNetSerializer = true };
 };

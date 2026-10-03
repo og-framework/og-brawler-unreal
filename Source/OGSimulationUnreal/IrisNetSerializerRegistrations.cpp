@@ -97,13 +97,6 @@
 //     parameter struct WITH a custom NetSerialize and no registration would be
 //     bypassed exactly like a replicated one. The bundle is healthy for the other
 //     reason: it has nothing to bypass.
-//   * FSimulationInputSyncBuffer DOES declare WithNetSerializer = true, and is the
-//     one type here that would be a casualty if it were still replicated. It is
-//     not: T8 retired `m_replicatedInputSyncedBuffer`, and its one surviving
-//     instance (USimmableUpdateComponent::m_clientToServerInputSyncedBuffer) is not
-//     a UPROPERTY at all, so no descriptor is ever built for it and no warning is
-//     ever emitted. If it is ever replicated again it must be added below in the
-//     same edit.
 //
 // PROVING THIS IS LIVE. The absence of the LogIris warning is NOT sufficient
 // evidence — it proves Iris found *a* serializer, not that it found *ours*. The

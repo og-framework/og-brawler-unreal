@@ -63,7 +63,6 @@ public:
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
 	using SyncedCorrectionBufferType  = FSimulationStateSyncBuffer;
-	using SyncedRemoteInputBufferType = FSimulationInputSyncBuffer;
 	using RelayedInputRingType        = FRelayedInputRing;
 
 	void setOnCorrectionStateReceivedCallback(
@@ -75,12 +74,6 @@ public:
 	void clearOnCorrectionStateReceivedCallback()
 	{
 		m_onCorrectionStateReceivedCallback = nullptr;
-	}
-
-
-	FSimulationInputSyncBuffer* getClientToServerInputSyncedBuffer()
-	{
-		return &m_clientToServerInputSyncedBuffer;
 	}
 
 	void sendLocalInputToAuthority(
@@ -147,7 +140,6 @@ private:
 
 	UFUNCTION(Server, Unreliable)
 	void ServerReceiveRemoteMove(const FInputRedundancyBundle& bundle);
-	FSimulationInputSyncBuffer m_clientToServerInputSyncedBuffer;
 
 	// ⛔G-36  docs/SimmableUpdateComponent-guards.md
 

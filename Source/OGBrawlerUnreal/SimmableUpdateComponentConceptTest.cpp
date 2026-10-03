@@ -60,19 +60,16 @@ concept PredictionSyncedBufferOwnerConceptLocal =
              uint32 redundancyDepth)
     {
         typename OwnerT::SyncedCorrectionBufferType;
-        typename OwnerT::SyncedRemoteInputBufferType;
         typename OwnerT::RelayedInputRingType;
         requires CorrectionStateSyncedBufferConceptLocal<typename OwnerT::SyncedCorrectionBufferType, StateT>;
-        requires CompositeSyncedBufferConceptLocal<typename OwnerT::SyncedRemoteInputBufferType, InputT>;
         // [T8] The correction-INPUT callback pair that sat between these two lines
-        // is retired with its channel. SyncedRemoteInputBufferType stays required —
-        // it still types getClientToServerInputSyncedBuffer below.
+        // is retired with its channel. [og-syncedInput-rework task 9] So is the
+        // client->server input buffer typedef, its constraint and its accessor.
         { owner.setOnCorrectionStateReceivedCallback(corrFn) };
         { owner.clearOnCorrectionStateReceivedCallback() };
         { owner.setOnRelayedInputReceivedCallback(relayFn) };
         { owner.clearOnRelayedInputReceivedCallback() };
         { constOwner.getRelayedInputRing() } -> std::same_as<const typename OwnerT::RelayedInputRingType&>;
-        { owner.getClientToServerInputSyncedBuffer() } -> std::same_as<typename OwnerT::SyncedRemoteInputBufferType*>;
         { owner.sendLocalInputToAuthority(pendingQueue, currentTick, redundancyDepth) };
     };
 

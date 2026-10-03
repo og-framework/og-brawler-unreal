@@ -45,7 +45,7 @@
 //
 // DIRTY DETECTION: every byte of ring state (version, entry count, entries) lives
 // inside the single UPROPERTY, so UE's default property comparison sees any
-// change to the ring and marks it dirty. (FSimulationInputSyncBuffer keeps its
+// change to the ring and marks it dirty. (FSimulationStateSyncBuffer keeps its
 // usedBytes watermark OUTSIDE the UPROPERTY and gets away with it because the
 // payload bytes always change too; this type deliberately has no such shadow
 // state.)

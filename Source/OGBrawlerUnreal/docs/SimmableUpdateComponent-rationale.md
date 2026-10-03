@@ -28,6 +28,7 @@ rather than restated here.
 <!-- lint-external-ref: EpicGamesAssignment -- ⛔ MUST NOT RESOLVE. F-34-8: a namespace named only by the deleted dead scratch code; it exists nowhere -->
 <!-- lint-external-ref: StructeredLog -- ⛔ MUST NOT RESOLVE. F-34-8: a misspelled engine header named by two deleted commented-out includes; no file of that name exists -->
 <!-- lint-external-ref: getSyncedCorrectionInputBuffer -- RETIRED (Sec 12): the authority accessor for the retired correction-input buffer. It must NOT resolve -->
+<!-- lint-external-ref: m_clientToServerInputSyncedBuffer -- RETIRED at og-syncedInput-rework task 9 (2026-10-03), dated history in Sec 9: the client->server input buffer member. It must NOT resolve -->
 <!-- lint-external-ref: getMachineVizState -- RETIRED (Sec 12): deleted with the pawn flinch-freeze predicate that was its only caller. It must NOT resolve -->
 <!-- lint-external-ref: m_onCorrectionInputReceivedCallback -- RETIRED (Sec 12): removed with the correction-input channel. It must NOT resolve -->
 
@@ -53,7 +54,7 @@ manager.
 `USimmableUpdateComponent`, `ASimulationManagerUImpl`, `GEngine`, `ASimulationInputRelay`,
 `ASimulationConnectionRelay`, `AOGBrawlerUECharacter`, and equally the replication vocabulary
 (`UChildConnection`, `FNetPing`, `COND_SkipOwner`, `COND_OwnerOnly`, `NetSerialize`, Iris, `UObject`,
-`FSimulationStateSyncBuffer`, `FSimulationInputSyncBuffer`) — is one adapter's binding for the role it
+`FSimulationStateSyncBuffer`) — is one adapter's binding for the role it
 names, and another adapter substitutes its own. The engine-free core never sees any of them.
 
 **Role.** One instance runs on each side and they are not the same object. The role test is
@@ -436,8 +437,11 @@ hole and no stale version expectation.** Lifetime registrations are per-property
 wire offsets, and every surviving property carries its own self-describing serializer with a
 watermark-trimmed length prefix. That is why the state channel's version was deliberately **not**
 bumped for this removal: the state payload's layout is unchanged, and every build that speaks the
-current version already agrees the input value is not on the wire. `FSimulationInputSyncBuffer` is
-untouched and survives in its client→server role as `m_clientToServerInputSyncedBuffer`.
+current version already agrees the input value is not on the wire. The input sync buffer type was
+untouched by T8 and survived in its client→server role as `m_clientToServerInputSyncedBuffer`; that
+role was retired too in og-syncedInput-rework task 9 (2026-10-03) — nothing had called its accessor
+since the redundancy-bundle RPC replaced it, and it was never replicated — and the member, accessor,
+typedef and type were deleted together with the core concept requirement that kept them.
 
 **The relayed-input ring's lifetime registration**, and the connection tier's owner-only one. Both
 covered in §6 and §5 respectively.
@@ -625,10 +629,10 @@ PARAMETER" (§6). Everything else is here.
 ### Carried header prose (verified before the move)
 
 **The concept typedefs.** `SyncedCorrectionBufferType` is the correction-state role
-(`FSimulationStateSyncBuffer`); `SyncedRemoteInputBufferType` names **one** role since the correction-
-input channel retired — the client→server buffer. `RelayedInputRingType` is named through a typedef for
-the same reason: `SimulationNetSync` binds the arrival callback and reads the ring at registration, and
-must do so without naming a UE type. `SimulatableOwnerTraits<SimulatableBrawler>` is specialised in
+(`FSimulationStateSyncBuffer`). `RelayedInputRingType` is named through a typedef for the same
+reason: `SimulationNetSync` binds the arrival callback and reads the ring at registration, and must do
+so without naming a UE type. A third typedef, for the client→server input buffer, was retired with
+that buffer in og-syncedInput-rework task 9 (2026-10-03); see §9. `SimulatableOwnerTraits<SimulatableBrawler>` is specialised in
 `SimulatableBrawlerOwnerTraits.h`; any site that instantiates `SimulationNetSync<SimulatableBrawler>`
 includes that header.
 
