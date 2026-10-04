@@ -292,6 +292,27 @@ and the failing cook are the only detectors, and the cook is the one that fails 
 
 ---
 
+## G-18 — `kBoomLengthAtTargetPitchMirror` mirrors the camera behaviour's full boom length; change both together
+
+**Site:** `static constexpr float kBoomLengthAtTargetPitchMirror = 900.f;` in `seedCameraBoomAtIsoRotation`.
+
+New guard (og-attackstatetransition-cleanup task 7, 2026-10-04). It replaced no comment, so it has no
+`>` block.
+
+⛔ **DO NOT CHANGE THE 900 HERE WITHOUT CHANGING `dAttackCameraBehaviour::integrate`'s LENGTH FORMULA
+(`DAttackCamera.cpp`), AND THE REVERSE.** The seed puts the boom at the iso pitch, which is the pitch
+`integrate` is driven to, and `integrate` sets the length to `900 − 500·(1 − |clamped pitch| / target)`:
+900 at the target. The seed length must be that value, or the first look input snaps the arm length.
+
+**Consequence.** With a different seed value the solo camera starts at the wrong distance, and jumps
+to 900 on the first frame of BlockLook plus a look input. Nothing logs it.
+
+**What breaks if the tag moves.** Nothing checks the pair. The 900 is a literal inside a function body
+in og-brawler's `.cpp`, so a `static_assert` here cannot reach it. `DAttackCamera.IsoSeedHoldsPitchAndFullLengthUnderHorizontalLook`
+pins the og-brawler side (length 900 at the target), and cannot see this file.
+
+---
+
 ## §R — Retired ids
 
 None.

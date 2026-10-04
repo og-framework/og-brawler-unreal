@@ -19,6 +19,7 @@
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
 #include "OGBrawlerUnreal/DAttackCircleUImplementation.h"
 #include "OGBrawlerUnreal/HumanoidMeshBuilder.h"
+#include "OGBrawlerUnreal/SharedIsometricCameraActor.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -357,6 +358,16 @@ void AOGBrawlerUECharacter::CustomPhysics(float DeltaTime, FBodyInstance* BodyIn
 	PhysicsTick(DeltaTime);
 }
 
+void AOGBrawlerUECharacter::seedCameraBoomAtIsoRotation(const FRotator& isoRotation)
+{
+	const FQuat relativeRotation = GetActorQuat().Inverse() * isoRotation.Quaternion();
+	m_cameraState.setCameraBoomTransform(uglm::toGLMMat4(FTransform(relativeRotation)));
+	// ⛔G-18  docs/OGBrawlerUECharacter-guards.md
+	static constexpr float kBoomLengthAtTargetPitchMirror = 900.f;
+	m_cameraState.setCameraBoomLength(kBoomLengthAtTargetPitchMirror);
+	m_cameraBoomSeeded = true;
+}
+
 void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -365,9 +376,16 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 
 	const glm::vec2 lookStick = InputCollection->consumeLookStick();
 
+	const FRotator isoRotation = ASharedIsometricCameraActor::resolveIsoRotation();
+	if (!m_cameraBoomSeeded && IsLocallyControlled())
+	{
+		seedCameraBoomAtIsoRotation(isoRotation);
+	}
+
 	DPIDSettings settings(0.03f, 0.01f, 0.01f);
 	const glm::vec3 aimStick3 = glm::vec3(InputCollection->getAimStick(), 0.f);
-	dAttackCameraBehaviour::integrate(DeltaSeconds, DAttackCameraInput{ aimStick3, lookStick, InputCollection->getBlockLook(), 0.8f, settings }, m_cameraState);
+	const float targetPitch = dAttackCameraBehaviour::targetPitchFromUEPitchDegrees(isoRotation.Pitch);
+	dAttackCameraBehaviour::integrate(DeltaSeconds, DAttackCameraInput{ aimStick3, lookStick, InputCollection->getBlockLook(), targetPitch, settings }, m_cameraState);
 	CameraBoom->SetRelativeRotation(uglm::toFRotator(m_cameraState.getCameraBoomTransform()));
 	CameraBoom->TargetArmLength = m_cameraState.getCameraBoomLength();
 

@@ -160,6 +160,10 @@ protected:
 
 	DAttackCameraState m_cameraState;
 
+	bool m_cameraBoomSeeded = false;
+
+	void seedCameraBoomAtIsoRotation(const FRotator& isoRotation);
+
 	OGBrawlerUEPID m_camPid;
 
 	void Attack(const FInputActionValue& Value);

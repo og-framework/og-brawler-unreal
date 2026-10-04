@@ -22,6 +22,13 @@ public:
     // the same world, so last-write-wins is fine.
     void setOwningWorld(UWorld* world) { m_owningWorld = world; }
 
+    // The iso camera's world rotation: the og.iso.pitch / og.iso.yaw CVars when
+    // non-zero, else the UPROPERTY values of `source`. A null `source` reads the
+    // class default object, so the solo third-person camera can start at the iso
+    // angle when no iso actor exists (AOGBrawlerUECharacter::Tick). Tick passes
+    // `this`, so both cameras resolve through this one function.
+    static FRotator resolveIsoRotation(const ASharedIsometricCameraActor* source = nullptr);
+
 private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera, meta=(AllowPrivateAccess="true"))
     USceneComponent* m_root;
@@ -29,7 +36,7 @@ private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category=Camera, meta=(AllowPrivateAccess="true"))
     UCameraComponent* m_camera;
 
-    UPROPERTY(EditAnywhere, Category=Iso) float m_yawDegrees       = 45.f;
+    UPROPERTY(EditAnywhere, Category=Iso) float m_yawDegrees       = 0.f;
     UPROPERTY(EditAnywhere, Category=Iso) float m_pitchDegrees     = -60.f;
     // Narrow FOV (telephoto) compresses perspective so the camera approximates
     // orthographic-style framing while still providing depth cues. Wider values

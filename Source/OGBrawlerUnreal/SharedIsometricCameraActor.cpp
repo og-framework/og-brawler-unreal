@@ -76,6 +76,17 @@ ASharedIsometricCameraActor::ASharedIsometricCameraActor()
     SetActorRotation(FRotator(m_pitchDegrees, m_yawDegrees, 0.f));
 }
 
+FRotator ASharedIsometricCameraActor::resolveIsoRotation(const ASharedIsometricCameraActor* source)
+{
+    if (source == nullptr)
+        source = GetDefault<ASharedIsometricCameraActor>();
+
+    // CVar overrides when non-zero, else the actor UPROPERTY.
+    const float pitchDegrees = !FMath::IsNearlyZero(g_pitchDegrees) ? g_pitchDegrees : source->m_pitchDegrees;
+    const float yawDegrees   = !FMath::IsNearlyZero(g_yawDegrees)   ? g_yawDegrees   : source->m_yawDegrees;
+    return FRotator(pitchDegrees, yawDegrees, 0.f);
+}
+
 void ASharedIsometricCameraActor::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
@@ -85,8 +96,6 @@ void ASharedIsometricCameraActor::Tick(float DeltaSeconds)
 
     // Resolve effective parameters — CVar overrides when non-zero, else actor UPROPERTY.
     const float fovDegrees  = g_fovDegrees       > 0.f ? g_fovDegrees       : m_fovDegrees;
-    const float pitchDegrees = !FMath::IsNearlyZero(g_pitchDegrees) ? g_pitchDegrees : m_pitchDegrees;
-    const float yawDegrees   = !FMath::IsNearlyZero(g_yawDegrees)   ? g_yawDegrees   : m_yawDegrees;
     const float minDistance = g_minDistanceCm    > 0.f ? g_minDistanceCm    : m_minDistanceCm;
     const float maxDistance = g_maxDistanceCm    > 0.f ? g_maxDistanceCm    : m_maxDistanceCm;
     const float margin      = g_marginCm         > 0.f ? g_marginCm         : m_marginCm;
@@ -100,7 +109,7 @@ void ASharedIsometricCameraActor::Tick(float DeltaSeconds)
     }
 
     // Apply rotation from resolved pitch / yaw so CVar edits take effect at runtime.
-    const FRotator targetRotation(pitchDegrees, yawDegrees, 0.f);
+    const FRotator targetRotation = resolveIsoRotation(this);
     if (!GetActorRotation().Equals(targetRotation, 0.01f))
     {
         SetActorRotation(targetRotation);
