@@ -77,8 +77,9 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	ic->BindAction(AimAction,         ETriggerEvent::Completed,  this, &UOGBrawlerInputCollectionComponent::onAim);
 	ic->BindAction(LookAction,        ETriggerEvent::Triggered,  this, &UOGBrawlerInputCollectionComponent::onLook);
 	ic->BindAction(LookAction,        ETriggerEvent::None,       this, &UOGBrawlerInputCollectionComponent::onLook);
-	ic->BindAction(BlockLookAction,   ETriggerEvent::Triggered,  this, &UOGBrawlerInputCollectionComponent::onBlockLook);
-	ic->BindAction(BlockLookAction,   ETriggerEvent::Completed,  this, &UOGBrawlerInputCollectionComponent::onBlockLook);
+	// BlockLook is a toggle (og-attackstatetransition-cleanup task 12): Started only, one edge per
+	// press, like the scheme switches below. A second binding for this action would flip twice.
+	ic->BindAction(BlockLookAction,   ETriggerEvent::Started,    this, &UOGBrawlerInputCollectionComponent::onBlockLook);
 	ic->BindAction(HoldGuardAction,   ETriggerEvent::Triggered,  this, &UOGBrawlerInputCollectionComponent::onHoldGuard);
 	ic->BindAction(HoldGuardAction,   ETriggerEvent::Completed,  this, &UOGBrawlerInputCollectionComponent::onHoldGuard);
 	ic->BindAction(LeftAttackAction,  ETriggerEvent::Triggered,  this, &UOGBrawlerInputCollectionComponent::onLeftAttack);
@@ -127,6 +128,23 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 	{
 		m_mouseAimCache = glm::vec3(0.f, 0.f, 0.f);
 		return;
+	}
+
+	// Mouse movement clears the gamepad latch (og-attackstatetransition-cleanup task 13). The
+	// signal is the cursor position, not the Look action: with the cursor shown, the viewport
+	// releases mouse capture on every mouse-up, and the Look delta only flows under capture.
+	// Only the primary local player owns the mouse, so couch players on pads are not touched.
+	// Rule and threshold: dInput::stickRouting::lastInputWasGamepadAfterCursor (og-brawler
+	// DAttackMachineSimulationRuntimeTweakables-rationale.md §10).
+	const ULocalPlayer* const localPlayer = pc->GetLocalPlayer();
+	float cursorX = 0.f;
+	float cursorY = 0.f;
+	if (localPlayer != nullptr && localPlayer->IsPrimaryPlayer() && pc->GetMousePosition(cursorX, cursorY))
+	{
+		const dInput::stickRouting::CursorLatch latch = dInput::stickRouting::lastInputWasGamepadAfterCursor(
+			m_lastMoveInputWasGamepad, m_cursorLatchAnchor, glm::vec2(cursorX, cursorY));
+		m_lastMoveInputWasGamepad = latch.lastInputWasGamepad;
+		m_cursorLatchAnchor       = latch.anchor;
 	}
 
 	// Line-plane intersection: project mouse onto z=0 plane through the capsule center.
@@ -194,6 +212,13 @@ glm::vec2 UOGBrawlerInputCollectionComponent::getAimStick() const
 
 glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
 {
+	// AimRelative + BlockLook: the aim is the flattened camera forward, ahead of every stick and
+	// mouse branch (og-attackstatetransition-cleanup task 11; og-brawler
+	// DAttackMachineSimulationRuntimeTweakables-rationale.md §9).
+	if (const std::optional<glm::vec3> lookAim = dInput::stickRouting::cameraLookAim(
+			dAttackMachineSimulation::g_movementScheme.load(), m_blockLook, m_camForwardCache))
+		return checkUnitAim(*lookAim);
+
 	const float aimDeadzone = dAttackMachineSimulation::g_aimStickDeadzone.load();
 	const glm::vec3 aimStick3 = glm::vec3(getAimStick(), 0.f);
 	if (glm::length(aimStick3) > aimDeadzone)
@@ -295,8 +320,9 @@ void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)
 	// keep buildAimDirection's gamepad-only fallback from triggering on WASD, we check which
 	// physical source is actually held right now: any held D-pad direction means gamepad,
 	// otherwise the event came from WASD. We don't update on near-zero events (Completed
-	// release) so the latch stays meaningful between input bursts.
-	if (!v.IsNearlyZero())
+	// release) so the latch stays meaningful between input bursts. The rule itself is
+	// dInput::stickRouting::lastInputWasGamepadAfterMoveKeys.
+	if (dInput::stickRouting::moveKeysPressed(m_moveKeys))
 	{
 		// ⭐ [movement-sim task 19] `APawn` IS THE NARROWEST TYPE THAT ANSWERS THIS. The only
 		// thing wanted from the owner is its controller, and `GetController()` is `APawn`'s.
@@ -315,7 +341,8 @@ void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)
 			const bool dpadMoveDown =
 				pc->IsInputKeyDown(EKeys::Gamepad_DPad_Up) || pc->IsInputKeyDown(EKeys::Gamepad_DPad_Down) ||
 				pc->IsInputKeyDown(EKeys::Gamepad_DPad_Left) || pc->IsInputKeyDown(EKeys::Gamepad_DPad_Right);
-			m_lastMoveInputWasGamepad = dpadMoveDown;
+			m_lastMoveInputWasGamepad = dInput::stickRouting::lastInputWasGamepadAfterMoveKeys(
+				m_lastMoveInputWasGamepad, m_moveKeys, dpadMoveDown);
 		}
 	}
 }
@@ -325,8 +352,12 @@ void UOGBrawlerInputCollectionComponent::onMoveStick(const FInputActionValue& Va
 	const FVector2D v = Value.Get<FVector2D>();
 	// Same (X, -Y) transform onMove applies: the left stick yields v.Y = +1 for stick-up.
 	m_leftStick = glm::vec2(v.X, v.Y * -1.f);
-	if (!v.IsNearlyZero())
-		m_lastMoveInputWasGamepad = true;
+	// Only a stick past its deadzone latches "gamepad" (og-attackstatetransition-cleanup task 13).
+	// Enhanced Input applies no deadzone to the 2D stick keys, so a resting pad's drift fires
+	// this handler every frame; latching on any non-zero value let that drift override the WASD
+	// latch onMove had just set, frame after frame.
+	m_lastMoveInputWasGamepad = dInput::stickRouting::lastInputWasGamepadAfterStick(
+		m_lastMoveInputWasGamepad, m_leftStick, dAttackMachineSimulation::g_moveStickDeadzone.load());
 }
 
 void UOGBrawlerInputCollectionComponent::onAim(const FInputActionValue& Value)
@@ -338,19 +369,22 @@ void UOGBrawlerInputCollectionComponent::onAim(const FInputActionValue& Value)
 	// stick so that downstream code sees the same (stick-up = -Y in storage) convention. This
 	// is what lets routeSticks hand either stick to either role without per-stick sign flips.
 	m_rightStick = glm::vec2(v.X, v.Y);
-	if (!v.IsNearlyZero())
-		m_lastMoveInputWasGamepad = true;
+	// Past the aim deadzone only, for the same drift reason as onMoveStick.
+	m_lastMoveInputWasGamepad = dInput::stickRouting::lastInputWasGamepadAfterStick(
+		m_lastMoveInputWasGamepad, m_rightStick, dAttackMachineSimulation::g_aimStickDeadzone.load());
 }
 
 void UOGBrawlerInputCollectionComponent::onLook(const FInputActionValue& Value)
 {
 	const FVector2D v = Value.Get<FVector2D>();
-	m_lookStick = glm::vec2(v.X, v.Y);
+	// Accumulate: the mouse look value is a per-evaluation displacement, and consumeLookStick
+	// drains the sum once per character Tick (og-attackstatetransition-cleanup task 9).
+	m_lookStick += glm::vec2(v.X, v.Y);
 }
 
-void UOGBrawlerInputCollectionComponent::onBlockLook(const FInputActionValue& Value)
+void UOGBrawlerInputCollectionComponent::onBlockLook(const FInputActionValue& /*Value*/)
 {
-	m_blockLook = Value.Get<bool>();
+	m_blockLook = !m_blockLook;
 }
 
 void UOGBrawlerInputCollectionComponent::onHoldGuard(const FInputActionValue& Value)

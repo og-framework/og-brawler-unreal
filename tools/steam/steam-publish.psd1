@@ -46,7 +46,7 @@
                         ReadyLinePattern = 'OGBrawlerSession: listening port=(?<port>\d+)'
                         Title            = 'OGBrawler dedicated server'
                         ClientLaunch     = 'steam://rungameid/{AppId:client}'
-                        LocalHint        = 'After joining: Tab adds a local player, Insert removes one'
+                        LocalHint        = 'After joining: Tab adds a local player, End removes one'
                     }
                 }
             )

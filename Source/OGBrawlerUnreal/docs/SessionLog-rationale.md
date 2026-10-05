@@ -44,7 +44,7 @@ task 13). The host launcher that ships in the server depot parses them. Prohibit
 Every player-controller join and leave goes through these two GameMode calls. The engine spawns a split
 player's controller after `NMT_JoinSplit` through the world's play-actor spawn, which calls Login and `PostLogin`
 (T10 spike Q7); a controller's destruction calls `Logout` (`AController::Destroyed`). That
-covers a client that connects or disconnects, Tab, and Insert (the server-side leave in
+covers a client that connects or disconnects, Tab, and the leave key (End; Insert when this was measured; the server-side leave in
 `JoinScreen-rationale.md` §14). Measured: a client closed with 1 player gave `left players=0`.
 
 ## 2. The measured sequence

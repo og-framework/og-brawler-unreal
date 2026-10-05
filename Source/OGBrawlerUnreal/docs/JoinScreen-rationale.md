@@ -74,7 +74,7 @@ Three `DefaultEngine.ini` lines, and no new map:
 the front-end behaves exactly like the gameplay GameMode. It becomes the front-end only when
 `frontEndApplies(GetNetMode(), IsPlayInPreview())` holds: a standalone world that was not launched by
 the editor. The whole truth table is a `static_assert` beside the function. When active, it spawns no
-pawn and uses a plain `APlayerController`, so the gameplay controller's Tab/Insert bindings are not
+pawn and uses a plain `APlayerController`, so the gameplay controller's Tab/End bindings are not
 live on the join screen. The HUD class stays `AOGBrawlerUEHUD`.
 
 Who never sees it:
@@ -166,7 +166,7 @@ constants. The screen has no on/off variable: it is the game's front door, not a
 
 ## 7. The local co-op keys — one source for the hint and the binding
 
-The join screen's hint ("After joining: Tab adds a local player, Insert removes one") is written from
+The join screen's hint ("After joining: Tab adds a local player, End removes one") is written from
 `brawlerJoinScreen::kLocalCoopKeyNames`. `AOGBrawlerPlayerController::SetupInputComponent` now binds
 `JoinLocalPlayer` and `LeaveLocalPlayer` to `joinScreenUImpl::localCoopAddPlayerKey()` and
 `joinScreenUImpl::localCoopRemovePlayerKey()`, which build the `FKey` from those same names. The hint
@@ -175,6 +175,20 @@ and the binding therefore cannot name different keys. A name that is not an engi
 og-brawler guard G-01 is now checked mechanically in every Development and Editor run. `checkf` is
 compiled out of Shipping, where an invalid name would leave the key unbound, but that build is only
 made after Development runs have passed.
+
+**End is also the address field's cursor-to-end key, and it never does both.** The leave key was
+Insert, then BackSpace (og-attackstatetransition-cleanup task 12, which traced this route for
+BackSpace), and is End since task 13 of the same initiative, which re-checked it for End.
+`UOGBrawlerGameViewportClient::InputKey` hands every press to `UOGBrawlerJoinSessionSubsystem::handleKey`
+first, while `forShownFrontEnd` returns a subsystem, and `handleKey` returns true for End (it moves the
+caret to the end), so the press is consumed before `UGameViewportClient::InputKey` (the `Super` call)
+would route it to a player controller. On top of that, the front-end world uses a plain
+`APlayerController` (§2), which binds no leave key at all. In a gameplay world `forShownFrontEnd`
+returns null, so End reaches only the controller's binding. With the console open, the engine console
+consumes every key while typing, End included, and `joinSessionTakingInput` hands nothing to the join
+screen. No code change was needed. BackSpace now has no gameplay binding: in play it does nothing, and
+on the join screen it deletes text, as before. No Enhanced Input action uses End: the AimRelative
+scheme switch, which sat on End during task 12, is back on 8.
 
 ## 8. The recent list on disk
 
@@ -279,9 +293,13 @@ at the limit means the player was refused, and the subsystem then records the ti
 success**, because the server spawns the new player's controller and it arrives later. The first
 version tested the return value and showed the notice for the successful 4th player (measured).
 
-**Removing: Insert.** User ruling (2026-09-29): Insert removes the highest-numbered local player, and
-local player 0 is never removed. Keyboard input goes to local player 0, so Insert always arrives on
-its controller. Two engine facts shape the code:
+**Removing: End** (Insert until og-attackstatetransition-cleanup task 12, then BackSpace until task 13
+of the same initiative; the behaviour is unchanged). One press removes exactly one player: the engine
+sends a key event to ONE local player's controller, chosen by input device
+(`UGameViewportClient::InputKey`), so even though every local player's controller binds the leave key,
+only one `LeaveLocalPlayer` runs per press, and it removes the last local player. User ruling (2026-09-29): the leave key removes the highest-numbered local
+player, and local player 0 is never removed. Keyboard input goes to local player 0, so the leave key
+always arrives on its controller. Two engine facts shape the code:
 
 * **The engine does not tell the server.** `UGameplayStatics::RemovePlayer` ends in
   `UGameInstance::RemoveLocalPlayer`, which destroys the controller only where it is the authority.
@@ -298,13 +316,14 @@ its controller. Two engine facts shape the code:
   its position in the parent connection's `Children`. The client hands a received controller to the
   local player at that position (the engine's `UChildConnection::HandleClientPlayer`). Removing a
   middle player would pair the next joiner with the wrong local player, and the client then closes the
-  whole connection (`BadChildConnectionIndex`). So Insert always removes the last local player,
+  whole connection (`BadChildConnectionIndex`). So the leave key always removes the last local player,
   whichever local controller received it, and the server refuses a leave from any child that is not
   the last of its connection. The earlier "a local player other than 0 removes itself" path is gone:
-  no key reaches it (gamepads have no Insert key, and the console runs on local player 0), and over
+  no key reaches it (the leave key is a keyboard key, and the console runs on local player 0), and over
   the network it would have broken the pairing.
 
-Measured (editor `-game`, two clients against a `playtest_server.bat`-shaped server): Insert on client
+Measured (editor `-game`, two clients against a `playtest_server.bat`-shaped server; the leave key
+was Insert then): Insert on client
 1 gave server `left players=4`; Tab again gave `joined players=5 local=3`, with spawn slot 2 reused.
 Client 2 went from 4 local players to 1 with three Inserts (a `left` line each), and a fourth Insert
 logged `no other local player to remove`; a Tab after that joined cleanly. Neither client logged

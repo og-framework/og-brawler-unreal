@@ -141,30 +141,16 @@ public:
 	void CustomPhysics(float DeltaTime, FBodyInstance* BodyInstance);
 
 	AOGBrawlerUECharacter();
-	
+
+	void seedCameraBoomAtIsoRotation();
+
 protected:
 
-	struct OGBrawlerUEPID
-	{
-		float error = 0.f;
-		float prev_err = 0.f;
-		float integral = 0.f ;
-		float derivative = 0.f;
-		float adjustment = 0.f;
-
-		float max_adjustment;
-		float P = 0.f;
-		float I = 0.f;
-		float D = 0.f;
-	};
-
-	DAttackCameraState m_cameraState;
+	dAttackCameraBehaviour::OrbitCameraState m_cameraState;
 
 	bool m_cameraBoomSeeded = false;
 
-	void seedCameraBoomAtIsoRotation(const FRotator& isoRotation);
-
-	OGBrawlerUEPID m_camPid;
+	void applyCameraStateToBoom(float targetPitchDeg, const dAttackCameraBehaviour::OrbitCameraSettings& settings);
 
 	void Attack(const FInputActionValue& Value);
 	virtual void Tick(float DeltaSeconds) override;

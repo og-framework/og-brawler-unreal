@@ -292,27 +292,47 @@ and the failing cook are the only detectors, and the cook is the one that fails 
 
 ---
 
-## G-18 — `kBoomLengthAtTargetPitchMirror` mirrors the camera behaviour's full boom length; change both together
+## G-19 — the orbit camera's input: the mouse sum goes in as-is, and the aim stick's Y is negated
 
-**Site:** `static constexpr float kBoomLengthAtTargetPitchMirror = 900.f;` in `seedCameraBoomAtIsoRotation`.
+**Site:** the `const dAttackCameraBehaviour::OrbitCameraInput input{ ... }` statement in `Tick`.
 
-New guard (og-attackstatetransition-cleanup task 7, 2026-10-04). It replaced no comment, so it has no
+New guard (og-attackstatetransition-cleanup task 9, 2026-10-04). It replaced no comment, so it has no
 `>` block.
 
-⛔ **DO NOT CHANGE THE 900 HERE WITHOUT CHANGING `dAttackCameraBehaviour::integrate`'s LENGTH FORMULA
-(`DAttackCamera.cpp`), AND THE REVERSE.** The seed puts the boom at the iso pitch, which is the pitch
-`integrate` is driven to, and `integrate` sets the length to `900 − 500·(1 − |clamped pitch| / target)`:
-900 at the target. The seed length must be that value, or the first look input snaps the arm length.
+⛔ **DO NOT MULTIPLY THE MOUSE VALUE BY `DeltaSeconds`, NORMALIZE IT OR THRESHOLD IT, AND DO NOT PASS
+`getAimStick()` WITHOUT NEGATING ITS Y.**
 
-**Consequence.** With a different seed value the solo camera starts at the wrong distance, and jumps
-to 900 on the first frame of BlockLook plus a look input. Nothing logs it.
+* **The mouse.** `consumeLookStick` returns the Look action values summed since the previous `Tick`:
+  a displacement, already scaled by the engine's mouse sensitivity. `dAttackCameraBehaviour::integrate`
+  turns it into degrees with no time step (og-brawler `DAttackCamera-guards.md` G-01). A `DeltaSeconds`
+  here makes mouse look depend on the frame rate again, and a normalize or a threshold brings back the
+  dead zone that made slow mouse movement do nothing. The only change allowed here is the sign of x
+  (og.cam.invertMouseX).
+* **The stick.** The input component stores every stick with up as −Y (`onMoveStick`, `onAim`, and
+  the comment on `getAimStick` in `OGBrawlerInputCollectionComponent.h`). The orbit camera takes y up.
+  Without the minus, stick up looks DOWN with the default settings, and og.cam.invertStickY does the
+  opposite of its name.
 
-**What breaks if the tag moves.** Nothing checks the pair. The 900 is a literal inside a function body
-in og-brawler's `.cpp`, so a `static_assert` here cannot reach it. `DAttackCamera.IsoSeedHoldsPitchAndFullLengthUnderHorizontalLook`
-pins the og-brawler side (length 900 at the target), and cannot see this file.
+**Consequence.** No error and no log: the camera turns the wrong way, or at a frame-rate-dependent speed.
+
+**What breaks if the tag moves.** Nothing checks it. `DAttackOrbitCamera.SignPins` pins the og-brawler
+side of both conventions, but the `OGBrawlerTests` target does not compile this module, so only PIE sees
+this statement.
 
 ---
 
 ## §R — Retired ids
 
-None.
+⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.
+
+### G-18 — RETIRED (og-attackstatetransition-cleanup task 9, 2026-10-04): the mirrored length was deleted
+
+**Was:** *the seed's boom length mirrors the camera behaviour's full boom length; change both together*
+(task 7). The seed wrote a function-local 900 that had to equal the length the old camera's integrate
+computed at the target pitch.
+
+**Why it retired.** No copy is left to drift. The seed no longer writes a length: `seedCameraBoomAtIsoRotation`
+calls `applyCameraStateToBoom`, which writes `dAttackCameraBehaviour::boomLength` on the seed frame and on
+every `Tick` after it, and the constructor's default length is `dAttackCameraBehaviour::kBoomLengthAtTargetPitch`.
+The length curve has one definition, in og-brawler `DAttackCamera.h`.
+

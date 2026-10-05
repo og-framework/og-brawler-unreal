@@ -149,7 +149,7 @@ physics-thread-written slots. That is a crossing this reader was argued free of.
 `UGameInstance::RemoveLocalPlayer` erases with `RemoveAt`, which shifts every later entry down. The conclusion still
 holds, for a narrower reason. The project's own removal path, `AOGBrawlerPlayerController::LeaveLocalPlayer`, never
 removes local player 0. Since og-brawler-uploadtosteam task 13 it always removes the LAST local player (whichever local
-controller received Insert), so a removal shifts no entry at all.
+controller received the leave key, End since og-attackstatetransition-cleanup task 13), so a removal shifts no entry at all.
 
 **Consequence.** Picking another index, or iterating every local player, breaks the one-HUD rule.
 `AOGBrawlerUEHUD` draws only when its owning controller equals this function's answer, so each couch co-op sibling's

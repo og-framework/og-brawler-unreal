@@ -46,7 +46,7 @@ FKey keyNamed(std::string_view keyName)
 	checkf(key.IsValid(),
 		TEXT("brawlerJoinScreen::kLocalCoopKeyNames holds '%s', which is not an engine key name. ")
 		TEXT("The local co-op hint shows this text and the player controller binds this key, so ")
-		TEXT("both must be an EKeys name such as Tab or Insert. See og-brawler docs/BrawlerJoinScreen-guards.md."),
+		TEXT("both must be an EKeys name such as Tab or End. See og-brawler docs/BrawlerJoinScreen-guards.md."),
 		*joinScreenUImpl::toFString(keyName));
 	return key;
 }

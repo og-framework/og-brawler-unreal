@@ -389,7 +389,7 @@ Three one-page guides for playtesters who are not developers. They can be copied
 into a message as they are. Start with the local playtest: it proves the install
 works before anyone deals with routers.
 
-Controls used below: **Tab** adds a local player and **Insert** removes one
+Controls used below: **Tab** adds a local player and **End** removes one
 (keyboard). Each extra local player needs a gamepad: the first gamepad drives
 player 1 (who also has the keyboard and mouse), the second gamepad drives
 player 2, and so on.
@@ -415,7 +415,7 @@ Steam.
 6. In the game, **This PC** is already selected. Press **Enter** (or **A** on a
    gamepad).
 7. Press **Tab** to add a player; the console prints a "Player joined" line.
-   **Insert** removes the most recently added player; player 1 always stays.
+   **End** removes the most recently added player; player 1 always stays.
 8. To stop: close the game, then press **Ctrl+C** in the console window.
 
 Good to know:

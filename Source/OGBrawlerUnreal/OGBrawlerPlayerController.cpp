@@ -88,10 +88,11 @@ void AOGBrawlerPlayerController::LeaveLocalPlayer()
     UGameInstance* gameInstance = GetGameInstance();
     if (gameInstance == nullptr || GetLocalPlayer() == nullptr) return;
 
-    // Insert removes the LAST local player (the highest-numbered), whichever local PC
-    // received it, and never LP0 -- UE's primary LP is load-bearing for the viewport
-    // (user ruling 2026-09-29, og-brawler-uploadtosteam task 13). Keyboard Insert always
-    // arrives on LP0, which owns the keyboard.
+    // The leave key (End; Insert before og-attackstatetransition-cleanup task 12, then BackSpace
+    // until task 13) removes the LAST local player (the highest-numbered), whichever local PC
+    // received it, and never LP0 -- UE's primary LP is load-bearing for the viewport (user ruling
+    // 2026-09-29, og-brawler-uploadtosteam task 13). The keyboard leave key always arrives on LP0,
+    // which owns the keyboard, and only there: one press, one removal.
     // ⛔ ONLY THE LAST ONE. Client and server pair a split player's controller with its
     //   local player by ARRAY INDEX (NetPlayerIndex = index in UNetConnection::Children
     //   on both sides, and in the client's local-player list), so removing a middle one
@@ -101,7 +102,7 @@ void AOGBrawlerPlayerController::LeaveLocalPlayer()
     const TArray<ULocalPlayer*>& localPlayers = gameInstance->GetLocalPlayers();
     if (localPlayers.Num() <= 1)
     {
-        UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: Insert: no other local player to remove; local player 0 stays"));
+        UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: leave local player: no other local player to remove; local player 0 stays"));
         return;
     }
 
@@ -110,11 +111,11 @@ void AOGBrawlerPlayerController::LeaveLocalPlayer()
         (leavingPlayer != nullptr) ? Cast<AOGBrawlerPlayerController>(leavingPlayer->GetPlayerController(world)) : nullptr;
     if (leaving == nullptr)
     {
-        UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: Insert: the last local player has no controller yet; nothing removed"));
+        UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: leave local player: the last local player has no controller yet; nothing removed"));
         return;
     }
 
-    UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: Insert: removing local player %d of %d"),
+    UE_LOG(LogOGJoinScreen, Log, TEXT("OGJoinScreen: leave local player: removing local player %d of %d"),
         localPlayers.Num() - 1, localPlayers.Num());
 
     // UGameplayStatics::RemovePlayer alone never tells a server: on a network client it
@@ -267,6 +268,18 @@ void AOGBrawlerPlayerController::refreshViewTarget()
     if (auto* pcm = Cast<AOGBrawlerPlayerCameraManager>(PlayerCameraManager))
     {
         pcm->setSuppressPawnFallback(desired != GetPawn());
+    }
+
+    // Iso -> solo: re-seed the solo camera at the iso angle (user decision, og-attackstatetransition-cleanup
+    // task 9). Only on the transition itself: the shared camera is the current view target and no blend
+    // to the pawn is already pending, so a refresh of an already-solo view keeps the player's angle.
+    // Rationale: Source/OGBrawlerUnreal/docs/OGBrawlerUECharacter-rationale.md section 14.
+    if (desired == GetPawn()
+        && Cast<ASharedIsometricCameraActor>(GetViewTarget()) != nullptr
+        && (PlayerCameraManager == nullptr || PlayerCameraManager->PendingViewTarget.Target != desired))
+    {
+        if (AOGBrawlerUECharacter* brawler = Cast<AOGBrawlerUECharacter>(desired))
+            brawler->seedCameraBoomAtIsoRotation();
     }
 
     SetViewTargetWithBlend(desired, m_viewTargetBlendSeconds);

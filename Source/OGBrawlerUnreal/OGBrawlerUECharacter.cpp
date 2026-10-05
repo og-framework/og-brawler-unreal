@@ -45,6 +45,60 @@
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
+namespace
+{
+	float g_camMouseSens = 1.f;
+	float g_camStickSens = 1.f;
+	bool g_camInvertMouseX = false;
+	bool g_camInvertMouseY = false;
+	bool g_camInvertStickY = false;
+	float g_camPitchMinDeg = dAttackCameraBehaviour::kPitchMinDeg;
+	float g_camPitchMaxDeg = dAttackCameraBehaviour::kPitchMaxDeg;
+	float g_camPullEFoldDeg = dAttackCameraBehaviour::kPullYawDegreesPerEFold;
+	float g_camPullMaxDegPerSec = dAttackCameraBehaviour::kPullMaxDegPerSec;
+	float g_camPullHoldoffSec = dAttackCameraBehaviour::kVerticalHoldoffSeconds;
+	float g_camPullDominanceRatio = dAttackCameraBehaviour::kDominanceRatio;
+
+	FAutoConsoleVariableRef CVarCamMouseSens(TEXT("og.cam.mouseSens"), g_camMouseSens,
+		TEXT("Solo camera: mouse look sensitivity multiplier (1 = the og-brawler default)"));
+	FAutoConsoleVariableRef CVarCamStickSens(TEXT("og.cam.stickSens"), g_camStickSens,
+		TEXT("Solo camera: look stick sensitivity multiplier (1 = the og-brawler default rates)"));
+	FAutoConsoleVariableRef CVarCamInvertMouseX(TEXT("og.cam.invertMouseX"), g_camInvertMouseX,
+		TEXT("Solo camera: 1 = mouse right turns the view left (the pre-orbit-camera direction)"));
+	FAutoConsoleVariableRef CVarCamInvertMouseY(TEXT("og.cam.invertMouseY"), g_camInvertMouseY,
+		TEXT("Solo camera: 1 = mouse up looks down"));
+	FAutoConsoleVariableRef CVarCamInvertStickY(TEXT("og.cam.invertStickY"), g_camInvertStickY,
+		TEXT("Solo camera: 1 = look stick up looks down"));
+	FAutoConsoleVariableRef CVarCamPitchMin(TEXT("og.cam.pitchMin"), g_camPitchMinDeg,
+		TEXT("Solo camera: smallest pitch in degrees below the horizon (sanitized into [1, 89])"));
+	FAutoConsoleVariableRef CVarCamPitchMax(TEXT("og.cam.pitchMax"), g_camPitchMaxDeg,
+		TEXT("Solo camera: largest pitch in degrees below the horizon (sanitized into [pitchMin, 89])"));
+	FAutoConsoleVariableRef CVarCamPullEFoldDeg(TEXT("og.cam.pullEFoldDeg"), g_camPullEFoldDeg,
+		TEXT("Solo camera: degrees of yaw per e-fold of the pull toward the iso pitch; smaller is stronger (raised to at least 1)"));
+	FAutoConsoleVariableRef CVarCamPullMaxDegPerSec(TEXT("og.cam.pullMaxDegPerSec"), g_camPullMaxDegPerSec,
+		TEXT("Solo camera: fastest the pull may move the pitch, in degrees per second (0 = no pull)"));
+	FAutoConsoleVariableRef CVarCamPullHoldoffSec(TEXT("og.cam.pullHoldoffSec"), g_camPullHoldoffSec,
+		TEXT("Solo camera: seconds the pull pauses after a deliberate vertical look (0 = never pauses, also not during vertical look)"));
+	FAutoConsoleVariableRef CVarCamPullDominanceRatio(TEXT("og.cam.pullDominanceRatio"), g_camPullDominanceRatio,
+		TEXT("Solo camera: weakens the pull on diagonal look; 0 = full pull on any diagonal, 2 = no pull past ~27 degrees off horizontal"));
+
+	dAttackCameraBehaviour::OrbitCameraSettings orbitCameraSettingsFromCVars()
+	{
+		dAttackCameraBehaviour::OrbitCameraSettings settings;
+		settings.mouseSens = g_camMouseSens;
+		settings.stickSens = g_camStickSens;
+		settings.invertMouseY = g_camInvertMouseY;
+		settings.invertStickY = g_camInvertStickY;
+		settings.pitchMinDeg = g_camPitchMinDeg;
+		settings.pitchMaxDeg = g_camPitchMaxDeg;
+		settings.pullYawDegreesPerEFold = g_camPullEFoldDeg;
+		settings.pullMaxDegPerSec = g_camPullMaxDegPerSec;
+		settings.verticalHoldoffSeconds = g_camPullHoldoffSec;
+		settings.dominanceRatio = g_camPullDominanceRatio;
+		return settings;
+	}
+}
+
 OGSIM_OPTIMIZE_OFF
 
 AOGBrawlerUECharacter::AOGBrawlerUECharacter()
@@ -88,8 +142,9 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 900.0f;
+	CameraBoom->TargetArmLength = dAttackCameraBehaviour::kBoomLengthAtTargetPitch;
 	CameraBoom->bUsePawnControlRotation = false;
+	CameraBoom->SetUsingAbsoluteRotation(true);
 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
@@ -358,14 +413,20 @@ void AOGBrawlerUECharacter::CustomPhysics(float DeltaTime, FBodyInstance* BodyIn
 	PhysicsTick(DeltaTime);
 }
 
-void AOGBrawlerUECharacter::seedCameraBoomAtIsoRotation(const FRotator& isoRotation)
+void AOGBrawlerUECharacter::seedCameraBoomAtIsoRotation()
 {
-	const FQuat relativeRotation = GetActorQuat().Inverse() * isoRotation.Quaternion();
-	m_cameraState.setCameraBoomTransform(uglm::toGLMMat4(FTransform(relativeRotation)));
-	// ⛔G-18  docs/OGBrawlerUECharacter-guards.md
-	static constexpr float kBoomLengthAtTargetPitchMirror = 900.f;
-	m_cameraState.setCameraBoomLength(kBoomLengthAtTargetPitchMirror);
+	const dAttackCameraBehaviour::OrbitCameraSettings settings = orbitCameraSettingsFromCVars();
+	const FRotator isoRotation = ASharedIsometricCameraActor::resolveIsoRotation();
+	m_cameraState = dAttackCameraBehaviour::seedFromUERotation(isoRotation.Pitch, isoRotation.Yaw, settings);
 	m_cameraBoomSeeded = true;
+	applyCameraStateToBoom(dAttackCameraBehaviour::pitchDegFromUEPitchDegrees(isoRotation.Pitch, settings), settings);
+}
+
+void AOGBrawlerUECharacter::applyCameraStateToBoom(
+	float targetPitchDeg, const dAttackCameraBehaviour::OrbitCameraSettings& settings)
+{
+	CameraBoom->SetWorldRotation(FRotator(-m_cameraState.pitchDeg, m_cameraState.yawDeg, 0.f));
+	CameraBoom->TargetArmLength = dAttackCameraBehaviour::boomLength(m_cameraState.pitchDeg, targetPitchDeg, settings);
 }
 
 void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
@@ -374,20 +435,26 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 
 	InputCollection->updateGameThreadCache();
 
-	const glm::vec2 lookStick = InputCollection->consumeLookStick();
+	const glm::vec2 lookUnits = InputCollection->consumeLookStick();
 
-	const FRotator isoRotation = ASharedIsometricCameraActor::resolveIsoRotation();
 	if (!m_cameraBoomSeeded && IsLocallyControlled())
 	{
-		seedCameraBoomAtIsoRotation(isoRotation);
+		seedCameraBoomAtIsoRotation();
 	}
 
-	DPIDSettings settings(0.03f, 0.01f, 0.01f);
-	const glm::vec3 aimStick3 = glm::vec3(InputCollection->getAimStick(), 0.f);
-	const float targetPitch = dAttackCameraBehaviour::targetPitchFromUEPitchDegrees(isoRotation.Pitch);
-	dAttackCameraBehaviour::integrate(DeltaSeconds, DAttackCameraInput{ aimStick3, lookStick, InputCollection->getBlockLook(), targetPitch, settings }, m_cameraState);
-	CameraBoom->SetRelativeRotation(uglm::toFRotator(m_cameraState.getCameraBoomTransform()));
-	CameraBoom->TargetArmLength = m_cameraState.getCameraBoomLength();
+	if (m_cameraBoomSeeded)
+	{
+		const dAttackCameraBehaviour::OrbitCameraSettings settings = orbitCameraSettingsFromCVars();
+		const float targetPitchDeg = dAttackCameraBehaviour::pitchDegFromUEPitchDegrees(
+			ASharedIsometricCameraActor::resolveIsoRotation().Pitch, settings);
+		const float mouseXSign = g_camInvertMouseX ? -1.f : 1.f;
+		const glm::vec2 aimStick = InputCollection->getAimStick();
+		// ⛔G-19  docs/OGBrawlerUECharacter-guards.md
+		const dAttackCameraBehaviour::OrbitCameraInput input{ InputCollection->getBlockLook(),
+			glm::vec2(mouseXSign * lookUnits.x, lookUnits.y), glm::vec2(aimStick.x, -aimStick.y), targetPitchDeg };
+		m_cameraState = dAttackCameraBehaviour::integrate(DeltaSeconds, input, settings, m_cameraState);
+		applyCameraStateToBoom(targetPitchDeg, settings);
+	}
 
 	{
 		glm::vec3 worldAimDirection = InputCollection->buildAimDirection();

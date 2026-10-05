@@ -11,6 +11,8 @@
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
 
+#include <optional>
+
 #include "OGBrawlerInputCollectionComponent.generated.h"
 
 class UEnhancedInputComponent;
@@ -139,10 +141,12 @@ public:
 	// observed uniformly.
 	glm::vec2 getMoveStick() const;
 	glm::vec2 getAimStick() const;
-	// Returns the current mouse delta and resets it to zero (consumed each frame by character Tick).
+	// Returns the mouse look values summed since the last call and resets the sum (drained once per character Tick).
 	glm::vec2 consumeLookStick() { const glm::vec2 v = m_lookStick; m_lookStick = glm::vec2(0.f, 0.f); return v; }
 	bool getLeftAttack() const { return m_leftAttack; }
 	bool getRightAttack() const { return m_rightAttack; }
+	// Look mode: a toggle (5 / gamepad Y), not a held button since og-attackstatetransition-cleanup
+	// task 12. Each pawn's component starts with it off.
 	bool getBlockLook() const { return m_blockLook; }
 	// The RAW guard button (Left Shift / gamepad left bumper). [movement-sim task 14] It is a sim
 	// input: buildPlayerInput reads it every tick and, since og-brawler-3rdControllerMode task 5,
@@ -179,12 +183,17 @@ private:
 	bool m_blockLook   = false;
 	bool m_holdGuard   = false;
 
-	// Input-device latch, updated on non-zero onMove / onMoveStick / onAim events. true ⇒
-	// the most recent such input came from the gamepad (either stick, or the D-pad);
-	// false ⇒ from WASD (or initial state). Used by buildAimDirection and
-	// buildMoveDirectionWorld to gate the "move stick feeds aim" fallback so the rule only
-	// fires in the gamepad case, leaving mouse+kbd's mouse-aim behavior untouched.
+	// Input-device latch. true ⇒ the most recent deliberate input came from the gamepad (a
+	// stick past its deadzone, or the D-pad); false ⇒ from WASD or mouse movement (or initial
+	// state). Written on the game thread by onMove / onMoveStick / onAim and by
+	// updateGameThreadCache (the cursor), through the dInput::stickRouting::lastInputWasGamepadAfter*
+	// rules. Used by buildAimDirection and buildMoveDirectionWorld to gate the "move stick feeds
+	// aim" fallback so the rule only fires in the gamepad case, leaving mouse+kbd's mouse-aim
+	// behavior untouched.
 	bool m_lastMoveInputWasGamepad = false;
+	// Where the cursor was when the gamepad took over (dInput::stickRouting::CursorLatch). Empty
+	// until the first cursor sample. Game thread only.
+	std::optional<glm::vec2> m_cursorLatchAnchor;
 
 	UEnhancedInputComponent* m_inputComponent = nullptr;
 

@@ -192,7 +192,7 @@ Trailing and one-line comments removed from the constructor, with their status:
 |---|---|
 | `// Don't rotate when the controller rotates. Let that just affect the camera.` | true (the three `bUseControllerRotation*` are `false`) |
 | `// Create a camera boom (pulls in towards the player if there is a collision)` | describes `USpringArmComponent`'s default collision test; kept as history |
-| `// The camera follows at this distance behind the character` (on `TargetArmLength = 900`) | true for the constructor only: `Tick` overwrites `TargetArmLength` every frame from `m_cameraState`, whose length starts at 0; since task 7 it is seeded to 900 once the pawn is locally controlled (§14) |
+| `// The camera follows at this distance behind the character` (on `TargetArmLength = 900`) | the default is `dAttackCameraBehaviour::kBoomLengthAtTargetPitch` (900) since task 9; once the pawn is locally controlled, `applyCameraStateToBoom` overwrites it on the seed and on every `Tick` with the orbit camera's length (§14) |
 | `// Rotate the arm based on the controller` (on `bUsePawnControlRotation = false`) | **false** — the value is `false`, so the arm does NOT follow the controller; the camera is driven by `dAttackCameraBehaviour` in `Tick` (R0, §13) |
 | `// Create a follow camera`, `// Attach the camera to the end of the boom …`, `// Camera does not rotate relative to arm` | true |
 | `// Create a PhysicsComponent` | **false** — no physics component is created (R0, §13) |
@@ -732,23 +732,65 @@ G-16.
 | C-12 | palette: "10 entries for a 6-brawler target" | every other figure is 4 (§5) |
 | C-13 | "all seven pre-existing call sites across three files" | a migration-time count; 14 calls in four files today (§1) |
 
-## 14. The solo camera starts at the iso angle (og-attackstatetransition-cleanup task 7, 2026-10-04)
+## 14. The solo camera: a pure orbit camera, seeded at the iso angle (og-attackstatetransition-cleanup tasks 7 and 9, 2026-10-04)
 
-**Before.** `m_cameraState` started with an identity boom rotation and a length of 0.
-`dAttackCameraBehaviour::integrate` returns early unless BlockLook is held with a look input, and `Tick`
-writes the state onto `CameraBoom` every frame. So a single local brawler's camera sat level, at arm
-length 0, until the first look input. The look PID then drove the pitch to a literal 0.8 rad (about 46°).
+**What it is.** The solo third-person camera's logic is og-brawler's pure orbit camera,
+`dAttackCameraBehaviour::integrate` in `DAttackCamera.h`. Its rules, constants and sign conventions are
+in og-brawler `OGBrawler/docs/DAttackCamera-rationale.md`. This class holds the state, `m_cameraState`:
+world yaw, pitch in degrees below the horizon, and the vertical hold-off. It builds the input, and writes
+the result onto `CameraBoom`.
 
-**Now.** Two changes, both in `Tick`:
+**Per `Tick`, in this order:**
 
-* **The seed.** On the first `Tick` where the pawn is locally controlled, `seedCameraBoomAtIsoRotation`
-  writes the boom's relative rotation as the actor rotation's inverse times the iso rotation, so the
-  arm's world rotation is the iso camera's. It also writes the length 900 (guard G-18). `m_cameraBoomSeeded`
-  makes it one-shot. The iso rotation comes from `ASharedIsometricCameraActor::resolveIsoRotation`: the
-  og.iso.pitch / og.iso.yaw console variables when non-zero, else the iso actor's class defaults (pitch
-  −60°, yaw 0°).
-* **The PID target.** `dAttackCameraBehaviour::targetPitchFromUEPitchDegrees` turns the iso pitch into
-  integrate's convention, every `Tick`, so a live og.iso.pitch change moves the target (not the seed).
+1. `updateGameThreadCache` reads the camera rotation for camera-relative movement. That rotation is one
+   frame old, because this `Tick` has not yet written the boom. Task 9 did not change this.
+2. `consumeLookStick` drains the mouse look sum. It is drained even for a pawn that is never seeded, so a
+   sum never carries over to a later frame.
+3. The seed, once, on the first `Tick` where the pawn is locally controlled (below).
+4. Only for a seeded pawn: the settings are read from the console variables (`orbitCameraSettingsFromCVars`);
+   the target is `dAttackCameraBehaviour::pitchDegFromUEPitchDegrees` of the iso pitch, every frame, so a
+   live og.iso.pitch change moves the target and not the seed; the input is built (guard G-19);
+   `dAttackCameraBehaviour::integrate` returns the next state; `applyCameraStateToBoom` writes it.
+
+**The input.**
+
+* `lookHeld` is `getBlockLook`, look mode. Since og-attackstatetransition-cleanup task 12 look mode is a
+  toggle (user decision): 5 or gamepad Y flips it once per press, and each pawn starts with it off. It was
+  held (Left Alt / LT) before. The same state hides the cursor and switches off cursor aim
+  (`updateGameThreadCache`), so with look mode off the mouse aims and does not turn the camera. In
+  AimRelative, look mode also makes the aim the camera forward (og-brawler
+  `DAttackMachineSimulationRuntimeTweakables-rationale.md` §9).
+* The mouse value is the Look action sum since the previous `Tick`. Since task 9 `onLook` adds (`+=`)
+  instead of overwriting: the value is a displacement, so every evaluation between two `Tick`s must count.
+  With one evaluation per frame, the normal case, nothing changes.
+* The stick is `getAimStick`, the scheme-routed aim stick (user decision): the right stick, or the left
+  stick in AimRelativeSwapped. Its Y is negated (G-19).
+
+**The boom.** The constructor calls `SetUsingAbsoluteRotation(true)`. `applyCameraStateToBoom` writes
+`SetWorldRotation(FRotator(-pitchDeg, yawDeg, 0))` and `TargetArmLength` from `dAttackCameraBehaviour::boomLength`.
+
+* **Why absolute rotation.** The state is in world space. With absolute rotation the boom's rotation IS
+  the state, whatever the actor's rotation (for example a spawn yaw from a player start), so the seed needs
+  no actor-rotation inverse (task 7's seed had one). It is not a guard: the capsule's rotation is locked
+  (`kCharacterCapsuleBody`, `lockRotation`), and `SetWorldRotation` converts to a relative rotation on
+  every write, so with the call removed nothing would change on screen today.
+* **The minus on the pitch.** The state's pitch is positive below the horizon; the engine's pitch is
+  positive up. `DAttackCamera.UnrealIsoRotatorSeedReadsAsTheTargetPitch` builds the same rotator from a
+  seeded state and checks it against the iso rotator, with the engine's own math. Dropping the minus would
+  put the camera under the floor on the first frame, which no one can miss, so it has no guard.
+* **The length.** `dAttackCameraBehaviour::boomLength` is the one definition of the curve: full length at
+  or past the target pitch. The constructor default is `dAttackCameraBehaviour::kBoomLengthAtTargetPitch`.
+  G-18 (task 7's mirrored 900) retired with the mirror.
+
+**The seed.** `seedCameraBoomAtIsoRotation` reads the iso rotation from `ASharedIsometricCameraActor::resolveIsoRotation`
+(the og.iso.pitch / og.iso.yaw console variables when non-zero, else the iso actor's class defaults,
+pitch −60°, yaw 0°), sets the state with `dAttackCameraBehaviour::seedFromUERotation`, sets `m_cameraBoomSeeded`
+and writes the boom at once. The seed clamps the pitch into og.cam.pitchMin / og.cam.pitchMax, so an iso
+pitch outside the limits starts the camera at the nearest limit.
+
+Measured on 2026-10-04 (headless standalone run of the ThirdPersonMap, boom properties printed at frame
+60): the defaults give a boom world rotation of (pitch −60, yaw 0) and a length of 900. With og.iso.yaw 45,
+og.iso.pitch −45 and og.cam.pitchMin 50 it is (−50, 45) and 900. The absolute-rotation flag reads `True`.
 
 **Why a one-shot flag in `Tick`, and not `PossessedBy` or `OnRep_Controller`.** `PossessedBy` runs only
 on the server, and `OnRep_Controller` only on a client, and §10 records that a mid-game couch player's
@@ -758,26 +800,75 @@ from one site. It waits until the controller has replicated, and it runs just be
 write, so the seeded pose is on screen in the same frame. A pawn that is never locally controlled is
 never seeded: its camera is never a view target.
 
-**Order inside `Tick`.** The seed runs before `integrate` and before the two `CameraBoom` writes. If it
-ran after them, one frame would show the unseeded pose. This is an ordering fence, so it has no tag.
+**Order inside `Tick`.** The seed runs before `integrate` and before the boom write. If it ran after
+them, one frame would show the unseeded pose. This is an ordering fence, so it has no tag.
 
-**The sign, measured.** `FRotator(-60, yaw, 0)`, made relative to the actor and copied raw into a glm
-quaternion (the copy that `uglm::toGLMMat4` makes), reads back as `glm::eulerAngles(...).y` = +1.0472
-(+π/3). It reads the same for eight actor-yaw and iso-yaw pairs. The case is
-`DAttackCamera.UnrealIsoRotatorSeedReadsAsTheTargetPitch`. So the helper negates the iso pitch.
+**Re-seed on iso → solo (user decision, task 9).** While two or more local brawlers play, the shared iso
+camera is the view target, and the pawn's camera still integrates (invisibly) whenever look mode (BlockLook) is on.
+When the game returns to one local brawler, `AOGBrawlerPlayerController::refreshViewTarget` re-runs
+`seedCameraBoomAtIsoRotation` before it blends to the pawn, so the solo camera comes back at the iso
+angle. It re-seeds only on that transition: the desired target is the pawn, the current view target
+(`GetViewTarget`) is the shared camera, and no blend to the pawn is already pending (`PendingViewTarget`).
+So a refresh of a view that is already solo keeps the player's angle, and a second refresh during the
+blend does not re-seed again (the engine also ignores the repeated `SetViewTargetWithBlend`). One case is
+not re-seeded: a blend from the pawn to the iso camera that is interrupted before it finishes. The current
+view target is then still the pawn, whose angle was still on screen.
 
-**The clamp.** integrate calls `std::clamp(currentPitch, 0, targetPitch)`, which is undefined for a
-negative target, and divides by the target. The helper clamps the iso pitch to 1°–89° before converting,
-and a `static_assert` in `DAttackCamera.h` holds the bounds inside (0°, 90°). An og.iso.pitch outside
-[−89°, −1°] still seeds at the iso rotation itself. The first look input then pulls the pitch into the
-clamped range.
+**Console variables (tasks 9 and 10).** Read every `Tick` into the settings. Local presentation only: nothing
+reaches the simulation or the wire.
 
-**What did not change.** The PID gains (0.03, 0.01, 0.01) stay a literal at the call site, and
-`DAttackCameraIsoSeedTest.cpp` copies them. Field of view and distance are not matched to the iso
-camera. Switching from the iso camera back to the solo camera does not re-seed: a pawn keeps the look
-state it has.
+| variable | default | effect |
+|---|---|---|
+| og.cam.mouseSens | 1 | multiplies mouse look |
+| og.cam.stickSens | 1 | multiplies stick look |
+| og.cam.invertMouseX | 0 | 1 = mouse right turns the view left (the camera before task 8) |
+| og.cam.invertMouseY | 0 | 1 = mouse up looks down |
+| og.cam.invertStickY | 0 | 1 = stick up looks down |
+| og.cam.pitchMin | 10 | smallest pitch below the horizon, in degrees |
+| og.cam.pitchMax | 80 | largest pitch below the horizon, in degrees |
+| og.cam.pullEFoldDeg | 20 | degrees of yaw per e-fold of the pull toward the iso pitch; smaller is stronger (task 10) |
+| og.cam.pullMaxDegPerSec | 240 | fastest the pull may move the pitch, in degrees per second; 0 = no pull (task 10) |
+| og.cam.pullHoldoffSec | 0 | seconds the pull pauses after a deliberate vertical look; 0 = no pause, also none during vertical look (task 10; task 8 used 0.6) |
+| og.cam.pullDominanceRatio | 0 | weakens the pull on diagonal look; 0 = full pull on any diagonal, 2 = none past about 27° off horizontal (task 10; task 8 used 2) |
+
+The defaults of the last six are the og-brawler constants, not copies. The orbit camera sanitizes the
+four pull values (og-brawler `DAttackCamera-rationale.md` §13): an e-fold below 1 is raised to 1, a
+negative cap means no pull, and a negative hold-off or ratio means off. The user ruled (task 10) that the
+pull is strong and never switched off by default, and kept the hold-off and the dominance weight as
+switches to try again. The pitch limits are sanitized into
+[1°, 89°]. og.cam.invertMouseX is applied in this file, to the consumed mouse x, because the
+og-brawler settings have no mouse-X invert.
+
+**Directions compared with the camera before task 8.** Mouse right now turns right (before: left;
+og.cam.invertMouseX 1 restores it). Mouse up looks up, and stick right turns right, as before.
+Stick up looks up. The camera before task 8 read the stick with `+y` = pitch down, and this component
+stores stick up as −Y, so it also looked up on stick up: the stick's pitch direction did NOT change, and
+og.cam.invertStickY 1 gives the inverted direction, not the old one (og-brawler
+`DAttackCamera-rationale.md` §3 records the same). That holds whatever sign the engine reports, because
+the old and new cameras read the same stored value. ⚠ For the right stick, "up is −Y in storage" rests on
+the comment in `onAim` and on the schemes that work today (AimRelativeSwapped adds the right stick to WASD, which is stored as up −Y). The engine's
+XInput and GameInput backends report stick up as positive, and the Aim mapping has no modifier, so the
+direction is a PIE check.
+
+**What did not change.** The legacy input scales, the control rotation and `bUsePawnControlRotation`
+(`false`) are untouched: the camera does not go through the controller. Camera-relative movement reads the
+camera one frame old, as before. A faster yaw now turns the move basis faster while moving, but there is
+no wire change. Field of view and distance are not matched to the iso camera.
+
+**Pawns that are never seeded** skip the camera block, so their boom keeps the constructor defaults
+(absolute rotation zero, length 900). Before task 9 their unseeded state was written every frame (an
+identity relative rotation and a length of 0). Neither is ever a view target. The input component's
+follow-camera fallback is used only by a pawn without a player controller, and that pawn builds no input
+(`buildPlayerInput` returns the zero input when there is no input component).
 
 **The iso actor reads its own instance.** The iso actor's `Tick` calls `resolveIsoRotation(this)`, so
 editing its properties on the placed instance in the details panel still moves the iso camera. The solo
 camera reads the class defaults. They agree in play: `findOrSpawnSharedCamera` spawns the actor from the
 class, and on 2026-10-04 no map or Blueprint in Content referenced the class.
+
+**History.** Before task 7 the camera state started with an identity boom rotation and a length of 0, so a
+single local brawler's camera sat level at arm length 0 until the first look input; a look PID then drove
+the pitch to a literal 0.8 rad (about 46°). Task 7 seeded the boom at the iso rotation (relative to the
+actor, with a mirrored length of 900, G-18) and made the PID target the iso pitch. Task 8 replaced the PID
+camera with the orbit camera in og-brawler (the PID was unstable above about 98.5 fps), which broke this
+file's build on purpose. Task 9 wired it in, as described above.
