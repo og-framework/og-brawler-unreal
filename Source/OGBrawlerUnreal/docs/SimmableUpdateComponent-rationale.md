@@ -702,3 +702,36 @@ Every id this component hands the core — `tryRegister`, `noteDelayedInputCompo
 
 The id is replicated with the pawn, not on the correction wire, so no wire format changes. The
 `sendConnectionTierToOwningClient` `check` compares its `id` argument with the same storage key.
+
+---
+
+## §14 Latency-budget stamps (og-simulationscheduler-withjolt task 1)
+
+Five sites in this file stamp the manager's latency-budget probe. Each is a timestamp and nothing
+else: it reads values the code beside it already has, writes only the probe, and changes no input,
+no wire byte and no ordering of the netcode it sits next to. The hop table, the threads and every
+site's measurement error are `SimulationManagerUImpl-rationale.md` §16; this list only says what
+each site does here.
+
+| site | stamp | thread |
+|---|---|---|
+| `sendLocalInputToAuthority`, after the send | `Handed` for every capture tick in the bundle (client) | GAME |
+| `ServerReceiveRemoteMove_Implementation`, after the version fence | `ServerReceived` for every capture tick in the bundle, and one `WIRE` sample from `readRoundTripMs` per bundle (authority) | GAME |
+| `OnRep_CorrectionState`, beside the `[ReceiveCorrectionState]` line | `ClientReceived` for the correction's tick (client) | GAME |
+| `onRelayedInputRingArrived`, before the core callback | `ClientReceived` for every capture tick in the ring (client) | GAME |
+| `attachInputRelayHost`, authority only | binds the relay host's flush callback, which stamps `Handed` for every capture tick a flush published | GAME |
+
+Every stamp goes through `ASimulationManagerUImpl::stampLatency`, which `checkf`s the game thread.
+Repeated capture ticks (redundant bundle slots, repeated relay entries) are expected: the probe keeps
+the first stamp and counts the rest.
+
+**The provider lambda is unchanged, and G-05 still holds.** The capture stamp needs the manager, which
+that lambda may not capture, so it is a wrapper the manager applies in `tryRegister`
+(`SimulationManagerUImpl-rationale.md` §16). The only addition to the header is
+`getOwnerInputCollection`, a `const` read the wrapper uses to reach the input-sample time.
+
+**G-19's order is unchanged.** The `ServerReceived` loop and the `WIRE` sample sit after the fence
+and before the tier's RTT sample and the core per-slot loop. They are measurement, not netcode policy:
+neither feeds the tier, the delay or the queue, and the `WIRE` sample goes to the probe only (G-22's
+one-sample-per-bundle rule is about the tier's sample, and this is a separate one, also once per
+bundle).

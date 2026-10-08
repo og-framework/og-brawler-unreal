@@ -9,6 +9,8 @@
 #include "GameFramework/PlayerStart.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
+#include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
 #include "OGSimulationUnreal/SimulationConnectionRelay.h"
 #include "OGSimulationUnreal/SimulationInputRelay.h"
@@ -48,6 +50,8 @@ DEFINE_LOG_CATEGORY(LogOG);
 DEFINE_LOG_CATEGORY(LogOGRelayProbe);
 DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
 DEFINE_LOG_CATEGORY(LogOGResimProbe);
+DEFINE_LOG_CATEGORY(LogOGLatencyBudget);
+DEFINE_LOG_CATEGORY(LogOGChaosDilation);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 #define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
@@ -447,7 +451,11 @@ void FSimulationManagerAsyncCallback::OnPreSimulate_Internal()
 		input->m_manager->editChaosTickMapper().update((int32_t)chaosTick, (int32_t)simulationTick);
 	}
 
+	const double stepStartSeconds = FPlatformTime::Seconds();
 	input->m_manager->onGameSimulation(updateInfo);
+
+	if (!isResimulating)
+		input->m_manager->stampLatencyAfterStep_Internal(stepStartSeconds);
 }
 
 void FSimulationManagerAsyncCallback::OnPostSolve_Internal()
@@ -464,6 +472,9 @@ void FSimulationManagerAsyncCallback::OnPostSolve_Internal()
 	SimulationUpdateInfo updateInfo(isResimulating, isFirstResimulationFrame);
 
 	input->m_manager->onPostGameSimulation(updateInfo);
+
+	if (!isResimulating)
+		input->m_manager->stampLatencyStepEnd_Internal();
 }
 
 void FSimulationManagerAsyncCallback::ProcessInputs_Internal(int32 PhysicsStep)
@@ -779,6 +790,10 @@ void ASimulationManagerUImpl::BeginPlay()
 	const ENetMode worldNetMode = GetNetMode();
 	const bool worldIsAuthority = (worldNetMode != NM_Client);
 
+	createLatencyBudget(worldIsAuthority);
+	m_latencyPostTickFlushHandle =
+		uWorld->OnPostTickFlush().AddUObject(this, &ASimulationManagerUImpl::onLatencyPostTickFlush);
+
 	int32 configuredRelayDelayFloorTicks = -1;
 	// ⛔G-57  docs/SimulationManagerUImpl-guards.md
 	if (worldIsAuthority && GConfig != nullptr)
@@ -1072,6 +1087,12 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	if (UWorld* World = GetWorld())
 	{
+		if (m_latencyPostTickFlushHandle.IsValid())
+		{
+			World->OnPostTickFlush().Remove(m_latencyPostTickFlushHandle);
+			m_latencyPostTickFlushHandle.Reset();
+		}
+
 		if (FPhysScene* PhysScene = World->GetPhysicsScene())
 		{
 			PhysScene->OnPhysScenePreTick.RemoveAll(this);
@@ -1343,6 +1364,8 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 		pushRingoutScoresToCharacters(m_systemsExec->get<brawlerRingout::ScoreSystem>(),
 			m_delayedInputComponentsById);
 	}
+
+	tickLatencyBudget_GameThread(Scene);
 }
 
 SimCharacterId ASimulationManagerUImpl::allocateSimCharacterId()
@@ -1506,7 +1529,8 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
             m_storage, m_reconciliation, m_inputResolution, m_netSync,
             id, std::move(*record.simulatable),
             /*owner=*/owner,
-            /*inputProvider=*/std::move(record.inputProvider));
+            /*inputProvider=*/wrapInputProviderWithLatencyStamp(
+                id, owner, std::move(record.inputProvider)));
     }
     UE_LOG(LogOGMgmt, Log, TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, isAuthority ? 1 : 0);
 
@@ -1801,6 +1825,10 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
 
     m_inputHistory.forgetCharacter(id);
 
+    if (m_latencyProbe)
+        m_latencyProbe->forgetLane(id);
+    m_latencyLastHandedCorrectionTick.erase(id);
+
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
 }
 
@@ -1813,6 +1841,259 @@ void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 Num
 	asyncInput->m_manager = this;
 
 	releaseDelayedInputsForStep(PhysicsStep, NumSteps);
+}
+
+void ASimulationManagerUImpl::createLatencyBudget(bool isAuthority)
+{
+	m_latencyProbe = std::make_unique<latencyBudget::LatencyBudgetProbe>(
+		isAuthority ? latencyBudget::kServerHops : latencyBudget::kClientHops);
+	m_latencyMailbox      = std::make_unique<LatencyMailbox>();
+	m_latencyClockMailbox = std::make_unique<LatencyClockMailbox>();
+}
+
+BrawlerInputProviderFn ASimulationManagerUImpl::wrapInputProviderWithLatencyStamp(
+	unsigned int id, const USimmableUpdateComponent& owner, BrawlerInputProviderFn inputProvider)
+{
+	if (!inputProvider)
+		return inputProvider;
+
+	const UOGBrawlerInputCollectionComponent* inputCollection = owner.getOwnerInputCollection();
+	BrawlerInputProviderFn wrapped =
+		[this, id, inputCollection, inner = std::move(inputProvider)](
+			const SimulationTimeStep& step,
+			const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache)
+		{
+			simulatableBrawler::PlayerInput input = inner(step, localInputCache);
+			const double capturedSeconds = FPlatformTime::Seconds();
+			const uint32 tick = step.getTick();
+			const double sampledSeconds =
+				inputCollection != nullptr ? inputCollection->getInputSampledSeconds() : 0.0;
+			if (sampledSeconds > 0.0)
+			{
+				postLatencyEvent_Internal(latencyBudget::Event::stamp(latencyBudget::Stream::Input,
+					id, tick, latencyBudget::Point::InputSampled, sampledSeconds));
+			}
+			postLatencyEvent_Internal(latencyBudget::Event::stamp(latencyBudget::Stream::Input,
+				id, tick, latencyBudget::Point::Captured, capturedSeconds));
+			return input;
+		};
+
+	checkf(static_cast<bool>(wrapped),
+		TEXT("wrapInputProviderWithLatencyStamp: a present provider must stay present. Provider ")
+		TEXT("presence is the core's local-vs-remote identity test, so the latency wrapper may ")
+		TEXT("never turn an empty provider into a callable or a callable into an empty one."));
+	return wrapped;
+}
+
+void ASimulationManagerUImpl::stampLatency(
+	latencyBudget::Stream stream, unsigned int lane, uint32 tick, latencyBudget::Point point)
+{
+	checkf(IsInGameThread(),
+		TEXT("ASimulationManagerUImpl::stampLatency is the GAME-THREAD door to the latency probe; ")
+		TEXT("the physics thread posts through postLatencyEvent_Internal's mailbox instead."));
+	if (m_latencyProbe)
+		m_latencyProbe->stamp(stream, lane, tick, point, FPlatformTime::Seconds());
+}
+
+void ASimulationManagerUImpl::noteLatencyWireSample(double roundTripSeconds)
+{
+	checkf(IsInGameThread(),
+		TEXT("ASimulationManagerUImpl::noteLatencyWireSample is game-thread only: the probe has one owner."));
+	if (m_latencyProbe)
+		m_latencyProbe->addSample(latencyBudget::Hop::Wire, roundTripSeconds * 0.5);
+}
+
+void ASimulationManagerUImpl::postLatencyEvent_Internal(const latencyBudget::Event& event)
+{
+	if (m_latencyMailbox)
+		m_latencyMailbox->tryPush(event);
+}
+
+void ASimulationManagerUImpl::stampLatencyAfterStep_Internal(double stepStartSeconds)
+{
+	if (!m_latencyMailbox || !m_manager.has_value())
+		return;
+
+	const uint32 tick = m_manager->currentIntegratedTick();
+
+	if (!m_manager->runsPrediction())
+	{
+		m_storage.forEachSimulatable<SimulatableBrawler>(
+			[this, stepStartSeconds](unsigned int id, const auto&)
+			{
+				const uint32 captureTick =
+					m_inputResolution.getLastUsedCaptureTick<SimulatableBrawler>(id);
+				if (captureTick != kNoInputCaptureTick)
+				{
+					postLatencyEvent_Internal(latencyBudget::Event::stamp(latencyBudget::Stream::Input,
+						id, captureTick, latencyBudget::Point::Consumed, stepStartSeconds));
+				}
+			});
+		return;
+	}
+
+	postLatencyEvent_Internal(latencyBudget::Event::stampPending(latencyBudget::Stream::State,
+		latencyBudget::Point::ClientReceived, latencyBudget::Point::Consumed, stepStartSeconds));
+
+	m_storage.forEachSimulatable<SimulatableBrawler>(
+		[this, tick, stepStartSeconds](unsigned int id, const auto&)
+		{
+			const RelayedReadObservationRing* const ring =
+				m_inputResolution.getDiagnostics().relayedReadObservations<SimulatableBrawler>(id);
+			if (ring == nullptr)
+				return;
+			for (std::size_t index = 0; index < ring->size(); ++index)
+			{
+				const RelayedReadObservation* const observation = ring->at(index);
+				if (observation == nullptr || observation->simTick != tick)
+					continue;
+				if (observation->hasAppliedCaptureTick)
+				{
+					postLatencyEvent_Internal(latencyBudget::Event::stamp(latencyBudget::Stream::Input,
+						id, observation->appliedCaptureTick, latencyBudget::Point::Consumed,
+						stepStartSeconds));
+				}
+				return;
+			}
+		});
+
+	if (m_latencyClockMailbox)
+	{
+		const ClientPredictionClock& clock = m_manager->getClientClock();
+		LatencyClockCounts counts;
+		counts.skips       = clock.getDiagnostics().skipCount();
+		counts.stalls      = clock.getDiagnostics().stallCount();
+		counts.hardResyncs = clock.getDiagnostics().hardResyncCount();
+		if (!(counts == m_latencyClockPosted_Physics) && m_latencyClockMailbox->tryPush(counts))
+			m_latencyClockPosted_Physics = counts;
+	}
+}
+
+void ASimulationManagerUImpl::stampLatencyStepEnd_Internal()
+{
+	if (!m_latencyMailbox || !m_manager.has_value())
+		return;
+
+	const double stepEndSeconds = FPlatformTime::Seconds();
+	const uint32 tick = m_manager->currentIntegratedTick();
+	m_storage.forEachSimulatable<SimulatableBrawler>(
+		[this, tick, stepEndSeconds](unsigned int id, const auto&)
+		{
+			postLatencyEvent_Internal(latencyBudget::Event::stamp(latencyBudget::Stream::State,
+				id, tick, latencyBudget::Point::StepEnd, stepEndSeconds));
+		});
+}
+
+void ASimulationManagerUImpl::onLatencyPostTickFlush()
+{
+	if (!m_latencyProbe)
+		return;
+	const double nowSeconds = FPlatformTime::Seconds();
+	m_latencyProbe->stampPending(latencyBudget::Stream::Input,
+		latencyBudget::Point::Handed, latencyBudget::Point::LeftProcess, nowSeconds);
+	m_latencyProbe->stampPending(latencyBudget::Stream::State,
+		latencyBudget::Point::Handed, latencyBudget::Point::LeftProcess, nowSeconds);
+}
+
+void ASimulationManagerUImpl::tickLatencyBudget_GameThread(FChaosScene* scene)
+{
+	if (!m_latencyProbe || !m_latencyMailbox || !m_manager.has_value())
+		return;
+
+	m_latencyMailbox->drain([this](const latencyBudget::Event& event) { m_latencyProbe->apply(event); });
+	m_latencyMailboxDropped += m_latencyMailbox->takeDroppedCount();
+	if (m_latencyClockMailbox)
+	{
+		m_latencyClockMailbox->drain(
+			[this](const LatencyClockCounts& counts) { m_latencyClockLatest = counts; });
+		m_latencyMailboxDropped += m_latencyClockMailbox->takeDroppedCount();
+	}
+
+	const double nowSeconds = FPlatformTime::Seconds();
+	const bool isClient = m_manager->runsPrediction();
+
+	if (!isClient)
+	{
+		for (const auto& entry : m_delayedInputComponentsById)
+		{
+			USimmableUpdateComponent* component = entry.second.Get();
+			if (component == nullptr)
+				continue;
+			const uint32 correctionTick =
+				component->getSyncedCorrectionStateBuffer().readFromBuffer<uint32>(
+					correctionStateBuffer::kTickOffset);
+			if (correctionTick == 0u)
+				continue;
+			uint32& lastHanded = m_latencyLastHandedCorrectionTick[entry.first];
+			if (lastHanded == correctionTick)
+				continue;
+			lastHanded = correctionTick;
+			m_latencyProbe->stamp(latencyBudget::Stream::State, entry.first, correctionTick,
+				latencyBudget::Point::Handed, nowSeconds);
+		}
+	}
+
+	m_latencyProbe->stampNewestPending(latencyBudget::Stream::State,
+		latencyBudget::Point::StepEnd, latencyBudget::Point::Rendered, nowSeconds);
+
+	if (isClient)
+	{
+		if (scene != nullptr)
+			m_chaosDilationWindow.add(static_cast<double>(scene->GetNetworkDeltaTimeScale()));
+
+		const UWorld* world = GetWorld();
+		const APlayerController* localController =
+			world != nullptr ? world->GetFirstPlayerController() : nullptr;
+		if (localController != nullptr && localController->GetNetworkPhysicsTickOffsetAssigned())
+		{
+			const int32 offset = localController->GetNetworkPhysicsTickOffset();
+			if (!m_lastPhysicsTickOffset.has_value() || *m_lastPhysicsTickOffset != offset)
+			{
+				m_lastPhysicsTickOffset = offset;
+				++m_physicsTickOffsetResets;
+			}
+		}
+	}
+
+	latencyBudget::WindowReport report;
+	if (!m_latencyProbe->closeWindowIfDue(nowSeconds, report))
+		return;
+
+	const TCHAR* role = isClient ? TEXT("Client") : TEXT("Server");
+	constexpr double kMillis = 1000.0;
+	for (std::size_t index = 0; index < report.hopCount; ++index)
+	{
+		const latencyBudget::HopSummary& hop = report.hops[index];
+		UE_LOG(LogOGLatencyBudget, Warning,
+			TEXT("[LatencyBudget] role=%s hop=%s p50=%.3f p95=%.3f p99=%.3f max=%.3f n=%u unit=ms ")
+			TEXT("noStart=%u noEnd=%u outOfOrder=%u overflow=%u"),
+			role, ANSI_TO_TCHAR(latencyBudget::hopName(hop.hop)),
+			hop.p50 * kMillis, hop.p95 * kMillis, hop.p99 * kMillis, hop.max * kMillis, hop.n,
+			hop.noStart, hop.noEnd, hop.outOfOrder, hop.overflow);
+	}
+	UE_LOG(LogOGLatencyBudget, Warning,
+		TEXT("[LatencyBudget.Window] role=%s seconds=%.2f stale=%u duplicate=%u laneOverflow=%u ")
+		TEXT("mailboxDropped=%llu"),
+		role, report.windowEndSeconds - report.windowStartSeconds, report.staleStamps,
+		report.duplicateStamps, report.laneOverflow,
+		static_cast<unsigned long long>(m_latencyMailboxDropped));
+	m_latencyMailboxDropped = 0u;
+
+	if (isClient)
+	{
+		UE_LOG(LogOGChaosDilation, Warning,
+			TEXT("[ChaosDilation] role=Client min=%.4f mean=%.4f max=%.4f samples=%u resets=%u ")
+			TEXT("offset=%d skips=%u stalls=%u hardResyncs=%u"),
+			m_chaosDilationWindow.min, m_chaosDilationWindow.mean(), m_chaosDilationWindow.max,
+			m_chaosDilationWindow.samples, m_physicsTickOffsetResets,
+			m_lastPhysicsTickOffset.value_or(0),
+			m_latencyClockLatest.skips - m_latencyClockAtWindowStart.skips,
+			m_latencyClockLatest.stalls - m_latencyClockAtWindowStart.stalls,
+			m_latencyClockLatest.hardResyncs - m_latencyClockAtWindowStart.hardResyncs);
+		m_chaosDilationWindow.reset();
+		m_physicsTickOffsetResets   = 0u;
+		m_latencyClockAtWindowStart = m_latencyClockLatest;
+	}
 }
 
 OGSIM_OPTIMIZE_ON

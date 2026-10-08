@@ -148,6 +148,8 @@ void ASimulationInputRelay::PreReplication(IRepChangedPropertyTracker& ChangedPr
     {
         ++m_flushedRoundCount;
         m_flushedEntryCount += published;
+        if (m_onRingFlushedCallback)
+            m_onRingFlushedCallback(m_relayedInputRing);
     }
     else
     {

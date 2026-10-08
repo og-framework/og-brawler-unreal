@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <functional>
 #include <optional>
+#include <memory>
 #include <set>
 #include "Engine/World.h"
 #include "PhysicsPublic.h"
@@ -40,6 +41,7 @@
 #include "OGSimulation/Network/ServerReceptionCoordinator.h"
 #include "OGSimulation/Network/RelayWritePathProbe.h"
 #include "OGSimulation/Network/ReplicatedTierConsumer.h"
+#include "OGSimulation/LatencyBudgetProbe.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
@@ -66,6 +68,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOG, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGRelayProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogOGLatencyBudget, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
 struct FMovementStaticDataCVars
@@ -323,6 +327,7 @@ public:
 
     virtual void onTimingInfoReceived(uint32_t authorityTick, double roundTripTime) override
     {
+        noteLatencyWireSample(roundTripTime);
         if (m_onTimingInfoReceivedCallback)
         {
             m_onTimingInfoReceivedCallback(authorityTick, roundTripTime);
@@ -334,6 +339,13 @@ public:
         m_manager->editNetworkEstimator().recordAuthorityTick(authorityTick);
     }
 
+    using LatencyMailbox = latencyBudget::SpscMailbox<latencyBudget::Event, 4096>;
+    void stampLatency(latencyBudget::Stream stream, unsigned int lane, uint32 tick,
+                      latencyBudget::Point point);
+    void noteLatencyWireSample(double roundTripSeconds);
+    void postLatencyEvent_Internal(const latencyBudget::Event& event);
+    void stampLatencyAfterStep_Internal(double stepStartSeconds);
+    void stampLatencyStepEnd_Internal();
     void OnPhysicsPreTick(FPhysScene* Scene, float DeltaTime);
     void OnPhysicsStep(FPhysScene* Scene, float DeltaTime);
     void OnPostPhysicsStep(FChaosScene* Scene);
@@ -665,6 +677,32 @@ private:
         m_delayedInputComponentsById;
 
     inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
+
+    struct LatencyClockCounts
+    {
+        uint32 skips       = 0u;
+        uint32 stalls      = 0u;
+        uint32 hardResyncs = 0u;
+        bool operator==(const LatencyClockCounts&) const = default;
+    };
+    using LatencyClockMailbox = latencyBudget::SpscMailbox<LatencyClockCounts, 64>;
+    BrawlerInputProviderFn wrapInputProviderWithLatencyStamp(
+        unsigned int id, const USimmableUpdateComponent& owner, BrawlerInputProviderFn inputProvider);
+    void createLatencyBudget(bool isAuthority);
+    void tickLatencyBudget_GameThread(FChaosScene* scene);
+    void onLatencyPostTickFlush();
+    std::unique_ptr<latencyBudget::LatencyBudgetProbe> m_latencyProbe;
+    std::unique_ptr<LatencyMailbox>                    m_latencyMailbox;
+    std::unique_ptr<LatencyClockMailbox>               m_latencyClockMailbox;
+    LatencyClockCounts                                 m_latencyClockPosted_Physics;
+    LatencyClockCounts                                 m_latencyClockLatest;
+    LatencyClockCounts                                 m_latencyClockAtWindowStart;
+    latencyBudget::ScalarWindowStats                   m_chaosDilationWindow;
+    std::optional<int32>                               m_lastPhysicsTickOffset;
+    uint32                                             m_physicsTickOffsetResets = 0u;
+    uint64                                             m_latencyMailboxDropped   = 0u;
+    std::unordered_map<unsigned int, uint32>           m_latencyLastHandedCorrectionTick;
+    FDelegateHandle                                    m_latencyPostTickFlushHandle;
 
     FSimulationManagerAsyncCallback* m_asyncCallback;
 

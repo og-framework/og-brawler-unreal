@@ -118,6 +118,8 @@ public:
 
 	void onRelayedInputRingArrived(const FRelayedInputRing& ring);
 
+	const UOGBrawlerInputCollectionComponent* getOwnerInputCollection() const { return m_ownerInputCollection; }
+
 
 protected:
 	virtual void BeginPlay();
