@@ -224,13 +224,7 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 
 	// ⛔G-03  docs/SimmableUpdateComponent-guards.md
 
-	ChaosSpatialQueryAdapter& queryAdapter = manager->editQueryAdapter();
-
 	{
-		FCollisionQueryParams queryParams;
-		queryParams.bTraceComplex = false;
-		queryParams.AddIgnoredActor(Owner);
-
 		QueryVolumeDescriptor targetVisDescriptor{
 			SphereGeometry{m_staticData->m_attackCircle.getOuterRadius() * 2.f},
 			collisionCategory::bodyAndGuard,
@@ -238,7 +232,7 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 			collisionCategory::queryRouting};
 
 		m_targetVisualizationVolumeIds.push_back(
-			queryAdapter.registerVolume(targetVisDescriptor, queryParams, FActorInstanceHandle(Owner)));
+			manager->registerVizVolume(targetVisDescriptor, *Owner));
 	}
 	m_attackTargetVisualizationState.emplace(m_targetVisualizationVolumeIds);
 	m_attackAimVisualizationState.emplace();
@@ -811,7 +805,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		{
 			dAttackTargetVisualizationTwo::Input attackTargetVisualizationInput(DeltaTime,
 				tmpAimInput,
-				vizManager->editQueryAdapter(),
+				vizManager->editVizQuery(),
 				rendererFunctorImpl,
 				DAttackTargetVisualizationCVars::legacyEnemyRangeArcsEnabled);
 			dAttackTargetVisualizationTwo::visualize(attackTargetVisualizationInput,
@@ -829,8 +823,8 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 					vizPlayerInput->aimDirection,
 					vizPlayerInput->moveStick,
 					vizPlayerInput->moveDirectionWorld,
-					vizManager->getPhysicsBodyReaderAdapter(),
-					vizManager->editQueryAdapter(),
+					vizManager->getVizReader(),
+					vizManager->editVizQuery(),
 					rendererFunctorImpl);
 				dAttackBlockPredictionVisualization::visualize(blockPredInput,
 					m_attackBlockPredictionVisualizationState.value(),

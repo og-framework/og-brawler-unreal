@@ -26,8 +26,7 @@
 #include <vector>
 #include "InputActionValue.h"
 
-#include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
-#include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
+#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/RelayedInputRing.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"

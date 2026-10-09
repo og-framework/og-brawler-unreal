@@ -399,6 +399,7 @@ The second fence block is the orientation banner's statement of the same rule (l
 <!-- lint-external-ref: SetXR -- Chaos engine particle-handle method, outside every scan root -->
 <!-- lint-external-ref: OutBytes -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: OutPackets -- Unreal Engine connection stat, outside every scan root -->
+<!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this file stopped binding it in og-simulationscheduler-withjolt task 51 -->
 <!-- lint-external-ref: ResimCooldownTicks -- ABSENCE FENCE (G-58): the ini key that was built and removed on a ruling. It must NOT resolve -->
 
 Ids **G-50 onward** belong to the implementation file; the header's are below G-50. Each quote
@@ -907,23 +908,36 @@ in storage. A notify moved after the `return` breaks the score push's no-rehash 
 
 ---
 
-## G-70 — the coordinator's early return guards the drain only, never PROBE A
+## G-70 — the frame function's coordinator test guards PROBE 6 only, never PROBE A
 
-**Site:** `if (!m_receptionCoordinator.has_value()) return;` in `releaseDelayedInputsForStep`.
+**Site:** `if (!m_receptionCoordinator.has_value()) return;` in `onFrameStepsDue_GameThread`, between
+PROBE A and PROBE 6.
 
-**The prohibition, as it stood in the source:**
+**The prohibition, as it stood in the source** (in `releaseDelayedInputsForStep`, before
+og-simulationscheduler-withjolt task 51):
 
 > ⛔ The coordinator early-return guards ONLY the drain, never PROBE A, which runs on both. §8
 
-**The consequence.** If the return is hoisted to the top of the function, the frame-health probe
-stops running on every client, because a pure client never has a coordinator. PROBE 6 below the
-return is server-only and is correctly behind it.
+**Rewritten and re-sited, id kept (task 51).** Task 51 split `releaseDelayedInputsForStep`: PROBE A,
+PROBE 6 and `[PacketBudget]` moved, in that order, into `onFrameStepsDue_GameThread`, and the drain
+kept the old name with a coordinator test of its own (rationale §7). The return this tag marks now
+stands between PROBE A and PROBE 6. ⛔ Do not hoist it above PROBE A. PROBE 6 and `[PacketBudget]`
+below it are server-only and correctly behind it.
+
+**The consequence.** Hoisted to the top of the function, the return stops the frame-health probe on
+every client, because a pure client never has a coordinator. The drain and the reap no longer depend
+on it: `releaseDelayedInputsForStep` tests the coordinator itself, and the Chaos configuration's
+`InjectInputs_External` tests it before the drain and the reap.
 
 ---
 
 ## G-71 — the upcoming sim tick comes from the mapper, and the `+ 1` is derived
 
-**Site:** `const int32 firstUpcomingSimTick =` in `releaseDelayedInputsForStep`.
+**Site:** `const int32 firstUpcomingSimTick =` in `InjectInputs_External`, the Chaos configuration's
+input hook (rationale §18). Re-sited there from `releaseDelayedInputsForStep` by
+og-simulationscheduler-withjolt task 51, id kept: the computation is the same, and it now feeds
+`onFrameStepsDue_GameThread`, the drain and the reap with one value, as it did before the split. It
+retires with the Chaos configuration in task 21.
 
 **The prohibition, as it stood in the source:**
 
@@ -953,6 +967,8 @@ and, at the reap and in PROBE A:
 > departure is counted as a `kFrameHealthDiscontinuityTicks` discontinuity. ⛔ A DIFFERENT
 > tick source would not be safe. §9
 
+The quoted `physicsStep` is the hook's `PhysicsStep` parameter since the re-siting.
+
 **Why a guard and not a derivation tag.** This line has two readings: the derivation of the
 `+ 1` (§9) and the prohibition on any other tick source. The rule gives a coinciding G and D one
 tag and merges the entries, so §9 is this entry's derivation.
@@ -964,7 +980,9 @@ server clock adds an unsynchronized read of a physics-thread-written value on th
 
 ## G-72 — the send-budget probe feeds the engine's cumulative counters, not `OutBytes` / `OutPackets`
 
-**Site:** the `m_connectionBudgetProbe.noteSample(` call in `releaseDelayedInputsForStep`.
+**Site:** the `m_connectionBudgetProbe.noteSample(` call in `onFrameStepsDue_GameThread` (moved there
+with PROBE 6 from `releaseDelayedInputsForStep` by og-simulationscheduler-withjolt task 51; the call
+is unchanged).
 
 **The prohibition, as it stood in the source:**
 
@@ -1010,18 +1028,24 @@ never finished registering.
 
 ---
 
-## G-75 — the systems executor is emplaced beside the adapters, and hands detection the PHYSICS-THREAD body adapter
+## G-75 — the systems executor is emplaced beside the adapters, and hands detection the same body adapter the integration layer uses
 
 **Tag site:** `SimulationManagerUImpl.h`, directly above `std::optional<BrawlerSystemsExec> m_systemsExec;`.
 The two emplace sites it governs are in `SimulationManagerUImpl.cpp`, one per role branch, each between
 `m_integrationLayer.emplace(...)` and `m_manager.emplace(...)`.
 
-**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<ChaosPhysicsBodyAdapter,
-ChaosSpatialQueryAdapter>`) is constructed from `*m_physAdapter` and `*m_queryAdapter` — the SAME two
-objects `m_integrationLayer` integrates with. ⛔ Never from `m_physReaderAdapter`, and never before the
+**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<physicsBackendUImpl::BodyAdapter,
+physicsBackendUImpl::QueryAdapter>`, the backend's types from `PhysicsBackendUImpl.h`) is constructed
+from `*m_physAdapter` and `*m_queryAdapter`, the SAME two objects `m_integrationLayer` integrates with.
+⛔ Never from `m_physReaderAdapter` (a `physicsBackendUImpl::ReaderAdapter`), and never before the
 adapters are emplaced or after `m_manager` is.
 
-**Verified 2026-09-23.** `ChaosPhysicsBodyAdapter::getBodyTransform` reads
+**Rewritten for the traits types (og-simulationscheduler-withjolt task 51).** The text named the Chaos
+types until the backend switch (rationale §18). The prohibition is the same in every configuration:
+detection reads the body state the step itself reads, never the reader. Only the Chaos configuration
+builds today, and the verification below is that configuration's.
+
+**Verified 2026-09-23 (Chaos configuration).** `ChaosPhysicsBodyAdapter::getBodyTransform` reads
 `proxy->GetPhysicsThreadAPI()`; `ChaosPhysicsBodyReaderAdapter::getBodyTransform` reads
 `proxy->GetGameThreadAPI()` (its own banner: "Reads GT-interpolated state"). Both satisfy
 `PhysicsBodyReaderAdapter`, so the wrong one compiles. The detector runs on the physics thread, in
@@ -1140,8 +1164,8 @@ orphans this entry.
 **The prohibition** (og-brawler-uploadtosteam task 12, 2026-09-29). ⛔ Do not call `GetWorld()`,
 `GetPhysicsScene()` or any other method that reaches the actor's outer, its world or another
 `UObject` from the destructor. Unbinding from engine objects belongs in `EndPlay`, which runs for
-every world teardown while the world still exists. The physics-scene pre-tick and step bindings are
-removed there, next to the post-tick handle.
+every world teardown while the world still exists. The Chaos configuration removes its post-tick
+handle and its two solver callbacks there.
 
 **The consequence of getting it wrong.** The destructor runs inside the garbage collector's purge,
 after the actor's outer level may already have been destroyed. The destructor used to call

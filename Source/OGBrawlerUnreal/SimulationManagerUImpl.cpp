@@ -33,6 +33,7 @@
 #include "Runtime/Engine/Classes/Engine/NetConnection.h"
 #include "Runtime/Engine/Classes/Engine/NetDriver.h"
 #include "Misc/ConfigCacheIni.h"
+#include "HAL/IConsoleManager.h"
 #include "OGSimulation/RelayedInputRingCodec.h"
 #include "OGSimulation/ResimGatePolicy.h"
 #include "OGSimulation/OGAssert.h"
@@ -52,12 +53,14 @@ DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
 DEFINE_LOG_CATEGORY(LogOGResimProbe);
 DEFINE_LOG_CATEGORY(LogOGLatencyBudget);
 DEFINE_LOG_CATEGORY(LogOGChaosDilation);
+DEFINE_LOG_CATEGORY(LogOGSimHost);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 #define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
 
 namespace
 {
+#if OG_PHYSICS_BACKEND_CHAOS
 	template <typename QueryAdapterOptional>
 	void emplaceBrawlerQueryAdapter(QueryAdapterOptional& queryAdapter, UWorld* world)
 	{
@@ -70,6 +73,7 @@ namespace
 			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
 		});
 	}
+#endif
 	void bindCorrectionFieldDiffGate()
 	{
 		// ⛔G-50  docs/SimulationManagerUImpl-guards.md
@@ -77,6 +81,7 @@ namespace
 			[]() -> bool { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
 	}
 
+#if OG_PHYSICS_BACKEND_CHAOS
 	void writeRestoredBodyState(Chaos::FRigidBodyHandle_Internal& ptApi, const PhysicsBodyState& restored,
 	                            bool wireCarriesRotationAndSpin)
 	{
@@ -267,6 +272,7 @@ namespace
 			before.position.x,       before.position.y,       before.position.z,
 			before.linearVelocity.x, before.linearVelocity.y, before.linearVelocity.z);
 	}
+#endif
 
 	enum class OGLogRoute : uint8
 	{
@@ -403,10 +409,20 @@ namespace
 #undef EMIT_OG
 	}
 
+#if !UE_BUILD_SHIPPING
+	TAutoConsoleVariable<int32> CVarTestGameThreadHitchMs(
+		TEXT("og.Sim.TestGameThreadHitchMs"),
+		0,
+		TEXT("Test only (non-shipping): when above 0, the next OnPostPhysicsStep sleeps the game thread ")
+		TEXT("this many milliseconds, once, and resets this variable to 0."),
+		ECVF_Default);
+#endif
+
 }
 
 OGSIM_OPTIMIZE_OFF
 
+#if OG_PHYSICS_BACKEND_CHAOS
 void FSimulationState2::Copy(const FSimulationState2& Value)
 {
 	bIsValid = Value.bIsValid;
@@ -678,6 +694,7 @@ void FSimulationManagerAsyncCallback::discardPushProbeStash(const TCHAR* reason)
 	m_pushProbeStash.Reset();
 	m_pushProbeStashFrame = INDEX_NONE;
 }
+#endif
 
 ASimulationManagerUImpl* ASimulationManagerUImpl::s_instances[] = {nullptr, nullptr};
 
@@ -1047,9 +1064,12 @@ void ASimulationManagerUImpl::BeginPlay()
 		TEXT("ROLE-GATED fence at the seed call."),
 		static_cast<int32>(worldNetMode));
 
-	physScene->OnPhysScenePreTick.AddUObject(this, &ASimulationManagerUImpl::OnPhysicsPreTick);
-	physScene->OnPhysSceneStep.AddUObject(this, &ASimulationManagerUImpl::OnPhysicsStep);
-	m_hysScenePostTickCallbackHandle = physScene->OnPhysScenePostTick.AddUObject(this, &ASimulationManagerUImpl::OnPostPhysicsStep);
+	UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Backend] backend=%hs fingerprint=none"),
+		physicsBackendUImpl::kBackendToken);
+
+#if OG_PHYSICS_BACKEND_CHAOS
+	m_hysScenePostTickCallbackHandle = physScene->OnPhysScenePostTick.AddWeakLambda(
+		this, [this](FChaosScene*) { OnPostPhysicsStep(); });
 
 	m_asyncCallback = solver->CreateAndRegisterSimCallbackObject_External<FSimulationManagerAsyncCallback>();
 	m_asyncCallback->setManager(this);
@@ -1059,6 +1079,7 @@ void ASimulationManagerUImpl::BeginPlay()
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
 	m_injectInputsExternalCallbackHandle = solverCallback->InjectInputsExternal.AddUObject(this, &ASimulationManagerUImpl::InjectInputs_External);
+#endif
 	UE_LOG(LogOGMgmt, Log, TEXT("SimulationManager: adapters, integration layer, and manager initialized"));
 }
 
@@ -1093,11 +1114,9 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			m_latencyPostTickFlushHandle.Reset();
 		}
 
+#if OG_PHYSICS_BACKEND_CHAOS
 		if (FPhysScene* PhysScene = World->GetPhysicsScene())
 		{
-			PhysScene->OnPhysScenePreTick.RemoveAll(this);
-			PhysScene->OnPhysSceneStep.RemoveAll(this);
-
 			if (Chaos::FPhysicsSolver* Solver = PhysScene->GetSolver())
 			{
 				if (m_injectInputsExternalCallbackHandle.IsValid())
@@ -1119,6 +1138,7 @@ void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 				}
 			}
 		}
+#endif
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -1339,16 +1359,16 @@ namespace
     }
 }
 
-void ASimulationManagerUImpl::OnPhysicsPreTick(FPhysScene* Scene, float DeltaTime)
+void ASimulationManagerUImpl::OnPostPhysicsStep()
 {
-}
+#if !UE_BUILD_SHIPPING
+	if (const int32 hitchMs = CVarTestGameThreadHitchMs.GetValueOnGameThread(); hitchMs > 0)
+	{
+		CVarTestGameThreadHitchMs->Set(0, ECVF_SetByConsole);
+		FPlatformProcess::Sleep(static_cast<float>(hitchMs) / 1000.f);
+	}
+#endif
 
-void ASimulationManagerUImpl::OnPhysicsStep(FPhysScene* Scene, float DeltaTime)
-{
-}
-
-void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
-{
 	onPostSimulationGameThread();
 
 	if (m_manager.has_value() && !m_manager->runsPrediction())
@@ -1365,7 +1385,15 @@ void ASimulationManagerUImpl::OnPostPhysicsStep(FChaosScene* Scene)
 			m_delayedInputComponentsById);
 	}
 
-	tickLatencyBudget_GameThread(Scene);
+	tickLatencyBudget_GameThread();
+}
+
+QueryVolumeId ASimulationManagerUImpl::registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner)
+{
+	FCollisionQueryParams queryParams;
+	queryParams.bTraceComplex = false;
+	queryParams.AddIgnoredActor(&owner);
+	return m_queryAdapter->registerVolume(descriptor, queryParams, FActorInstanceHandle(&owner));
 }
 
 SimCharacterId ASimulationManagerUImpl::allocateSimCharacterId()
@@ -1633,13 +1661,8 @@ void ASimulationManagerUImpl::relayRemoteInput(
     }
 }
 
-void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps)
+void ASimulationManagerUImpl::onFrameStepsDue_GameThread(int32 firstUpcomingSimTick, int32 numSteps)
 {
-
-    // ⛔G-71  docs/SimulationManagerUImpl-guards.md
-    const int32 firstUpcomingSimTick =
-        static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(physicsStep))) + 1;
-
     static_assert(kFrameHealthProbeWindowSamples == kResimGateProbeWindowSamples,
         "PROBE A's window must stay the same length as ResimGateProbe's, so one [ResimProbe.Frame] "
         "window lines up against the surrounding [ResimProbe.Gate] windows without a resim-tick "
@@ -1769,6 +1792,14 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
             }
         }
     }
+}
+
+void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 firstTick, int32 numSteps)
+{
+    if (!m_receptionCoordinator.has_value())
+        return;
+
+    UE_LOG(LogOGNet, Log, TEXT("[ReleaseBatch] first=%d numSteps=%d"), firstTick, numSteps);
 
     auto deliver = [this](unsigned int id, uint32 captureTick,
                           const simulatableBrawler::PlayerInput& input) -> bool
@@ -1788,9 +1819,7 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 physicsStep, int
     };
 
     m_receptionCoordinator->releaseDelayedInputs<SimulatableBrawler>(
-        firstUpcomingSimTick, numSteps, deliver);
-
-    m_receptionCoordinator->reapConnections(firstUpcomingSimTick);
+        firstTick, numSteps, deliver);
 }
 
 void ASimulationManagerUImpl::unregisterFromNewFramework(
@@ -1832,6 +1861,7 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
 }
 
+#if OG_PHYSICS_BACKEND_CHAOS
 void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)
 {
 	FSimulationInput2* asyncInput = m_asyncCallback->GetProducerInputData_External();
@@ -1840,8 +1870,19 @@ void ASimulationManagerUImpl::InjectInputs_External(int32 PhysicsStep, int32 Num
 	asyncInput->m_world = GetWorld();
 	asyncInput->m_manager = this;
 
-	releaseDelayedInputsForStep(PhysicsStep, NumSteps);
+	// ⛔G-71  docs/SimulationManagerUImpl-guards.md
+	const int32 firstUpcomingSimTick =
+		static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(PhysicsStep))) + 1;
+
+	onFrameStepsDue_GameThread(firstUpcomingSimTick, NumSteps);
+
+	if (m_receptionCoordinator.has_value())
+	{
+		releaseDelayedInputsForStep(firstUpcomingSimTick, NumSteps);
+		m_receptionCoordinator->reapConnections(firstUpcomingSimTick);
+	}
 }
+#endif
 
 void ASimulationManagerUImpl::createLatencyBudget(bool isAuthority)
 {
@@ -1995,7 +2036,7 @@ void ASimulationManagerUImpl::onLatencyPostTickFlush()
 		latencyBudget::Point::Handed, latencyBudget::Point::LeftProcess, nowSeconds);
 }
 
-void ASimulationManagerUImpl::tickLatencyBudget_GameThread(FChaosScene* scene)
+void ASimulationManagerUImpl::tickLatencyBudget_GameThread()
 {
 	if (!m_latencyProbe || !m_latencyMailbox || !m_manager.has_value())
 		return;
@@ -2036,8 +2077,10 @@ void ASimulationManagerUImpl::tickLatencyBudget_GameThread(FChaosScene* scene)
 	m_latencyProbe->stampNewestPending(latencyBudget::Stream::State,
 		latencyBudget::Point::StepEnd, latencyBudget::Point::Rendered, nowSeconds);
 
+#if OG_PHYSICS_BACKEND_CHAOS
 	if (isClient)
 	{
+		FChaosScene* scene = GetWorld() != nullptr ? GetWorld()->GetPhysicsScene() : nullptr;
 		if (scene != nullptr)
 			m_chaosDilationWindow.add(static_cast<double>(scene->GetNetworkDeltaTimeScale()));
 
@@ -2054,6 +2097,7 @@ void ASimulationManagerUImpl::tickLatencyBudget_GameThread(FChaosScene* scene)
 			}
 		}
 	}
+#endif
 
 	latencyBudget::WindowReport report;
 	if (!m_latencyProbe->closeWindowIfDue(nowSeconds, report))
@@ -2079,6 +2123,7 @@ void ASimulationManagerUImpl::tickLatencyBudget_GameThread(FChaosScene* scene)
 		static_cast<unsigned long long>(m_latencyMailboxDropped));
 	m_latencyMailboxDropped = 0u;
 
+#if OG_PHYSICS_BACKEND_CHAOS
 	if (isClient)
 	{
 		UE_LOG(LogOGChaosDilation, Warning,
@@ -2094,6 +2139,7 @@ void ASimulationManagerUImpl::tickLatencyBudget_GameThread(FChaosScene* scene)
 		m_physicsTickOffsetResets   = 0u;
 		m_latencyClockAtWindowStart = m_latencyClockLatest;
 	}
+#endif
 }
 
 OGSIM_OPTIMIZE_ON

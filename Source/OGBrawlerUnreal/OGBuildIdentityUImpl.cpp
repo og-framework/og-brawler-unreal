@@ -11,6 +11,7 @@
 #include "Misc/Paths.h"
 
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
+#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 
 DEFINE_LOG_CATEGORY(LogOGBuildIdentity);
 
@@ -77,12 +78,15 @@ void applyNetworkVersion()
 {
 	const BuildIdentity& identity = buildIdentityUImpl::buildIdentity();
 	const FString        label    = joinScreenUImpl::toFString(identity.label);
+	const FString        backend  = joinScreenUImpl::toFString(buildIdentityUImpl::backendToken());
 
 	if (buildIdentityUImpl::overridesNetworkVersion(identity.label))
-		FNetworkVersion::SetProjectVersion(*(FNetworkVersion::GetProjectVersion() + TEXT("+") + label));
+		FNetworkVersion::SetProjectVersion(
+			*(FNetworkVersion::GetProjectVersion() + TEXT("+") + label + TEXT("+") + backend));
 
-	UE_LOG(LogOGBuildIdentity, Display, TEXT("OGBuildIdentity: label=%s source=%s networkProjectVersion=%s"), *label,
-		sourceName(identity.source), *FNetworkVersion::GetProjectVersion());
+	UE_LOG(LogOGBuildIdentity, Display,
+		TEXT("OGBuildIdentity: label=%s source=%s backend=%s networkProjectVersion=%s"), *label,
+		sourceName(identity.source), *backend, *FNetworkVersion::GetProjectVersion());
 }
 
 } // namespace
@@ -99,6 +103,11 @@ const BuildIdentity& buildIdentity()
 std::string_view buildLabel()
 {
 	return buildIdentity().label;
+}
+
+std::string_view backendToken()
+{
+	return physicsBackendUImpl::kBackendToken;
 }
 
 void registerNetworkVersionHook()

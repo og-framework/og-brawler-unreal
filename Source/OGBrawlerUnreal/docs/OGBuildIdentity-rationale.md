@@ -31,7 +31,7 @@ source that is present but unusable (an `-OGBuildLabel=` value that is not a lab
 `dev`; it does not fall through to the next source. One rule for "no usable label" keeps the outcome
 predictable: a broken build behaves like an unlabelled one, and the log says why.
 
-The label is used in four places:
+The label is used in four places (the physics-backend token beside it is §7):
 
 * the join screen's `Build: <label>` line, through `joinScreenUImpl::ownBuildLabel()`;
 * the "different build" failure text, which names the client's own label (the client never learns the
@@ -40,7 +40,7 @@ The label is used in four places:
 * the dedicated server's `OGBrawlerSession: build label=<label>` line (§5).
 
 At engine start each process logs one line:
-`LogOGBuildIdentity: Display: OGBuildIdentity: label=<label> source=<source> networkProjectVersion=<v>`.
+`LogOGBuildIdentity: Display: OGBuildIdentity: label=<label> source=<source> backend=<token> networkProjectVersion=<v>`.
 
 ## 2. Reading `build_info.txt`
 
@@ -62,7 +62,9 @@ printed into a server log line whose fields are separated by spaces (§5).
 ## 3. The network version
 
 `applyNetworkVersion` runs on `FCoreDelegates::OnPostEngineInit` (⛔G-01) and, for any label but `dev`,
-calls `FNetworkVersion::SetProjectVersion("<ProjectVersion>+<label>")`, e.g. `0.1.0+20260929-101500-abc1234`.
+calls `FNetworkVersion::SetProjectVersion("<ProjectVersion>+<label>+<backend>")`, e.g.
+`0.1.0+20260929-101500-abc1234+chaos` (the backend token is §7; it was not part of the version before
+og-simulationscheduler-withjolt task 51).
 
 * **Why the project version.** The engine hashes "`<ProjectName> <ProjectVersion>, NetCL: <n>`" plus the
   engine and game protocol versions into the network version (`FNetworkVersion::GetLocalNetworkVersion`,
@@ -130,3 +132,20 @@ The task 15 acceptance used exactly this:
 
 The engine's `-networkversionoverride=<n>` also forces a mismatch, but it replaces the changelist in the
 hash rather than testing this code.
+
+## 7. The physics-backend token
+
+Until task 21 of og-simulationscheduler-withjolt, one build of this game runs either the Chaos host or
+the Jolt host, chosen at compile time (`SimulationManagerUImpl-rationale.md` §18). The build identity
+carries which one: `buildIdentityUImpl::backendToken()` returns `physicsBackendUImpl::kBackendToken`
+from `PhysicsBackendUImpl.h`, which is `chaos` in the Chaos configuration. It is read in two places:
+
+* the start line, as `backend=<token>` (§1);
+* the network version of a labelled build, as a third `+<token>` part (§3). Two labelled builds of
+  different backends therefore get different network versions, and the server refuses the join the
+  way it refuses any other version mismatch (§4).
+
+`dev` still changes nothing (§3): an unlabelled run keeps the engine's version whatever its backend,
+so the editor and PIE behave as before. Telling two unlabelled builds of different backends apart,
+and the Jolt token `jolt:<determinism fingerprint>` with a refusal that names both builds, belong to
+task 18. Until then only the Chaos configuration builds, so every peer carries the same token.

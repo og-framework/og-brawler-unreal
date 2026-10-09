@@ -21,6 +21,9 @@ collide.
   the engine (og-netcode-v2-field-defects task 10's fix).
 * **§16** is the latency-budget probe's host side: its stamp sites, threads and measurement errors
   (og-simulationscheduler-withjolt task 1).
+* **§18** is the backend switch: the compile-time choice between the Chaos host and the Jolt host,
+  and what each configuration compiles (og-simulationscheduler-withjolt task 51). §17 is reserved
+  for the Jolt frame host (task 18).
 
 <!-- ================= DECLARED LINT ESCAPES =================================
      Every token below is CORRECT and cannot resolve. None is here to silence a
@@ -47,6 +50,10 @@ collide.
 <!-- lint-external-ref: UWorld::OnPostTickFlush -- Unreal Engine method, outside every scan root (§16) -->
 <!-- lint-external-ref: FChaosScene::GetNetworkDeltaTimeScale -- Unreal Engine method, outside every scan root (§16) -->
 <!-- lint-external-ref: FChaosScene -- Unreal Engine type, outside every scan root (§16) -->
+<!-- lint-external-ref: OnPhysScenePreTick -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in task 51 (§13.1 quotes the old source) -->
+<!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in task 51 (§13.1 quotes the old source) -->
+<!-- lint-external-ref: editQueryAdapter -- RETIRED in task 51 (§18): the public query-adapter accessor, replaced by editVizQuery. It must NOT resolve -->
+<!-- lint-external-ref: getPhysicsBodyReaderAdapter -- RETIRED in task 51 (§18): the public reader accessor, replaced by getVizReader; §12 quotes its old declaration verbatim. It must NOT resolve -->
 <!-- lint-external-ref: FPlatformTime::Seconds -- Unreal Engine function, outside every scan root (§16) -->
 <!-- lint-external-ref: SendTo -- Unreal Engine socket method, outside every scan root (§16) -->
 <!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root (§16) -->
@@ -230,8 +237,9 @@ have a site, and it is `⛔G-16` on `recomputeAndPublishEffectiveInputDelay`.
 | `BeginPlay` / `EndPlay` | GAME | the composition root |
 | `onConnectionTierReceived` / `Replayed`, `onRelayDelayFloorReceived` / `Replayed`, `onInputRelayHostReady` | GAME | the four replication listeners |
 | `deliverRemoteInput`, `relayRemoteInput`, `noteDelayedInputComponent` | GAME | the transport sinks, driven from the RPC receipt path |
-| `InjectInputs_External` → `releaseDelayedInputsForStep` | GAME | the drain, the reap and PROBE A |
-| `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
+| `InjectInputs_External` → `onFrameStepsDue_GameThread`, `releaseDelayedInputsForStep`, `reapConnections` (Chaos configuration, §18) | GAME | PROBE A and PROBE 6 once per physics frame, then the drain and the reap (§7) |
+| `OnPostPhysicsStep` | GAME | the post-physics pass: visualization snapshot, timing buffer, score push, latency probe; bound to the scene's post-tick delegate in the Chaos configuration |
+| `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides (Chaos configuration, §18) — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
 | `pollInputHistory`, `pollInputHistoryLanes` | GAME | the input-history display's render-rate feed, driven from `USimmableUpdateComponent::TickComponent` |
 
 **There are three crossings, and they are not alike.** One is a write of one scalar; the other
@@ -398,6 +406,11 @@ forwards to one core-owned object for one purpose belongs here**, and the enumer
 reading aid. Replacing the list outright with that sentence would end the drift, at the cost of
 the ten anchors `doc_anchor_lint.ps1` currently resolves through it — a trade worth making only
 if the lead wants the anchors spent elsewhere.
+
+**In the Chaos configuration only (§18):** `noteResimRequest` and `noteResimGrant` have no callers
+but the Chaos hooks, and neither have the four plain forwards beside them (`onGameSimulation`,
+`onPostGameSimulation`, `onCheckIsSimilar`, `prepareResimulation`), so all six sit in the Chaos arm.
+The Jolt host feeds the resim-gate probe from the step driver instead (task 18).
 
 `getInputHistoryRows` and `getInputHistoryLanes` both return a pointer to `const` for the same
 reason: the panel that draws the rows, and the bars that draw the cells, must not write one.
@@ -1067,15 +1080,33 @@ itself returns `void` per the concept.
 
 ### The drain and the reap
 
-`releaseDelayedInputsForStep` supplies only the game-thread-safe upcoming sim tick (§9) and the
-per-id callback, then calls `ServerReceptionCoordinator::releaseDelayedInputs` and `reapConnections`. The reap was relocated
-here off the former arrival-gated RTT sample path: it now runs once per physics frame regardless
-of traffic — a documented benign cadence change, since an idle server now reaps — and the
+The frame's game-thread work is three pieces (split by og-simulationscheduler-withjolt task 51, §18):
+
+* `onFrameStepsDue_GameThread(firstUpcomingSimTick, numSteps)` holds PROBE A, then the coordinator
+  test (`⛔G-70`), then PROBE 6 and `[PacketBudget]` (§8). Nothing in it releases input.
+* `releaseDelayedInputsForStep(firstTick, numSteps)` is the drain only. It tests the coordinator
+  itself, prints one `[ReleaseBatch] first=<tick> numSteps=<n>` line on `LogOGNet` at `Log` (the
+  category of the coordinator's `[Release]` lines), and calls
+  `ServerReceptionCoordinator::releaseDelayedInputs` with the per-id callback.
+* The reap, `ServerReceptionCoordinator::reapConnections`, is called by the host.
+
+**The Chaos configuration's call order is the order of the code before the split.**
+`InjectInputs_External` runs on the game thread once per physics frame, before the frame's steps
+are handed to the solver, and calls: the mapper's `firstUpcomingSimTick` (§9, `⛔G-71`); then
+`onFrameStepsDue_GameThread(first, NumSteps)`; then, when a coordinator exists, the drain with
+`(first, NumSteps)` and `reapConnections(first)`. So this configuration releases the frame's whole
+batch up front, before its first step: one `[ReleaseBatch]` per frame, with `numSteps` equal to the
+frame's step count. Every `[Release]` line that follows lies in `[first, first + numSteps)` of the
+nearest `[ReleaseBatch]` before it. That containment is the within-run check of the pattern (§18).
+
+The drain hands over only the game-thread-safe upcoming sim tick (§9) and the per-id callback. The
+reap was relocated here off the former arrival-gated RTT sample path: it runs once per physics frame
+regardless of traffic — a documented benign cadence change, since an idle server now reaps — and the
 coordinator gates it on the dwell boundary internally. Its tick comes from the mapper, **not** the
 physics-thread-written server clock.
 
-The coordinator's early return guards **only** the drain, not PROBE A below it, because that probe
-runs on both roles and a pure client never has a coordinator.
+PROBE A runs on both roles and a pure client never has a coordinator, so every coordinator test sits
+below it.
 
 ---
 
@@ -1109,11 +1140,13 @@ resolution peer's `InputResolutionTelemetry`, `RelayArrivalProbe` in `NetSyncTel
 probes"* until task 11 — §11 C13): it is
 measured on this actor's game thread, from the Chaos pre-step hook, and the only tick source legal
 to read there is the `ChaosTickMapper`'s atomic offset — which this actor owns and
-`SimulationNetSync` has no access to.
+`SimulationNetSync` has no access to. Since task 51 the probe sits in `onFrameStepsDue_GameThread`,
+which the Chaos configuration's `InjectInputs_External` calls with the mapper's tick (§7, §18).
 
 **Why this hook and not `OnPostPhysicsStep`, on either role:** that hook is game-thread on both
-roles too, but it is handed only an `FChaosScene`. It has no physics step number and therefore no
-route to a sim tick through the only source safe on that thread. Sampling there would have
+roles too, but it receives no physics step number (it was handed only an `FChaosScene` until task 51,
+and now takes no argument), and therefore has no route to a sim tick through the only source safe on
+that thread. Sampling there would have
 required either reading the physics-thread-written clock or inventing a second counter, both ruled
 out. This hook already has both numbers: the step, and Chaos's own sub-step count.
 
@@ -1194,6 +1227,8 @@ emitted at any verbosity, deliberately — a per-write line is a per-tick line.
 
 ### PROBE 6 — per-connection send budget (`m_connectionBudgetProbe`), server only
 
+*Site: `onFrameStepsDue_GameThread`, below its coordinator test, once per physics frame (§7).*
+
 **Why arithmetic was not enough.** The budget model is
 `allowance = CurrentNetSpeed / DesiredTickRate` bytes per tick, with up to two ticks of bankable
 credit. Both halves are read from engine source, but **every term in it is derived**:
@@ -1235,6 +1270,8 @@ per session, on the first connection, at `Warning` — the value is a property o
 handler stack, not of the connection.
 
 ### The resim-gate feeds (`noteResimRequest` / `noteResimGrant`), client only
+
+*Chaos configuration only (§18): both feeds are called from the Chaos hooks.*
 
 **Why our own counters at all.** `FRewindData::FindValidResimFrame` and
 `FPBDRigidsSolver::ConditionalApplyRewind_Internal` log every refusal and every silent frame-skip
@@ -1464,10 +1501,12 @@ safe to read from the game thread, which is why the resolution specifies it.
 drain releases input for each of them. The normal fixed-tick case is `NumSteps == 1` and collapses
 to a single drain.
 
-The Chaos hook `OnPhysicsPreTick` → `InjectInputs_External` → `releaseDelayedInputsForStep` is
-game-thread and immediately precedes the step. The drain is a no-op on a client and on a server
-with nothing parked; the frame-health probe inside the same function is **not** a no-op on either
-role.
+In the Chaos configuration the caller is `InjectInputs_External`, bound to the rewind callback's
+`InjectInputsExternal` delegate (`FNetworkPhysicsCallback`). Chaos broadcasts it on the game thread,
+once per physics frame, as it hands the frame's steps to the solver. It computes
+`firstUpcomingSimTick` (`⛔G-71`) and passes the same value to `onFrameStepsDue_GameThread`, the drain
+and the reap (§7). The drain is a no-op on a client and on a server with nothing parked; the
+frame-health probe is **not** a no-op on either role (§11 C20).
 
 ---
 
@@ -1863,6 +1902,16 @@ definition are what hold it. Task 11's C12 said the sentence's *substance* was t
 `.cpp`'s copy of the same argument is §13's C13-8.
 
 *Found by task 12's review of task 11's text.*
+
+### C20 — §9 named an empty hook as the drain's caller
+
+§9 said the drain was reached through the pre-tick hook, then `InjectInputs_External`. The pre-tick
+hook this class bound to the scene's pre-tick delegate had an empty body and called nothing.
+`InjectInputs_External` is bound to the rewind callback's `InjectInputsExternal` delegate, which
+Chaos broadcasts from the solver when it pushes the frame's steps. Task 51 deleted the empty hook
+and its binding, and §9 now names the real caller.
+
+*Found by og-simulationscheduler-withjolt task 51.*
 
 ### Routed, not fixed — an observation about a neighbouring file
 
@@ -3632,7 +3681,8 @@ describe the committed ini (C13-1).
 
 ### 13.8 The capacity pin's word rounding — `(usableBits / 32) * 4` ∴D-50
 
-*The `[PacketBudget]` line in `releaseDelayedInputsForStep`.*
+*The `[PacketBudget]` line in `onFrameStepsDue_GameThread` (in `releaseDelayedInputsForStep` until
+task 51's split, §7).*
 
 The first argument of that line turns `UNetConnection::GetMaxSingleBunchSizeBits()` into
 usable **bytes**. It does not divide by 8: it rounds **down to whole 32-bit words** first,
@@ -3992,12 +4042,14 @@ a lower bound.
 
 ### The `[ChaosDilation]` line (client only)
 
-Per window, from `tickLatencyBudget_GameThread`:
+Per window, from `tickLatencyBudget_GameThread`, in the Chaos configuration only (§18):
 
 * `min` / `mean` / `max` / `samples`: the physics scene's network delta-time scale, sampled once per
-  game frame from the `FChaosScene` that `OnPostPhysicsStep` receives
-  (`FChaosScene::GetNetworkDeltaTimeScale`, beside the setter the engine's time-dilation client RPC
-  calls). It is the engine's physics time dilation, active today.
+  game frame from the world's physics scene (`GetPhysicsScene`, an `FChaosScene`;
+  `FChaosScene::GetNetworkDeltaTimeScale`, beside the setter the engine's time-dilation client RPC
+  calls). It is the engine's physics time dilation, active today. Until task 51 the same scene
+  arrived as `OnPostPhysicsStep`'s argument: the scene's post-tick delegate passes the scene that
+  broadcasts it, which is the world's one physics scene.
 * `resets` / `offset`: how many times the first local player controller's network physics tick
   offset changed in the window, and its current value. The engine's timestamp-setup client RPC
   writes that offset. ⚠ A reset to the **same** value is invisible to this poll, and only the first
@@ -4032,6 +4084,130 @@ p50s: client `H6` 90 ms and server `H4` 149 ms (the relay-delay floor and the in
 expected), `H5`'s `noEnd` about half its ticks (the rotation), and the dilation scale moving between
 0.976 and 1.024. A headless client is smoother than a rendering one, so these numbers are wiring
 evidence, not a baseline; the baseline is task 2's.
+
+---
+
+## §18 The backend switch — `OG_PHYSICS_BACKEND_CHAOS` (og-simulationscheduler-withjolt task 51)
+
+The initiative replaces Chaos with Jolt as the gameplay physics engine. Until gate 22 compares the
+two, both hosts stay selectable at compile time, and task 21 removes the switch after the gate (the
+user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos is retired soon).
+
+### The macro and the traits header
+
+* **One macro**, `OG_PHYSICS_BACKEND_CHAOS`: `1` builds the Chaos host, `0` the Jolt host. It comes
+  from one constant, `PhysicsBackendChaos` in `OGBrawlerUnreal.Build.cs`, added as a
+  **`PublicDefinitions`** entry, so every module that includes this header sees the same value. A
+  private definition would let a future includer compile the other arm, an ODR violation. It is not
+  an environment variable, because nothing established that UBT re-reads a changed environment
+  variable before it reuses its makefile; an edited `OGBrawlerUnreal.Build.cs` is always re-read. Task 51 saw both: a
+  flipped constant, and a deleted definition, each recompiled the module and stopped at the traits
+  header's matching error. A switch changes a definition every file of the module compiles with, so
+  make it with the editor closed rather than through Live Coding.
+* **Task 51 sets `1`.** The Jolt arm does not exist yet. Its branch of `PhysicsBackendUImpl.h` is an
+  `#error` that says task 18 adds it, so the value `0` cannot build by accident.
+* **`PhysicsBackendUImpl.h`** stops the build when the macro is undefined, and selects the types in
+  namespace `physicsBackendUImpl`. In the Chaos configuration:
+
+| alias | type |
+|---|---|
+| `physicsBackendUImpl::BodyAdapter` | `ChaosPhysicsBodyAdapter` |
+| `physicsBackendUImpl::ReaderAdapter` | `ChaosPhysicsBodyReaderAdapter` |
+| `physicsBackendUImpl::QueryAdapter` | `ChaosSpatialQueryAdapter` |
+| `physicsBackendUImpl::Factory` | `ChaosPhysicsFactory` |
+| `physicsBackendUImpl::VizQuery` | `ChaosSpatialQueryAdapter` |
+| `physicsBackendUImpl::VizReader` | `ChaosPhysicsBodyReaderAdapter` |
+
+  It also defines `kChaosBackend` and `kBackendToken` (`chaos`). The adapter members (`m_physAdapter`,
+  `m_physReaderAdapter`, `m_queryAdapter`), `BrawlerIntegrationExecFor_UE`, `BrawlerHitDetectionSystem`
+  and `SimulationManagerUImplConceptTest.cpp` name the aliases, so the Jolt arm's type swap is one set
+  of alias edits.
+
+### What the Chaos arm holds
+
+The Chaos host is the code below, compiled only when the macro is `1`. Each piece sits where it was
+before task 51, between `#if OG_PHYSICS_BACKEND_CHAOS` / `#endif` lines.
+
+* **Header:** the `ChaosTickMapper` include; `FSimulationState2`, `FSimulationInput2`,
+  `FRewindPushProbeStashedBody` and `FSimulationManagerAsyncCallback`; the six passthroughs from
+  `onGameSimulation` to `noteResimGrant` (§1); `InjectInputs_External` with `editChaosTickMapper` /
+  `getChaosTickMapper`; `m_asyncCallback` and the two delegate handles; `m_chaosTickMapper`.
+* **`.cpp`:** `emplaceBrawlerQueryAdapter`; `writeRestoredBodyState` and the push-probe helpers; every
+  `FSimulationManagerAsyncCallback` definition; in `BeginPlay`, the post-tick binding, the callback
+  object and the `InjectInputsExternal` binding; their removal in `EndPlay`; `InjectInputs_External`;
+  and the two `[ChaosDilation]` blocks of `tickLatencyBudget_GameThread`.
+
+Everything else is shared. Three shared pieces still name Chaos-side types in task 51, because only
+the Chaos configuration builds: the role branches' adapter construction in `BeginPlay`, `tryRegister`'s
+first-call bind (`ChaosPhysicsFactory` and the volume registration), and `registerVizVolume`'s query
+parameters. Task 18 gives them their Jolt bodies. The guards on the arm's code (`⛔G-02`, `⛔G-51` to `⛔G-55`, `⛔G-71`, `⛔G-76`, `⛔G-77`) stay as
+they are until task 21 retires them with the arm.
+
+### The rules
+
+1. **Nothing reflected sits inside an arm.** UHT rejects `UPROPERTY`, `UFUNCTION` and the other
+   reflection markers inside a preprocessor block it does not know ("must not be inside preprocessor
+   blocks"; the UHT header parser, lines 631-636 of UhtHeaderFileParser.cs, UE 5.6), and
+   `OG_PHYSICS_BACKEND_CHAOS` is such a block. Plain C++ inside it is fine. This header's only
+   reflected declarations are the `UCLASS` and its `GENERATED_BODY`, both outside every arm. A
+   reflected declaration that one backend needs is declared in both configurations.
+2. **Arms live only in this class's two files and the traits header.** `USimmableUpdateComponent`
+   and `AOGBrawlerUECharacter` have none. The component reaches the visualization adapters through
+   three members that exist in both configurations (below).
+3. **Both adapter sets compile in both configurations** once the Jolt arm exists (task 18). The
+   switch selects wiring, never whether an adapter compiles.
+4. **The Chaos arm holds the code as it was,** with only the edits the shared changes below force. No
+   new feature lands in it.
+5. **No comment marks an arm.** This section is the description.
+
+### The shared changes
+
+* `OnPostPhysicsStep` takes no argument. The Chaos configuration binds the scene's post-tick delegate
+  to a weak lambda that drops the scene and calls it. The `[ChaosDilation]` block reads the scene
+  from `GetWorld()` instead (§16). The two empty physics-scene hooks (pre-tick and step) and their
+  bindings are deleted (§11 C20).
+* **The split** of the frame's game-thread work into `onFrameStepsDue_GameThread`, the drain and the
+  reap (§7).
+* **`[ReleaseBatch] first=<tick> numSteps=<n>`**, one line per drain call, on `LogOGNet` at `Log`,
+  after the drain's coordinator test and before it drains. The committed `LogOGNet=Warning` hides
+  it. In the Chaos configuration there is one per physics frame, with `n` equal to the frame's step
+  count; the Jolt host will print one per step with `n = 1`. Every `[Release]` line's `releaseTick`
+  lies in `[first, first + n)` of the nearest `[ReleaseBatch]` before it. `[Release]` prints
+  absolute ticks, which differ between runs, so the two backends are compared by distributions,
+  never by lines (gate 22).
+* **`og.Sim.TestGameThreadHitchMs`** (not in Shipping): when it is above 0, the next
+  `OnPostPhysicsStep` sleeps the game thread that many milliseconds, once, and sets the variable back
+  to 0 at console priority (`ECVF_SetByConsole`), so a value set from the console or `-ExecCmds` is
+  reset. It forces a catch-up frame: on an inline-stepping server, 250 ms gives a frame of about 15
+  steps, which shows the release pattern in one `[ReleaseBatch]` line. The sleep sits at the top of
+  the shared `OnPostPhysicsStep`, the one hitch site for both hosts.
+* **`editVizQuery()`, `getVizReader()` and `registerVizVolume(descriptor, owner)`** replace
+  `editQueryAdapter()` and `getPhysicsBodyReaderAdapter()`, and the unused body-adapter accessor is
+  deleted, so no code outside this class can name a body adapter. In the Chaos configuration the first
+  two return the Chaos query adapter and reader; `registerVizVolume` builds the query parameters the
+  component used to build itself (simple collision, the owner ignored) and registers the volume on the
+  query adapter. They are handles, an exception to §1's narrow-passthrough rule that they inherit from
+  the accessors they replace: the two visualizers are templates over the adapter types and call them
+  directly, on the game thread. In the Jolt configuration they will return the game-thread pose view
+  (task 18).
+* **The backend token.** The build identity takes `kBackendToken` (`OGBuildIdentity-rationale.md` §7).
+* **`LogOGSimHost`** and its one-shot `Warning` line at `BeginPlay`:
+  `[SimHost.Backend] backend=chaos fingerprint=none`, so every log names the configuration it came
+  from. `Config/DefaultEngine.ini` pins the category at `Warning`, beside `LogOGLatencyBudget`. In the
+  Chaos configuration it is the category's only line; the Jolt host adds its window line (task 52)
+  and prints its determinism fingerprint (task 18).
+
+### The build rule until task 21
+
+Every task that edits a file with an arm (this class's two files, the traits header) builds both
+configurations once the Jolt arm exists: the Jolt configuration on the task's full target matrix, and
+the Chaos configuration on the editor, the targets gate 22 runs it on (the packaged dedicated server
+and the Android client) and both test targets. Until task 18, only the Chaos configuration builds.
+
+### Task 21
+
+After gate 22, task 21 deletes the Chaos arms, the macro, the constant and the traits header's Chaos
+branch, and retires the guards listed above.
 
 ---
 

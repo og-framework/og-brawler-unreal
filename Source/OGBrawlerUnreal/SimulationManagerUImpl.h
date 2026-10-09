@@ -26,7 +26,9 @@
 #include "OGSimulation/SimulationManager.h"
 #include "OGSimulation/SimulatableList.h"
 #include "OGSimulation/SystemsExecutor.h"
+#if OG_PHYSICS_BACKEND_CHAOS
 #include "OGSimulationUnreal/PCTimeManagement/ChaosTickMapper.h"
+#endif
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
 #include "OGSimulation/SimulationManagerConcept.h"
@@ -52,9 +54,7 @@
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
 
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
-#include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
-#include "OGSimulationUnreal/ChaosPhysicsBodyReaderAdapter.h"
-#include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
+#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 
@@ -70,6 +70,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGLatencyBudget, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogOGSimHost, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
 struct FMovementStaticDataCVars
@@ -93,6 +94,7 @@ class ASimulationManagerUImpl;
 class ASimulationTimingRelay;
 class ASimulationConnectionRelay;
 
+#if OG_PHYSICS_BACKEND_CHAOS
 struct FSimulationState2 : public Chaos::FSimCallbackOutput
 {
 	FSimulationState2()
@@ -261,6 +263,7 @@ private:
 		static_assert(everyRegisteredHookIsOverridden<FSimulationManagerAsyncCallback>());
 	}
 };
+#endif
 
 UCLASS()
 class ASimulationManagerUImpl : public AActor,
@@ -292,6 +295,7 @@ public:
 
         m_manager->editClientClock().requestInputDelayIncreaseStall(deltaDelayTicks);
     }
+#if OG_PHYSICS_BACKEND_CHAOS
     void onGameSimulation(const SimulationUpdateInfo& info)
     {
         m_manager->onGameSimulation(info);
@@ -314,6 +318,7 @@ public:
             return;
         m_manager->editResimGateProbe().noteGrant(grantedChaosFrame);
     }
+#endif
     void onPostSimulationGameThread();
 
     virtual void BeginPlay() override;
@@ -346,9 +351,7 @@ public:
     void postLatencyEvent_Internal(const latencyBudget::Event& event);
     void stampLatencyAfterStep_Internal(double stepStartSeconds);
     void stampLatencyStepEnd_Internal();
-    void OnPhysicsPreTick(FPhysScene* Scene, float DeltaTime);
-    void OnPhysicsStep(FPhysScene* Scene, float DeltaTime);
-    void OnPostPhysicsStep(FChaosScene* Scene);
+    void OnPostPhysicsStep();
 
     SimCharacterId allocateSimCharacterId();
 
@@ -361,15 +364,17 @@ public:
 
     void unregisterFromNewFramework(SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority);
 
+#if OG_PHYSICS_BACKEND_CHAOS
     void InjectInputs_External(int32 PhysicsStep, int32 NumSteps);
 
     ChaosTickMapper& editChaosTickMapper() { return m_chaosTickMapper; }
     const ChaosTickMapper& getChaosTickMapper() const { return m_chaosTickMapper; }
+#endif
 
-    ChaosPhysicsBodyAdapter&  editPhysicsBodyAdapter() { return m_physAdapter.value(); }
-    ChaosSpatialQueryAdapter& editQueryAdapter()       { return m_queryAdapter.value(); }
+    physicsBackendUImpl::VizQuery&        editVizQuery()       { return m_queryAdapter.value(); }
+    const physicsBackendUImpl::VizReader& getVizReader() const { return m_physReaderAdapter.value(); }
+    QueryVolumeId registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
-    const ChaosPhysicsBodyReaderAdapter& getPhysicsBodyReaderAdapter() const { return m_physReaderAdapter.value(); }
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
 
     SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
@@ -646,7 +651,9 @@ private:
 
     bool m_ringoutSpawnPointsSeeded = false;
 
-    void releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps);
+    void onFrameStepsDue_GameThread(int32 firstUpcomingSimTick, int32 numSteps);
+
+    void releaseDelayedInputsForStep(int32 firstTick, int32 numSteps);
 
     void applyReplicatedConnectionTier(uint8 tier);
 
@@ -689,7 +696,7 @@ private:
     BrawlerInputProviderFn wrapInputProviderWithLatencyStamp(
         unsigned int id, const USimmableUpdateComponent& owner, BrawlerInputProviderFn inputProvider);
     void createLatencyBudget(bool isAuthority);
-    void tickLatencyBudget_GameThread(FChaosScene* scene);
+    void tickLatencyBudget_GameThread();
     void onLatencyPostTickFlush();
     std::unique_ptr<latencyBudget::LatencyBudgetProbe> m_latencyProbe;
     std::unique_ptr<LatencyMailbox>                    m_latencyMailbox;
@@ -704,19 +711,21 @@ private:
     std::unordered_map<unsigned int, uint32>           m_latencyLastHandedCorrectionTick;
     FDelegateHandle                                    m_latencyPostTickFlushHandle;
 
+#if OG_PHYSICS_BACKEND_CHAOS
     FSimulationManagerAsyncCallback* m_asyncCallback;
 
     FDelegateHandle m_injectInputsExternalCallbackHandle;
     FDelegateHandle m_hysScenePostTickCallbackHandle;
+#endif
 
     std::function<void(uint32_t, double)> m_onTimingInfoReceivedCallback;
 
     ASimulationTimingRelay* m_timingRelay = nullptr;
     ASimulationTimingRelay* findTimingRelay();
 
-    std::optional<ChaosPhysicsBodyAdapter>   m_physAdapter;
-    std::optional<ChaosPhysicsBodyReaderAdapter> m_physReaderAdapter;
-    std::optional<ChaosSpatialQueryAdapter>  m_queryAdapter;
+    std::optional<physicsBackendUImpl::BodyAdapter>   m_physAdapter;
+    std::optional<physicsBackendUImpl::ReaderAdapter> m_physReaderAdapter;
+    std::optional<physicsBackendUImpl::QueryAdapter>  m_queryAdapter;
 
     static FMovementStaticDataCVars readMovementStaticDataCVars();
 
@@ -744,11 +753,11 @@ private:
 
     template <typename... SimulatableTs>
     using BrawlerIntegrationExecFor_UE = SimulationIntegrationExecutor<
-        simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableTs...>;
+        simulatableBrawler::StaticData, physicsBackendUImpl::BodyAdapter, physicsBackendUImpl::QueryAdapter, SimulatableTs...>;
     using BrawlerIntegrationExec = apply_t<BrawlerIntegrationExecFor_UE, BrawlerSimulatables>;
 
     using BrawlerHitDetectionSystem =
-        brawlerHitDetection::System<ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter>;
+        brawlerHitDetection::System<physicsBackendUImpl::BodyAdapter, physicsBackendUImpl::QueryAdapter>;
 
     using BrawlerSystemsExec = SimulationSystemsExecutor<
         BrawlerSimulatables,
@@ -778,7 +787,9 @@ private:
 
     static ASimulationManagerUImpl* s_instances[2];
 
+#if OG_PHYSICS_BACKEND_CHAOS
     ChaosTickMapper m_chaosTickMapper;
+#endif
 
     struct PendingRegistration
     {

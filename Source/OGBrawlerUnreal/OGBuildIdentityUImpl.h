@@ -118,6 +118,8 @@ const BuildIdentity& buildIdentity();
 
 std::string_view buildLabel();
 
+std::string_view backendToken();
+
 void registerNetworkVersionHook();
 
 } // namespace buildIdentityUImpl

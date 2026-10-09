@@ -12,6 +12,11 @@ The rules the compiler holds need no entry: the `build_info.txt` parse (BOM, CR,
 `label=` lines), the label character set, and "the `dev` label never changes the network version" are
 `static_assert`s in `OGBuildIdentityUImpl.h` (rationale §2, §3).
 
+The physics-backend token (rationale §7, og-simulationscheduler-withjolt task 51) needs no entry either:
+it is read from `PhysicsBackendUImpl.h`, the header that selects the backend, so the token and the
+compiled host cannot disagree, and it reaches the network version only inside the labelled-build
+branch that the `dev` assertion already covers.
+
 ---
 
 ## G-01 — the network version is set from `FCoreDelegates::OnPostEngineInit`, never earlier

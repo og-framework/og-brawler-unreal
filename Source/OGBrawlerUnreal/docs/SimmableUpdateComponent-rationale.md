@@ -151,8 +151,8 @@ pair at the end changed no scope (there was no code after that point either); it
 `tryInitializeWithManager` for the next tick and returns.
 
 **Loop one — `tryInitializeWithManager`.** Waits for the manager to exist. Once it does: cache the
-owner's input-collection component, register the target-visualization query volume with the
-manager's query adapter, construct the three visualization states, and schedule loop two.
+owner's input-collection component, register the target-visualization query volume through the
+manager's `registerVizVolume` (§10), construct the three visualization states, and schedule loop two.
 
 **Loop two — `tryRegisterWithNewFramework`.** Waits for the manager, then for the pawn's
 `SimCharacterId` (§13), then for the character's physics bodies to become resolvable — `tryRegister`
@@ -539,6 +539,20 @@ pass is the primary view and the arcs remain for A/B comparison.
 
 **`selectVisualizationInput`'s echo carries continuous fields only** (§10); **no tier consult** is wired
 here — muting on a degraded tier is a separate, optional change.
+
+### The visualization adapters come from the manager, through three backend-neutral members
+
+The target and block-prediction passes query the world through `ASimulationManagerUImpl::editVizQuery`
+and read bodies through `ASimulationManagerUImpl::getVizReader`; loop one registers the target
+volume with `ASimulationManagerUImpl::registerVizVolume`, handing it the descriptor and the owner
+(og-simulationscheduler-withjolt task 51). The manager owns the choice of physics backend
+(`SimulationManagerUImpl-rationale.md` §18), and these members exist in both configurations, so this
+component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
+instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
+query adapter and the game-thread reader, and `registerVizVolume` builds the query parameters this
+file used to build itself (simple collision, the owner ignored), so the volume and the two passes
+behave as before. The visualizers are templates over the adapter types, so the calls compile against
+whichever pair the manager selects.
 
 ---
 
