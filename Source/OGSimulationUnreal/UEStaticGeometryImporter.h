@@ -50,6 +50,7 @@ struct OGSIMULATIONUNREAL_API UEStaticImportReport
 struct OGSIMULATIONUNREAL_API UEStaticImportResult
 {
 	StaticWorldDescription description;
+	std::vector<uint8_t> physicsOnly;
 	UEStaticImportReport report;
 };
 

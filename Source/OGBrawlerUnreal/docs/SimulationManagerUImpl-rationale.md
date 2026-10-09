@@ -22,8 +22,11 @@ collide.
 * **§16** is the latency-budget probe's host side: its stamp sites, threads and measurement errors
   (og-simulationscheduler-withjolt task 1).
 * **§18** is the backend switch: the compile-time choice between the Chaos host and the Jolt host,
-  and what each configuration compiles (og-simulationscheduler-withjolt task 51). §17 is reserved
-  for the Jolt frame host (task 18).
+  and what each configuration compiles (og-simulationscheduler-withjolt task 51), the Jolt
+  configuration's world (task 53), its stepping (task 54) and its render publish and apply (task 55).
+  §17 is reserved for the Jolt frame host
+  overview (task 18); the frame host and the step hooks have their own documents,
+  `SimulationFrameHostUImpl-rationale.md` and `BrawlerStepHooksUImpl-rationale.md`.
 
 <!-- ================= DECLARED LINT ESCAPES =================================
      Every token below is CORRECT and cannot resolve. None is here to silence a
@@ -238,7 +241,9 @@ have a site, and it is `⛔G-16` on `recomputeAndPublishEffectiveInputDelay`.
 | `onConnectionTierReceived` / `Replayed`, `onRelayDelayFloorReceived` / `Replayed`, `onInputRelayHostReady` | GAME | the four replication listeners |
 | `deliverRemoteInput`, `relayRemoteInput`, `noteDelayedInputComponent` | GAME | the transport sinks, driven from the RPC receipt path |
 | `InjectInputs_External` → `onFrameStepsDue_GameThread`, `releaseDelayedInputsForStep`, `reapConnections` (Chaos configuration, §18) | GAME | PROBE A and PROBE 6 once per physics frame, then the drain and the reap (§7) |
-| `OnPostPhysicsStep` | GAME | the post-physics pass: visualization snapshot, timing buffer, score push, latency probe; bound to the scene's post-tick delegate in the Chaos configuration |
+| `OnPostPhysicsStep` | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, §18), the render apply (Jolt configuration, §18), visualization snapshot, timing buffer, score push, latency probe; bound to the scene's post-tick delegate in the Chaos configuration, called by the frame host's `TG_EndPhysics` tick function in the Jolt configuration |
+| the frame host's two tick functions → `onFrameStepsDue_GameThread`, the reap (authority), `OnPostPhysicsStep` (Jolt configuration, §18) | GAME | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`SimulationFrameHostUImpl-rationale.md`) |
+| `runJoltStep_Step` → `SimulationStepDriver::runTick` and the four step hooks, including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, §18) | PHYSICS: a worker task on a client, the game thread inline on the authority | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
 | `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides (Chaos configuration, §18) — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
 | `pollInputHistory`, `pollInputHistoryLanes` | GAME | the input-history display's render-rate feed, driven from `USimmableUpdateComponent::TickComponent` |
 
@@ -256,6 +261,25 @@ The worst a race can do is apply a new delay one tick late.
 `m_receptionCoordinator`, `m_frameHealthProbe`, `m_relayWriteProbe`, `m_connectionBudgetProbe`,
 `m_inputHistory` and `m_delayedInputComponentsById`. `m_manager->editResimGateProbe()` is the mirror case on the
 other side: physics-thread-only, and its correctness rests on nothing else touching it.
+
+### The Jolt host's mechanisms J1–J5 and the shadow hand-over (og-simulationscheduler-withjolt tasks 54–56)
+
+The Jolt configuration replaces Chaos's implicit marshalling (its game-thread body API, its
+scene-query copy, the tick mapper's atomic, its marshalled input struct, its end-of-physics body
+sync) with five host mechanisms
+(design D §2.4), and Chaos's game-thread copy of the physics scene with a shadow world on a worker client (design D §2.5, "(e) in detail"). None is a new data crossing between og-simulation structures, so og-simulation's
+threading-crossings table is unchanged; they are this class's own boundary.
+
+| | what | direction | mechanism | why it is safe |
+|---|---|---|---|---|
+| **J1** | occupancy commands `{slot, occupied}` | GT → step | the frame host's `SpscRing<OccupancyCommandUImpl, 64>`: Occupy pushed on `tryRegister`'s Ready path after `notifyCharacterRegistered`, Vacate pushed by `releaseJoltSlot`; drained first in `beforeTick` into the driver's `noteOccupancy` | one producer (the game thread) and one consumer (the step, serialized by the task chain); occupancy is applied only by the driver, on its thread, so the occupancy timeline records what the world stepped with (`⛔G-81`). A full ring is a `checkf` |
+| **J2** | the world mutex `m_joltWorldMutex` | GT ↔ step | a UE::FMutex held by `runJoltStep_Step` for each whole step and by the game thread around `tryRegister`'s bind pass and the world build | the bind needs synchronous ids, so it locks instead of queuing (design D7); the game thread never waits for a step task while holding it (frame-host G-05); the query adapter's access predicate checks it (§18) |
+| **J3** | the published tick offset | step → GT | the frame host's `std::atomic<int64_t>`, stored relaxed in `afterTick` as `tick − physicsStep`, loaded relaxed at `TG_StartPhysics` and added to the dispatch counter | the mapper's own semantics (a lone relaxed offset, read on the game thread); no `+ 1` (§9, frame-host G-03) |
+| **J4** | the frame's step batch | GT → task | first step, count and deadlines copied into the task by value | the step code never touches the game-thread-owned scheduler |
+| **J5** | the render snapshot | step → GT | `m_renderSnapshots`, a `SnapshotChannel<RenderSnapshot, 4>`: `afterTick` fills a pooled slot with `fillRenderSnapshot` and commits it once per step; `applyRenderSnapshot_GameThread` peeks the newest at the top of `OnPostPhysicsStep`, moves every registered capsule to it and releases it (§18) | one writer (the step) and one reader (the game thread) on a lock-free channel that hands the reader only committed slots and never recycles a held one; the reader holds one snapshot at a time, so four slots always leave the writer a free one (a full channel is a `checkf`) |
+| **shadow hand-over** | the newest saved state slot (worker client only) | step → GT | `m_shadowSlots`, a `SnapshotChannel<ShadowStateSlotUImpl, 3>` whose three slots are pre-reserved to the ring's slot size when the manager is built: `afterTick` copies the step world's ring slot for the step's tick into a pooled slot and commits it, only when the step saved one (`stepAllocatesFrontierSlot`; a Stall step saves none); `restoreShadowWorld_GameThread` peeks the newest at the top of `OnPostPhysicsStep` and, when it is newer than the last one restored, restores `m_shadowWorld` from it (§18) | the same channel argument as J5: one writer, one reader holding one slot, so three slots always leave the writer a free one (a full channel is a `checkf`). The copy is a byte copy into reserved storage and the body-id list fits its reserved capacity, so nothing allocates after construction. The shadow world itself is game-thread-only: built at `BeginPlay`, bound and released by `tryRegister` and the slot release, restored and queried on the game thread; the step never touches it, and the visualizations never touch the step world |
+
+J6 (step-cost samples) is task 52's.
 
 ### The read crossing — `pollInputHistory`, and why its tear is accepted
 
@@ -1108,6 +1132,29 @@ physics-thread-written server clock.
 PROBE A runs on both roles and a pure client never has a coordinator, so every coordinator test sits
 below it.
 
+**The Jolt configuration's call pattern (og-simulationscheduler-withjolt task 54).** The same three
+pieces, at the three places design D3 puts them (`SimulationFrameHostUImpl-rationale.md` §2):
+
+* `onFrameStepsDue_GameThread(first + offset, n)` once per frame at `TG_StartPhysics`, only when the
+  scheduler made `n ≥ 1` steps due: the condition and the arguments under which Chaos called
+  `InjectInputs_External`.
+* The drain **per simulation tick**, from the authority step's `beforeTick`, as
+  `releaseDelayedInputsForStep(authorityTick, 1)`: one `[ReleaseBatch]` with `numSteps=1` per step,
+  for the tick that step will simulate (`BrawlerStepHooksUImpl-guards.md` G-01).
+* `reapConnections(first + offset)` **once per frame, after the frame's inline steps**, with the value
+  the probe call received. It stays per frame because it is the only feed of the coordinator's
+  `noteServerTick`, the receipt gate's reference: per step, the reference would sit at the frame's last
+  tick, not its first, when the next frame's receipts are judged, and the gate's window would shift by
+  the frame's step count (frame-host G-06). On the authority the value is exactly the server clock plus
+  one, because every earlier step has completed inline and published its offset.
+
+No receipt can land between inline steps (receipts happen in the engine's receive dispatch, before the
+tick groups), so the queue a step drains holds what the batch would have held. The two patterns
+release the same `(id, captureTick, releaseTick)` set and differ only in which step pops an input in a
+multi-step frame with a per-character gap (design D4): the batch hands the next input to the gap tick;
+per step, the gap tick underruns and the rest apply on time. The comparison is therefore by
+distribution, never line by line (§18).
+
 ---
 
 ## §8 The four probes
@@ -1141,7 +1188,11 @@ probes"* until task 11 — §11 C13): it is
 measured on this actor's game thread, from the Chaos pre-step hook, and the only tick source legal
 to read there is the `ChaosTickMapper`'s atomic offset — which this actor owns and
 `SimulationNetSync` has no access to. Since task 51 the probe sits in `onFrameStepsDue_GameThread`,
-which the Chaos configuration's `InjectInputs_External` calls with the mapper's tick (§7, §18).
+which the Chaos configuration's `InjectInputs_External` calls with the mapper's tick (§7, §18). In the
+Jolt configuration the frame host calls it at `TG_StartPhysics` with its dispatch counter plus the
+published offset J3 (§1), which is the mapper's value except that a client Skip or Stall's ±1 reaches
+the probe one frame earlier (`SimulationFrameHostUImpl-rationale.md` §5); the line formats are
+unchanged (og-simulationscheduler-withjolt task 54).
 
 **Why this hook and not `OnPostPhysicsStep`, on either role:** that hook is game-thread on both
 roles too, but it receives no physics step number (it was handed only an `FChaosScene` until task 51,
@@ -1271,7 +1322,11 @@ handler stack, not of the connection.
 
 ### The resim-gate feeds (`noteResimRequest` / `noteResimGrant`), client only
 
-*Chaos configuration only (§18): both feeds are called from the Chaos hooks.*
+*Chaos configuration only (§18): both feeds are called from the Chaos hooks. In the Jolt configuration
+the step driver feeds the same probe (`SimulationStepDriver::resimulateIfRequested`: a request when the
+gate names an anchor, a grant when the world still holds that tick), so `[ResimProbe.Gate]`,
+`[ResimProbe.Chaos]` and `[ResimProbe.Apply]` keep their formats with a sim-tick frame domain: a
+refusal is a ring miss, a clamp cannot happen (task 54).*
 
 **Why our own counters at all.** `FRewindData::FindValidResimFrame` and
 `FPBDRigidsSolver::ConditionalApplyRewind_Internal` log every refusal and every silent frame-skip
@@ -1329,6 +1384,10 @@ cleanly. With logging on, `UE_LOG_ACTIVE` already yields a `bool`, so nothing ch
 predicate still reads the category live (guard G-50).
 
 ### The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only
+
+*Chaos configuration only (§18). The Jolt configuration has no rewind push: the step driver restores
+the Jolt world's saved tick and pushes the corrected body states itself (§14), so neither line prints
+there (task 54).*
 
 **What it exists to decide, and that a REFUTATION is the point.** og-netcode-v2-field-defects
 task 10 asks whether the body-state push `FirstPreResimStep_Internal` makes is ever read.
@@ -1507,6 +1566,13 @@ once per physics frame, as it hands the frame's steps to the solver. It computes
 `firstUpcomingSimTick` (`⛔G-71`) and passes the same value to `onFrameStepsDue_GameThread`, the drain
 and the reap (§7). The drain is a no-op on a client and on a server with nothing parked; the
 frame-health probe is **not** a no-op on either role (§11 C20).
+
+**This derivation is the Chaos configuration's** and retires with it (task 21). The Jolt configuration
+has no mapper and no `+ 1`: the step driver hands each authority step `serverTick + 1` and checks after
+the step that it simulated exactly that tick (`SimulationStepDriver-rationale.md` §7), and the per-frame
+tick is the frame host's dispatch counter plus the offset `afterTick` publishes, `tick − physicsStep`,
+in which the `+ 1` is already contained (`SimulationFrameHostUImpl-rationale.md` §5;
+og-simulationscheduler-withjolt task 54).
 
 ---
 
@@ -3503,6 +3569,12 @@ Verified: `respawnDelayTicks` defaults to `120u`. The caller computes `isAuthori
 *`pushRingoutScoresToCharacters`, and its call in `OnPostPhysicsStep`. The cross-thread
 argument is in §1, the second read crossing. What follows is the rest.*
 
+*Call site by configuration: `OnPostPhysicsStep` is called by the scene's post-tick delegate in the
+Chaos configuration and by the frame host's `TG_EndPhysics` tick function in the Jolt one, at the same
+point of the frame (after the wait for earlier frames' steps) and every frame. On the authority every
+step has run inline before it, so the push reads a score table no step is writing; the argument below
+is unchanged (task 54).*
+
 > [ringout task 5] ⭐ THE AUTHORITY-SIDE SCORE PUSH
 >
 > WHAT IT IS. One game-thread pass that copies each character's authority-side ring-out
@@ -3622,7 +3694,8 @@ has ten and omits `[ResimProbe.SlotMap]`, which `CorrectionCache.h` emits. Also,
 ### 13.7 The rewind-push probe — the source's own wording, beyond §8
 
 *§8 carries this probe's design. These are the passages from its source that §8 did not already
-state.*
+state. Chaos configuration only: the probe and its helpers sit in the Chaos arm and retire with it in
+task 21 (§18).*
 
 > TWO QUESTIONS, ONE FIELD SET, ONE PRODUCTION COMPARATOR. `match` asks whether the
 > replay's starting state equals the pushed value; `inert` asks whether the push could
@@ -3813,6 +3886,12 @@ and on four early returns: `// pre-BeginPlay ordering; the relay latches and rep
 
 *og-netcode-v2-field-defects task 10's fix, 2026-09-25. The prohibitions are `⛔G-76` (where and how
 the write happens) and `⛔G-77` (which fields it writes).*
+
+*Chaos configuration only (§18), retiring with it in task 21. The Jolt configuration's successor is the
+step driver: on a granted resimulation it restores the Jolt world's saved tick, calls
+`prepareResimulation`, and pushes the restored body states through
+`SimulationIntegrationExecutor::pushCorrectedBodyStatesAll` (the wire-shape rule lives in the core),
+before the first replayed step (task 54).*
 
 **What the hook does.** A granted rewind makes `FirstPreResimStep_Internal` do three things, in this
 order:
@@ -4022,6 +4101,21 @@ Times are `FPlatformTime::Seconds` (one monotonic clock per process). "GT" is th
 **H1 and H2 are measured for a remote client's own characters only.** A listen host's local players
 have no client provider, so the host role has no capture path to stamp.
 
+### The Jolt configuration's stamp sites (og-simulationscheduler-withjolt task 54)
+
+The hop table above names the Chaos configuration's step-side sites. In the Jolt configuration "PT" is
+the step's thread (the frame host's task on a client, the game thread inline on the authority), every
+game-thread site is unchanged, and the step-side sites move to the step hooks (design D9, D18):
+
+| stamp | Chaos configuration | Jolt configuration |
+|---|---|---|
+| step-start time for `H4`, `H6`, `H6c` and the clock counts | `OnPreSimulate_Internal`, immediately before `onGameSimulation` | `BrawlerStepHooksUImpl::beforeSimulate`, after any replay and immediately before the normal step (`BrawlerStepHooksUImpl-guards.md` G-03); on a client early only by the Jolt scratch save |
+| `stampLatencyAfterStep_Internal(start)` | `OnPreSimulate_Internal`, after `onGameSimulation` | `beforePhysics`, after `onGameSimulation`, before the physics step |
+| `stampLatencyStepEnd_Internal` (`H5`, `H7` starts) | `OnPostSolve_Internal` | `afterTick`, after the post-step pass and the ring save: microseconds later |
+
+Both configurations take the start time at the same instant, so gate 22 compares them like for like.
+`[ChaosDilation]` is the Chaos configuration's only (§18).
+
 ### The `H3` hook
 
 `UWorld::OnPostTickFlush` is broadcast by the world's tick immediately after the net drivers'
@@ -4104,21 +4198,22 @@ user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos 
   flipped constant, and a deleted definition, each recompiled the module and stopped at the traits
   header's matching error. A switch changes a definition every file of the module compiles with, so
   make it with the editor closed rather than through Live Coding.
-* **Task 51 sets `1`.** The Jolt arm does not exist yet. Its branch of `PhysicsBackendUImpl.h` is an
-  `#error` that says task 18 adds it, so the value `0` cannot build by accident.
+* **The constant stays `1` until the flip to Jolt** (task 18's last part). Task 51 built the switch
+  with a Jolt branch that was only an `#error`; task 53 gave the branch its types and the first part
+  of the Jolt host (below), and `0` now builds.
 * **`PhysicsBackendUImpl.h`** stops the build when the macro is undefined, and selects the types in
-  namespace `physicsBackendUImpl`. In the Chaos configuration:
+  namespace `physicsBackendUImpl`:
 
-| alias | type |
-|---|---|
-| `physicsBackendUImpl::BodyAdapter` | `ChaosPhysicsBodyAdapter` |
-| `physicsBackendUImpl::ReaderAdapter` | `ChaosPhysicsBodyReaderAdapter` |
-| `physicsBackendUImpl::QueryAdapter` | `ChaosSpatialQueryAdapter` |
-| `physicsBackendUImpl::Factory` | `ChaosPhysicsFactory` |
-| `physicsBackendUImpl::VizQuery` | `ChaosSpatialQueryAdapter` |
-| `physicsBackendUImpl::VizReader` | `ChaosPhysicsBodyReaderAdapter` |
+| alias | Chaos configuration | Jolt configuration |
+|---|---|---|
+| `physicsBackendUImpl::BodyAdapter` | `ChaosPhysicsBodyAdapter` | `JoltPhysicsBodyAdapter` |
+| `physicsBackendUImpl::ReaderAdapter` | `ChaosPhysicsBodyReaderAdapter` | `JoltPhysicsBodyReaderAdapter` |
+| `physicsBackendUImpl::QueryAdapter` | `ChaosSpatialQueryAdapter` | `JoltSpatialQueryAdapter` |
+| `physicsBackendUImpl::Factory` | `ChaosPhysicsFactory` | `JoltPhysicsFactory` |
+| `physicsBackendUImpl::VizQuery` | `ChaosSpatialQueryAdapter` | `JoltSpatialQueryAdapter` |
+| `physicsBackendUImpl::VizReader` | `ChaosPhysicsBodyReaderAdapter` | `JoltPhysicsBodyReaderAdapter` |
 
-  It also defines `kChaosBackend` and `kBackendToken` (`chaos`). The adapter members (`m_physAdapter`,
+  It also defines `kChaosBackend` and `kBackendToken` (`chaos` or `jolt`). The adapter members (`m_physAdapter`,
   `m_physReaderAdapter`, `m_queryAdapter`), `BrawlerIntegrationExecFor_UE`, `BrawlerHitDetectionSystem`
   and `SimulationManagerUImplConceptTest.cpp` name the aliases, so the Jolt arm's type swap is one set
   of alias edits.
@@ -4137,10 +4232,11 @@ before task 51, between `#if OG_PHYSICS_BACKEND_CHAOS` / `#endif` lines.
   object and the `InjectInputsExternal` binding; their removal in `EndPlay`; `InjectInputs_External`;
   and the two `[ChaosDilation]` blocks of `tickLatencyBudget_GameThread`.
 
-Everything else is shared. Three shared pieces still name Chaos-side types in task 51, because only
-the Chaos configuration builds: the role branches' adapter construction in `BeginPlay`, `tryRegister`'s
-first-call bind (`ChaosPhysicsFactory` and the volume registration), and `registerVizVolume`'s query
-parameters. Task 18 gives them their Jolt bodies. The guards on the arm's code (`⛔G-02`, `⛔G-51` to `⛔G-55`, `⛔G-71`, `⛔G-76`, `⛔G-77`) stay as
+Since task 53 the Chaos arm also holds three pieces that task 51 left shared because only the Chaos
+configuration built then: the role branches' adapter construction in `BeginPlay` (with the solver
+lookup above the branches), `tryRegister`'s first-call bind (`ChaosPhysicsFactory` and the volume
+registration), and `registerVizVolume`'s query parameters. Each has a Jolt arm beside it (below). The
+guards on the arm's code (`⛔G-02`, `⛔G-51` to `⛔G-55`, `⛔G-71`, `⛔G-76`, `⛔G-77`) stay as
 they are until task 21 retires them with the arm.
 
 ### The rules
@@ -4183,26 +4279,301 @@ they are until task 21 retires them with the arm.
   the shared `OnPostPhysicsStep`, the one hitch site for both hosts.
 * **`editVizQuery()`, `getVizReader()` and `registerVizVolume(descriptor, owner)`** replace
   `editQueryAdapter()` and `getPhysicsBodyReaderAdapter()`, and the unused body-adapter accessor is
-  deleted, so no code outside this class can name a body adapter. In the Chaos configuration the first
-  two return the Chaos query adapter and reader; `registerVizVolume` builds the query parameters the
-  component used to build itself (simple collision, the owner ignored) and registers the volume on the
-  query adapter. They are handles, an exception to §1's narrow-passthrough rule that they inherit from
-  the accessors they replace: the two visualizers are templates over the adapter types and call them
-  directly, on the game thread. In the Jolt configuration they will return the game-thread pose view
-  (task 18).
+  deleted, so no code outside this class can name a body adapter. The first two return references to
+  a world every peer's game thread may query (`SimmableUpdateComponent-rationale.md` §10; task 53 made
+  them pointers, null on a worker client, until task 56 gave that client its shadow world). In the Chaos configuration
+  they always return the Chaos query adapter and reader; `registerVizVolume` builds the query
+  parameters the component used to build itself (simple collision, the owner ignored) and registers
+  the volume on the query adapter. They are handles, an exception to §1's narrow-passthrough rule that
+  they inherit from the accessors they replace: the two visualizers are templates over the adapter
+  types and call them directly, on the game thread. The Jolt configuration's answers are below.
 * **The backend token.** The build identity takes `kBackendToken` (`OGBuildIdentity-rationale.md` §7).
 * **`LogOGSimHost`** and its one-shot `Warning` line at `BeginPlay`:
   `[SimHost.Backend] backend=chaos fingerprint=none`, so every log names the configuration it came
   from. `Config/DefaultEngine.ini` pins the category at `Warning`, beside `LogOGLatencyBudget`. In the
-  Chaos configuration it is the category's only line; the Jolt host adds its window line (task 52)
-  and prints its determinism fingerprint (task 18).
+  Chaos configuration it is the category's only `Warning` line; the Jolt host adds `[SimHost.Mode]`
+  and `[SimHost.World]` (below), its window line (task 52) and its determinism fingerprint (task 18).
+* **`dt`** is the engine physics setting AsyncFixedTimeStepSize in both configurations, `checkf`-ed at
+  `BeginPlay` to be one tick of `UEBrawlerNetConfig::tickFrequencyHz`. It is the number Chaos steps
+  with, and the Chaos arm `checkf`s that its solver's async dt is the same value, which it was before
+  the manager stopped asking the solver (design D13).
+
+### The Jolt arm's world (task 53)
+
+The first part of the Jolt host builds the physics world and binds characters into it. Task 53 built
+it without stepping; task 54 steps it (the next subsection). Everything below is plain C++ in Jolt arms
+of this class's two files.
+
+* **Members**, in declaration order: `m_joltRuntime` (a `JoltRuntimeLeaseUImpl`, which acquires the
+  reference-counted `JoltRuntime` and releases it when destroyed: PIE has two worlds in one process),
+  `m_joltWorld`, the slot template, the slot table, the world mutex `m_joltWorldMutex` and the stepping
+  mode, all above the adapter members. `compositionContractsHold` asserts runtime < world < body
+  adapter < reader and query adapter < integration layer, because members are destroyed in reverse
+  and each of those holds a reference into the one before it.
+* **The stepping mode** is fixed at `BeginPlay` by `decideJoltSteppingMode` and printed once as
+  `[SimHost.Mode] role=<Authority|Client> stepping=<inline|worker> viz=<stepWorld|shadowWorld>`. The authority
+  always steps inline on the game thread: its pre-step input release touches UObjects. A client steps
+  on a worker task, or inline when `og.Sim.RunInline` is 1 (read once). The decision is the role,
+  never the engine's ShouldUseThreadingForPerformance, which would put a listen or standalone authority on
+  a worker as Chaos does (design D2). Task 54 dispatches by it.
+* **`buildJoltWorld`** runs before the role branches, in this order, the same on every peer:
+  1. acquire the runtime;
+  2. import the level's static collision with `UEStaticGeometryImporter` and the brawler's six-row
+     category table (`brawlerCategoryChannels`, the same rows as the Chaos arm's
+     `emplaceBrawlerQueryAdapter`; the duplicate goes with the Chaos arm in task 21), and log its
+     report;
+  3. split the import into queryable and PhysicsOnly shapes by the importer's per-shape
+     `physicsOnly` flags;
+  4. construct `m_joltWorld` from the slot template (one body per physics declaration of
+     `SimulatableBrawler`, in declaration order, so the factory's template-order bind matches the
+     composite), `kMaxSimulatableSlots` slots, the static layer keys of both parts, the movement
+     gravity, and a rollback ring of `rollbackWindowHardCap` plus 2 ticks on a client and none on the
+     authority (which never resimulates);
+  5. build the queryable statics with one `JoltStaticWorldBuilder`, then the PhysicsOnly statics with
+     a second one, always both and always in that order, so the static bodies get the same Jolt
+     indices on every peer (the static part of a query hit's sort key is the body index);
+  6. construct the body adapter, the reader over its bind table, and the query adapter with the six
+     mapped categories (the Chaos adapter's mapped set) and an access predicate (below);
+  7. exclude the PhysicsOnly bodies from queries, as Chaos's queries never see them.
+
+  Steps 4 to 7 run under the world mutex. Nothing is contended at `BeginPlay`; it is there because
+  the query adapter's predicate demands it on a worker client. One `[SimHost.World]` line reports the
+  slot count, bodies per slot, ring depth and both static counts. ThirdPersonMap has no PhysicsOnly
+  element, so the second builder builds nothing there.
+* **The world mutex (J2)** is a UE::FMutex, taken through a scope class that also opens a
+  `JoltWorldAccessScope` and sets this manager's bit in a thread-local "this thread holds J2" mask. The
+  step holds it for each whole tick (`runJoltStep_Step`, task 54). The game thread holds it only around
+  `tryRegister`'s bind pass (`⛔G-81`), the world build above and the driver's construction; never
+  around a visualization pass. UE::FMutex is not recursive, so the scope `checkf`s the bit before it
+  locks.
+* **Access predicates.** `JoltSpatialQueryAdapter` asserts every call through the function pointer it
+  is given. A worker client's adapter gets "this manager's step is running on this thread, or this
+  thread holds this manager's J2". An inline host's also accepts "on the game thread", because there the
+  game thread runs the steps and queries between them. The "step is running" bit is set by the step
+  scope in `runJoltStep_Step`. Both flags are keyed per manager (next subsection).
+* **The slot table.** A character owns one of the world's fixed slots from the first time the
+  manager hears of it until it leaves. `acquireJoltSlot` keys the table by the owning actor and hands
+  out the lowest free slot; `registerVizVolume`, which the component calls before the character's
+  simulation id is known, takes the slot first, and `tryRegister` finds it there. A slot is per peer
+  and never on the wire: a query hit's key uses the simulation id, not the slot.
+* **The bind** (`tryRegister`'s first call, `⛔G-81`). Under J2, `JoltPhysicsFactory` binds the slot's
+  template bodies in declaration order. Its `simulatableId` is the storage key (`toStorageKey` of the simulation id),
+  which the authority alone assigns and every client receives on the pawn (§15), so it is the same on
+  every peer, as the query adapter's hit order requires. The factory's shape registrar is the query
+  adapter's `registerShape`, so child bodies map to their root and their shape enables register. Each
+  declaration's query volumes are registered with the slot's root body as the ignored root. Then one
+  `[SimHost.Bind] bind id=<id> slot=<slot> boundBodies=<n> slotsInUse=<k>` line at `Log`. Occupancy
+  is not applied here: the slot stays parked until the step applies the Occupy command the Ready
+  path pushes (J1, task 54).
+* **The capsule contract (design D14).** The Chaos factory compared the authored UE capsule with the
+  movement descriptor when it adopted the capsule as the root body. The Jolt slot body is built from
+  the descriptor, so the bind pass `checkf`s the pawn's unscaled capsule radius and half-height against
+  the descriptor's `CapsuleGeometry` instead (`OGBrawlerUECharacter-guards.md` G-01).
+* **Readiness** is unchanged in shape: the second call asks the body adapter's `isBodyResolvable` for every
+  declaration's body. For the Jolt body adapter that means "bound": it reads the bind table the first
+  call's factory wrote, on this thread, so it needs no lock and is true on the next attempt.
+* **The release** (`unregisterFromNewFramework`, last): `releaseJoltSlot` pushes the slot's Vacate
+  command (J1, task 54), clears the slot's bind-table entries and frees the slot, on the game thread
+  without J2. The body adapter's step-side
+  reads of the bind table (the locked-rotation inertia) never read the entries a release clears; the
+  reader's "bound" gate does, and its only callers are the game-thread visualizations, so the
+  release cannot race them (task 11 review N3). A reader with a step-thread caller would need the
+  release under J2. The bodies keep their stale user data until the next bind, which is harmless: a
+  parked body answers no query and collides with nothing. Query volumes are never unregistered, as in
+  the Chaos configuration. One `[SimHost.Bind] release slot=<slot> boundBodies=<n> slotsInUse=<k>`
+  line at `Log`.
+* **Visualizations.** On an inline host `editVizQuery()` and `getVizReader()` return the step world's
+  adapters, which the game thread may query between steps, and `registerVizVolume` registers in the
+  same adapter with the slot's root as the ignored root. On a worker client they return the shadow
+  world's adapters, and the volume registers there (the shadow world, below). Task 53 returned null on
+  a worker client, and the component skipped its two physics-querying passes; task 56 removed that skip,
+  and the accessors return references again, as before task 53.
+
+### The Jolt arm's stepping (task 54)
+
+The frame host (`SimulationFrameHostUImpl`) and the step hooks (`BrawlerStepHooksUImpl`) have their
+own documents. This class's part:
+
+* **Members**, after `m_manager` and in this order: `m_frameHost`, `m_stepHooks`, `m_stepDriver` (a
+  `SimulationStepDriver` over the manager, `m_joltWorld`, the integration layer and the hooks).
+  `compositionContractsHold` asserts manager < frame host < hooks < driver: the driver unregisters its
+  resync callback from the manager's client clock when destroyed, and holds the hooks, which hold the
+  frame host. The frame host is this class's friend: it calls the private per-frame and per-step
+  functions below and the driver.
+* **`startJoltStepping`**, at the end of `BeginPlay` (design §9.1 steps 7–9), in the Chaos arm's
+  registration slot: under J2 it constructs the hooks and the driver (`dt`, `ResimPolicy::OnRequest`;
+  its constructor parks every slot), then `m_frameHost.begin` builds the scheduler and registers the two
+  tick functions.
+* **`runJoltStep_Step(physicsStep, deadline)`**, called by the frame host for each step of a batch on
+  the step's thread: J2 scope, step scope (the "step is running" bit), the deadline into the hooks, then
+  `m_stepDriver->runTick(physicsStep)`.
+* **J1 sites.** `tryRegister`'s Ready path pushes an Occupy command after `registerSimulatable` and
+  `notifyCharacterRegistered`; `releaseJoltSlot` pushes a Vacate command before it clears the bind table.
+  A rejoin that rebinds the slot before the step drains the Vacate is safe: J1 is FIFO, so the
+  Vacate applies first, and the new Occupy follows only from the new character's own Ready pass.
+* **`EndPlay`** begins with the frame host's `unregisterTickFunctions` and then
+  `waitForOutstandingSteps` (`⛔G-80`): no step runs after it, before any teardown.
+* **The per-frame and per-step input work** is §7's Jolt call pattern; PROBE A's tick source is §8's.
+
+**Why the thread-local flags are keyed per manager** (task 53 review N1). A one-process PIE can hold
+two managers, the authority's and a client's (`s_instances`), on one game thread. With one process-wide
+flag, a server step running inline would satisfy a worker client's predicate on the game thread, and a
+game-thread bind in one manager would make the other's adapter accept a call it should refuse. So the
+two flags are bit masks with one bit per manager slot (`kJoltAuthorityRoleBit`, `kJoltClientRoleBit`,
+fixed by `decideJoltSteppingMode`), and each manager's adapter gets the predicate instantiated for its
+own bit (`joltWorldAccessCheckFor`). The J2 scope's "not already held" `checkf` tests the manager's own
+bit, so a game thread that ever held both managers' mutexes at once would not trip it; that nesting
+cannot deadlock, because a step only ever takes its own manager's mutex. Two client managers in one
+process are already refused at `BeginPlay` (`s_instances`).
+
+**Character contact solving can differ between peers at ULP level** (task 53 review N2). Slots are
+handed out per peer in registration order (above), and Jolt orders contact constraints by body id, so
+the same two characters touching can be solved in a different order on two peers. Queries are
+unaffected (their hits sort by a peer-stable key). Prediction correction absorbs the difference as it
+absorbs Chaos's; nothing claims bitwise cross-peer determinism of the solver. The task-54 headless runs
+(idle characters, no contact) showed no higher resimulation rate than the same-commit Chaos run.
+
+### The Jolt arm's render publish and apply (task 55)
+
+The Chaos configuration's end of physics syncs every component to the physics result, interpolated
+two steps behind. The Jolt configuration has no such sync, so this class does it for the one component
+that needs it, the capsule root (design D11, §8).
+
+* **Why it is not cosmetic.** The capsule is the mouse-aim plane point: the input component's
+  `updateGameThreadCache` projects the mouse onto the horizontal plane through the capsule's world
+  translation (`OGBrawlerInputCollectionComponent.cpp`, the plane point read before the line-plane
+  intersection), and the camera boom hangs off the capsule. Without the apply the aim input fed into
+  the simulation is measured from wherever the capsule spawned (design F7).
+* **The snapshot type.** `RenderSnapshot` is `RenderSnapshotT<kMaxSimulatableSlots * 6>`, declared with
+  the other brawler aliases: one body per declaration of the brawler's physics composite in every
+  slot. Two `static_assert`s in `publishRenderSnapshot_Step` hold it: the 6 equals the composite's
+  declaration count, and the snapshot is trivially copyable (no heap-owning member).
+* **Publish, on the step's thread.** `afterTick` calls the frame host's `publishRenderSnapshot_Step`,
+  which calls this class's `publishRenderSnapshot_Step(outcome, currentStepDeadline)`: take a slot
+  (`beginWrite`), fill it from `m_storage` (`fillRenderSnapshot`), `commit`. Once per `runTick`, on every
+  role, never in a replay (the driver calls no hook then). The fill runs after the post-step pass, so it
+  reads this step's poses from og-simulation's storage, keyed by the peer-stable storage key; it reads
+  storage on the step's thread inside the step, as every other step code does, so it adds no crossing
+  beyond J5 itself.
+* **No allocation after warm-up.** The channel's four slots are built with the manager, and
+  og-simulation's own test pins that the channel allocates nothing after construction. The fill writes
+  the slot in place; the storage walk iterates the existing maps; the key sort is an in-place sort over
+  the slot's array; the snapshot owns no heap storage (the second `static_assert`).
+* **Apply, on the game thread.** `OnPostPhysicsStep` calls `applyRenderSnapshot_GameThread` before its
+  shared body (after the non-shipping hitch sleep and, on a worker client, after the shadow-world restore
+  of the next subsection),
+  every frame, on every role. The Chaos configuration has no apply: the engine's sync does that job. The
+  apply peeks the newest snapshot (back 0, no interpolation until task 19, so the capsule leads the
+  Chaos configuration's interpolated pose by one or two steps). For every character in
+  `m_renderTargetsById`, filled on `tryRegister`'s Ready path and erased by `unregisterFromNewFramework`,
+  it finds the root body by storage key and `m_joltRootDeclarationIndex` with a binary search over the
+  sorted bodies, and moves the actor there with teleport and no sweep (`⛔G-83`). The rotation is the
+  snapshot's only when the body carries one; the brawler's capsule body does not, so the actor keeps its
+  own. Then it releases the snapshot.
+* **The root declaration.** `buildJoltWorld` takes `m_joltRootDeclarationIndex` from the slot template's
+  one `isRoot` body (a `checkf` demands exactly one). The template and the snapshot both enumerate the
+  composite in its declaration order, so a template index is a declaration index.
+* **On a worker client** the newest committed snapshot may come from this frame's step task, still
+  running under block mode 0: a newer pose, never a torn one.
+* **The non-shipping check** (`[SimHost.RenderApply]`, `LogOGSimHost`), two comparisons per registered
+  character every frame, against the translation the aim plane reads:
+  * *held* (`checkRenderTargetsHeld_GameThread`, before the apply): the capsule still sits where the
+    last apply put it. Between two applies lie the next frame's pre-physics group, where the aim is
+    read, and the engine's own physics groups; anything that moves the capsule there logs a MOVED
+    Warning.
+  * *applied* (`checkRenderApply_GameThread`, after the apply): the capsule equals the newest snapshot's
+    pose; otherwise a MISMATCH Warning.
+
+  The tolerance is 1e-6 cm. The snapshot pose is a float, exact in double; the engine computes the
+  move as a delta from the old location in double, so the result could differ from the target by one
+  rounding of that sum. Measured: every comparison was exact. A window line every 600 frames gives
+  frames, frames with a snapshot, characters, comparisons, missing (a registered character absent from
+  the newest snapshot: until the first snapshot published after the character's occupancy push, one or more frames per join on a worker client), exact, out of tolerance, the largest error, held
+  comparisons, moved, the largest drift, the path the applied poses travelled (it shows the check
+  compares moving capsules) and the snapshot steps; a first line per character gives the spawn-to-pose
+  teleport.
+
+### The Jolt arm's game-thread shadow world (task 56)
+
+On a client the step runs on a worker task, so the game thread may not query the step world: it
+changes under the query, and the query adapter's predicate refuses any caller that neither runs the
+step nor holds J2. The visualizations still need a world to query every frame. Chaos gives them its
+game-thread copy of the scene, refreshed at the end of physics. The Jolt configuration does the same
+with a second world that only the game thread touches (design D §2.5, "(e) in detail"; OQ13 = (e)).
+
+* **Who.** Worker clients only: the stepping mode decides it at `BeginPlay` and it never changes. The
+  authority and a client with `og.Sim.RunInline` 1 step on the game thread, so their visualizations
+  query the step world between steps and they build no shadow.
+* **Construction** (`buildShadowWorld`, at the end of `buildJoltWorld`, after the step world's J2 scope).
+  `m_shadowWorld` takes the step world's `JoltWorldConfig` with two fields changed: `ringDepthTicks` 0
+  (the shadow never saves a tick) and `tempAllocatorBytes` `kShadowTempAllocatorBytes`, 64 KiB instead
+  of 16 MB (the shadow never steps; og-simulation-jolt's two-world tests restored and queried such a
+  world). The same two `JoltStaticWorldBuilder` calls run in the same order, from the same two static
+  descriptions, so the statics get the same body ids. The shadow has its own body adapter, reader and
+  query adapter (`m_shadowBodyAdapter`, `m_shadowReader`, `m_shadowQuery`), declared after
+  `m_shadowWorld` (`compositionContractsHold` asserts the order), and the PhysicsOnly statics are
+  excluded from its queries as from the step's. The query adapter's predicate is
+  `joltShadowAccessOnGameThread`: on the game thread. The shapes are built twice rather than shared,
+  which needs no og-simulation-jolt change. `⛔G-82`.
+* **The BeginPlay check** (non-shipping `checkf`, and one `[SimHost.Shadow] built` line on every
+  build). The restore checks only the slot bodies: the save filter skips statics, so a shadow whose
+  statics differ would restore without complaint. The check compares the two worlds' body counts
+  (slot bodies plus the bodies the two static builders created) and the two lists of static body ids.
+  Jolt's own body count is not reachable from this module: Jolt's body manager is not exported from
+  the OGSimulationJolt DLL, so the editor build cannot link it. A static created outside the two
+  builders would not be counted; the host creates none.
+* **Bind mirroring** (`bindShadowSlot`). The step world's bind writes four things no state slot carries:
+  the body adapter's bind table, the query adapter's shape registrations, and, through the factory's
+  body defaults, each body's friction, restitution, user data and motion properties. The query adapter
+  drops hits on bodies without user data, so a shadow without them would answer nothing. So
+  `tryRegister`, after the J2 scope closes, runs the same `JoltPhysicsFactory` bind (the whole
+  `createPhysicalObject`, body defaults included) over the shadow's adapters: the same slot template,
+  slot, storage key and options, in declaration order, with the shadow's `registerShape` as the
+  registrar. It runs on the game thread without J2, because the step never touches the shadow. The
+  declarations' own query volumes are not registered in the shadow: they belong to the step's hit
+  detection, and the visualizations use only the volume `registerVizVolume` registers. The slot release
+  mirrors the step's: `releaseShadowSlot` clears the shadow bind table's entries for the slot.
+* **The bind-table comparison** (`compareShadowBindTables_GameThread`, non-shipping), after every bind
+  and every release: for every slot body, the two worlds' body ids, bindings and locked-rotation inertia
+  must agree, and after a bind also the body and shape ids the two factories returned. It logs
+  `[SimHost.Shadow] bindCompare after=<bind|release> id slot equal=1 boundBodies compares mismatches`
+  at Log, or a Warning with equal=0 and the count of differing bodies.
+* **Hand-over, on the step's thread** (`publishShadowSlot_Step`, from `afterTick` through the frame host,
+  after the render publish and before J3). Only on a worker client, and only when the step saved a
+  slot: `stepAllocatesFrontierSlot` of the step's kind, the same predicate the driver uses (a Stall step
+  saves none, and the shadow keeps the previous slot). It copies the step world's ring slot for the
+  step's tick into a pooled `ShadowStateSlotUImpl` of `m_shadowSlots` (the bytes into storage the slot's
+  constructor sized to `ringSlotBytes`, the body ids into a vector reserved for every slot body),
+  stamps a sequence number and commits it. `buildShadowWorld` `checkf`s that the step world's ring slot
+  size is the one the pooled slots were sized for. Never in a replay: the driver calls no hook then.
+* **Restore, on the game thread** (`restoreShadowWorld_GameThread`, first in `OnPostPhysicsStep` on a
+  worker client, before the render apply; design D §4.2). It peeks the newest slot and, when its
+  sequence is newer than the last one restored, calls `restoreFromSnapshot`: the body-set check, Jolt's
+  state restore, then the slot's occupancy and shape enables, without the undo save `restoreTick` takes.
+  A slot whose body set differs from the shadow's is refused with og-simulation-jolt's Warning
+  ("refused: the snapshot's body set differs from the live body set") and the shadow keeps its
+  state; a refused slot is not retried. A frame with no newer slot (a faster display, or a frame with
+  no step) restores nothing.
+* **Timing.** A visualization in frame k reads the state restored at frame k − 1's end of physics, as
+  Chaos's queries read the copy its end of physics refreshed. Under block mode 0 the newest slot may
+  come from a step task still running: a newer state, never a torn one, because only committed slots are
+  handed to the reader. Until task 19 the shadow holds the newest saved tick; task 19 writes the
+  interpolated render pose into its slot bodies after the restore.
+* **The non-shipping window** (`logShadowWindow_GameThread`, `[SimHost.Shadow] role=Client`, every 600
+  frames): frames, restores, frames with nothing newer, refusals, slots published and slots missing
+  (a tick the step world's ring did not hold), how many restores left the shadow's state hash equal to
+  the saved tick's (`liveStateHash`) and how many did not, the occupied slots of the last restore, the
+  last restored tick, the slowest restore, how often `editVizQuery()` and `getVizReader()` handed out
+  the shadow's or the step's adapters, how often the shadow's predicate ran, how often the step
+  adapter's predicate ran on the game thread outside J2 (each such call is also an access assert), the
+  bind comparisons and mismatches so far, and the channel's drops.
 
 ### The build rule until task 21
 
 Every task that edits a file with an arm (this class's two files, the traits header) builds both
-configurations once the Jolt arm exists: the Jolt configuration on the task's full target matrix, and
-the Chaos configuration on the editor, the targets gate 22 runs it on (the packaged dedicated server
-and the Android client) and both test targets. Until task 18, only the Chaos configuration builds.
+configurations: the Jolt configuration on the task's full target matrix, and the Chaos configuration
+on the editor, the targets gate 22 runs it on (the packaged dedicated server and the Android client)
+and both test targets.
 
 ### Task 21
 

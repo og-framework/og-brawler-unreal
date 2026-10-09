@@ -24,10 +24,17 @@
 #include "Runtime/CoreUObject/Public/UObject/Object.h"
 
 #include "OGSimulation/SimulationManager.h"
+#include "OGSimulation/RenderSnapshot.h"
 #include "OGSimulation/SimulatableList.h"
 #include "OGSimulation/SystemsExecutor.h"
 #if OG_PHYSICS_BACKEND_CHAOS
 #include "OGSimulationUnreal/PCTimeManagement/ChaosTickMapper.h"
+#else
+#include "Async/Mutex.h"
+#include "OGSimulation/StaticGeometry.h"
+#include "OGSimulation/SimulationStepDriver.h"
+#include "OGBrawlerUnreal/SimulationFrameHostUImpl.h"
+#include "OGBrawlerUnreal/BrawlerStepHooksUImpl.h"
 #endif
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
@@ -93,6 +100,7 @@ class USimmableUpdateComponent;
 class ASimulationManagerUImpl;
 class ASimulationTimingRelay;
 class ASimulationConnectionRelay;
+class AOGBrawlerUECharacter;
 
 #if OG_PHYSICS_BACKEND_CHAOS
 struct FSimulationState2 : public Chaos::FSimCallbackOutput
@@ -263,6 +271,17 @@ private:
 		static_assert(everyRegisteredHookIsOverridden<FSimulationManagerAsyncCallback>());
 	}
 };
+#else
+struct JoltRuntimeLeaseUImpl
+{
+	explicit JoltRuntimeLeaseUImpl(JoltRuntime::LogFn logger) : runtime(JoltRuntime::acquire(logger)) {}
+	~JoltRuntimeLeaseUImpl() { JoltRuntime::release(); }
+
+	JoltRuntimeLeaseUImpl(const JoltRuntimeLeaseUImpl&) = delete;
+	JoltRuntimeLeaseUImpl& operator=(const JoltRuntimeLeaseUImpl&) = delete;
+
+	JoltRuntime& runtime;
+};
 #endif
 
 UCLASS()
@@ -371,8 +390,8 @@ public:
     const ChaosTickMapper& getChaosTickMapper() const { return m_chaosTickMapper; }
 #endif
 
-    physicsBackendUImpl::VizQuery&        editVizQuery()       { return m_queryAdapter.value(); }
-    const physicsBackendUImpl::VizReader& getVizReader() const { return m_physReaderAdapter.value(); }
+    physicsBackendUImpl::VizQuery&        editVizQuery();
+    const physicsBackendUImpl::VizReader& getVizReader() const;
     QueryVolumeId registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
@@ -716,6 +735,36 @@ private:
 
     FDelegateHandle m_injectInputsExternalCallbackHandle;
     FDelegateHandle m_hysScenePostTickCallbackHandle;
+#else
+    friend class SimulationFrameHostUImpl;
+
+    void decideJoltSteppingMode(bool worldIsAuthority);
+    void buildJoltWorld(UWorld& world, bool worldIsAuthority);
+    uint32 acquireJoltSlot(const AActor& owner);
+    void releaseJoltSlot(const AActor& owner);
+    BodyId joltSlotRootBodyId(const JoltWorld& world, uint32 slot) const;
+    uint32 boundJoltBodyCount() const;
+    void startJoltStepping(UWorld& world, float dt, bool worldIsAuthority);
+    void runJoltStep_Step(uint64 physicsStep, double stepDeadlineSeconds);
+    bool isJoltWorldMutexHeldOnThisThread() const;
+
+    void buildShadowWorld(const JoltWorldConfig& stepConfig, const StaticWorldDescription& queryableStatics,
+        const StaticWorldDescription& physicsOnlyStatics, const std::vector<JPH::BodyID>& stepStaticBodies);
+    void bindShadowSlot(uint32 slot, unsigned int id, const SimulatableBrawler& simulatable);
+    void releaseShadowSlot(uint32 slot);
+    void compareShadowBindTables_GameThread(const TCHAR* after, uint32 slot, unsigned int id, bool sameResults);
+
+    std::optional<JoltRuntimeLeaseUImpl>         m_joltRuntime;
+    std::optional<JoltWorld>                     m_joltWorld;
+    std::optional<JoltWorld>                     m_shadowWorld;
+    std::optional<JoltPhysicsBodyAdapter>        m_shadowBodyAdapter;
+    std::optional<JoltPhysicsBodyReaderAdapter>  m_shadowReader;
+    std::optional<JoltSpatialQueryAdapter>       m_shadowQuery;
+    std::vector<SlotBodyTemplate>                m_joltSlotTemplate;
+    std::unordered_map<const AActor*, uint32>    m_joltSlotByOwner;
+    UE::FMutex                                   m_joltWorldMutex;
+    bool                                         m_joltStepsInline = true;
+    uint8                                        m_joltRoleBit     = 0;
 #endif
 
     std::function<void(uint32_t, double)> m_onTimingInfoReceivedCallback;
@@ -735,6 +784,7 @@ private:
     using BrawlerNetSync         = apply_t<SimulationNetSync,           BrawlerSimulatables>;
     using BrawlerInputResolution = apply_t<SimulationInputResolution,   BrawlerSimulatables>;
     using BrawlerReconciliation  = apply_t<SimulationReconciliation,    BrawlerSimulatables>;
+    using RenderSnapshot         = RenderSnapshotT<kMaxSimulatableSlots * 6>;
 
     BrawlerStorage m_storage;
 
@@ -785,6 +835,90 @@ private:
         BrawlerSystemsExec, BrawlerStorage, simulatableBrawler::StaticData>;
     std::optional<ManagerType> m_manager;
 
+#if !OG_PHYSICS_BACKEND_CHAOS
+    using BrawlerStepDriver =
+        SimulationStepDriver<ManagerType, JoltWorld, BrawlerIntegrationExec, BrawlerStepHooksUImpl>;
+
+    struct RenderTargetUImpl
+    {
+        TWeakObjectPtr<AOGBrawlerUECharacter> character;
+        FVector                               appliedCm = FVector::ZeroVector;
+        bool                                  applied   = false;
+    };
+
+    struct RenderApplyWindowUImpl
+    {
+        uint32 frames          = 0u;
+        uint32 appliedFrames   = 0u;
+        uint32 applied         = 0u;
+        uint32 missing         = 0u;
+        uint32 exact           = 0u;
+        uint32 outOfTolerance  = 0u;
+        uint32 held            = 0u;
+        uint32 moved           = 0u;
+        double maxErrorCm      = 0.0;
+        double maxHeldDriftCm  = 0.0;
+        double pathCm          = 0.0;
+        uint64 firstAppliedStep = 0u;
+        uint64 lastAppliedStep  = 0u;
+    };
+
+    void publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds);
+    void applyRenderSnapshot_GameThread();
+    void checkRenderTargetsHeld_GameThread();
+    void checkRenderApply_GameThread(const RenderSnapshot& newest);
+
+    SnapshotChannel<RenderSnapshot, 4>                   m_renderSnapshots;
+    std::unordered_map<unsigned int, RenderTargetUImpl>  m_renderTargetsById;
+    uint8                                                m_joltRootDeclarationIndex = 0;
+    RenderApplyWindowUImpl                               m_renderApplyWindow;
+
+    struct ShadowStateSlotUImpl
+    {
+        ShadowStateSlotUImpl();
+
+        JoltStateSlot state;
+        uint64        sequence = 0u;
+    };
+
+    struct ShadowWindowUImpl
+    {
+        uint32 frames               = 0u;
+        uint32 restores             = 0u;
+        uint32 unchanged            = 0u;
+        uint32 refused              = 0u;
+        uint32 hashEqual            = 0u;
+        uint32 hashDiffer           = 0u;
+        uint32 occupiedSlots        = 0u;
+        uint64 vizQueryShadow       = 0u;
+        uint64 vizQueryStep         = 0u;
+        uint64 vizReaderShadow      = 0u;
+        uint64 vizReaderStep        = 0u;
+        uint64 shadowQueryAccessesAtStart         = 0u;
+        uint64 stepQueryGameThreadAccessesAtStart = 0u;
+        uint64 publishedAtStart     = 0u;
+        uint64 missingAtStart       = 0u;
+        double maxRestoreMs         = 0.0;
+        uint32 lastRestoredTick     = 0u;
+    };
+
+    void publishShadowSlot_Step(const TickOutcome& outcome);
+    void restoreShadowWorld_GameThread();
+    void logShadowWindow_GameThread();
+
+    SnapshotChannel<ShadowStateSlotUImpl, 3>             m_shadowSlots;
+    std::atomic<uint64>                                  m_shadowSlotsPublished{0u};
+    std::atomic<uint64>                                  m_shadowSlotsMissing{0u};
+    uint64                                               m_shadowRestoredSequence = 0u;
+    uint32                                               m_shadowBindCompares     = 0u;
+    uint32                                               m_shadowBindMismatches   = 0u;
+    mutable ShadowWindowUImpl                            m_shadowWindow;
+
+    SimulationFrameHostUImpl             m_frameHost;
+    std::optional<BrawlerStepHooksUImpl> m_stepHooks;
+    std::optional<BrawlerStepDriver>     m_stepDriver;
+#endif
+
     static ASimulationManagerUImpl* s_instances[2];
 
 #if OG_PHYSICS_BACKEND_CHAOS
@@ -826,6 +960,48 @@ private:
             "component ending play - one abandoned mid-Pending included - so a counter drifts downward and "
             "disarms the cap. Was the 'A SET, not a counter' prose fence of SimulationManagerUImpl.h "
             "(task 11).");
+#if !OG_PHYSICS_BACKEND_CHAOS
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_joltRuntime)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_joltWorld)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_joltWorld)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_physReaderAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_queryAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_queryAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_integrationLayer),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The Jolt world "
+            "must outlive every adapter bound to it (the reader holds the body adapter's bind table, "
+            "the integration layer holds the adapters), and the JoltRuntime lease must outlive the "
+            "world (the last JoltRuntime::release unregisters Jolt's types and deletes its Factory). Keep "
+            "m_joltRuntime < m_joltWorld < m_physAdapter < {m_physReaderAdapter, m_queryAdapter} < "
+            "m_integrationLayer. Was design D's compile-time row 'runtime < world < adapters' (task 18).");
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_joltRuntime)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowWorld)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_shadowWorld)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowBodyAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_shadowBodyAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowReader)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_shadowBodyAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowQuery),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The game-thread shadow world "
+            "must outlive its own adapters (the reader holds the shadow body adapter's bind table), and the "
+            "JoltRuntime lease must outlive the shadow world as it outlives the step world. Keep m_joltRuntime < "
+            "m_shadowWorld < m_shadowBodyAdapter < {m_shadowReader, m_shadowQuery}. Was design D's 'runtime < world "
+            "< adapters' row, applied to the shadow world (task 56).");
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_manager)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_frameHost)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_frameHost)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_stepHooks)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_stepHooks)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_stepDriver),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The step driver unregisters its "
+            "resync callback from the manager's client clock in its destructor and holds the hooks, and the hooks "
+            "hold the frame host, so the driver must go first, then the hooks, then the frame host, all while the "
+            "manager is alive. Keep m_manager < m_frameHost < m_stepHooks < m_stepDriver. Was design D's "
+            "compile-time row 'manager < hooks < driver' (task 18).");
+#endif
         return true;
     }
 

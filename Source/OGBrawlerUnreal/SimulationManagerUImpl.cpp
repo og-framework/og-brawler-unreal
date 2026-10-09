@@ -28,6 +28,14 @@
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGSimulationUnreal/ChaosPhysicsFactory.h"
 #include "Components/CapsuleComponent.h"
+#include "PhysicsEngine/PhysicsSettings.h"
+#include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
+#if !OG_PHYSICS_BACKEND_CHAOS
+#include "Async/UniqueLock.h"
+#include "OGSimulationJolt/JoltLayerTable.h"
+#include "OGSimulationJolt/JoltStaticWorldBuilder.h"
+#include "OGSimulationUnreal/UEStaticGeometryImporter.h"
+#endif
 
 #include "Runtime/Engine/Public/Net/NetPing.h"
 #include "Runtime/Engine/Classes/Engine/NetConnection.h"
@@ -73,6 +81,198 @@ namespace
 			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
 		});
 	}
+#else
+	TAutoConsoleVariable<int32> CVarSimRunInline(
+		TEXT("og.Sim.RunInline"),
+		0,
+		TEXT("Jolt configuration only. 1 = a client steps inline on the game thread instead of on a worker task. ")
+		TEXT("Read once, at the simulation manager's BeginPlay. The authority always steps inline."),
+		ECVF_Default);
+
+	const std::vector<UEStaticCategoryChannel>& brawlerCategoryChannels()
+	{
+		static const std::vector<UEStaticCategoryChannel> channels{
+			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
+			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
+			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
+			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
+			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
+			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
+		};
+		return channels;
+	}
+
+	uint32 brawlerMappedCategories()
+	{
+		uint32 mapped = 0u;
+		for (const UEStaticCategoryChannel& channel : brawlerCategoryChannels())
+			mapped |= 1u << channel.category;
+		return mapped;
+	}
+
+	void logJoltToSimHost(const char* message)
+	{
+		const FString line(UTF8_TO_TCHAR(message));
+		if (line.StartsWith(TEXT("[Warning]")))
+		{
+			UE_LOG(LogOGSimHost, Warning, TEXT("%s"), *line);
+		}
+		else
+		{
+			UE_LOG(LogOGSimHost, Log, TEXT("%s"), *line);
+		}
+	}
+
+	using BrawlerPhysicsComposite =
+		std::remove_cvref_t<decltype(std::declval<const SimulatableBrawler&>().getPhysicsComposite())>;
+
+	std::vector<SlotBodyTemplate> brawlerSlotTemplate()
+	{
+		std::vector<SlotBodyTemplate> slotTemplate;
+		const BrawlerPhysicsComposite composite{};
+		composite.forEach([&slotTemplate](const auto& declaration)
+		{
+			using D = std::decay_t<decltype(declaration)>;
+			slotTemplate.push_back(SlotBodyTemplate{ D::descriptor(), static_cast<uint8_t>(slotTemplate.size()) });
+		});
+		return slotTemplate;
+	}
+
+	constexpr uint8 kJoltAuthorityRoleBit = 1u;
+	constexpr uint8 kJoltClientRoleBit    = 2u;
+
+	thread_local uint8 t_joltWorldMutexHeldRoles = 0u;
+	thread_local uint8 t_joltStepRunningRoles    = 0u;
+
+	thread_local uint64 t_joltShadowQueryAccesses        = 0u;
+	thread_local uint64 t_joltStepQueryGameThreadAccesses = 0u;
+
+	constexpr uint32 kShadowTempAllocatorBytes = 64u * 1024u;
+
+	template <uint8 RoleBit>
+	bool joltWorldAccessFromStepOrWorldMutex()
+	{
+		return ((t_joltStepRunningRoles | t_joltWorldMutexHeldRoles) & RoleBit) != 0u;
+	}
+
+	template <uint8 RoleBit>
+	bool joltWorkerClientStepWorldAccess()
+	{
+#if !UE_BUILD_SHIPPING
+		if ((t_joltWorldMutexHeldRoles & RoleBit) == 0u && IsInGameThread())
+			++t_joltStepQueryGameThreadAccesses;
+#endif
+		return joltWorldAccessFromStepOrWorldMutex<RoleBit>();
+	}
+
+	bool joltShadowAccessOnGameThread()
+	{
+#if !UE_BUILD_SHIPPING
+		++t_joltShadowQueryAccesses;
+#endif
+		return IsInGameThread();
+	}
+
+	template <uint8 RoleBit>
+	bool joltWorldAccessFromStepWorldMutexOrInlineGameThread()
+	{
+		return joltWorldAccessFromStepOrWorldMutex<RoleBit>() || IsInGameThread();
+	}
+
+	JoltWorldAccessCheckFn joltWorldAccessCheckFor(uint8 roleBit, bool stepsInline)
+	{
+		if (roleBit == kJoltAuthorityRoleBit)
+		{
+			return stepsInline ? &joltWorldAccessFromStepWorldMutexOrInlineGameThread<kJoltAuthorityRoleBit>
+			                   : &joltWorldAccessFromStepOrWorldMutex<kJoltAuthorityRoleBit>;
+		}
+		return stepsInline ? &joltWorldAccessFromStepWorldMutexOrInlineGameThread<kJoltClientRoleBit>
+		                   : &joltWorkerClientStepWorldAccess<kJoltClientRoleBit>;
+	}
+
+	UE::FMutex& checkedNotYetHeld(UE::FMutex& worldMutex, uint8 roleBit)
+	{
+		checkf(roleBit == kJoltAuthorityRoleBit || roleBit == kJoltClientRoleBit,
+			TEXT("The Jolt world mutex (J2) was taken before the stepping mode chose this manager's role bit."));
+		checkf((t_joltWorldMutexHeldRoles & roleBit) == 0u,
+			TEXT("This manager's Jolt world mutex (J2) is already held on this thread. UE::FMutex is not recursive: a ")
+			TEXT("second lock deadlocks. Take J2 once, around the whole GT world write or the whole step (UImpl G-81)."));
+		return worldMutex;
+	}
+
+	class JoltWorldLockScopeUImpl
+	{
+	public:
+		JoltWorldLockScopeUImpl(UE::FMutex& worldMutex, uint8 roleBit)
+			: m_lock(checkedNotYetHeld(worldMutex, roleBit))
+			, m_roleBit(roleBit)
+		{
+			t_joltWorldMutexHeldRoles |= m_roleBit;
+		}
+
+		~JoltWorldLockScopeUImpl()
+		{
+			t_joltWorldMutexHeldRoles &= static_cast<uint8>(~m_roleBit);
+		}
+
+		JoltWorldLockScopeUImpl(const JoltWorldLockScopeUImpl&) = delete;
+		JoltWorldLockScopeUImpl& operator=(const JoltWorldLockScopeUImpl&) = delete;
+
+	private:
+		UE::TUniqueLock<UE::FMutex> m_lock;
+		JoltWorldAccessScope        m_access;
+		uint8                       m_roleBit;
+	};
+
+	class JoltStepScopeUImpl
+	{
+	public:
+		explicit JoltStepScopeUImpl(uint8 roleBit)
+			: m_roleBit(roleBit)
+		{
+			checkf((t_joltStepRunningRoles & m_roleBit) == 0u,
+				TEXT("A Jolt step of this manager is already running on this thread: steps never nest."));
+			t_joltStepRunningRoles |= m_roleBit;
+		}
+
+		~JoltStepScopeUImpl()
+		{
+			t_joltStepRunningRoles &= static_cast<uint8>(~m_roleBit);
+		}
+
+		JoltStepScopeUImpl(const JoltStepScopeUImpl&) = delete;
+		JoltStepScopeUImpl& operator=(const JoltStepScopeUImpl&) = delete;
+
+	private:
+		uint8 m_roleBit;
+	};
+
+	template <typename Composite>
+	struct physicsDeclarationCountOf;
+
+	template <typename... Declarations>
+	struct physicsDeclarationCountOf<SimulationComposite<Declarations...>>
+		: std::integral_constant<size_t, sizeof...(Declarations)>
+	{
+	};
+
+	template <size_t MaxBodies>
+	const RenderBody* findRenderBody(const RenderSnapshotT<MaxBodies>& snapshot, uint32_t simulatableId,
+		uint8_t declarationIndex)
+	{
+		RenderBody key;
+		key.simulatableId    = simulatableId;
+		key.declarationIndex = declarationIndex;
+		const RenderBody* const end = snapshot.bodies.data() + snapshot.bodyCount;
+		const RenderBody* const found = std::lower_bound(snapshot.bodies.data(), end, key, &renderSnapshotDetail::keyLess);
+		return found != end && renderSnapshotDetail::sameKey(*found, key) ? found : nullptr;
+	}
+
+#if !UE_BUILD_SHIPPING
+	constexpr double kRenderApplyToleranceCm  = 1.0e-6;
+	constexpr uint32 kRenderApplyWindowFrames = 600u;
+	constexpr uint32 kShadowWindowFrames      = 600u;
+#endif
 #endif
 	void bindCorrectionFieldDiffGate()
 	{
@@ -796,6 +996,14 @@ void ASimulationManagerUImpl::BeginPlay()
 
 	seedRingoutSpawnPointsFromLevel(*uWorld);
 
+	const float dt = UPhysicsSettings::Get()->AsyncFixedTimeStepSize;
+	checkf(FMath::Abs(dt * static_cast<float>(UEBrawlerNetConfig::tickFrequencyHz) - 1.f) < 1e-4f,
+		TEXT("SimulationManagerUImpl: UPhysicsSettings::AsyncFixedTimeStepSize (%f s) is not one tick of ")
+		TEXT("UEBrawlerNetConfig::tickFrequencyHz (%d Hz). The manager's step dt and the tick rate the ")
+		TEXT("per-connection templates are compiled for must agree. Was design D13 (task 18)."),
+		dt, UEBrawlerNetConfig::tickFrequencyHz);
+
+#if OG_PHYSICS_BACKEND_CHAOS
 	FPhysScene* physScene = uWorld->GetPhysicsScene();
 	if (physScene == nullptr)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
@@ -803,6 +1011,13 @@ void ASimulationManagerUImpl::BeginPlay()
 	Chaos::FPhysicsSolver* solver = physScene->GetSolver();
 	if (solver == nullptr)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
+
+	checkf(static_cast<float>(solver->GetAsyncDeltaTime()) == dt,
+		TEXT("SimulationManagerUImpl: the Chaos solver's async dt (%f s) differs from ")
+		TEXT("UPhysicsSettings::AsyncFixedTimeStepSize (%f s), which the manager now steps with. Was ")
+		TEXT("design D13: the two are the same number."),
+		static_cast<float>(solver->GetAsyncDeltaTime()), dt);
+#endif
 
 	const ENetMode worldNetMode = GetNetMode();
 	const bool worldIsAuthority = (worldNetMode != NM_Client);
@@ -850,6 +1065,11 @@ void ASimulationManagerUImpl::BeginPlay()
 		}
 	}
 
+#if !OG_PHYSICS_BACKEND_CHAOS
+	decideJoltSteppingMode(worldIsAuthority);
+	buildJoltWorld(*uWorld, worldIsAuthority);
+#endif
+
 	if (worldIsAuthority)
 	{
 		if (s_instances[0] != nullptr)
@@ -874,15 +1094,17 @@ void ASimulationManagerUImpl::BeginPlay()
 				UE_LOG(LogOGBrawler, Log, TEXT("%s"), *fmsg);
 			}
 		};
+#if OG_PHYSICS_BACKEND_CHAOS
 		Chaos::FPBDRigidsSolver& rigidsSolverS = solver->CastChecked();
 		m_physAdapter.emplace(rigidsSolverS);
 		m_physReaderAdapter.emplace(rigidsSolverS);
 		emplaceBrawlerQueryAdapter(m_queryAdapter, uWorld);
+#endif
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_systemsExec.emplace(std::piecewise_construct,
 			BrawlerHitDetectionSystem(*m_physAdapter, *m_queryAdapter),
 			brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{});
-		m_manager.emplace(false, solver->GetAsyncDeltaTime(), ManagerType::Params{
+		m_manager.emplace(false, dt, ManagerType::Params{
 			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, *m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmloggerServer) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmloggerServer));
@@ -975,15 +1197,17 @@ void ASimulationManagerUImpl::BeginPlay()
 				UE_LOG(LogOGBrawler, Log, TEXT("%s"), *fmsg);
 			}
 		};
+#if OG_PHYSICS_BACKEND_CHAOS
 		Chaos::FPBDRigidsSolver& rigidsSolverC = solver->CastChecked();
 		m_physAdapter.emplace(rigidsSolverC);
 		m_physReaderAdapter.emplace(rigidsSolverC);
 		emplaceBrawlerQueryAdapter(m_queryAdapter, uWorld);
+#endif
 		m_integrationLayer.emplace(m_storage, m_staticData, *m_physAdapter, *m_queryAdapter);
 		m_systemsExec.emplace(std::piecewise_construct,
 			BrawlerHitDetectionSystem(*m_physAdapter, *m_queryAdapter),
 			brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{});
-		m_manager.emplace(/*usePrediction=*/true, solver->GetAsyncDeltaTime(), ManagerType::Params{
+		m_manager.emplace(/*usePrediction=*/true, dt, ManagerType::Params{
 			*m_integrationLayer, m_netSync, m_inputResolution, m_reconciliation, *m_systemsExec,
 			m_storage, m_staticData, std::function<void(const char*)>(pctmlogger) });
 		m_reconciliation.setLogger(std::function<void(const char*)>(pctmlogger));
@@ -1079,12 +1303,20 @@ void ASimulationManagerUImpl::BeginPlay()
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
 	m_injectInputsExternalCallbackHandle = solverCallback->InjectInputsExternal.AddUObject(this, &ASimulationManagerUImpl::InjectInputs_External);
+#else
+	startJoltStepping(*uWorld, dt, worldIsAuthority);
 #endif
 	UE_LOG(LogOGMgmt, Log, TEXT("SimulationManager: adapters, integration layer, and manager initialized"));
 }
 
 void ASimulationManagerUImpl::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+#if !OG_PHYSICS_BACKEND_CHAOS
+	m_frameHost.unregisterTickFunctions();
+	// ⛔G-80  docs/SimulationManagerUImpl-guards.md
+	m_frameHost.waitForOutstandingSteps();
+#endif
+
 	// ⛔G-64  docs/SimulationManagerUImpl-guards.md
 	m_delayedInputComponentsById.clear();
 	m_receptionCoordinator.reset();
@@ -1369,6 +1601,12 @@ void ASimulationManagerUImpl::OnPostPhysicsStep()
 	}
 #endif
 
+#if !OG_PHYSICS_BACKEND_CHAOS
+	if (m_shadowWorld.has_value())
+		restoreShadowWorld_GameThread();
+	applyRenderSnapshot_GameThread();
+#endif
+
 	onPostSimulationGameThread();
 
 	if (m_manager.has_value() && !m_manager->runsPrediction())
@@ -1388,13 +1626,635 @@ void ASimulationManagerUImpl::OnPostPhysicsStep()
 	tickLatencyBudget_GameThread();
 }
 
+physicsBackendUImpl::VizQuery& ASimulationManagerUImpl::editVizQuery()
+{
+#if OG_PHYSICS_BACKEND_CHAOS
+	return m_queryAdapter.value();
+#else
+	if (m_joltStepsInline)
+	{
+#if !UE_BUILD_SHIPPING
+		++m_shadowWindow.vizQueryStep;
+#endif
+		return m_queryAdapter.value();
+	}
+#if !UE_BUILD_SHIPPING
+	++m_shadowWindow.vizQueryShadow;
+#endif
+	return m_shadowQuery.value();
+#endif
+}
+
+const physicsBackendUImpl::VizReader& ASimulationManagerUImpl::getVizReader() const
+{
+#if OG_PHYSICS_BACKEND_CHAOS
+	return m_physReaderAdapter.value();
+#else
+	if (m_joltStepsInline)
+	{
+#if !UE_BUILD_SHIPPING
+		++m_shadowWindow.vizReaderStep;
+#endif
+		return m_physReaderAdapter.value();
+	}
+#if !UE_BUILD_SHIPPING
+	++m_shadowWindow.vizReaderShadow;
+#endif
+	return m_shadowReader.value();
+#endif
+}
+
 QueryVolumeId ASimulationManagerUImpl::registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner)
 {
+#if OG_PHYSICS_BACKEND_CHAOS
 	FCollisionQueryParams queryParams;
 	queryParams.bTraceComplex = false;
 	queryParams.AddIgnoredActor(&owner);
 	return m_queryAdapter->registerVolume(descriptor, queryParams, FActorInstanceHandle(&owner));
+#else
+	const uint32 slot = acquireJoltSlot(owner);
+	if (!m_joltStepsInline)
+		return m_shadowQuery->registerVolume(descriptor, joltSlotRootBodyId(*m_shadowWorld, slot));
+
+	return m_queryAdapter->registerVolume(descriptor, joltSlotRootBodyId(*m_joltWorld, slot));
+#endif
 }
+
+#if !OG_PHYSICS_BACKEND_CHAOS
+void ASimulationManagerUImpl::decideJoltSteppingMode(bool worldIsAuthority)
+{
+	m_joltStepsInline = worldIsAuthority || CVarSimRunInline.GetValueOnGameThread() != 0;
+	m_joltRoleBit     = worldIsAuthority ? kJoltAuthorityRoleBit : kJoltClientRoleBit;
+
+	UE_LOG(LogOGSimHost, Warning,
+		TEXT("[SimHost.Mode] role=%s stepping=%s viz=%s"),
+		worldIsAuthority ? TEXT("Authority") : TEXT("Client"),
+		m_joltStepsInline ? TEXT("inline") : TEXT("worker"),
+		m_joltStepsInline ? TEXT("stepWorld") : TEXT("shadowWorld"));
+}
+
+void ASimulationManagerUImpl::buildJoltWorld(UWorld& world, bool worldIsAuthority)
+{
+	m_joltRuntime.emplace(&logJoltToSimHost);
+
+	const UEStaticImportResult import = UEStaticGeometryImporter(brawlerCategoryChannels()).importWorld(world);
+	UEStaticGeometryImporter::logReport(import.report, worldIsAuthority ? TEXT("authority") : TEXT("client"));
+
+	StaticWorldDescription queryableStatics;
+	StaticWorldDescription physicsOnlyStatics;
+	for (std::size_t index = 0; index < import.description.shapes.size(); ++index)
+	{
+		StaticWorldDescription& target = import.physicsOnly[index] != 0u ? physicsOnlyStatics : queryableStatics;
+		target.shapes.push_back(import.description.shapes[index]);
+	}
+
+	m_joltSlotTemplate = brawlerSlotTemplate();
+	const auto rootTemplate = std::find_if(m_joltSlotTemplate.begin(), m_joltSlotTemplate.end(),
+		[](const SlotBodyTemplate& body) { return body.descriptor.body.isRoot; });
+	checkf(rootTemplate != m_joltSlotTemplate.end()
+			&& std::none_of(rootTemplate + 1, m_joltSlotTemplate.end(),
+				[](const SlotBodyTemplate& body) { return body.descriptor.body.isRoot; }),
+		TEXT("buildJoltWorld: the brawler's physics composite must declare exactly one isRoot body (the capsule the ")
+		TEXT("render apply moves)."));
+	m_joltRootDeclarationIndex = static_cast<uint8>(rootTemplate - m_joltSlotTemplate.begin());
+
+	JoltWorldConfig config;
+	config.simulatableSlots = kMaxSimulatableSlots;
+	config.slotTemplate     = m_joltSlotTemplate;
+	config.staticLayers     = staticLayerKeysOf(queryableStatics);
+	const std::vector<JoltLayerKey> physicsOnlyLayers = staticLayerKeysOf(physicsOnlyStatics);
+	config.staticLayers.insert(config.staticLayers.end(), physicsOnlyLayers.begin(), physicsOnlyLayers.end());
+	config.ringDepthTicks   = worldIsAuthority ? 0u : static_cast<uint32_t>(TimeConfig{}.rollbackWindowHardCap) + 2u;
+	config.gravityCmPerS2   = glm::vec3(0.f, 0.f, m_staticData.m_movementStaticData.gravity);
+
+	std::vector<JPH::BodyID> stepStaticBodies;
+	{
+		JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
+
+		m_joltWorld.emplace(m_joltRuntime->runtime, config, &logJoltToSimHost);
+
+		JoltStaticWorldBuilder queryableBuilder(*m_joltWorld, &logJoltToSimHost);
+		queryableBuilder.build(queryableStatics);
+		JoltStaticWorldBuilder physicsOnlyBuilder(*m_joltWorld, &logJoltToSimHost);
+		physicsOnlyBuilder.build(physicsOnlyStatics);
+
+		m_physAdapter.emplace(*m_joltWorld);
+		m_physReaderAdapter.emplace(*m_joltWorld, m_physAdapter->bindTable());
+		m_queryAdapter.emplace(*m_joltWorld, &logJoltToSimHost, JoltSpatialQueryConfig{
+			brawlerMappedCategories(),
+			joltWorldAccessCheckFor(m_joltRoleBit, m_joltStepsInline) });
+		m_queryAdapter->excludeStaticBodiesFromQueries(physicsOnlyBuilder.stats().bodies);
+
+		stepStaticBodies = queryableBuilder.stats().bodies;
+		stepStaticBodies.insert(stepStaticBodies.end(), physicsOnlyBuilder.stats().bodies.begin(),
+			physicsOnlyBuilder.stats().bodies.end());
+
+		UE_LOG(LogOGSimHost, Warning,
+			TEXT("[SimHost.World] slots=%u bodiesPerSlot=%u ringDepthTicks=%u statics=%d physicsOnlyStatics=%d staticBodies=%d physicsOnlyBodies=%d"),
+			m_joltWorld->simulatableSlots(), m_joltWorld->bodiesPerSlot(), config.ringDepthTicks,
+			static_cast<int32>(queryableStatics.shapes.size()), static_cast<int32>(physicsOnlyStatics.shapes.size()),
+			static_cast<int32>(queryableBuilder.stats().bodies.size()),
+			static_cast<int32>(physicsOnlyBuilder.stats().bodies.size()));
+	}
+
+	if (!m_joltStepsInline)
+		buildShadowWorld(config, queryableStatics, physicsOnlyStatics, stepStaticBodies);
+}
+
+void ASimulationManagerUImpl::buildShadowWorld(const JoltWorldConfig& stepConfig,
+	const StaticWorldDescription& queryableStatics, const StaticWorldDescription& physicsOnlyStatics,
+	const std::vector<JPH::BodyID>& stepStaticBodies)
+{
+	checkf(m_joltWorld->ring().slotBytes() == JoltWorldConfig{}.ringSlotBytes,
+		TEXT("buildShadowWorld: the step world's ring slots hold %u bytes, but the shadow hand-over's pooled slots ")
+		TEXT("are pre-reserved to JoltWorldConfig's default %u. Keep the two equal, or a hand-over allocates."),
+		m_joltWorld->ring().slotBytes(), JoltWorldConfig{}.ringSlotBytes);
+
+	JoltWorldConfig shadowConfig = stepConfig;
+	shadowConfig.ringDepthTicks     = 0u;
+	shadowConfig.tempAllocatorBytes = kShadowTempAllocatorBytes;
+
+	// ⛔G-82  docs/SimulationManagerUImpl-guards.md
+	m_shadowWorld.emplace(m_joltRuntime->runtime, shadowConfig, &logJoltToSimHost);
+
+	JoltStaticWorldBuilder queryableBuilder(*m_shadowWorld, &logJoltToSimHost);
+	queryableBuilder.build(queryableStatics);
+	JoltStaticWorldBuilder physicsOnlyBuilder(*m_shadowWorld, &logJoltToSimHost);
+	physicsOnlyBuilder.build(physicsOnlyStatics);
+
+	m_shadowBodyAdapter.emplace(*m_shadowWorld);
+	m_shadowReader.emplace(*m_shadowWorld, m_shadowBodyAdapter->bindTable());
+	m_shadowQuery.emplace(*m_shadowWorld, &logJoltToSimHost, JoltSpatialQueryConfig{
+		brawlerMappedCategories(),
+		&joltShadowAccessOnGameThread });
+	m_shadowQuery->excludeStaticBodiesFromQueries(physicsOnlyBuilder.stats().bodies);
+
+	std::vector<JPH::BodyID> shadowStaticBodies = queryableBuilder.stats().bodies;
+	shadowStaticBodies.insert(shadowStaticBodies.end(), physicsOnlyBuilder.stats().bodies.begin(),
+		physicsOnlyBuilder.stats().bodies.end());
+
+	const uint32 stepBodies =
+		m_joltWorld->simulatableSlots() * m_joltWorld->bodiesPerSlot() + static_cast<uint32>(stepStaticBodies.size());
+	const uint32 shadowBodies =
+		m_shadowWorld->simulatableSlots() * m_shadowWorld->bodiesPerSlot() + static_cast<uint32>(shadowStaticBodies.size());
+	const bool sameStatics = shadowStaticBodies == stepStaticBodies;
+	UE_LOG(LogOGSimHost, Warning,
+		TEXT("[SimHost.Shadow] built bodies step=%u shadow=%u sameStatics=%d slots=%u bodiesPerSlot=%u ringDepthTicks=%u tempAllocatorBytes=%u"),
+		stepBodies, shadowBodies, sameStatics ? 1 : 0, m_shadowWorld->simulatableSlots(), m_shadowWorld->bodiesPerSlot(),
+		shadowConfig.ringDepthTicks, shadowConfig.tempAllocatorBytes);
+#if !UE_BUILD_SHIPPING
+	checkf(stepBodies == shadowBodies && sameStatics,
+		TEXT("buildShadowWorld: the shadow world holds %u bodies and the step world %u (same static bodies: %d). The ")
+		TEXT("shadow must be built by the same calls, in the same order, from the same configuration except the ring ")
+		TEXT("depth and the temp allocator (UImpl G-82); its restore checks only the slot bodies, so a missing or extra ")
+		TEXT("static would go unnoticed there."),
+		shadowBodies, stepBodies, sameStatics ? 1 : 0);
+#endif
+}
+
+uint32 ASimulationManagerUImpl::acquireJoltSlot(const AActor& owner)
+{
+	if (const auto found = m_joltSlotByOwner.find(&owner); found != m_joltSlotByOwner.end())
+		return found->second;
+
+	std::array<bool, kMaxSimulatableSlots> taken{};
+	for (const auto& entry : m_joltSlotByOwner)
+		taken[entry.second] = true;
+
+	const auto freeSlot = std::find(taken.begin(), taken.end(), false);
+	checkf(freeSlot != taken.end(),
+		TEXT("acquireJoltSlot: all %u Jolt slots are taken; '%s' cannot get one. The Jolt world has a fixed ")
+		TEXT("body set of kMaxSimulatableSlots characters (design D7, task 10)."),
+		kMaxSimulatableSlots, *owner.GetName());
+
+	const uint32 slot = static_cast<uint32>(freeSlot - taken.begin());
+	m_joltSlotByOwner.emplace(&owner, slot);
+	return slot;
+}
+
+void ASimulationManagerUImpl::releaseJoltSlot(const AActor& owner)
+{
+	const auto found = m_joltSlotByOwner.find(&owner);
+	if (found == m_joltSlotByOwner.end())
+		return;
+
+	const uint32 slot = found->second;
+	m_frameHost.pushOccupancy_GameThread(slot, false);
+	m_physAdapter->bindTable().releaseSlot(slot);
+	m_joltSlotByOwner.erase(found);
+
+	UE_LOG(LogOGSimHost, Log, TEXT("[SimHost.Bind] release slot=%u boundBodies=%u slotsInUse=%d"),
+		slot, boundJoltBodyCount(), static_cast<int32>(m_joltSlotByOwner.size()));
+
+	if (m_shadowWorld.has_value())
+		releaseShadowSlot(slot);
+}
+
+BodyId ASimulationManagerUImpl::joltSlotRootBodyId(const JoltWorld& world, uint32 slot) const
+{
+	for (uint32 templateIndex = 0; templateIndex < m_joltSlotTemplate.size(); ++templateIndex)
+	{
+		if (m_joltSlotTemplate[templateIndex].descriptor.body.isRoot)
+			return JoltPhysicsBodyAdapter::bodyIdOf(world.slotBodyId(slot, templateIndex));
+	}
+	checkf(false, TEXT("joltSlotRootBodyId: the slot template has no isRoot body"));
+	return BodyId{};
+}
+
+uint32 ASimulationManagerUImpl::boundJoltBodyCount() const
+{
+	uint32 bound = 0u;
+	for (uint32 slot = 0; slot < m_joltWorld->simulatableSlots(); ++slot)
+	{
+		for (uint32 templateIndex = 0; templateIndex < m_joltWorld->bodiesPerSlot(); ++templateIndex)
+		{
+			if (m_physAdapter->bindTable().isBound(
+					JoltPhysicsBodyAdapter::bodyIdOf(m_joltWorld->slotBodyId(slot, templateIndex))))
+				++bound;
+		}
+	}
+	return bound;
+}
+
+void ASimulationManagerUImpl::startJoltStepping(UWorld& world, float dt, bool worldIsAuthority)
+{
+	checkf(world.PersistentLevel != nullptr, TEXT("startJoltStepping: the world has no persistent level."));
+
+	{
+		JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
+		m_stepHooks.emplace(m_frameHost);
+		m_stepDriver.emplace(*m_manager, *m_joltWorld, *m_integrationLayer, *m_stepHooks,
+			StepDriverConfig{ dt, ResimPolicy::OnRequest, 0u });
+	}
+
+	m_frameHost.begin(*this, *world.PersistentLevel,
+		SimulationFrameHostUImpl::Config{ static_cast<double>(dt), worldIsAuthority, m_joltStepsInline });
+}
+
+void ASimulationManagerUImpl::runJoltStep_Step(uint64 physicsStep, double stepDeadlineSeconds)
+{
+	JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
+	JoltStepScopeUImpl      stepScope(m_joltRoleBit);
+	m_stepHooks->currentStepDeadline = stepDeadlineSeconds;
+	m_stepDriver->runTick(physicsStep);
+}
+
+bool ASimulationManagerUImpl::isJoltWorldMutexHeldOnThisThread() const
+{
+	return (t_joltWorldMutexHeldRoles & m_joltRoleBit) != 0u;
+}
+
+void ASimulationManagerUImpl::publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds)
+{
+	static_assert(RenderSnapshot::kMaxBodies
+			== kMaxSimulatableSlots * physicsDeclarationCountOf<BrawlerPhysicsComposite>::value,
+		"RenderSnapshot holds one body per declaration of the brawler's physics composite in every slot: "
+		"kMaxSimulatableSlots x 6. A declaration added to or removed from SimulatableBrawler's physics composite must "
+		"change the alias's 6 with it, or fillRenderSnapshot drops the excess bodies. Was design D section 8's "
+		"'MaxBodies = kMaxSimulatableSlots (8) x 6 = 48'.");
+	static_assert(std::is_trivially_copyable_v<RenderSnapshot>,
+		"RenderSnapshot must stay a flat value with no heap-owning member: the J5 channel's four slots are built with "
+		"the manager and filled in place on every step, which allocates nothing only while the snapshot owns no heap "
+		"storage. Was task 55's 'no allocation on the publish path after warm-up'.");
+
+	RenderSnapshot* const snapshot = m_renderSnapshots.beginWrite();
+	checkf(snapshot != nullptr,
+		TEXT("publishRenderSnapshot_Step: the render snapshot channel (J5) has no free slot. The game thread holds at ")
+		TEXT("most one snapshot (the newest, for one apply), and a 4-slot channel keeps a free slot for up to two."));
+	if (snapshot == nullptr)
+		return;
+
+	fillRenderSnapshot(*snapshot, m_storage, outcome, stepDeadlineSeconds);
+	m_renderSnapshots.commit();
+}
+
+void ASimulationManagerUImpl::applyRenderSnapshot_GameThread()
+{
+#if !UE_BUILD_SHIPPING
+	++m_renderApplyWindow.frames;
+	checkRenderTargetsHeld_GameThread();
+#endif
+
+	if (const RenderSnapshot* const newest = m_renderSnapshots.peekNewest(0))
+	{
+		for (auto& [id, target] : m_renderTargetsById)
+		{
+			AOGBrawlerUECharacter* const character = target.character.Get();
+			const RenderBody* const body = findRenderBody(*newest, id, m_joltRootDeclarationIndex);
+			if (character == nullptr || body == nullptr)
+				continue;
+
+			const FVector location = uglm::toFVector(body->positionCm);
+			const FQuat rotation = body->hasRotation != 0u ? uglm::toFQuat(body->rotation) : character->GetActorQuat();
+#if !UE_BUILD_SHIPPING
+			const FVector before = character->GetActorLocation();
+#endif
+			// ⛔G-83  docs/SimulationManagerUImpl-guards.md
+			character->SetActorLocationAndRotation(location, rotation, /*bSweep*/ false, /*OutSweepHitResult*/ nullptr,
+				ETeleportType::TeleportPhysics);
+
+#if !UE_BUILD_SHIPPING
+			if (target.applied)
+			{
+				m_renderApplyWindow.pathCm += FVector::Dist(target.appliedCm, location);
+			}
+			else
+			{
+				UE_LOG(LogOGSimHost, Log,
+					TEXT("[SimHost.RenderApply] first role=%s id=%u from=(%.3f,%.3f,%.3f) to=(%.3f,%.3f,%.3f) physicsStep=%llu tick=%u"),
+					runsPrediction() ? TEXT("Client") : TEXT("Authority"), id, before.X, before.Y, before.Z,
+					location.X, location.Y, location.Z, static_cast<unsigned long long>(newest->physicsStep),
+					static_cast<uint32>(newest->tick));
+			}
+#endif
+			target.appliedCm = location;
+			target.applied   = true;
+		}
+
+#if !UE_BUILD_SHIPPING
+		checkRenderApply_GameThread(*newest);
+#endif
+		m_renderSnapshots.release(newest);
+	}
+
+#if !UE_BUILD_SHIPPING
+	if (m_renderApplyWindow.frames >= kRenderApplyWindowFrames)
+	{
+		const RenderApplyWindowUImpl& window = m_renderApplyWindow;
+		UE_LOG(LogOGSimHost, Log,
+			TEXT("[SimHost.RenderApply] role=%s frames=%u appliedFrames=%u characters=%d applied=%u missing=%u exact=%u ")
+			TEXT("outOfTolerance=%u maxErrorCm=%.9f held=%u moved=%u maxHeldDriftCm=%.9f pathCm=%.3f steps=[%llu,%llu] drops=%llu"),
+			runsPrediction() ? TEXT("Client") : TEXT("Authority"), window.frames, window.appliedFrames,
+			static_cast<int32>(m_renderTargetsById.size()), window.applied, window.missing, window.exact,
+			window.outOfTolerance, window.maxErrorCm, window.held, window.moved, window.maxHeldDriftCm, window.pathCm,
+			static_cast<unsigned long long>(window.firstAppliedStep), static_cast<unsigned long long>(window.lastAppliedStep),
+			static_cast<unsigned long long>(m_renderSnapshots.drops()));
+		m_renderApplyWindow = RenderApplyWindowUImpl{};
+	}
+#endif
+}
+
+#if !UE_BUILD_SHIPPING
+void ASimulationManagerUImpl::checkRenderTargetsHeld_GameThread()
+{
+	for (const auto& [id, target] : m_renderTargetsById)
+	{
+		const AOGBrawlerUECharacter* const character = target.character.Get();
+		if (!target.applied || character == nullptr)
+			continue;
+
+		const FVector planePoint = character->GetCapsuleComponent()->GetComponentTransform().GetTranslation();
+		const double driftCm = FVector::Dist(planePoint, target.appliedCm);
+		++m_renderApplyWindow.held;
+		m_renderApplyWindow.maxHeldDriftCm = FMath::Max(m_renderApplyWindow.maxHeldDriftCm, driftCm);
+		if (driftCm > kRenderApplyToleranceCm && m_renderApplyWindow.moved++ == 0u)
+		{
+			UE_LOG(LogOGSimHost, Warning,
+				TEXT("[SimHost.RenderApply] MOVED role=%s id=%u capsule=(%.6f,%.6f,%.6f) applied=(%.6f,%.6f,%.6f) driftCm=%.9f: ")
+				TEXT("something moved the capsule between the last render apply and this one"),
+				runsPrediction() ? TEXT("Client") : TEXT("Authority"), id, planePoint.X, planePoint.Y, planePoint.Z,
+				target.appliedCm.X, target.appliedCm.Y, target.appliedCm.Z, driftCm);
+		}
+	}
+}
+
+void ASimulationManagerUImpl::checkRenderApply_GameThread(const RenderSnapshot& newest)
+{
+	RenderApplyWindowUImpl& window = m_renderApplyWindow;
+	if (window.appliedFrames++ == 0u)
+		window.firstAppliedStep = newest.physicsStep;
+	window.lastAppliedStep = newest.physicsStep;
+
+	for (const auto& [id, target] : m_renderTargetsById)
+	{
+		const AOGBrawlerUECharacter* const character = target.character.Get();
+		const RenderBody* const body = findRenderBody(newest, id, m_joltRootDeclarationIndex);
+		if (character == nullptr || body == nullptr)
+		{
+			++window.missing;
+			continue;
+		}
+
+		const FVector planePoint = character->GetCapsuleComponent()->GetComponentTransform().GetTranslation();
+		const FVector pose = uglm::toFVector(body->positionCm);
+		const double errorCm = FVector::Dist(planePoint, pose);
+		++window.applied;
+		window.exact += planePoint == pose ? 1u : 0u;
+		window.maxErrorCm = FMath::Max(window.maxErrorCm, errorCm);
+		if (errorCm > kRenderApplyToleranceCm && window.outOfTolerance++ == 0u)
+		{
+			UE_LOG(LogOGSimHost, Warning,
+				TEXT("[SimHost.RenderApply] MISMATCH role=%s id=%u capsule=(%.6f,%.6f,%.6f) snapshot=(%.6f,%.6f,%.6f) errorCm=%.9f physicsStep=%llu"),
+				runsPrediction() ? TEXT("Client") : TEXT("Authority"), id, planePoint.X, planePoint.Y, planePoint.Z,
+				pose.X, pose.Y, pose.Z, errorCm, static_cast<unsigned long long>(newest.physicsStep));
+		}
+	}
+}
+#endif
+
+ASimulationManagerUImpl::ShadowStateSlotUImpl::ShadowStateSlotUImpl()
+{
+	state.bytes.assign(JoltWorldConfig{}.ringSlotBytes, 0u);
+	state.bodyIds.reserve(kMaxSimulatableSlots * physicsDeclarationCountOf<BrawlerPhysicsComposite>::value);
+}
+
+void ASimulationManagerUImpl::bindShadowSlot(uint32 slot, unsigned int id, const SimulatableBrawler& simulatable)
+{
+	JoltPhysicsFactory factory(*m_shadowBodyAdapter, m_joltSlotTemplate, slot, id, JoltPhysicsFactoryOptions{},
+		[this](BodyId body, uint32_t shapeIndex, std::optional<BodyId> rootBodyId)
+		{
+			return m_shadowQuery->registerShape(body, shapeIndex, rootBodyId);
+		});
+
+	bool sameResults = true;
+	simulatable.getPhysicsComposite().forEach([&](const auto& decl)
+	{
+		using D = std::decay_t<decltype(decl)>;
+		const JoltPhysicsFactory::PhysicalObjectResult result = factory.createPhysicalObject(D::descriptor(), D::name);
+		sameResults = sameResults && result.bodyId == decl.bindings.ownBodyId && result.shapeIds == decl.bindings.shapeIds
+			&& factory.parentBodyId() == decl.bindings.parentBodyId;
+	});
+
+	compareShadowBindTables_GameThread(TEXT("bind"), slot, id, sameResults);
+}
+
+void ASimulationManagerUImpl::releaseShadowSlot(uint32 slot)
+{
+	m_shadowBodyAdapter->bindTable().releaseSlot(slot);
+	compareShadowBindTables_GameThread(TEXT("release"), slot, 0u, true);
+}
+
+void ASimulationManagerUImpl::compareShadowBindTables_GameThread(const TCHAR* after, uint32 slot, unsigned int id,
+	bool sameResults)
+{
+#if !UE_BUILD_SHIPPING
+	const JoltBodyBindTable& stepTable   = m_physAdapter->bindTable();
+	const JoltBodyBindTable& shadowTable = m_shadowBodyAdapter->bindTable();
+	const bool sameShape = stepTable.simulatableSlots() == shadowTable.simulatableSlots()
+		&& stepTable.bodiesPerSlot() == shadowTable.bodiesPerSlot();
+	const uint32 slots = FMath::Min(stepTable.simulatableSlots(), shadowTable.simulatableSlots());
+	const uint32 bodiesPerSlot = FMath::Min(stepTable.bodiesPerSlot(), shadowTable.bodiesPerSlot());
+
+	uint32 bound = 0u;
+	uint32 differing = 0u;
+	for (uint32 slotIndex = 0u; slotIndex < slots; ++slotIndex)
+	{
+		for (uint32 templateIndex = 0u; templateIndex < bodiesPerSlot; ++templateIndex)
+		{
+			const BodyId stepBody   = JoltPhysicsBodyAdapter::bodyIdOf(m_joltWorld->slotBodyId(slotIndex, templateIndex));
+			const BodyId shadowBody = JoltPhysicsBodyAdapter::bodyIdOf(m_shadowWorld->slotBodyId(slotIndex, templateIndex));
+			const std::optional<JoltBodyBinding> stepBinding   = stepTable.bindingOf(stepBody);
+			const std::optional<JoltBodyBinding> shadowBinding = shadowTable.bindingOf(shadowBody);
+			bound += stepBinding.has_value() ? 1u : 0u;
+			const bool same = stepBody == shadowBody && stepBinding == shadowBinding
+				&& (!stepBinding.has_value()
+					|| stepTable.lockedRotationInertiaOf(stepBody) == shadowTable.lockedRotationInertiaOf(shadowBody));
+			differing += same ? 0u : 1u;
+		}
+	}
+
+	const bool equal = sameShape && differing == 0u && sameResults;
+	++m_shadowBindCompares;
+	if (equal)
+	{
+		UE_LOG(LogOGSimHost, Log,
+			TEXT("[SimHost.Shadow] bindCompare after=%s id=%u slot=%u equal=1 boundBodies=%u compares=%u mismatches=%u"),
+			after, id, slot, bound, m_shadowBindCompares, m_shadowBindMismatches);
+	}
+	else
+	{
+		++m_shadowBindMismatches;
+		UE_LOG(LogOGSimHost, Warning,
+			TEXT("[SimHost.Shadow] bindCompare after=%s id=%u slot=%u equal=0 boundBodies=%u differing=%u sameShape=%d ")
+			TEXT("sameResults=%d compares=%u mismatches=%u: the shadow world's bind table differs from the step world's"),
+			after, id, slot, bound, differing, sameShape ? 1 : 0, sameResults ? 1 : 0, m_shadowBindCompares,
+			m_shadowBindMismatches);
+	}
+#endif
+}
+
+void ASimulationManagerUImpl::publishShadowSlot_Step(const TickOutcome& outcome)
+{
+	if (!m_shadowWorld.has_value() || !stepAllocatesFrontierSlot(outcome.kind))
+		return;
+
+	const JoltStateSlot* const saved = m_joltWorld->ring().find(outcome.tick);
+	if (saved == nullptr)
+	{
+		m_shadowSlotsMissing.fetch_add(1u, std::memory_order_relaxed);
+		return;
+	}
+
+	ShadowStateSlotUImpl* const target = m_shadowSlots.beginWrite();
+	checkf(target != nullptr,
+		TEXT("publishShadowSlot_Step: the shadow hand-over channel has no free slot. The game thread holds at most one ")
+		TEXT("slot (the newest, for one restore), and a 3-slot channel keeps a free slot for one."));
+	if (target == nullptr)
+		return;
+
+	JoltStateSlot& state = target->state;
+	checkf(saved->byteCount <= state.bytes.size(),
+		TEXT("publishShadowSlot_Step: a saved tick holds %u bytes but the pooled hand-over slot only %d."),
+		saved->byteCount, static_cast<int32>(state.bytes.size()));
+	std::copy_n(saved->bytes.begin(), saved->byteCount, state.bytes.begin());
+	state.byteCount = saved->byteCount;
+	state.bodyIds.assign(saved->bodyIds.begin(), saved->bodyIds.end());
+	state.sidecar   = saved->sidecar;
+	state.stateHash = saved->stateHash;
+	state.tick      = saved->tick;
+	state.valid     = saved->valid;
+
+	target->sequence = m_shadowSlotsPublished.load(std::memory_order_relaxed) + 1u;
+	m_shadowSlotsPublished.store(target->sequence, std::memory_order_relaxed);
+	m_shadowSlots.commit();
+}
+
+void ASimulationManagerUImpl::restoreShadowWorld_GameThread()
+{
+	ShadowWindowUImpl& window = m_shadowWindow;
+	++window.frames;
+
+	if (const ShadowStateSlotUImpl* const newest = m_shadowSlots.peekNewest(0))
+	{
+		if (newest->sequence > m_shadowRestoredSequence)
+		{
+			const double startSeconds = FPlatformTime::Seconds();
+			const bool restored = m_shadowWorld->restoreFromSnapshot(newest->state);
+			const double restoreMs = (FPlatformTime::Seconds() - startSeconds) * 1000.0;
+			m_shadowRestoredSequence = newest->sequence;
+			if (restored)
+			{
+				++window.restores;
+				window.lastRestoredTick = static_cast<uint32>(newest->state.tick);
+				window.maxRestoreMs = FMath::Max(window.maxRestoreMs, restoreMs);
+#if !UE_BUILD_SHIPPING
+				window.occupiedSlots = static_cast<uint32>(newest->state.sidecar.occupancy.occupied.count());
+				if (m_shadowWorld->liveStateHash() == newest->state.stateHash)
+				{
+					++window.hashEqual;
+				}
+				else if (window.hashDiffer++ == 0u)
+				{
+					UE_LOG(LogOGSimHost, Warning,
+						TEXT("[SimHost.Shadow] HASH role=Client tick=%u: the restored shadow world's state hash differs from ")
+						TEXT("the step world's saved tick"),
+						static_cast<uint32>(newest->state.tick));
+				}
+#endif
+			}
+			else
+			{
+				++window.refused;
+			}
+		}
+		else
+		{
+			++window.unchanged;
+		}
+		m_shadowSlots.release(newest);
+	}
+	else
+	{
+		++window.unchanged;
+	}
+
+#if !UE_BUILD_SHIPPING
+	if (window.frames >= kShadowWindowFrames)
+		logShadowWindow_GameThread();
+#endif
+}
+
+void ASimulationManagerUImpl::logShadowWindow_GameThread()
+{
+#if !UE_BUILD_SHIPPING
+	const ShadowWindowUImpl& window = m_shadowWindow;
+	const uint64 published = m_shadowSlotsPublished.load(std::memory_order_relaxed);
+	const uint64 missing   = m_shadowSlotsMissing.load(std::memory_order_relaxed);
+	UE_LOG(LogOGSimHost, Log,
+		TEXT("[SimHost.Shadow] role=Client frames=%u restores=%u unchanged=%u refused=%u published=%llu missing=%llu ")
+		TEXT("hashEqual=%u hashDiffer=%u occupiedSlots=%u lastTick=%u maxRestoreMs=%.4f vizQuery=[shadow:%llu step:%llu] ")
+		TEXT("vizReader=[shadow:%llu step:%llu] shadowQueryAccesses=%llu stepQueryGameThreadAccesses=%llu bindCompares=%u ")
+		TEXT("bindMismatches=%u drops=%llu"),
+		window.frames, window.restores, window.unchanged, window.refused,
+		static_cast<unsigned long long>(published - window.publishedAtStart),
+		static_cast<unsigned long long>(missing - window.missingAtStart),
+		window.hashEqual, window.hashDiffer, window.occupiedSlots,
+		window.lastRestoredTick, window.maxRestoreMs,
+		static_cast<unsigned long long>(window.vizQueryShadow), static_cast<unsigned long long>(window.vizQueryStep),
+		static_cast<unsigned long long>(window.vizReaderShadow), static_cast<unsigned long long>(window.vizReaderStep),
+		static_cast<unsigned long long>(t_joltShadowQueryAccesses - window.shadowQueryAccessesAtStart),
+		static_cast<unsigned long long>(t_joltStepQueryGameThreadAccesses - window.stepQueryGameThreadAccessesAtStart),
+		m_shadowBindCompares, m_shadowBindMismatches, static_cast<unsigned long long>(m_shadowSlots.drops()));
+
+	ShadowWindowUImpl next;
+	next.publishedAtStart                   = published;
+	next.missingAtStart                     = missing;
+	next.shadowQueryAccessesAtStart         = t_joltShadowQueryAccesses;
+	next.stepQueryGameThreadAccessesAtStart = t_joltStepQueryGameThreadAccesses;
+	m_shadowWindow = next;
+#endif
+}
+#endif
 
 SimCharacterId ASimulationManagerUImpl::allocateSimCharacterId()
 {
@@ -1451,6 +2311,7 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         checkf(character != nullptr,
                TEXT("USimmableUpdateComponent must be attached to an AOGBrawlerUECharacter — the ")
                TEXT("first-call body pass reads that class's own root capsule"));
+#if OG_PHYSICS_BACKEND_CHAOS
         FBodyInstanceAsyncPhysicsTickHandle parentHandle =
             character->GetCapsuleComponent()->GetBodyInstanceAsyncPhysicsTickHandle();
         const BodyId parentBodyId = m_physAdapter->getBodyId(parentHandle);
@@ -1476,6 +2337,58 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
                 decl.bindings.queryVolumeIds.push_back(
                     m_queryAdapter->registerVolume(volDesc, qp, FActorInstanceHandle(ownerActor)));
         });
+#else
+        {
+            const UCapsuleComponent* capsule = character->GetCapsuleComponent();
+            const CapsuleGeometry* descriptorCapsule = std::get_if<CapsuleGeometry>(
+                &brawlerMovementSimulation::PhysicsDeclaration::descriptor().shapes.front().geometry);
+            checkf(descriptorCapsule != nullptr
+                       && FMath::IsNearlyEqual(capsule->GetUnscaledCapsuleRadius(), descriptorCapsule->radius)
+                       && FMath::IsNearlyEqual(capsule->GetUnscaledCapsuleHalfHeight(), descriptorCapsule->halfHeight),
+                   TEXT("tryRegister: the pawn's capsule (radius %f, half-height %f) disagrees with the movement ")
+                   TEXT("descriptor's CapsuleGeometry (radius %f, half-height %f), id=%u. The Jolt slot body is built ")
+                   TEXT("from the descriptor, while the UE capsule is the aim plane and the camera anchor: change both ")
+                   TEXT("together. Was the Chaos factory's adopt-root check (design D14; OGBrawlerUECharacter G-01)."),
+                   capsule->GetUnscaledCapsuleRadius(), capsule->GetUnscaledCapsuleHalfHeight(),
+                   descriptorCapsule != nullptr ? descriptorCapsule->radius : 0.f,
+                   descriptorCapsule != nullptr ? descriptorCapsule->halfHeight : 0.f, id);
+        }
+
+        AActor* ownerActor = owner.GetOwner();
+        const simulatableBrawler::StaticData& staticData = owner.getStaticData();
+        const uint32 slot = acquireJoltSlot(*ownerActor);
+        BodyId parentBodyId;
+        {
+            // ⛔G-81  docs/SimulationManagerUImpl-guards.md
+            JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
+
+            JoltPhysicsFactory factory(*m_physAdapter, m_joltSlotTemplate, slot, id, JoltPhysicsFactoryOptions{},
+                [this](BodyId body, uint32_t shapeIndex, std::optional<BodyId> rootBodyId)
+                {
+                    return m_queryAdapter->registerShape(body, shapeIndex, rootBodyId);
+                });
+            parentBodyId = factory.parentBodyId();
+
+            record.simulatable->editPhysicsComposite().forEach([&](auto& decl)
+            {
+                using D = std::decay_t<decltype(decl)>;
+                const auto& subStaticData = D::staticDataOf(staticData);
+                auto r = factory.createPhysicalObject(D::descriptor(), D::name);
+                decl.bindings.ownBodyId        = r.bodyId;
+                decl.bindings.parentBodyId     = parentBodyId;
+                decl.bindings.attachmentOffset = D::attachmentOffset(subStaticData);
+                decl.bindings.shapeIds         = std::move(r.shapeIds);
+                for (const auto& volDesc : D::queryVolumes(subStaticData))
+                    decl.bindings.queryVolumeIds.push_back(m_queryAdapter->registerVolume(volDesc, parentBodyId));
+            });
+        }
+
+        UE_LOG(LogOGSimHost, Log, TEXT("[SimHost.Bind] bind id=%u slot=%u boundBodies=%u slotsInUse=%d"),
+            id, slot, boundJoltBodyCount(), static_cast<int32>(m_joltSlotByOwner.size()));
+
+        if (m_shadowWorld.has_value())
+            bindShadowSlot(slot, id, *record.simulatable);
+#endif
 
 #if DO_CHECK
         record.simulatable->getPhysicsComposite().forEach([&](const auto& decl)
@@ -1578,6 +2491,16 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 
     // ⛔G-69  docs/SimulationManagerUImpl-guards.md
     m_manager->notifyCharacterRegistered(id);
+
+#if !OG_PHYSICS_BACKEND_CHAOS
+    {
+        const auto slot = m_joltSlotByOwner.find(owner.GetOwner());
+        checkf(slot != m_joltSlotByOwner.end(),
+               TEXT("tryRegister: id=%u is Ready but its owner holds no Jolt slot; the first pass binds one."), id);
+        m_frameHost.pushOccupancy_GameThread(slot->second, true);
+        m_renderTargetsById[id] = RenderTargetUImpl{ Cast<AOGBrawlerUECharacter>(owner.GetOwner()) };
+    }
+#endif
 
     m_pendingRegistrations.erase(it);
     return TryRegisterStatus::Ready;
@@ -1857,6 +2780,12 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
     if (m_latencyProbe)
         m_latencyProbe->forgetLane(id);
     m_latencyLastHandedCorrectionTick.erase(id);
+
+#if !OG_PHYSICS_BACKEND_CHAOS
+    m_renderTargetsById.erase(id);
+    if (const AActor* ownerActor = owner.GetOwner())
+        releaseJoltSlot(*ownerActor);
+#endif
 
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);
 }

@@ -35,10 +35,19 @@ entry replaced.
 > ⛔⛔ 42 / 96 IS A CONTRACT, NOT A TUNING VALUE. […] A different size in the constructor is an
 > immediate assert at the first character registration. Change both together or neither.
 
-**Consequence.** A size that disagrees fails `ChaosPhysicsFactory::createPhysicalObject`'s
-adopt-root `checkf` (radius and half-height compared with `FMath::IsNearlyEqual`) at the first
-registration. ⚠ That `checkf` compiles out when `DO_CHECK == 0`, and a Shipping build would then
-run with a body whose size disagrees with the simulation's.
+**Consequence.** A size that disagrees fails a `checkf` at the first registration, one per physics
+backend (radius and half-height compared with `FMath::IsNearlyEqual`):
+
+* **Chaos configuration:** `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root branch, which
+  adopts this capsule as the root body.
+* **Jolt configuration** (og-simulationscheduler-withjolt task 53, design D14): the check in
+  `ASimulationManagerUImpl::tryRegister`'s first-call bind. Jolt builds the character body from the
+  descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
+  camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
+
+⚠ Both `checkf`s compile out when `DO_CHECK == 0`, and a Shipping build would then run with a
+capsule whose size disagrees with the simulation's. Task 21 drops the Chaos bullet with the Chaos
+configuration.
 
 **What breaks if the tag moves.** The mirror is also quoted by line in `SimulatableBrawlerTypes.h`
 and `BrawlerMovementSimulation-rationale.md`. Neither is checked.

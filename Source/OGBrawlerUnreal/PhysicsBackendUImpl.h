@@ -13,7 +13,10 @@
 #include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
 #include "OGSimulationUnreal/ChaosPhysicsFactory.h"
 #else
-#error "the Jolt arm lands in task 18"
+#include "OGSimulationJolt/JoltPhysicsBodyAdapter.h"
+#include "OGSimulationJolt/JoltPhysicsBodyReaderAdapter.h"
+#include "OGSimulationJolt/JoltSpatialQueryAdapter.h"
+#include "OGSimulationJolt/JoltPhysicsFactory.h"
 #endif
 
 namespace physicsBackendUImpl
@@ -29,6 +32,16 @@ using VizReader     = ChaosPhysicsBodyReaderAdapter;
 
 inline constexpr bool kChaosBackend = true;
 inline constexpr char kBackendToken[] = "chaos";
+#else
+using BodyAdapter   = JoltPhysicsBodyAdapter;
+using ReaderAdapter = JoltPhysicsBodyReaderAdapter;
+using QueryAdapter  = JoltSpatialQueryAdapter;
+using Factory       = JoltPhysicsFactory;
+using VizQuery      = JoltSpatialQueryAdapter;
+using VizReader     = JoltPhysicsBodyReaderAdapter;
+
+inline constexpr bool kChaosBackend = false;
+inline constexpr char kBackendToken[] = "jolt";
 #endif
 
 } // namespace physicsBackendUImpl

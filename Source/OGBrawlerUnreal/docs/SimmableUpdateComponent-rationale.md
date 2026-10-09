@@ -554,6 +554,14 @@ file used to build itself (simple collision, the owner ignored), so the volume a
 behave as before. The visualizers are templates over the adapter types, so the calls compile against
 whichever pair the manager selects.
 
+In the Jolt configuration the two accessors return the step world's adapters on the authority and on
+a client stepping inline (`og.Sim.RunInline`), and the game-thread shadow world's on a client that
+steps on a worker, where the step's own world may be queried only by the step or under the world
+mutex (`SimulationManagerUImpl-rationale.md` §18, "The Jolt arm's game-thread shadow world"). Either
+way the component gets a world it may query on the game thread, so both passes run on every peer, as
+in the Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
+and the component skipped the two passes there; task 56 removed that skip.)
+
 ---
 
 ## §11 Corrections — claims this file carried that were not true

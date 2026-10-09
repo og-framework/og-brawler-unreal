@@ -66,8 +66,13 @@ gameplay-debugger rendering component (movable, standalone only) and a text rend
 * The set is filled only when the element's collision includes physics (G-04). The element's
   setting is the intersection of the component's and the element's own, as Chaos combines them.
   Elements that collide physically but are not queryable (PhysicsOnly) are emitted and counted as
-  `elementsPhysicsOnly`: the descriptor has no "not queryable" flag, so a backend's queries would
-  find them although Chaos's would not. None exist on ThirdPersonMap.
+  `elementsPhysicsOnly`. The descriptor has no "not queryable" flag, and og-simulation's static
+  descriptor stays as it is, so the result carries one instead: `UEStaticImportResult::physicsOnly`
+  holds one entry per shape of the description, in the description's order (the sort permutes it
+  with the shapes), and is 1 for a PhysicsOnly shape. A backend builds those shapes separately and
+  keeps them out of its queries, as Chaos's queries never see them; the Jolt host builds them with a
+  second static builder and excludes its bodies from queries. The flag is not hashed, so the checksum
+  is unchanged. None exist on ThirdPersonMap.
 
 Observed on ThirdPersonMap with the brawler's table: every imported shape has `categories=0x10`
 (world, category 4) and `blockingCategories=0x3f` (all six mapped categories).

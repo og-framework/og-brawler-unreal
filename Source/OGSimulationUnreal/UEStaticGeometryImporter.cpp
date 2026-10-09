@@ -242,6 +242,7 @@ namespace
 		const std::array<CollisionCategories, ECollisionChannel::ECC_MAX>& channelToCategory;
 		UEStaticImportReport& report;
 		std::vector<StaticShapeDescriptor>& shapes;
+		std::vector<uint8_t>& physicsOnly;
 
 		void emit(ComponentContext& component, StaticShape shape, const FTransform& shapeToBody, const FTransform& bodyToWorld,
 			ECollisionEnabled::Type elementCollision, uint32_t instanceIndex, uint32_t elementIndex)
@@ -257,7 +258,8 @@ namespace
 				++report.elementsUnmappedObjectType;
 				return;
 			}
-			if (!CollisionEnabledHasQuery(collision))
+			const bool isPhysicsOnly = !CollisionEnabledHasQuery(collision);
+			if (isPhysicsOnly)
 			{
 				++report.elementsPhysicsOnly;
 			}
@@ -278,6 +280,7 @@ namespace
 				*component.componentName, instanceIndex, elementIndex, descriptor.categories.bits, descriptor.blockingCategories.bits,
 				descriptor.localToWorld[3][0], descriptor.localToWorld[3][1], descriptor.localToWorld[3][2], descriptor.friction, descriptor.restitution);
 			shapes.push_back(std::move(descriptor));
+			physicsOnly.push_back(isPhysicsOnly ? 1u : 0u);
 		}
 
 		void warnNonUniform(ComponentContext& component, const FVector& scale)
@@ -544,7 +547,7 @@ UEStaticImportResult UEStaticGeometryImporter::importWorld(UWorld& world) const
 {
 	const double startSeconds = FPlatformTime::Seconds();
 	UEStaticImportResult result;
-	WorldImport walk{m_categoryChannels, m_channelToCategory, result.report, result.description.shapes};
+	WorldImport walk{m_categoryChannels, m_channelToCategory, result.report, result.description.shapes, result.physicsOnly};
 
 	for (TActorIterator<AActor> it(&world); it; ++it)
 	{
@@ -572,12 +575,16 @@ UEStaticImportResult UEStaticGeometryImporter::importWorld(UWorld& world) const
 		return keyA != keyB ? keyA < keyB : a.first < b.first;
 	});
 	std::vector<StaticShapeDescriptor> sorted;
+	std::vector<uint8_t> sortedPhysicsOnly;
 	sorted.reserve(shapes.size());
+	sortedPhysicsOnly.reserve(shapes.size());
 	for (const auto& entry : order)
 	{
 		sorted.push_back(std::move(shapes[entry.second]));
+		sortedPhysicsOnly.push_back(result.physicsOnly[entry.second]);
 	}
 	shapes = std::move(sorted);
+	result.physicsOnly = std::move(sortedPhysicsOnly);
 
 	for (std::size_t i = 1; i < shapes.size(); ++i)
 	{
