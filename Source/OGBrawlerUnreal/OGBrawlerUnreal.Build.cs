@@ -4,7 +4,7 @@ using UnrealBuildTool;
 
 public class OGBrawlerUnreal : ModuleRules
 {
-	private const int PhysicsBackendChaos = 1;
+	private const int PhysicsBackendChaos = 0;
 
 	public OGBrawlerUnreal(ReadOnlyTargetRules Target) : base(Target)
 	{

@@ -12,10 +12,15 @@ The rules the compiler holds need no entry: the `build_info.txt` parse (BOM, CR,
 `label=` lines), the label character set, and "the `dev` label never changes the network version" are
 `static_assert`s in `OGBuildIdentityUImpl.h` (rationale §2, §3).
 
-The physics-backend token (rationale §7, og-simulationscheduler-withjolt task 51) needs no entry either:
-it is read from `PhysicsBackendUImpl.h`, the header that selects the backend, so the token and the
-compiled host cannot disagree, and it reaches the network version only inside the labelled-build
-branch that the `dev` assertion already covers.
+The physics-backend token and the login check (rationale §7, og-simulationscheduler-withjolt tasks 51
+and 18) need no entry either. The token is built from `PhysicsBackendUImpl.h`, the header that selects
+the backend, so the token and the compiled host cannot disagree. The admission rule (a different
+backend and a missing token are refused; a different Jolt fingerprint is admitted with a Warning) is two
+`static_assert`s, over `classifyBackendLogin` and `refusesBackendLogin` in `OGBuildIdentityUImpl.h`. And every way the wiring can break fails closed and says why: a client whose
+local-player class does not send the token is refused with "the client reports no physics backend".
+The one way it fails open is a game mode that stops calling the check, a deleted call in
+`AOGBrawlerUEGameMode::PreLogin`; even then every process names its token on its start line and in
+`[SimHost.Backend]`, so the logs show the mismatch.
 
 ---
 

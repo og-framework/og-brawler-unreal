@@ -31,7 +31,7 @@ source that is present but unusable (an `-OGBuildLabel=` value that is not a lab
 `dev`; it does not fall through to the next source. One rule for "no usable label" keeps the outcome
 predictable: a broken build behaves like an unlabelled one, and the log says why.
 
-The label is used in four places (the physics-backend token beside it is §7):
+The label is used in four places (the physics-backend token beside it, and the login check it feeds, are §7):
 
 * the join screen's `Build: <label>` line, through `joinScreenUImpl::ownBuildLabel()`;
 * the "different build" failure text, which names the client's own label (the client never learns the
@@ -62,9 +62,11 @@ printed into a server log line whose fields are separated by spaces (§5).
 ## 3. The network version
 
 `applyNetworkVersion` runs on `FCoreDelegates::OnPostEngineInit` (⛔G-01) and, for any label but `dev`,
-calls `FNetworkVersion::SetProjectVersion("<ProjectVersion>+<label>+<backend>")`, e.g.
-`0.1.0+20260929-101500-abc1234+chaos` (the backend token is §7; it was not part of the version before
-og-simulationscheduler-withjolt task 51).
+calls `FNetworkVersion::SetProjectVersion("<ProjectVersion>+<label>")`, e.g.
+`0.1.0+20260929-101500-abc1234`. The physics backend is not part of the version: it is compared at
+login instead (§7). Task 51 of og-simulationscheduler-withjolt had appended it as a third `+<backend>`
+part; task 18 took it out again, so that a backend mismatch is refused by one check, for labelled and
+`dev` builds alike, with a reason that names both sides.
 
 * **Why the project version.** The engine hashes "`<ProjectName> <ProjectVersion>, NetCL: <n>`" plus the
   engine and game protocol versions into the network version (`FNetworkVersion::GetLocalNetworkVersion`,
@@ -133,19 +135,84 @@ The task 15 acceptance used exactly this:
 The engine's `-networkversionoverride=<n>` also forces a mismatch, but it replaces the changelist in the
 hash rather than testing this code.
 
-## 7. The physics-backend token
+## 7. The physics backend: the token and the login check
 
 Until task 21 of og-simulationscheduler-withjolt, one build of this game runs either the Chaos host or
-the Jolt host, chosen at compile time (`SimulationManagerUImpl-rationale.md` §18). The build identity
-carries which one: `buildIdentityUImpl::backendToken()` returns `physicsBackendUImpl::kBackendToken`
-from `PhysicsBackendUImpl.h`, which is `chaos` in the Chaos configuration. It is read in two places:
+the Jolt host, chosen at compile time (`SimulationManagerUImpl-rationale.md` §18). Two peers of
+different backends cannot play together: they simulate the same inputs differently, so every
+prediction would be corrected. The build identity therefore carries a **backend token**, and the server
+refuses a login whose backend differs from its own. Two Jolt peers whose Jolt builds step differently (a
+Debug and a Development build, a different instruction set, a different Jolt version) are admitted, with
+a Warning that names both fingerprints (the policy below).
 
-* the start line, as `backend=<token>` (§1);
-* the network version of a labelled build, as a third `+<token>` part (§3). Two labelled builds of
-  different backends therefore get different network versions, and the server refuses the join the
-  way it refuses any other version mismatch (§4).
+**The token.** `buildIdentityUImpl::backendToken()`:
 
-`dev` still changes nothing (§3): an unlabelled run keeps the engine's version whatever its backend,
-so the editor and PIE behave as before. Telling two unlabelled builds of different backends apart,
-and the Jolt token `jolt:<determinism fingerprint>` with a refusal that names both builds, belong to
-task 18. Until then only the Chaos configuration builds, so every peer carries the same token.
+| configuration | token | example |
+|---|---|---|
+| Chaos | `chaos` | `chaos` |
+| Jolt | `jolt:<fingerprint>`, the 16 lower-case hex digits of the Jolt determinism fingerprint's value | jolt:35a523518f873707 |
+
+The fingerprint is og-simulation-jolt's `determinismFingerprint`: the Jolt version and feature bits,
+the instruction set the library was compiled for, fused multiply-add, the step's FP mode and the
+state hash of a short probe simulation, folded into one 64-bit value
+(`JoltDeterminismFingerprint-rationale.md`). The traits header computes it
+(`physicsBackendUImpl::computeDeterminismFingerprint`, which acquires the Jolt runtime, runs the probe
+and releases the runtime; the Chaos configuration has none), and the build identity computes it once,
+on first use, and keeps it for the process. The first use is `applyNetworkVersion` at
+`FCoreDelegates::OnPostEngineInit`, so the start line (§1) already carries the full token, and the probe
+runs before any world exists. It takes about 2 ms; the runtime's two lines
+(initialised, shut down) are logged at `Log` on `LogOGBuildIdentity`.
+`buildIdentityUImpl::backendFingerprint()` is the hex alone (`none` for Chaos); the manager's
+`[SimHost.Backend] backend=<chaos|jolt> fingerprint=<hex|none>` line prints it.
+
+**The check, at login.** The client puts its token in its login URL, and the server compares it in its
+game mode's pre-login, before the player is admitted:
+
+* **Client.** `UOGBrawlerLocalPlayer`, the project's local-player class, returns `OGBackend=<token>` as its game login options
+  (`buildIdentityUImpl::backendLoginOption`, key `kBackendLoginOptionKey`). The engine's pending net
+  game appends a local player's game login options to the URL it sends at login, whatever started the
+  travel: the join screen, a command-line address, or PIE. `Config/DefaultEngine.ini` sets
+  LocalPlayerClassName to it once, in the engine section. The property is a global config property, so
+  every engine class reads it from that section: the game engine of packaged clients and `-game` runs,
+  and the editor's engine in PIE.
+* **Server.** `AOGBrawlerUEGameMode::PreLogin` runs the engine's own checks first and then, when they
+  admitted the player, `buildIdentityUImpl::refuseMismatchedBackendLogin(options, error)`. It reads the
+  `OGBackend` option and classifies it against its own token with `classifyBackendLogin`
+  (`BackendLoginVerdict`: a match, a client that reports no token, a different backend, or the same
+  backend with a different fingerprint; `static_assert`s pin the four). `refusesBackendLogin` decides
+  which verdicts refuse: a different backend and a missing token do, a different fingerprint and a match
+  do not (a second `static_assert` pins that). A refusal sets the error, which refuses the login, and logs
+  one `Warning` on `LogOGBuildIdentity`: `OGBuildIdentity: refused a login: <reason>`. A different
+  fingerprint is admitted and logs one `Warning` instead: "OGBuildIdentity: admitted a login with a
+  different Jolt determinism fingerprint: this server runs jolt:…, the client runs jolt:…."
+* **The reason names both sides**, server first:
+  * "Different physics backend: this server runs jolt:35a523518f873707, the client runs chaos."
+  * "Different build: the client reports no physics backend, this server runs jolt:…." (a build from
+    before this check, or a client whose local-player class is not this project's).
+* **What the client sees.** The engine sends the error to the client as its login failure, and the
+  client's pending net game reports it as a pending-connection failure carrying the server's text. The
+  join screen maps that to "Server refused: <text>" (`JoinScreen-rationale.md` §13), and the engine logs
+  the text in the engine's LogNet category, so the client's screen and log name both tokens too.
+
+**Why at login and not in the network version.** The version is a 32-bit hash, so a version mismatch
+reaches the client as "different build" and cannot say which builds (§4: the client never learns the
+server's label). It is also left unchanged for `dev` (§3), so two unlabelled builds of different
+backends, the editor's `-game` and a packaged development client, would have connected. The login URL
+carries text, so the check can compare the token exactly and name both, and it applies to every build.
+A labelled build still gets the label in its version, and two different labels are still refused at
+the version check, before the login.
+
+**A dedicated server on another map.** The check lives in `AOGBrawlerUEGameMode`, the game mode of
+every gameplay map (`Config/DefaultEngine.ini` GlobalDefaultGameMode). The front-end game mode hosts no
+joins.
+
+**The fingerprint policy: backend only** (the user's ruling, 2026-10-09). A different fingerprint is
+admitted, never refused. The instruction set is part of the fingerprint (NEON on Android arm64, an x64
+instruction set on Win64), so an Android client always differs from a Win64 server, and refusing it would
+rule out the mixed sessions the game is played in. Nothing here needs bitwise-identical simulation across
+peers: the server is authoritative, and a client's prediction is corrected when it diverges, so a
+different Jolt build costs more corrections, not a broken session. The server's Warning keeps the
+difference visible in its log. The client logs nothing about it: a successful login hands the client no
+text from the server, so it never learns the server's token (it would need a new replicated field). Its
+own start line and `[SimHost.Backend]` still name its fingerprint, so the two logs together show the
+pair.

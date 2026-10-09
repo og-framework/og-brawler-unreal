@@ -506,10 +506,13 @@ lifetime arithmetic lines up with the simulation's own pruning.
 *Moved from `TickComponent` (task 25).*
 
 **The movement draw reads a sim-tick snapshot on the render clock.** `attackSimAllState` is
-`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes once per completed sim tick in
-`ASimulationManagerUImpl::OnPostPhysicsStep`. So every drawn `State` / `DerivedState` value is stale by
-up to one 60 Hz tick, and a render frame above 60 Hz redraws the same snapshot; `StaticData` is authored
-once per session. The State and DerivedState halves come from the **same** copy, so the probe reading
+`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes in
+`ASimulationManagerUImpl::OnPostPhysicsStep`, once per game frame at the end of physics, in both
+physics backends. So every drawn `State` / `DerivedState` value is the newest tick the copy saw: a
+frame that ran several ticks shows only the last, a client that steps on a worker can lag the frame,
+and a render frame above 60 Hz redraws the same tick's values; `StaticData` is authored once per
+session. (Until og-simulationscheduler-withjolt task 18 this paragraph said "once per completed sim
+tick" and "stale by up to one 60 Hz tick"; neither held.) The State and DerivedState halves come from the **same** copy, so the probe reading
 and the body pose describe one tick and can be combined — which the servo-error arithmetic in
 `BrawlerMovementVisualization.h` rests on. The call is a pure reader: every argument is a `const&`.
 

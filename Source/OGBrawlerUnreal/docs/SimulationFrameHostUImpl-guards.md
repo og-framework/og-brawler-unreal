@@ -9,14 +9,15 @@ opaque, stable, and retired rather than reused. The reasoning lives in
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The rules the compiler or a runtime check holds need no entry: the authority is refused a worker at
-`begin` (a `checkf`, design D2), a full occupancy ring is a `checkf`, and the two waits `checkf` that
-this thread does not hold the manager's world mutex (rationale §6).
+`begin` (a `checkf`, design D2), a full occupancy ring is a `checkf`, the two waits `checkf` that
+this thread does not hold the manager's world mutex (rationale §6), and the ownership asserts on the
+scheduler and the driver's doors are `checkf`s (rationale §9).
 
 ---
 
 ## G-01 — the authority steps inline, chosen by role, never by the engine's threading switch
 
-**Site:** `if (m_stepsInline)` in `startSteps_GameThread`.
+**Site:** `if (m_stepsInline)` in `pumpAndRunSteps_GameThread`.
 
 **The prohibition** (design D2, F9). ⛔ Do not dispatch an authority step to a worker, and do not key
 the inline-or-worker choice on the engine's ShouldUseThreadingForPerformance or any other engine
@@ -37,7 +38,7 @@ would bypass both.
 ## G-02 — the per-frame probe call runs once per frame, before the steps, only when steps are due
 
 **Site:** the `m_owner->onFrameStepsDue_GameThread(firstUpcomingSimTick, ...)` call in
-`startSteps_GameThread`.
+`pumpAndRunSteps_GameThread`.
 
 **The prohibition** (design D3, F5). ⛔ Do not call `onFrameStepsDue_GameThread` per step, from a hook,
 or in a frame with no due step (the `numSteps == 0` return above it). It runs once per frame, before
@@ -53,7 +54,7 @@ Chaos never produced.
 
 ## G-03 — the frame's tick is the dispatch counter plus the published offset, with no `+ 1`
 
-**Site:** `const int32 firstUpcomingSimTick =` in `startSteps_GameThread`.
+**Site:** `const int32 firstUpcomingSimTick =` in `pumpAndRunSteps_GameThread`.
 
 **The prohibition** (design D8, §2.4; successor of the UImpl's G-71 derivation). ⛔ Do not read a
 simulation clock here, do not substitute the last completed tick, and do not add 1. The value is the
@@ -69,7 +70,7 @@ writes. The last completed tick lags by the steps still in flight and jitters PR
 
 ## G-04 — the scheduler is pumped with the accumulated world delta
 
-**Site:** `const uint32 numSteps = m_scheduler->pump(m_hostTimeSeconds);` in `startSteps_GameThread`.
+**Site:** `const uint32 numSteps = scheduler.pump(m_hostTimeSeconds);` in `pumpAndRunSteps_GameThread`.
 
 **The prohibition** (design D6). ⛔ Do not pump with the platform clock (FPlatformTime) or any time
 source other than `m_hostTimeSeconds`, which accumulates the tick function's `DeltaTime` on the line
@@ -102,7 +103,7 @@ engine's own end-of-physics pattern), so the tag marks the one blocking wait.
 
 ## G-06 — the authority reaps once per frame, after the inline steps
 
-**Site:** the `coordinator->reapConnections(firstUpcomingSimTick)` call in `startSteps_GameThread`.
+**Site:** the `coordinator->reapConnections(firstUpcomingSimTick)` call in `pumpAndRunSteps_GameThread`.
 
 **The prohibition** (design D3, F5). ⛔ Do not move the reap into the step loop or a hook, and do not
 call it before the frame's steps or in a frame with no due step. It runs once, after `runBatch`, with

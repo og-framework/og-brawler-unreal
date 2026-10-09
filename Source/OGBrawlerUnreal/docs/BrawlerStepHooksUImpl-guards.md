@@ -8,7 +8,8 @@ than reused. The reasoning lives in `BrawlerStepHooksUImpl-rationale.md`.
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The concept conformance is a `static_assert` and needs no entry; so are the game-thread `checkf` of an
-authority `beforeTick` (design D2) and its `authorityTick` presence check.
+authority `beforeTick` (design D2), its `authorityTick` presence check, and every hook's step-context
+`checkf` (rationale §3).
 
 ---
 

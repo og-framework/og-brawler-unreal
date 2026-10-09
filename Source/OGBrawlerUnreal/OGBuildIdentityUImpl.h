@@ -108,6 +108,54 @@ static_assert(!overridesNetworkVersion(brawlerJoinScreen::kDevBuildLabel) && ove
               "unchanged': the dev label must never touch the network version, so the editor and PIE "
               "keep the engine's version. See docs/OGBuildIdentity-rationale.md section 3.");
 
+inline constexpr std::string_view kBackendLoginOptionKey = "OGBackend";
+
+enum class BackendLoginVerdict : uint8
+{
+	Match,
+	MissingFromClient,
+	DifferentBackend,
+	DifferentFingerprint,
+};
+
+constexpr std::string_view backendNameOf(std::string_view token)
+{
+	return token.substr(0, token.find(':'));
+}
+
+constexpr BackendLoginVerdict classifyBackendLogin(std::string_view serverToken, std::string_view clientToken)
+{
+	if (clientToken.empty())
+		return BackendLoginVerdict::MissingFromClient;
+	if (clientToken == serverToken)
+		return BackendLoginVerdict::Match;
+	return backendNameOf(clientToken) == backendNameOf(serverToken) ? BackendLoginVerdict::DifferentFingerprint
+	                                                                 : BackendLoginVerdict::DifferentBackend;
+}
+
+constexpr bool refusesBackendLogin(BackendLoginVerdict verdict)
+{
+	return verdict == BackendLoginVerdict::MissingFromClient || verdict == BackendLoginVerdict::DifferentBackend;
+}
+
+static_assert(classifyBackendLogin("chaos", "chaos") == BackendLoginVerdict::Match
+                  && classifyBackendLogin("jolt:00000000000000aa", "jolt:00000000000000aa") == BackendLoginVerdict::Match
+                  && classifyBackendLogin("jolt:00000000000000aa", "chaos") == BackendLoginVerdict::DifferentBackend
+                  && classifyBackendLogin("chaos", "jolt:00000000000000aa") == BackendLoginVerdict::DifferentBackend
+                  && classifyBackendLogin("jolt:00000000000000aa", "jolt:00000000000000ab")
+                      == BackendLoginVerdict::DifferentFingerprint
+                  && classifyBackendLogin("jolt:00000000000000aa", "") == BackendLoginVerdict::MissingFromClient,
+              "Was the task 18 classification of a login's backend token (chaos, or jolt:<determinism fingerprint>) "
+              "against the server's. See docs/OGBuildIdentity-rationale.md section 7.");
+static_assert(refusesBackendLogin(BackendLoginVerdict::DifferentBackend)
+                  && refusesBackendLogin(BackendLoginVerdict::MissingFromClient)
+                  && !refusesBackendLogin(BackendLoginVerdict::DifferentFingerprint)
+                  && !refusesBackendLogin(BackendLoginVerdict::Match),
+              "Was the user's 'backend only' ruling (2026-10-09): a different physics backend or a missing token is "
+              "refused; a different Jolt determinism fingerprint is admitted with a Warning, because an Android arm64 "
+              "client always differs from a Win64 server and the netcode corrects rather than runs in lockstep. See "
+              "docs/OGBuildIdentity-rationale.md section 7.");
+
 struct BuildIdentity
 {
 	std::string      label;
@@ -118,7 +166,13 @@ const BuildIdentity& buildIdentity();
 
 std::string_view buildLabel();
 
+std::string_view backendFingerprint();
+
 std::string_view backendToken();
+
+FString backendLoginOption();
+
+bool refuseMismatchedBackendLogin(const FString& loginOptions, FString& errorMessage);
 
 void registerNetworkVersionHook();
 

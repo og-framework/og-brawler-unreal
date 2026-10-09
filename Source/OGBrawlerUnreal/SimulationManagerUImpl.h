@@ -747,6 +747,7 @@ private:
     void startJoltStepping(UWorld& world, float dt, bool worldIsAuthority);
     void runJoltStep_Step(uint64 physicsStep, double stepDeadlineSeconds);
     bool isJoltWorldMutexHeldOnThisThread() const;
+    bool isJoltStepRunningOnThisThread() const;
 
     void buildShadowWorld(const JoltWorldConfig& stepConfig, const StaticWorldDescription& queryableStatics,
         const StaticWorldDescription& physicsOnlyStatics, const std::vector<JPH::BodyID>& stepStaticBodies);

@@ -9,6 +9,7 @@
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformTime.h"
 #include "UObject/WeakObjectPtrTemplates.h"
+#include "OGSimulation/LatencyBudgetProbe.h"
 
 #include <algorithm>
 
@@ -35,6 +36,73 @@ namespace
 		ENamedThreads::HighThreadPriority,
 		ENamedThreads::NormalTaskPriority,
 		ENamedThreads::HighTaskPriority);
+
+	thread_local const SimulationFrameHostUImpl* t_batchHost = nullptr;
+
+	class BatchScopeUImpl
+	{
+	public:
+		explicit BatchScopeUImpl(const SimulationFrameHostUImpl& host)
+			: m_previous(t_batchHost)
+		{
+			t_batchHost = &host;
+		}
+
+		~BatchScopeUImpl()
+		{
+			t_batchHost = m_previous;
+		}
+
+		BatchScopeUImpl(const BatchScopeUImpl&) = delete;
+		BatchScopeUImpl& operator=(const BatchScopeUImpl&) = delete;
+
+	private:
+		const SimulationFrameHostUImpl* m_previous;
+	};
+
+	struct PercentilesUImpl
+	{
+		uint32 n   = 0u;
+		double p50 = 0.0;
+		double p99 = 0.0;
+		double max = 0.0;
+	};
+
+	PercentilesUImpl percentilesOf(std::vector<float>& values)
+	{
+		PercentilesUImpl result;
+		result.n = static_cast<uint32>(values.size());
+		if (result.n == 0u)
+			return result;
+
+		std::sort(values.begin(), values.end());
+		result.p50 = values[latencyBudget::nearestRankIndex(result.n, 500u)];
+		result.p99 = values[latencyBudget::nearestRankIndex(result.n, 990u)];
+		result.max = values.back();
+		return result;
+	}
+
+	FString formatPercentiles(std::vector<float>& values, bool twoDecimals)
+	{
+		const PercentilesUImpl p = percentilesOf(values);
+		if (p.n == 0u)
+			return TEXT("-");
+		return twoDecimals ? FString::Printf(TEXT("%.2f/%.2f/%.2f"), p.p50, p.p99, p.max)
+		                   : FString::Printf(TEXT("%.1f/%.1f/%.1f"), p.p50, p.p99, p.max);
+	}
+}
+
+void SimulationFrameHostUImpl::WindowSamplesUImpl::add(double value)
+{
+	if (values.size() < kMaxWindowSamples)
+		values.push_back(static_cast<float>(value));
+	else
+		++overflow;
+}
+
+std::array<SimulationFrameHostUImpl::WindowSamplesUImpl*, 8> SimulationFrameHostUImpl::HostWindowSamplesUImpl::all()
+{
+	return { &frameMs, &startPhysicsUs, &endWaitUs, &postPhysicsUs, &j2WaitUs, &stepUs, &preUs, &shadowRestoreUs };
 }
 
 void FSimulationStartStepsTickFunctionUImpl::ExecuteTick(float DeltaTime, ELevelTick TickType,
@@ -92,7 +160,11 @@ void SimulationFrameHostUImpl::begin(ASimulationManagerUImpl& owner, ULevel& lev
 	}
 
 	m_hostTimeSeconds = 0.0;
+	m_lastFrameStartSeconds = 0.0;
 	m_scheduler.emplace(SchedulerConfig{ config.dtSeconds, MaxCatchUpSteps{ cap }, 0.75, 1.25 }, m_hostTimeSeconds);
+	for (WindowSamplesUImpl* samples : m_windowSamples.all())
+		samples->values.reserve(kMaxWindowSamples);
+	startWindow_GameThread(FPlatformTime::Seconds());
 
 	m_startTick.host                 = this;
 	m_startTick.bCanEverTick         = true;
@@ -108,6 +180,7 @@ void SimulationFrameHostUImpl::begin(ASimulationManagerUImpl& owner, ULevel& lev
 	m_endTick.EndTickGroup         = TG_EndPhysics;
 	m_endTick.RegisterTickFunction(&level);
 	m_endTick.AddPrerequisite(&owner, m_startTick);
+	m_tickFunctionsRegistered = true;
 
 	UE_LOG(LogOGSimHost, Warning,
 		TEXT("[SimHost.Frame] role=%s stepping=%s dt=%.6f maxCatchUpSteps=%u rateScale=[0.75,1.25] timeBase=worldDelta"),
@@ -121,6 +194,7 @@ void SimulationFrameHostUImpl::unregisterTickFunctions()
 	if (m_owner == nullptr)
 		return;
 
+	m_tickFunctionsRegistered = false;
 	if (m_endTick.IsTickFunctionRegistered())
 	{
 		m_endTick.RemovePrerequisite(m_owner, m_startTick);
@@ -163,8 +237,35 @@ void SimulationFrameHostUImpl::pushOccupancy_GameThread(uint32_t slot, bool occu
 		static_cast<uint32>(kOccupancyCommandCapacity), slot, occupied ? 1 : 0);
 }
 
+void SimulationFrameHostUImpl::noteWorldMutexWait_GameThread(double waitSeconds)
+{
+	++m_windowCounts.j2Waits;
+	m_windowSamples.j2WaitUs.add(waitSeconds * 1.0e6);
+}
+
+void SimulationFrameHostUImpl::noteShadowRestore_GameThread(double restoreSeconds, bool refused)
+{
+	m_windowSamples.shadowRestoreUs.add(restoreSeconds * 1.0e6);
+	m_windowCounts.shadowRefused += refused ? 1u : 0u;
+}
+
+bool SimulationFrameHostUImpl::isRunningBatchOnThisThread() const
+{
+	return t_batchHost == this;
+}
+
+bool SimulationFrameHostUImpl::isStepRunningOnThisThread() const
+{
+	return m_owner != nullptr && m_owner->isJoltStepRunningOnThisThread();
+}
+
 void SimulationFrameHostUImpl::applyOccupancyCommands_Step()
 {
+	checkf(isStepRunningOnThisThread(),
+		TEXT("SimulationFrameHostUImpl::applyOccupancyCommands_Step: called outside a step of this manager. It is the ")
+		TEXT("step driver's occupancy door, and only the step (runJoltStep_Step, under the world mutex) may touch the ")
+		TEXT("driver: from anywhere else it races the running step, and the occupancy timeline no longer records the ")
+		TEXT("body set the world stepped with."));
 	while (std::optional<OccupancyCommandUImpl> command = m_occupancyCommands.tryPop())
 		m_owner->m_stepDriver->noteOccupancy(command->slot, command->occupied);
 }
@@ -199,21 +300,53 @@ void SimulationFrameHostUImpl::publishShadowSlot_Step(const TickOutcome& outcome
 	m_owner->publishShadowSlot_Step(outcome);
 }
 
+void SimulationFrameHostUImpl::pushStepCost_Step(const StepCostSampleUImpl& sample)
+{
+	m_stepCosts.tryPush(sample);
+}
+
+SimulationScheduler& SimulationFrameHostUImpl::schedulerOnOwningThread()
+{
+	checkf(IsInGameThread(),
+		TEXT("SimulationFrameHostUImpl: the scheduler was reached off the game thread. The game thread owns it in ")
+		TEXT("every M1 stepping mode: it pumps it at TG_StartPhysics, and the step reads only the batch it was handed ")
+		TEXT("by value. It has no synchronization, so a call from the step or any other thread (a rate change from an ")
+		TEXT("RPC included) races the pump."));
+	checkf(m_scheduler.has_value(), TEXT("SimulationFrameHostUImpl: the scheduler was reached before begin()."));
+	return *m_scheduler;
+}
+
 void SimulationFrameHostUImpl::startSteps_GameThread(float deltaSeconds)
+{
+	const double startSeconds = FPlatformTime::Seconds();
+	if (m_lastFrameStartSeconds > 0.0)
+		m_windowSamples.frameMs.add((startSeconds - m_lastFrameStartSeconds) * 1000.0);
+	m_lastFrameStartSeconds = startSeconds;
+
+	const uint32 numSteps = pumpAndRunSteps_GameThread(deltaSeconds);
+
+	++m_windowCounts.frames;
+	m_windowCounts.steps += numSteps;
+	m_windowCounts.maxStepsPerFrame = FMath::Max(m_windowCounts.maxStepsPerFrame, numSteps);
+	m_windowSamples.startPhysicsUs.add((FPlatformTime::Seconds() - startSeconds) * 1.0e6);
+}
+
+uint32_t SimulationFrameHostUImpl::pumpAndRunSteps_GameThread(float deltaSeconds)
 {
 	m_blockingSteps = m_pendingSteps;
 
+	SimulationScheduler& scheduler = schedulerOnOwningThread();
 	m_hostTimeSeconds += static_cast<double>(deltaSeconds);
 	// ⛔G-04  docs/SimulationFrameHostUImpl-guards.md
-	const uint32 numSteps = m_scheduler->pump(m_hostTimeSeconds);
+	const uint32 numSteps = scheduler.pump(m_hostTimeSeconds);
 	if (numSteps == 0u)
-		return;
+		return 0u;
 
 	StepBatch batch;
-	batch.first = m_scheduler->physicsStepCount() - numSteps;
+	batch.first = scheduler.physicsStepCount() - numSteps;
 	batch.count = numSteps;
 	for (uint32 index = 0u; index < numSteps; ++index)
-		batch.deadlines[index] = m_scheduler->stepDeadline(batch.first + index);
+		batch.deadlines[index] = scheduler.stepDeadline(batch.first + index);
 
 	// ⛔G-03  docs/SimulationFrameHostUImpl-guards.md
 	const int32 firstUpcomingSimTick =
@@ -231,7 +364,7 @@ void SimulationFrameHostUImpl::startSteps_GameThread(float deltaSeconds)
 			// ⛔G-06  docs/SimulationFrameHostUImpl-guards.md
 			coordinator->reapConnections(firstUpcomingSimTick);
 		}
-		return;
+		return numSteps;
 	}
 
 	FGraphEventArray prerequisites;
@@ -241,6 +374,7 @@ void SimulationFrameHostUImpl::startSteps_GameThread(float deltaSeconds)
 	m_pendingSteps = FFunctionGraphTask::CreateAndDispatchWhenReady(
 		[this, batch]() { runBatch(batch); },
 		TStatId{}, &prerequisites, CPrio_OGSimStepTask.Get());
+	return numSteps;
 }
 
 void SimulationFrameHostUImpl::endSteps_GameThread(const FGraphEventRef& completion)
@@ -249,17 +383,18 @@ void SimulationFrameHostUImpl::endSteps_GameThread(const FGraphEventRef& complet
 		TEXT("SimulationFrameHostUImpl::endSteps_GameThread: the game thread holds the Jolt world mutex (J2) at end of ")
 		TEXT("physics, where it waits for step tasks that take it: a deadlock. Was frame-host G-05."));
 
+	const double endStartSeconds = FPlatformTime::Seconds();
 	const FGraphEventRef waitFor = CVarSimBlockMode.GetValueOnGameThread() == 1 ? m_pendingSteps : m_blockingSteps;
 	if (!waitFor.IsValid() || waitFor->IsComplete())
 	{
-		m_owner->OnPostPhysicsStep();
+		runPostPhysicsStep_GameThread(std::nullopt);
 		return;
 	}
 
 	if (!completion.IsValid())
 	{
 		FTaskGraphInterface::Get().WaitUntilTaskCompletes(waitFor, ENamedThreads::GameThread_Local);
-		m_owner->OnPostPhysicsStep();
+		runPostPhysicsStep_GameThread(endStartSeconds);
 		return;
 	}
 
@@ -267,12 +402,119 @@ void SimulationFrameHostUImpl::endSteps_GameThread(const FGraphEventRef& complet
 	prerequisites.Add(waitFor);
 	TWeakObjectPtr<ASimulationManagerUImpl> owner(m_owner);
 	completion->DontCompleteUntil(FFunctionGraphTask::CreateAndDispatchWhenReady(
-		[owner]()
+		[owner, endStartSeconds]()
 		{
-			if (ASimulationManagerUImpl* manager = owner.Get())
-				manager->OnPostPhysicsStep();
+			ASimulationManagerUImpl* const manager = owner.Get();
+			if (manager == nullptr || !manager->m_frameHost.m_tickFunctionsRegistered)
+				return;
+			manager->m_frameHost.runPostPhysicsStep_GameThread(endStartSeconds);
 		},
 		TStatId{}, &prerequisites, ENamedThreads::GameThread));
+}
+
+void SimulationFrameHostUImpl::runPostPhysicsStep_GameThread(std::optional<double> waitStartSeconds)
+{
+	const double postStartSeconds = FPlatformTime::Seconds();
+	if (waitStartSeconds.has_value())
+	{
+		++m_windowCounts.endWaits;
+		m_windowSamples.endWaitUs.add((postStartSeconds - *waitStartSeconds) * 1.0e6);
+	}
+
+	m_owner->OnPostPhysicsStep();
+
+	const double nowSeconds = FPlatformTime::Seconds();
+	m_windowSamples.postPhysicsUs.add((nowSeconds - postStartSeconds) * 1.0e6);
+	drainStepCosts_GameThread();
+	if (nowSeconds - m_windowCounts.startSeconds >= kWindowSeconds)
+		logWindow_GameThread(nowSeconds);
+}
+
+void SimulationFrameHostUImpl::drainStepCosts_GameThread()
+{
+	while (std::optional<StepCostSampleUImpl> sample = m_stepCosts.tryPop())
+	{
+		m_windowSamples.stepUs.add(sample->stepSeconds * 1.0e6);
+		if (m_isAuthority || sample->replayedTicks > 0u)
+			m_windowSamples.preUs.add(sample->preSeconds * 1.0e6);
+		if (sample->replayedTicks > 0u)
+		{
+			++m_windowCounts.replays;
+			m_windowCounts.replayedTicks += sample->replayedTicks;
+			m_windowCounts.maxReplayDepth = FMath::Max(m_windowCounts.maxReplayDepth, sample->replayedTicks);
+		}
+		m_windowCounts.resimRefused += sample->resimRefused ? 1u : 0u;
+	}
+}
+
+void SimulationFrameHostUImpl::startWindow_GameThread(double nowSeconds)
+{
+	const SimulationScheduler& scheduler = schedulerOnOwningThread();
+
+	m_windowCounts                = HostWindowCountsUImpl{};
+	m_windowCounts.startSeconds   = nowSeconds;
+	m_windowCounts.lostAtStart    = scheduler.lostTime();
+	m_windowCounts.ignoredAtStart = scheduler.ignoredTimeSamples();
+	m_windowCounts.j1DropsAtStart = m_occupancyCommands.drops();
+	m_windowCounts.j6DropsAtStart = m_stepCosts.drops();
+	for (WindowSamplesUImpl* samples : m_windowSamples.all())
+	{
+		samples->values.clear();
+		samples->overflow = 0u;
+	}
+}
+
+void SimulationFrameHostUImpl::logWindow_GameThread(double nowSeconds)
+{
+	const SimulationScheduler& scheduler = schedulerOnOwningThread();
+	const HostWindowCountsUImpl& counts = m_windowCounts;
+	HostWindowSamplesUImpl& samples = m_windowSamples;
+
+	const LostTime lost = scheduler.lostTime();
+	uint32 overflow = 0u;
+	for (const WindowSamplesUImpl* windowSamples : samples.all())
+		overflow += windowSamples->overflow;
+
+	const FString replayDepth = counts.replays == 0u
+		? FString(TEXT("-"))
+		: FString::Printf(TEXT("%.2f/%u"),
+			static_cast<double>(counts.replayedTicks) / static_cast<double>(counts.replays), counts.maxReplayDepth);
+	const uint32 costSamples = static_cast<uint32>(samples.stepUs.values.size());
+	const uint32 preTicks    = static_cast<uint32>(samples.preUs.values.size());
+	const uint32 restores    = static_cast<uint32>(samples.shadowRestoreUs.values.size());
+
+	UE_LOG(LogOGSimHost, Warning,
+		TEXT("[SimHost.Window] role=%s stepping=%s seconds=%.2f frames=%u frameMs=%s startPhysicsUs=%s endWaits=%u ")
+		TEXT("endWaitUs=%s postPhysicsUs=%s steps=%llu maxStepsPerFrame=%u lostSteps=%llu lostSeconds=%.4f ")
+		TEXT("ignoredTimeSamples=%llu j1Drops=%llu j2Waits=%u j2WaitUs=%s costSamples=%u stepUs=%s preTicks=%u preUs=%s ")
+		TEXT("replayDepth=%s resimRefused=%u j6Drops=%llu shadowRestores=%u shadowRestoreUs=%s shadowRefused=%u ")
+		TEXT("sampleOverflow=%u"),
+		m_isAuthority ? TEXT("Authority") : TEXT("Client"),
+		m_stepsInline ? TEXT("inline") : TEXT("worker"),
+		nowSeconds - counts.startSeconds, counts.frames,
+		*formatPercentiles(samples.frameMs.values, true),
+		*formatPercentiles(samples.startPhysicsUs.values, false),
+		counts.endWaits,
+		*formatPercentiles(samples.endWaitUs.values, false),
+		*formatPercentiles(samples.postPhysicsUs.values, false),
+		static_cast<unsigned long long>(counts.steps), counts.maxStepsPerFrame,
+		static_cast<unsigned long long>(lost.steps - counts.lostAtStart.steps),
+		lost.seconds - counts.lostAtStart.seconds,
+		static_cast<unsigned long long>(scheduler.ignoredTimeSamples() - counts.ignoredAtStart),
+		static_cast<unsigned long long>(m_occupancyCommands.drops() - counts.j1DropsAtStart),
+		counts.j2Waits,
+		*formatPercentiles(samples.j2WaitUs.values, false),
+		costSamples,
+		*formatPercentiles(samples.stepUs.values, false),
+		preTicks,
+		*formatPercentiles(samples.preUs.values, false),
+		*replayDepth, counts.resimRefused,
+		static_cast<unsigned long long>(m_stepCosts.drops() - counts.j6DropsAtStart),
+		restores,
+		*formatPercentiles(samples.shadowRestoreUs.values, false),
+		counts.shadowRefused, overflow);
+
+	startWindow_GameThread(nowSeconds);
 }
 
 void SimulationFrameHostUImpl::runBatch(const StepBatch& batch)
@@ -287,6 +529,7 @@ void SimulationFrameHostUImpl::runBatch(const StepBatch& batch)
 			static_cast<unsigned long long>(batch.first), batch.count);
 	}
 
+	const BatchScopeUImpl batchScope(*this);
 	for (uint32 index = 0u; index < batch.count; ++index)
 		m_owner->runJoltStep_Step(batch.first + index, batch.deadlines[index]);
 }

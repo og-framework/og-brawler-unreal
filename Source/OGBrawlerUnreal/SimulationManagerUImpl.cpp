@@ -30,6 +30,7 @@
 #include "Components/CapsuleComponent.h"
 #include "PhysicsEngine/PhysicsSettings.h"
 #include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
+#include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
 #if !OG_PHYSICS_BACKEND_CHAOS
 #include "Async/UniqueLock.h"
 #include "OGSimulationJolt/JoltLayerTable.h"
@@ -1288,8 +1289,11 @@ void ASimulationManagerUImpl::BeginPlay()
 		TEXT("ROLE-GATED fence at the seed call."),
 		static_cast<int32>(worldNetMode));
 
-	UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Backend] backend=%hs fingerprint=none"),
-		physicsBackendUImpl::kBackendToken);
+	{
+		const std::string_view fingerprint = buildIdentityUImpl::backendFingerprint();
+		UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Backend] backend=%hs fingerprint=%.*hs"),
+			physicsBackendUImpl::kBackendName, static_cast<int32>(fingerprint.size()), fingerprint.data());
+	}
 
 #if OG_PHYSICS_BACKEND_CHAOS
 	m_hysScenePostTickCallbackHandle = physScene->OnPhysScenePostTick.AddWeakLambda(
@@ -1893,6 +1897,14 @@ void ASimulationManagerUImpl::startJoltStepping(UWorld& world, float dt, bool wo
 
 void ASimulationManagerUImpl::runJoltStep_Step(uint64 physicsStep, double stepDeadlineSeconds)
 {
+	checkf(m_frameHost.isRunningBatchOnThisThread(),
+		TEXT("runJoltStep_Step: called outside the frame host's step batch. It is the step driver's only door to ")
+		TEXT("runTick: the frame host's batch is the one caller, so the steps stay serialized in the scheduler's ")
+		TEXT("order and each step's deadline and offset belong to the batch the game thread dispatched."));
+	checkf(!m_joltStepsInline || IsInGameThread(),
+		TEXT("runJoltStep_Step: an inline step ran off the game thread. In the inline mode (the authority, and a client ")
+		TEXT("under og.Sim.RunInline) the game thread owns the step driver: the authority's input release delivers into ")
+		TEXT("UObjects, and the inline access predicates accept the game thread."));
 	JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
 	JoltStepScopeUImpl      stepScope(m_joltRoleBit);
 	m_stepHooks->currentStepDeadline = stepDeadlineSeconds;
@@ -1902,6 +1914,11 @@ void ASimulationManagerUImpl::runJoltStep_Step(uint64 physicsStep, double stepDe
 bool ASimulationManagerUImpl::isJoltWorldMutexHeldOnThisThread() const
 {
 	return (t_joltWorldMutexHeldRoles & m_joltRoleBit) != 0u;
+}
+
+bool ASimulationManagerUImpl::isJoltStepRunningOnThisThread() const
+{
+	return (t_joltStepRunningRoles & m_joltRoleBit) != 0u;
 }
 
 void ASimulationManagerUImpl::publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds)
@@ -2180,8 +2197,10 @@ void ASimulationManagerUImpl::restoreShadowWorld_GameThread()
 		{
 			const double startSeconds = FPlatformTime::Seconds();
 			const bool restored = m_shadowWorld->restoreFromSnapshot(newest->state);
-			const double restoreMs = (FPlatformTime::Seconds() - startSeconds) * 1000.0;
+			const double restoreSeconds = FPlatformTime::Seconds() - startSeconds;
+			const double restoreMs = restoreSeconds * 1000.0;
 			m_shadowRestoredSequence = newest->sequence;
+			m_frameHost.noteShadowRestore_GameThread(restoreSeconds, !restored);
 			if (restored)
 			{
 				++window.restores;
@@ -2359,8 +2378,10 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         const uint32 slot = acquireJoltSlot(*ownerActor);
         BodyId parentBodyId;
         {
+            const double worldMutexWaitStartSeconds = FPlatformTime::Seconds();
             // ⛔G-81  docs/SimulationManagerUImpl-guards.md
             JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
+            m_frameHost.noteWorldMutexWait_GameThread(FPlatformTime::Seconds() - worldMutexWaitStartSeconds);
 
             JoltPhysicsFactory factory(*m_physAdapter, m_joltSlotTemplate, slot, id, JoltPhysicsFactoryOptions{},
                 [this](BodyId body, uint32_t shapeIndex, std::optional<BodyId> rootBodyId)
