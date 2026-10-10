@@ -63,9 +63,12 @@ and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
 > §GATE 1 onwards) records `CollisionCylinder`. Keeping it makes "PIE parity with task 15"
 > a line-for-line comparison instead of a judgement call.
 
-**Consequence.** A rename compiles and runs; it breaks the line-for-line comparison of
-`[PhysicsFactory.AdoptRoot]` lines against the recorded transcripts, and it renames a default
-subobject that serialized instances refer to by name.
+**Consequence.** A rename compiles and runs. In both physics configurations it renames a default
+subobject that serialized instances refer to by name. In the Chaos configuration it also breaks the
+line-for-line comparison of `[PhysicsFactory.AdoptRoot]` lines against the recorded transcripts:
+`ChaosPhysicsFactory`'s adopt-root branch logs the adopted component's name. The Jolt configuration
+adopts nothing, so it prints no such line (og-simulationscheduler-withjolt task 19); task 21 drops
+this half with the Chaos configuration.
 
 ---
 
@@ -78,9 +81,24 @@ where a movement component would be created.
 > CLASS. Locomotion is `brawlerMovementSimulation`; do not re-introduce a second authority
 > over this capsule.
 
-**Consequence.** The capsule is simulated by the physics factory and written every tick by the
-movement sub-simulation (`drivesBody`). A second writer (a movement component, or re-basing the
-class on the engine's walking-pawn base) fights the simulation and the correction path.
+**Consequence.** The capsule has exactly one writer in each physics configuration, and a second
+writer (a movement component, or re-basing the class on the engine's walking-pawn base) fights it:
+
+* **Chaos configuration:** the physics factory adopts and simulates the capsule, the movement
+  sub-simulation writes it every tick (`drivesBody`), and the engine's end-of-physics sync moves the
+  component to the interpolated result. A second writer fights the simulation and the correction
+  path.
+* **Jolt configuration** (og-simulationscheduler-withjolt task 19): the character's body is a Jolt
+  slot body built from the movement descriptor, and this capsule does not simulate
+  (`ASimulationManagerUImpl::tryRegister` switches its physics simulation off). The render sync,
+  `ASimulationManagerUImpl::applyRenderSnapshot_GameThread`, is the only writer: once per frame at the
+  end of physics it teleports the capsule to the interpolated render pose. A second writer moves the
+  capsule between two applies, and the capsule is the mouse-aim plane point and the camera anchor, so
+  the aim fed into the next simulated tick is measured from the wrong point. In a development build
+  the render apply's held check logs a `[SimHost.RenderApply]` MOVED Warning the first time it
+  happens.
+
+Task 21 drops the Chaos bullet with the Chaos configuration.
 
 ---
 

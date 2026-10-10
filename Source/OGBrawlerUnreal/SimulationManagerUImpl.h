@@ -33,6 +33,7 @@
 #include "Async/Mutex.h"
 #include "OGSimulation/StaticGeometry.h"
 #include "OGSimulation/SimulationStepDriver.h"
+#include "OGSimulation/RenderInterpolation.h"
 #include "OGBrawlerUnreal/SimulationFrameHostUImpl.h"
 #include "OGBrawlerUnreal/BrawlerStepHooksUImpl.h"
 #endif
@@ -862,16 +863,40 @@ private:
         double pathCm          = 0.0;
         uint64 firstAppliedStep = 0u;
         uint64 lastAppliedStep  = 0u;
+        uint32 interpolated    = 0u;
+        uint32 newestMode      = 0u;
+        uint32 atNewest        = 0u;
+        uint32 beyondOldest    = 0u;
+        uint32 snaps           = 0u;
+        uint32 maxNextBack     = 0u;
+        uint32 shadowBodies    = 0u;
+        uint32 shadowExact     = 0u;
+        uint32 shadowOutOfTolerance = 0u;
+        double shadowMaxErrorCm     = 0.0;
+        double shadowMaxAngleRad    = 0.0;
+        std::vector<float> frameDisplacementCm;
     };
 
     void publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds);
+    bool buildRenderPoses_GameThread();
+    void syncRenderPoses_GameThread();
     void applyRenderSnapshot_GameThread();
+    void updateVisualizationAtRenderPoses_GameThread();
+    void overwriteShadowPoses_GameThread();
     void checkRenderTargetsHeld_GameThread();
-    void checkRenderApply_GameThread(const RenderSnapshot& newest);
+    void checkRenderApply_GameThread();
+    void traceRenderFrame_GameThread() const;
+    void logRenderApplyWindow_GameThread();
 
     SnapshotChannel<RenderSnapshot, 4>                   m_renderSnapshots;
     std::unordered_map<unsigned int, RenderTargetUImpl>  m_renderTargetsById;
     uint8                                                m_joltRootDeclarationIndex = 0;
+    RenderSnapshot                                       m_renderPoses;
+    bool                                                 m_renderPosesValid = false;
+    RenderInterpolationFrame                             m_renderFrame;
+#if !UE_BUILD_SHIPPING
+    RenderSnapshot                                       m_renderTraceNext;
+#endif
     RenderApplyWindowUImpl                               m_renderApplyWindow;
 
     struct ShadowStateSlotUImpl
@@ -911,6 +936,7 @@ private:
     std::atomic<uint64>                                  m_shadowSlotsPublished{0u};
     std::atomic<uint64>                                  m_shadowSlotsMissing{0u};
     uint64                                               m_shadowRestoredSequence = 0u;
+    uint64                                               m_shadowRestoredFrame    = 0u;
     uint32                                               m_shadowBindCompares     = 0u;
     uint32                                               m_shadowBindMismatches   = 0u;
     mutable ShadowWindowUImpl                            m_shadowWindow;

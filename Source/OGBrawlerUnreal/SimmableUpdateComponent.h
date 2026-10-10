@@ -39,7 +39,6 @@ class DAttackCircle;
 class UInputAction;
 class UEnhancedInputComponent;
 class USimmableUpdateComponent;
-class ChaosTickMapper;
 class UOGBrawlerInputCollectionComponent;
 class ASimulationInputRelay;
 
@@ -55,9 +54,6 @@ public:
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override final;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
-	void setAttackAxisBody(FBodyInstance* attackAxisBody) { m_attackAxisBody = attackAxisBody; }
-	void setAttackAxisBody(FBodyInstanceAsyncPhysicsTickHandle attackAxisPhysicsHandle) { m_attackAxisPhysicshandle = attackAxisPhysicsHandle; }
 
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
@@ -159,9 +155,6 @@ private:
 
 
 	UOGBrawlerInputCollectionComponent* m_ownerInputCollection = nullptr;
-
-	FBodyInstance* m_attackAxisBody;
-	FBodyInstanceAsyncPhysicsTickHandle m_attackAxisPhysicshandle;
 
 
 	dAttackRadialVisualization::State m_visualizationState;

@@ -3,8 +3,6 @@
 
 #include "SimmableUpdateComponent.h"
 #include "OGSimulation/CompilerControl.h"
-#include "Chaos/ChaosEngineInterface.h"
-#include "Chaos/Declares.h"
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
@@ -19,24 +17,13 @@
 #include "Logging/LogMacros.h"
 
 
-#include "Chaos/Box.h"
-#include "Chaos/PBDRigidParticles.h"
-#include "Chaos/Vector.h"
 #include "Math/Vector.h"
 #include "Runtime/Core/Public/Templates/SharedPointer.h"
-#include "Runtime/Experimental/ChaosCore/Public/Chaos/Real.h"
-#include "Runtime/Experimental/ChaosCore/Public/Chaos/Vector.h"
-#include "Runtime/Experimental/ChaosCore/Public/Chaos/Core.h"
 #include "Runtime/Engine/Public/Physics/PhysicsFiltering.h"
-#include "Runtime/PhysicsCore/Public/Chaos/ChaosEngineInterface.h"
-#include "PBDRigidsSolver.h"
-#include "PhysicsProxy/SingleParticlePhysicsProxy.h"
-#include "Runtime/Experimental/Chaos/Public/PhysicsProxy/SingleParticlePhysicsProxy.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
-#include "Physics/Experimental/PhysScene_Chaos.h"
 
 #include "OGBrawlerUnreal/DAttackCircleUImplementation.h"
 #include "OGBrawlerUnreal/DShapeUImplementation.h"

@@ -87,6 +87,9 @@ public:
 	bool isRunningBatchOnThisThread() const;
 	bool isStepRunningOnThisThread() const;
 
+	double hostNowSeconds_GameThread() const;
+	double stepIntervalSeconds_GameThread();
+
 	void applyOccupancyCommands_Step();
 	void releaseDelayedInputsForStep(SimTick authorityTick, uint32_t numSteps);
 	void stampLatencyAfterStep_Step(double stepStartSeconds);

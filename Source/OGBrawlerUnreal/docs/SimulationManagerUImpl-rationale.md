@@ -260,7 +260,7 @@ have a site, and it is `⛔G-16` on `recomputeAndPublishEffectiveInputDelay`.
 | `onConnectionTierReceived` / `Replayed`, `onRelayDelayFloorReceived` / `Replayed`, `onInputRelayHostReady` | GAME | the four replication listeners |
 | `deliverRemoteInput`, `relayRemoteInput`, `noteDelayedInputComponent` | GAME | the transport sinks, driven from the RPC receipt path |
 | `InjectInputs_External` → `onFrameStepsDue_GameThread`, `releaseDelayedInputsForStep`, `reapConnections` (Chaos configuration, §18) | GAME | PROBE A and PROBE 6 once per physics frame, then the drain and the reap (§7) |
-| `OnPostPhysicsStep` | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, §18), the render apply (Jolt configuration, §18), visualization snapshot, timing buffer, score push, latency probe; bound to the scene's post-tick delegate in the Chaos configuration, called by the frame host's `TG_EndPhysics` tick function in the Jolt configuration |
+| `OnPostPhysicsStep` | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, §18), the render interpolation and apply and the shadow overwrite (Jolt configuration, §18), visualization snapshot (with the rendered poses in the Jolt configuration), timing buffer, score push, latency probe; bound to the scene's post-tick delegate in the Chaos configuration, called by the frame host's `TG_EndPhysics` tick function in the Jolt configuration |
 | the frame host's two tick functions → `onFrameStepsDue_GameThread`, the reap (authority), `OnPostPhysicsStep` (Jolt configuration, §18) | GAME | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`SimulationFrameHostUImpl-rationale.md`) |
 | `runJoltStep_Step` → `SimulationStepDriver::runTick` and the four step hooks, including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, §18) | PHYSICS: a worker task on a client, the game thread inline on the authority | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
 | `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides (Chaos configuration, §18) — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
@@ -4237,7 +4237,7 @@ client on a worker task.
 | one step: the world mutex, then the step driver's `runTick` and the four hooks | `runJoltStep_Step`, the step hooks | §18, "The Jolt arm's stepping"; `BrawlerStepHooksUImpl-rationale.md` |
 | the per-frame input work before the steps (PROBE A, PROBE 6), the reap after the inline steps, the drain per authority step | the frame host and the hooks | §7, §8 |
 | the world, its statics, the character slots, the bind and the release | this class | §18, "The Jolt arm's world" |
-| the render publish and the capsule apply | the hooks and this class | §18, "The Jolt arm's render publish and apply" |
+| the render publish, the interpolation and the capsule apply | the hooks and this class | §18, "The Jolt arm's render publish and apply" and "The Jolt arm's render interpolation" |
 | the game-thread shadow world | this class | §18, "The Jolt arm's game-thread shadow world" |
 | the mechanisms between the game thread and the step (J1–J6, the shadow hand-over) | the frame host, the hooks, this class | §1 |
 | the per-window line `[SimHost.Window]`, the step cost and the thread-ownership asserts | the frame host, the hooks, this class | frame-host rationale §8–§9; hooks rationale §3; §8; §18, "The Jolt arm's stepping" |
@@ -4254,9 +4254,9 @@ client on a worker task.
    `afterTick` stamps the step end, publishes the render snapshot (J5), hands the saved state slot to the
    shadow world, and publishes the tick offset (J3).
 3. `TG_EndPhysics`, game thread: wait for earlier frames' task, then `OnPostPhysicsStep`: restore the
-   shadow world from the newest slot, move the capsules to the newest snapshot, then the shared body
-   (the sends, the timing-relay write, the visualization copy, the ring-out score push, the latency
-   probe).
+   shadow world from the newest slot, blend the render pose two steps behind the host time, move the
+   capsules there and write it into the shadow world, then the shared body (the sends, the timing-relay
+   write, the visualization copy with the rendered poses, the ring-out score push, the latency probe).
 
 On the authority step 2 runs inside step 1, on the game thread: its `beforeTick` also releases the
 delayed inputs due for that step, and the reap follows the frame's steps. It has no shadow world, and
@@ -4283,8 +4283,9 @@ the scheduler, the two tick functions). `EndPlay` first unregisters the tick fun
 outstanding step (`⛔G-80`), before any teardown.
 
 **Lines.** `[SimHost.Backend]` (both configurations), `[SimHost.Mode]`, `[SimHost.World]`,
-`[SimHost.Frame]`, `[SimHost.FirstStep]`, `[SimHost.Bind]`, `[SimHost.Shadow]`, the non-shipping
-`[SimHost.RenderApply]` checks, and the per-window `[SimHost.Window]` (§8), on `LogOGSimHost`.
+`[SimHost.Frame]`, `[SimHost.FirstStep]`, `[SimHost.Bind]`, `[SimHost.Shadow]`, `[SimHost.RenderTarget]`,
+the non-shipping `[SimHost.RenderApply]` and `[SimHost.RenderSync]` checks and `[SimHost.RenderTrace]`,
+and the per-window `[SimHost.Window]` (§8), on `LogOGSimHost`.
 
 ## §18 The backend switch — `OG_PHYSICS_BACKEND_CHAOS` (og-simulationscheduler-withjolt task 51)
 
@@ -4578,9 +4579,9 @@ that needs it, the capsule root (design D11, §8).
 * **Apply, on the game thread.** `OnPostPhysicsStep` calls `applyRenderSnapshot_GameThread` before its
   shared body (after the non-shipping hitch sleep and, on a worker client, after the shadow-world restore
   of the next subsection),
-  every frame, on every role. The Chaos configuration has no apply: the engine's sync does that job. The
-  apply peeks the newest snapshot (back 0, no interpolation until task 19, so the capsule leads the
-  Chaos configuration's interpolated pose by one or two steps). For every character in
+  every frame, on every role. The Chaos configuration has no apply: the engine's sync does that job.
+  Task 55's apply peeked the newest snapshot; since task 19 it moves the capsule to the render
+  interpolation's pose (next subsection), and `og.Render.NewestSnapshot` 1 restores the newest. For every character in
   `m_renderTargetsById`, filled on `tryRegister`'s Ready path and erased by `unregisterFromNewFramework`,
   it finds the root body by storage key and `m_joltRootDeclarationIndex` with a binary search over the
   sorted bodies, and moves the actor there with teleport and no sweep (`⛔G-83`). The rotation is the
@@ -4597,12 +4598,13 @@ that needs it, the capsule root (design D11, §8).
     last apply put it. Between two applies lie the next frame's pre-physics group, where the aim is
     read, and the engine's own physics groups; anything that moves the capsule there logs a MOVED
     Warning.
-  * *applied* (`checkRenderApply_GameThread`, after the apply): the capsule equals the newest snapshot's
-    pose; otherwise a MISMATCH Warning.
+  * *applied* (`checkRenderApply_GameThread`, after the apply): the capsule equals the rendered pose
+    (the newest snapshot's until task 19, the interpolated one since); otherwise a MISMATCH Warning.
 
-  The tolerance is 1e-6 cm. The snapshot pose is a float, exact in double; the engine computes the
-  move as a delta from the old location in double, so the result could differ from the target by one
-  rounding of that sum. Measured: every comparison was exact. A window line every 600 frames gives
+  The held tolerance is 1e-6 cm: the snapshot pose is a float, exact in double, and the engine moves
+  the component by a double delta from the old location, so one rounding of that sum is possible.
+  Task 55 measured every comparison exact. Since task 19 the applied tolerance is the engine's own
+  no-move threshold (the render interpolation subsection). A window line every 600 frames gives
   frames, frames with a snapshot, characters, comparisons, missing (a registered character absent from
   the newest snapshot: until the first snapshot published after the character's occupancy push, one or more frames per join on a worker client), exact, out of tolerance, the largest error, held
   comparisons, moved, the largest drift, the path the applied poses travelled (it shows the check
@@ -4676,8 +4678,8 @@ with a second world that only the game thread touches (design D §2.5, "(e) in d
 * **Timing.** A visualization in frame k reads the state restored at frame k − 1's end of physics, as
   Chaos's queries read the copy its end of physics refreshed. Under block mode 0 the newest slot may
   come from a step task still running: a newer state, never a torn one, because only committed slots are
-  handed to the reader. Until task 19 the shadow holds the newest saved tick; task 19 writes the
-  interpolated render pose into its slot bodies after the restore.
+  handed to the reader. Since task 19 the shadow's slot bodies are then set to the interpolated render
+  pose (the render interpolation subsection), so the visualizations query the rendered pose.
 * **The non-shipping window** (`logShadowWindow_GameThread`, `[SimHost.Shadow] role=Client`, every 600
   frames): frames, restores, frames with nothing newer, refusals, slots published and slots missing
   (a tick the step world's ring did not hold), how many restores left the shadow's state hash equal to
@@ -4686,6 +4688,88 @@ with a second world that only the game thread touches (design D §2.5, "(e) in d
   the shadow's or the step's adapters, how often the shadow's predicate ran, how often the step
   adapter's predicate ran on the game thread outside J2 (each such call is also an access assert), the
   bind comparisons and mismatches so far, and the channel's drops.
+
+### The Jolt arm's render interpolation (task 19)
+
+Task 55 moved each capsule to the newest snapshot. At a render rate that is not a multiple of the
+60 Hz step (the first Jolt PIE's clients ran at 100 fps), that apply holds the capsule on some frames
+and moves it a whole step on others: a 3:2 step/hold judder, which the weapon and guard drawings,
+taken from the newest tick, shared. Chaos rendered every body two steps behind, blended between the
+two results that bracket that time (the engine's p.AsyncInterpolationMultiplier, default 2, and its
+results manager). This configuration now does the same (design D §8).
+
+* **The render time** is `hostNowSeconds_GameThread()` minus the delay times
+  `stepIntervalSeconds_GameThread()`: the frame host's time base, the one the snapshots' step
+  deadlines come from (frame-host rationale §4). The delay is `og.Render.InterpolationDelaySteps`,
+  default 2, read every frame and clamped to [0, 2]. Never sim ticks: a Stall step (the tick does not
+  advance) and a Skip step (it jumps) each step the world once and publish a snapshot at their own
+  deadline, so the render clock neither stops nor jumps with the sim clock.
+* **The core (task 67).** The bracket, the alpha and the blend are og-simulation's engine-free
+  `interpolateRenderPoses` (`OGSimulation/RenderInterpolation.h`; its rationale is
+  `RenderInterpolation-rationale.md` in og-simulation's docs). `buildRenderPoses_GameThread` reads the
+  cvars, computes the render time, passes the snap distance, and calls it with J5 and the pose set; it
+  keeps the core's per-frame summary (`m_renderFrame`) for the window line and the trace. Task 19 had
+  the same code in this class; task 67 moved it unchanged, so another game can reuse it.
+* **The bracket** follows Chaos's rule: *next* is the oldest published
+  snapshot whose deadline is at or after the render time, *prev* the one before it, and alpha is the
+  render time's position between their two deadlines. With no snapshot after the render time the
+  newest is drawn (alpha 1, no extrapolation, as Chaos); with none before it (the first frames after a
+  join) the oldest one reachable is. The walk peeks back 0 first (the channel's read-start view) and
+  holds at most two snapshots: when a peeked older snapshot is still at or after the render time, the
+  newer one is released. Two `static_assert`s tie this to J5: the core's demands a channel that keeps
+  its newest snapshot while two are held (four slots, task 44's sizing rule), and this class's keeps
+  the delay clamp within what four slots can bracket (the step before the render time is at most the
+  delay's whole part plus one behind the newest). The headless runs never reached past back 1.
+* **The pose set**, `m_renderPoses`: a copy of *next* whose bodies are blended from *prev* with alpha,
+  positions linearly and rotations (bodies that carry one) by slerp (the core's `blendRenderPoses`).
+  The core snaps above a distance its caller passes; this class passes `kRenderParkSnapCm` (half the
+  projectile pool's park depth, 500 m): a body whose two poses lie farther apart is a pooled
+  projectile being parked or unparked, not motion, so it takes *next*'s pose unblended and counts as a
+  snap; every other jump (a respawn) is blended, as Chaos blends it. A body missing from *prev* (a
+  character that just joined) takes *next*'s pose.
+* **Who reads it**, in `OnPostPhysicsStep`, through `syncRenderPoses_GameThread` (the shadow restore,
+  the apply, the shadow overwrite, in that order) and then the visualization copy:
+  * the capsule of every registered character (the apply, `⛔G-83`), the mouse-aim plane point;
+  * on a worker client, the shadow world (`overwriteShadowPoses_GameThread`): after this frame's
+    restore, every occupied slot body bound in the shadow is set to its pose with the shadow body
+    adapter's `setBodyTransform` (no activation; a body without a rotation keeps the restored one). The
+    target and block-prediction queries of the next frame then find the bodies where they are drawn, as
+    Chaos's queries found its interpolated game-thread copy (design OQ10). A `checkf` demands that the
+    restore ran this frame first: a restore after the overwrite would put the newest tick back;
+  * the visualization copy (`updateVisualizationAtRenderPoses_GameThread`): after
+    `updateVisualizationAll` it writes the pose into the body states of every declaration except the
+    root (the weapon axis, the guard, the projectile pool), so those drawings follow the rendered
+    character. The root body keeps the newest tick (`SimmableUpdateComponent-rationale.md` §10, "The
+    movement draw and the input-history poll").
+  * Inline roles (the authority, and a client under `og.Sim.RunInline`) have no shadow: their
+    visualizations query the step world between steps, at the newest tick. A dedicated server draws
+    nothing.
+* **`og.Render.NewestSnapshot` 1** draws the newest snapshot with no delay and no blend, task 55's
+  apply, to measure the difference.
+* **Not done here:** Chaos's correction smoothing, which task 57 adds as an error term on this pose
+  set, and Chaos's optional second results channel.
+* **The capsule check tolerates the engine's no-move threshold.** The engine does not move a component
+  whose new location equals the old one within its kinda-small number (1e-4 cm) on every axis (the
+  location comparison in the scene component's internal set-world-location-and-rotation). The blended
+  idle hover moves less than that on some frames, so the capsule can stay up to 1e-4 cm per axis from
+  the pose. The *applied* check therefore compares with that same per-axis tolerance and counts exact
+  matches separately; the apply records where the capsule actually ended, so the *held* check still
+  demands 1e-6 cm.
+* **Lines** (`LogOGSimHost`, non-shipping unless stated):
+  * the `[SimHost.RenderApply]` window line also prints `mode` (interp or newest), `delaySteps`,
+    `interpolated` (frames blended between two snapshots), `atNewest` (render time past the newest),
+    `beyondOldest` (render time before the oldest reachable), `snaps`, `maxNextBack`, and `dispCm`, the
+    capsules' per-frame displacement as p50/p99/max;
+  * `[SimHost.RenderSync]`, on a worker client every 600 frames: the shadow bodies overwritten, each
+    read back through the reader the visualizations use, with exact matches, out of tolerance (1e-3 cm
+    or 1e-4 rad: the pose goes from centimetres to Jolt's metres and back through floats), the largest
+    error and angle; a SHADOW Warning on the first one out of tolerance;
+  * `[SimHost.RenderTarget]`, every build, once per character when it registers: whether the capsule
+    simulates physics (the registration switches it off; `OGBrawlerUECharacter-rationale.md` §1.2) and
+    which of the character's components still do (the cosmetic camera-axis sphere);
+  * `og.Render.TraceFrames` 1: one `[SimHost.RenderTrace]` line per frame per character (rendered
+    position, the *next* step's pose, host and render time, the bracket's steps and kinds, alpha), for
+    offline analysis.
 
 ### The build rule until task 21
 

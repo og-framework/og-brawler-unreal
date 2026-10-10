@@ -160,8 +160,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	SimmableUpdateComponent = CreateDefaultSubobject<USimmableUpdateComponent>(TEXT("USimmableUpdateComponent"));
 	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
-	OnCalculateCustomPhysics.BindUObject(this, &AOGBrawlerUECharacter::CustomPhysics);
-
 	this->NetUpdateFrequency = 60.0f;
 	this->MinNetUpdateFrequency = 60.0f;
 
@@ -402,15 +400,6 @@ void AOGBrawlerUECharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	{
 		UE_LOG(LogTemplateCharacter, Error, TEXT("'%s' Failed to find an Enhanced Input component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
 	}
-}
-
-void AOGBrawlerUECharacter::PhysicsTick_Implementation(float SubstepDeltaTime)
-{
-}
-
-void AOGBrawlerUECharacter::CustomPhysics(float DeltaTime, FBodyInstance* BodyInstance)
-{
-	PhysicsTick(DeltaTime);
 }
 
 void AOGBrawlerUECharacter::seedCameraBoomAtIsoRotation()

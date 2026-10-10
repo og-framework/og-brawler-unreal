@@ -110,6 +110,16 @@ the world's delta seconds, exactly what Chaos accumulates. A paused world runs n
 accumulates nothing; slomo and the world's per-frame clamp reach the simulation as they did.
 `m_hostTimeSeconds` starts at 0 with the scheduler.
 
+**The render clock reads the same time base** (og-simulationscheduler-withjolt task 19, design §8).
+The render snapshots carry each step's deadline from this scheduler, so the manager's render
+interpolation takes its render time from two game-thread doors on this host rather than from a
+clock of its own: `hostNowSeconds_GameThread` (`m_hostTimeSeconds`, as accumulated at this frame's
+`TG_StartPhysics`) and `stepIntervalSeconds_GameThread` (the scheduler's step size over its rate
+scale, so a delay of N steps stays N steps when task 38's dilation changes the rate). Both are
+game-thread only, like the scheduler (§9). A second clock (the platform's wall time, say) would drift
+from the deadlines by every paused, clamped or dilated frame, and the interpolation with it (manager
+rationale §18, "The Jolt arm's render interpolation").
+
 **Catch-up cap (design D5).** `og.Sim.MaxCatchUpSteps`, read once in `begin`, default **60 on both
 roles**: Chaos's one-second clamp at 60 Hz, which applies to every role. The scheduler drops the rest
 of a longer frame and counts it as lost time. The value is clamped to `[1, kMaxStepsPerFrame]`
@@ -187,13 +197,16 @@ of the frame into the host's three slices.
 * endWaits and endWaitUs: the frames whose end of physics had to wait for an earlier frame's step
   task, and the time from `endSteps_GameThread` to the start of the post-physics pass (the game thread
   may run other work meanwhile).
-* postPhysicsUs: the manager's `OnPostPhysicsStep` (shadow restore, render apply, the sends, the
-  visualization copy, the score push, the latency probe, and the non-shipping hitch sleep).
+* postPhysicsUs: the manager's `OnPostPhysicsStep` (shadow restore, render interpolation and apply,
+  the shadow overwrite, the sends, the visualization copy and its pose overwrite, the score push, the
+  latency probe, and the non-shipping hitch sleep).
 
 A frame whose frameMs rises while the three slices stay small is slow elsewhere (rendering, other
 actors, an editor). A rising startPhysicsUs on an inline host together with a rising stepUs is the step.
 
-**Steps.** steps (run in the window), maxStepsPerFrame, and from the scheduler the window's lostSteps,
+**Steps.** steps (dispatched in the window: counted when `startSteps_GameThread` runs or dispatches
+the frame's batch, so on a worker client a frame's steps may run, and land in costSamples, in the next
+window; only the totals of steps and costSamples match), maxStepsPerFrame, and from the scheduler the window's lostSteps,
 lostSeconds and ignoredTimeSamples (deltas of its running totals `lostTime()` and
 `ignoredTimeSamples()`). A game-thread hitch shows as a frame with a catch-up burst (maxStepsPerFrame
 close to the hitch over `dt`) and no lost steps below the cap (§4). A frame's steps and frame period
@@ -258,6 +271,9 @@ protects.
   only the batch it was handed, J4). A later scheduler door, such as the time-dilation port's rate
   change, goes through the same accessor; in M2's thread mode the accessor's check follows the scheduler
   to the runner thread.
+* **The render clock's doors are the game thread's.** `stepIntervalSeconds_GameThread` reads the
+  scheduler through `schedulerOnOwningThread()`; `hostNowSeconds_GameThread` reads `m_hostTimeSeconds`,
+  which `TG_StartPhysics` writes, and `checkf`s the game thread itself (§4).
 * **The driver stays the manager's, asserted at its two doors.** The driver needs the manager's private
   manager type, so it is a manager member (task 54's review, A1), and nothing reaches `m_stepDriver`
   after `startJoltStepping` builds it except two doors. `runJoltStep_Step` `checkf`s that this thread

@@ -305,6 +305,20 @@ void SimulationFrameHostUImpl::pushStepCost_Step(const StepCostSampleUImpl& samp
 	m_stepCosts.tryPush(sample);
 }
 
+double SimulationFrameHostUImpl::hostNowSeconds_GameThread() const
+{
+	checkf(IsInGameThread(),
+		TEXT("SimulationFrameHostUImpl::hostNowSeconds_GameThread: the host time is the game thread's accumulated world ")
+		TEXT("delta, written at TG_StartPhysics; read off the game thread it races that write."));
+	return m_hostTimeSeconds;
+}
+
+double SimulationFrameHostUImpl::stepIntervalSeconds_GameThread()
+{
+	const SimulationScheduler& scheduler = schedulerOnOwningThread();
+	return scheduler.config().dtSeconds / scheduler.rateScale();
+}
+
 SimulationScheduler& SimulationFrameHostUImpl::schedulerOnOwningThread()
 {
 	checkf(IsInGameThread(),

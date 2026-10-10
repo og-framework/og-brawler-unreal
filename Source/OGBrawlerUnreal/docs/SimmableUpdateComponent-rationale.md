@@ -516,6 +516,18 @@ tick" and "stale by up to one 60 Hz tick"; neither held.) The State and DerivedS
 and the body pose describe one tick and can be combined — which the servo-error arithmetic in
 `BrawlerMovementVisualization.h` rests on. The call is a pure reader: every argument is a `const&`.
 
+**In the Jolt configuration the copy's attached bodies carry the rendered pose** (og-simulationscheduler-withjolt
+task 19). Right after the copy, the manager's `updateVisualizationAtRenderPoses_GameThread` writes the
+render interpolation's pose (two steps behind the host time, the pose the capsule is moved to) into the
+copy's body states of every declaration except the root: the radial weapon axis, the guard and the
+projectile pool. So the weapon, guard and projectile passes draw where the rendered character is, not
+one or two steps ahead of it. The root (movement) body is left at the newest tick on purpose: the visible
+character is the capsule and its mesh, which the render sync already moved, and this movement draw's
+outline is documented as the simulation's belief, built from a body pose and a probe reading of the same
+tick. Every other `State` and `DerivedState` value in the copy stays the newest tick's. In the Chaos
+configuration the copy is unchanged (`SimulationManagerUImpl-rationale.md` §18, "The Jolt arm's render
+interpolation").
+
 **The movement cvar is read per frame, deliberately (guard G-26).** Task 16 made `StaticData` cvars
 read once, at construction, so a tunable cannot move under a running session and put two peers on
 different numbers. A viz cvar is the opposite case: it feeds nothing simulated, and its value is that a
@@ -650,6 +662,7 @@ PARAMETER" (§6). Everything else is here.
 | header: `m_inputRelayHost`, detached rings, `m_hasLocalInputProvider` | §6; G-12; F-25-5 |
 | header: `UObject` constructor doc, `//Physics`, `//Visualization`, "To add mapping context" | deleted as labels |
 | header: two commented-out physics-state overrides | deleted; recorded in §2 |
+| header: the two attack-axis body setters, the attack-axis body pointer and async-physics handle (no caller in either physics configuration), the Chaos tick-mapper forward declaration, and the `.cpp`'s Chaos includes | deleted by og-simulationscheduler-withjolt task 19 (design D §3.4); the component names no physics backend (§10, "The visualization adapters come from the manager") |
 
 ### Carried header prose (verified before the move)
 

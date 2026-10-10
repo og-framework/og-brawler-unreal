@@ -11,7 +11,6 @@
 #include "DVolume/DVolumeAsset.h"
 #include "OGBrawler/DAttackCircle.h"
 #include "OGBrawler/DAttackCamera.h"
-#include "PhysicsEngine/PhysicsConstraintComponent.h"
 
 #include "Runtime/Engine/Classes/Components/SplineComponent.h"
 #include "ProceduralMeshComponent/Public/ProceduralMeshComponent.h"
@@ -105,9 +104,6 @@ class AOGBrawlerUECharacter : public APawn
 
 public:
 	UPROPERTY(Category = "Weapon", VisibleAnywhere, BlueprintReadWrite)
-	UPhysicsConstraintComponent* m_weaponConstraint;
-
-	UPROPERTY(Category = "Weapon", VisibleAnywhere, BlueprintReadWrite)
 	USphereComponent* m_cameraAxis;
 	
 	UPROPERTY(Category = "Weapon", EditAnywhere)
@@ -132,13 +128,6 @@ public:
 
 	float m_currentAttackAngle;
 	float m_attackTimer;
-
-	UFUNCTION(BlueprintNativeEvent)
-	void PhysicsTick(float SubstepDeltaTime);
-	virtual void PhysicsTick_Implementation(float SubstepDeltaTime);
-
-	FCalculateCustomPhysics OnCalculateCustomPhysics;
-	void CustomPhysics(float DeltaTime, FBodyInstance* BodyInstance);
 
 	AOGBrawlerUECharacter();
 

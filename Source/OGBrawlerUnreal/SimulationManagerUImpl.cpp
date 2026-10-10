@@ -90,6 +90,30 @@ namespace
 		TEXT("Read once, at the simulation manager's BeginPlay. The authority always steps inline."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<float> CVarRenderInterpolationDelaySteps(
+		TEXT("og.Render.InterpolationDelaySteps"),
+		2.f,
+		TEXT("Jolt configuration only. How many physics steps behind the host time the characters are rendered, ")
+		TEXT("interpolated between the two published steps that bracket that time by their step deadlines. 2 matches ")
+		TEXT("Chaos's p.AsyncInterpolationMultiplier. Clamped to [0, 2]: the render snapshot channel keeps four steps."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<int32> CVarRenderNewestSnapshot(
+		TEXT("og.Render.NewestSnapshot"),
+		0,
+		TEXT("Jolt configuration only, for comparison. 1 = render the newest published step, with no interpolation and ")
+		TEXT("no delay."),
+		ECVF_Default);
+
+#if !UE_BUILD_SHIPPING
+	TAutoConsoleVariable<int32> CVarRenderTraceFrames(
+		TEXT("og.Render.TraceFrames"),
+		0,
+		TEXT("Jolt configuration, non-shipping. 1 = log every frame's rendered capsule position per character, with the ")
+		TEXT("render time and the bracketing steps ([SimHost.RenderTrace] on LogOGSimHost, Log)."),
+		ECVF_Default);
+#endif
+
 	const std::vector<UEStaticCategoryChannel>& brawlerCategoryChannels()
 	{
 		static const std::vector<UEStaticCategoryChannel> channels{
@@ -257,20 +281,25 @@ namespace
 	{
 	};
 
-	template <size_t MaxBodies>
-	const RenderBody* findRenderBody(const RenderSnapshotT<MaxBodies>& snapshot, uint32_t simulatableId,
-		uint8_t declarationIndex)
-	{
-		RenderBody key;
-		key.simulatableId    = simulatableId;
-		key.declarationIndex = declarationIndex;
-		const RenderBody* const end = snapshot.bodies.data() + snapshot.bodyCount;
-		const RenderBody* const found = std::lower_bound(snapshot.bodies.data(), end, key, &renderSnapshotDetail::keyLess);
-		return found != end && renderSnapshotDetail::sameKey(*found, key) ? found : nullptr;
-	}
+	constexpr double kRenderMaxInterpolationDelaySteps = 2.0;
+	constexpr float  kRenderParkSnapCm = -0.5f * brawlerProjectileSimulation::kParkZ;
 
 #if !UE_BUILD_SHIPPING
+	const TCHAR* stepKindText(StepKind kind)
+	{
+		switch (kind)
+		{
+		case StepKind::Normal:     return TEXT("Normal");
+		case StepKind::Stall:      return TEXT("Stall");
+		case StepKind::Skip:       return TEXT("Skip");
+		case StepKind::HardResync: return TEXT("HardResync");
+		}
+		return TEXT("?");
+	}
+
 	constexpr double kRenderApplyToleranceCm  = 1.0e-6;
+	constexpr double kShadowPoseToleranceCm   = 1.0e-3;
+	constexpr double kShadowPoseToleranceRad  = 1.0e-4;
 	constexpr uint32 kRenderApplyWindowFrames = 600u;
 	constexpr uint32 kShadowWindowFrames      = 600u;
 #endif
@@ -1606,9 +1635,7 @@ void ASimulationManagerUImpl::OnPostPhysicsStep()
 #endif
 
 #if !OG_PHYSICS_BACKEND_CHAOS
-	if (m_shadowWorld.has_value())
-		restoreShadowWorld_GameThread();
-	applyRenderSnapshot_GameThread();
+	syncRenderPoses_GameThread();
 #endif
 
 	onPostSimulationGameThread();
@@ -1619,7 +1646,11 @@ void ASimulationManagerUImpl::OnPostPhysicsStep()
 			ServerTickClock::writeToSyncedBuffer(getServerClock(), relay->editBuffer(), 0);
 	}
 
+#if OG_PHYSICS_BACKEND_CHAOS
 	updateVisualizationAll(m_storage);
+#else
+	updateVisualizationAtRenderPoses_GameThread();
+#endif
 
 	if (m_manager.has_value() && m_systemsExec.has_value() && !m_manager->runsPrediction())
 	{
@@ -1945,6 +1976,34 @@ void ASimulationManagerUImpl::publishRenderSnapshot_Step(const TickOutcome& outc
 	m_renderSnapshots.commit();
 }
 
+bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
+{
+	using RenderChannel = decltype(m_renderSnapshots);
+	static_assert(kRenderMaxInterpolationDelaySteps <= static_cast<double>(RenderChannel::kCapacity - 2),
+		"og.Render.InterpolationDelaySteps is clamped to what the J5 channel can bracket: the step before the render time is "
+		"at most floor(delay) + 1 snapshots behind the newest, so a delay of N - 2 steps is the most an N-slot channel "
+		"reaches. Raise the channel's N with the clamp (task 19).");
+
+	RenderInterpolationParams params;
+	params.newestOnly = CVarRenderNewestSnapshot.GetValueOnGameThread() != 0;
+	params.snapDistanceCm = kRenderParkSnapCm;
+	const double delaySteps = FMath::Clamp(static_cast<double>(CVarRenderInterpolationDelaySteps.GetValueOnGameThread()),
+		0.0, kRenderMaxInterpolationDelaySteps);
+	params.renderTimeSeconds =
+		m_frameHost.hostNowSeconds_GameThread() - delaySteps * m_frameHost.stepIntervalSeconds_GameThread();
+
+	RenderSnapshot* nextCopy = nullptr;
+#if !UE_BUILD_SHIPPING
+	if (CVarRenderTraceFrames.GetValueOnGameThread() != 0)
+		nextCopy = &m_renderTraceNext;
+#endif
+	if (!interpolateRenderPoses(m_renderSnapshots, params, m_renderPoses, m_renderFrame, nextCopy))
+		return false;
+
+	m_renderPosesValid = true;
+	return true;
+}
+
 void ASimulationManagerUImpl::applyRenderSnapshot_GameThread()
 {
 #if !UE_BUILD_SHIPPING
@@ -1952,12 +2011,12 @@ void ASimulationManagerUImpl::applyRenderSnapshot_GameThread()
 	checkRenderTargetsHeld_GameThread();
 #endif
 
-	if (const RenderSnapshot* const newest = m_renderSnapshots.peekNewest(0))
+	if (buildRenderPoses_GameThread())
 	{
 		for (auto& [id, target] : m_renderTargetsById)
 		{
 			AOGBrawlerUECharacter* const character = target.character.Get();
-			const RenderBody* const body = findRenderBody(*newest, id, m_joltRootDeclarationIndex);
+			const RenderBody* const body = findRenderBody(m_renderPoses, id, m_joltRootDeclarationIndex);
 			if (character == nullptr || body == nullptr)
 				continue;
 
@@ -1973,42 +2032,129 @@ void ASimulationManagerUImpl::applyRenderSnapshot_GameThread()
 #if !UE_BUILD_SHIPPING
 			if (target.applied)
 			{
-				m_renderApplyWindow.pathCm += FVector::Dist(target.appliedCm, location);
+				const double displacementCm = FVector::Dist(target.appliedCm, character->GetActorLocation());
+				m_renderApplyWindow.pathCm += displacementCm;
+				m_renderApplyWindow.frameDisplacementCm.push_back(static_cast<float>(displacementCm));
 			}
 			else
 			{
 				UE_LOG(LogOGSimHost, Log,
 					TEXT("[SimHost.RenderApply] first role=%s id=%u from=(%.3f,%.3f,%.3f) to=(%.3f,%.3f,%.3f) physicsStep=%llu tick=%u"),
 					runsPrediction() ? TEXT("Client") : TEXT("Authority"), id, before.X, before.Y, before.Z,
-					location.X, location.Y, location.Z, static_cast<unsigned long long>(newest->physicsStep),
-					static_cast<uint32>(newest->tick));
+					location.X, location.Y, location.Z, static_cast<unsigned long long>(m_renderPoses.physicsStep),
+					static_cast<uint32>(m_renderPoses.tick));
 			}
 #endif
-			target.appliedCm = location;
+			target.appliedCm = character->GetActorLocation();
 			target.applied   = true;
 		}
 
 #if !UE_BUILD_SHIPPING
-		checkRenderApply_GameThread(*newest);
+		checkRenderApply_GameThread();
+		traceRenderFrame_GameThread();
 #endif
-		m_renderSnapshots.release(newest);
 	}
 
 #if !UE_BUILD_SHIPPING
 	if (m_renderApplyWindow.frames >= kRenderApplyWindowFrames)
-	{
-		const RenderApplyWindowUImpl& window = m_renderApplyWindow;
-		UE_LOG(LogOGSimHost, Log,
-			TEXT("[SimHost.RenderApply] role=%s frames=%u appliedFrames=%u characters=%d applied=%u missing=%u exact=%u ")
-			TEXT("outOfTolerance=%u maxErrorCm=%.9f held=%u moved=%u maxHeldDriftCm=%.9f pathCm=%.3f steps=[%llu,%llu] drops=%llu"),
-			runsPrediction() ? TEXT("Client") : TEXT("Authority"), window.frames, window.appliedFrames,
-			static_cast<int32>(m_renderTargetsById.size()), window.applied, window.missing, window.exact,
-			window.outOfTolerance, window.maxErrorCm, window.held, window.moved, window.maxHeldDriftCm, window.pathCm,
-			static_cast<unsigned long long>(window.firstAppliedStep), static_cast<unsigned long long>(window.lastAppliedStep),
-			static_cast<unsigned long long>(m_renderSnapshots.drops()));
-		m_renderApplyWindow = RenderApplyWindowUImpl{};
-	}
+		logRenderApplyWindow_GameThread();
 #endif
+}
+
+void ASimulationManagerUImpl::syncRenderPoses_GameThread()
+{
+	if (m_shadowWorld.has_value())
+		restoreShadowWorld_GameThread();
+	applyRenderSnapshot_GameThread();
+	overwriteShadowPoses_GameThread();
+}
+
+void ASimulationManagerUImpl::updateVisualizationAtRenderPoses_GameThread()
+{
+	updateVisualizationAll(m_storage);
+	if (!m_renderPosesValid)
+		return;
+
+	m_storage.forEachSimulatable<SimulatableBrawler>([this](unsigned int id, SimulatableBrawler& simulatable)
+	{
+		auto& vizState = simulatable.editVizState().editState();
+		uint8 declarationIndex = 0;
+		simulatable.getPhysicsComposite().forEach([&](const auto& declaration)
+		{
+			using D = std::decay_t<decltype(declaration)>;
+			using S = typename D::StateType;
+			const uint8 index = declarationIndex++;
+			const RenderBody* const pose = findRenderBody(m_renderPoses, id, index);
+			if (pose == nullptr || index == m_joltRootDeclarationIndex)
+				return;
+
+			auto& bodyState = D::bodyStateOf(vizState.template edit<S>());
+			bodyState.position = pose->positionCm;
+			if constexpr (std::is_same_v<std::remove_cvref_t<decltype(bodyState)>, PhysicsBodyState>)
+				bodyState.rotation = pose->rotation;
+		});
+	});
+}
+
+void ASimulationManagerUImpl::overwriteShadowPoses_GameThread()
+{
+	if (!m_shadowWorld.has_value() || !m_renderPosesValid)
+		return;
+	checkf(m_shadowRestoredFrame == GFrameCounter,
+		TEXT("overwriteShadowPoses_GameThread: the shadow world was not restored this frame before the render poses were ")
+		TEXT("written into it. The restore loads the newest saved tick into every slot body, so a restore after this ")
+		TEXT("overwrite would leave the visualizations querying the newest tick instead of the rendered pose."));
+
+	const JoltBodyBindTable& shadowBindTable = m_shadowBodyAdapter->bindTable();
+	for (const auto& [id, target] : m_renderTargetsById)
+	{
+		const AOGBrawlerUECharacter* const character = target.character.Get();
+		if (character == nullptr)
+			continue;
+		const auto slot = m_joltSlotByOwner.find(character);
+		if (slot == m_joltSlotByOwner.end())
+			continue;
+
+		for (uint32 declarationIndex = 0u; declarationIndex < m_shadowWorld->bodiesPerSlot(); ++declarationIndex)
+		{
+			const RenderBody* const pose = findRenderBody(m_renderPoses, id, static_cast<uint8>(declarationIndex));
+			if (pose == nullptr)
+				continue;
+			const BodyId body = JoltPhysicsBodyAdapter::bodyIdOf(m_shadowWorld->slotBodyId(slot->second, declarationIndex));
+			if (!shadowBindTable.isBound(body))
+				continue;
+
+			glm::mat4 transform = pose->hasRotation != 0u ? glm::mat4_cast(pose->rotation)
+			                                              : m_shadowBodyAdapter->getBodyTransform(body);
+			transform[3] = glm::vec4(pose->positionCm, 1.f);
+			m_shadowBodyAdapter->setBodyTransform(body, transform);
+
+#if !UE_BUILD_SHIPPING
+			RenderApplyWindowUImpl& window = m_renderApplyWindow;
+			const glm::mat4 queried = m_shadowReader->getBodyTransform(body);
+			const double errorCm = glm::distance(glm::vec3(queried[3]), pose->positionCm);
+			double angleRad = 0.0;
+			if (pose->hasRotation != 0u)
+			{
+				const glm::dquat queriedRotation(glm::normalize(glm::quat_cast(glm::mat3(queried))));
+				const glm::dquat relative = glm::conjugate(glm::dquat(pose->rotation)) * queriedRotation;
+				angleRad = 2.0 * FMath::Atan2(glm::length(glm::dvec3(relative.x, relative.y, relative.z)), FMath::Abs(relative.w));
+			}
+			++window.shadowBodies;
+			window.shadowExact += errorCm == 0.0 ? 1u : 0u;
+			window.shadowMaxErrorCm  = FMath::Max(window.shadowMaxErrorCm, errorCm);
+			window.shadowMaxAngleRad = FMath::Max(window.shadowMaxAngleRad, angleRad);
+			if ((errorCm > kShadowPoseToleranceCm || angleRad > kShadowPoseToleranceRad) && window.shadowOutOfTolerance++ == 0u)
+			{
+				UE_LOG(LogOGSimHost, Warning,
+					TEXT("[SimHost.RenderSync] SHADOW id=%u declaration=%u queried=(%.6f,%.6f,%.6f) rendered=(%.6f,%.6f,%.6f) ")
+					TEXT("errorCm=%.9f angleRad=%.9f: the shadow world the visualizations query is not at the rendered pose"),
+					id, declarationIndex, queried[3].x, queried[3].y, queried[3].z, pose->positionCm.x, pose->positionCm.y,
+					pose->positionCm.z, errorCm, angleRad);
+			}
+#endif
+		}
+	}
 }
 
 #if !UE_BUILD_SHIPPING
@@ -2035,17 +2181,24 @@ void ASimulationManagerUImpl::checkRenderTargetsHeld_GameThread()
 	}
 }
 
-void ASimulationManagerUImpl::checkRenderApply_GameThread(const RenderSnapshot& newest)
+void ASimulationManagerUImpl::checkRenderApply_GameThread()
 {
 	RenderApplyWindowUImpl& window = m_renderApplyWindow;
+	const RenderInterpolationFrame& bracket = m_renderFrame;
 	if (window.appliedFrames++ == 0u)
-		window.firstAppliedStep = newest.physicsStep;
-	window.lastAppliedStep = newest.physicsStep;
+		window.firstAppliedStep = m_renderPoses.physicsStep;
+	window.lastAppliedStep = m_renderPoses.physicsStep;
+	window.interpolated += bracket.hasPrev ? 1u : 0u;
+	window.newestMode   += bracket.newestOnly ? 1u : 0u;
+	window.atNewest     += bracket.atNewest ? 1u : 0u;
+	window.beyondOldest += bracket.beyondOldest ? 1u : 0u;
+	window.snaps        += bracket.snaps;
+	window.maxNextBack   = FMath::Max(window.maxNextBack, bracket.nextBack);
 
 	for (const auto& [id, target] : m_renderTargetsById)
 	{
 		const AOGBrawlerUECharacter* const character = target.character.Get();
-		const RenderBody* const body = findRenderBody(newest, id, m_joltRootDeclarationIndex);
+		const RenderBody* const body = findRenderBody(m_renderPoses, id, m_joltRootDeclarationIndex);
 		if (character == nullptr || body == nullptr)
 		{
 			++window.missing;
@@ -2058,14 +2211,81 @@ void ASimulationManagerUImpl::checkRenderApply_GameThread(const RenderSnapshot& 
 		++window.applied;
 		window.exact += planePoint == pose ? 1u : 0u;
 		window.maxErrorCm = FMath::Max(window.maxErrorCm, errorCm);
-		if (errorCm > kRenderApplyToleranceCm && window.outOfTolerance++ == 0u)
+		if (!planePoint.Equals(pose, UE_KINDA_SMALL_NUMBER) && window.outOfTolerance++ == 0u)
 		{
 			UE_LOG(LogOGSimHost, Warning,
-				TEXT("[SimHost.RenderApply] MISMATCH role=%s id=%u capsule=(%.6f,%.6f,%.6f) snapshot=(%.6f,%.6f,%.6f) errorCm=%.9f physicsStep=%llu"),
+				TEXT("[SimHost.RenderApply] MISMATCH role=%s id=%u capsule=(%.6f,%.6f,%.6f) rendered=(%.6f,%.6f,%.6f) errorCm=%.9f physicsStep=%llu"),
 				runsPrediction() ? TEXT("Client") : TEXT("Authority"), id, planePoint.X, planePoint.Y, planePoint.Z,
-				pose.X, pose.Y, pose.Z, errorCm, static_cast<unsigned long long>(newest.physicsStep));
+				pose.X, pose.Y, pose.Z, errorCm, static_cast<unsigned long long>(m_renderPoses.physicsStep));
 		}
 	}
+}
+
+void ASimulationManagerUImpl::traceRenderFrame_GameThread() const
+{
+	if (CVarRenderTraceFrames.GetValueOnGameThread() == 0)
+		return;
+
+	const RenderInterpolationFrame& bracket = m_renderFrame;
+	for (const auto& [id, target] : m_renderTargetsById)
+	{
+		const RenderBody* const nextBody = findRenderBody(m_renderTraceNext, id, m_joltRootDeclarationIndex);
+		if (!target.applied || nextBody == nullptr)
+			continue;
+		UE_LOG(LogOGSimHost, Log,
+			TEXT("[SimHost.RenderTrace] role=%s frame=%llu id=%u pos=(%.4f,%.4f,%.4f) nextPos=(%.4f,%.4f,%.4f) host=%.6f ")
+			TEXT("render=%.6f mode=%s prev=%llu/%s next=%llu/%s back=%u alpha=%.4f newest=%llu"),
+			runsPrediction() ? TEXT("Client") : TEXT("Authority"), static_cast<unsigned long long>(GFrameCounter), id,
+			target.appliedCm.X, target.appliedCm.Y, target.appliedCm.Z,
+			nextBody->positionCm.x, nextBody->positionCm.y, nextBody->positionCm.z,
+			m_frameHost.hostNowSeconds_GameThread(), bracket.renderTimeSeconds,
+			bracket.newestOnly ? TEXT("newest") : TEXT("interp"),
+			static_cast<unsigned long long>(bracket.prevStep), bracket.hasPrev ? stepKindText(bracket.prevKind) : TEXT("-"),
+			static_cast<unsigned long long>(bracket.nextStep), stepKindText(bracket.nextKind), bracket.nextBack,
+			bracket.alpha, static_cast<unsigned long long>(bracket.newestStep));
+	}
+}
+
+void ASimulationManagerUImpl::logRenderApplyWindow_GameThread()
+{
+	RenderApplyWindowUImpl& window = m_renderApplyWindow;
+	FString displacement = TEXT("-");
+	if (!window.frameDisplacementCm.empty())
+	{
+		std::vector<float>& values = window.frameDisplacementCm;
+		std::sort(values.begin(), values.end());
+		const uint32 n = static_cast<uint32>(values.size());
+		displacement = FString::Printf(TEXT("%.4f/%.4f/%.4f"), values[latencyBudget::nearestRankIndex(n, 500u)],
+			values[latencyBudget::nearestRankIndex(n, 990u)], values.back());
+	}
+
+	UE_LOG(LogOGSimHost, Log,
+		TEXT("[SimHost.RenderApply] role=%s frames=%u appliedFrames=%u characters=%d applied=%u missing=%u exact=%u ")
+		TEXT("outOfTolerance=%u maxErrorCm=%.9f held=%u moved=%u maxHeldDriftCm=%.9f pathCm=%.3f steps=[%llu,%llu] drops=%llu ")
+		TEXT("mode=%s delaySteps=%.2f interpolated=%u atNewest=%u beyondOldest=%u snaps=%u maxNextBack=%u dispCm=%s"),
+		runsPrediction() ? TEXT("Client") : TEXT("Authority"), window.frames, window.appliedFrames,
+		static_cast<int32>(m_renderTargetsById.size()), window.applied, window.missing, window.exact,
+		window.outOfTolerance, window.maxErrorCm, window.held, window.moved, window.maxHeldDriftCm, window.pathCm,
+		static_cast<unsigned long long>(window.firstAppliedStep), static_cast<unsigned long long>(window.lastAppliedStep),
+		static_cast<unsigned long long>(m_renderSnapshots.drops()),
+		window.newestMode > 0u ? TEXT("newest") : TEXT("interp"),
+		FMath::Clamp(static_cast<double>(CVarRenderInterpolationDelaySteps.GetValueOnGameThread()), 0.0,
+			kRenderMaxInterpolationDelaySteps),
+		window.interpolated, window.atNewest, window.beyondOldest, window.snaps, window.maxNextBack, *displacement);
+
+	if (m_shadowWorld.has_value())
+	{
+		UE_LOG(LogOGSimHost, Log,
+			TEXT("[SimHost.RenderSync] role=Client frames=%u shadowBodies=%u shadowExact=%u shadowOutOfTolerance=%u ")
+			TEXT("shadowMaxErrorCm=%.6f shadowMaxAngleRad=%.6f"),
+			window.frames, window.shadowBodies, window.shadowExact, window.shadowOutOfTolerance, window.shadowMaxErrorCm,
+			window.shadowMaxAngleRad);
+	}
+
+	std::vector<float> samples = std::move(window.frameDisplacementCm);
+	samples.clear();
+	window = RenderApplyWindowUImpl{};
+	window.frameDisplacementCm = std::move(samples);
 }
 #endif
 
@@ -2190,6 +2410,7 @@ void ASimulationManagerUImpl::restoreShadowWorld_GameThread()
 {
 	ShadowWindowUImpl& window = m_shadowWindow;
 	++window.frames;
+	m_shadowRestoredFrame = GFrameCounter;
 
 	if (const ShadowStateSlotUImpl* const newest = m_shadowSlots.peekNewest(0))
 	{
@@ -2519,7 +2740,26 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
         checkf(slot != m_joltSlotByOwner.end(),
                TEXT("tryRegister: id=%u is Ready but its owner holds no Jolt slot; the first pass binds one."), id);
         m_frameHost.pushOccupancy_GameThread(slot->second, true);
-        m_renderTargetsById[id] = RenderTargetUImpl{ Cast<AOGBrawlerUECharacter>(owner.GetOwner()) };
+        AOGBrawlerUECharacter* const character = Cast<AOGBrawlerUECharacter>(owner.GetOwner());
+        m_renderTargetsById[id] = RenderTargetUImpl{ character };
+        if (character != nullptr)
+        {
+            UCapsuleComponent* const capsule = character->GetCapsuleComponent();
+            capsule->SetSimulatePhysics(false);
+
+            TArray<UPrimitiveComponent*> primitives;
+            character->GetComponents<UPrimitiveComponent>(primitives);
+            FString simulating;
+            for (const UPrimitiveComponent* primitive : primitives)
+            {
+                if (primitive->IsSimulatingPhysics())
+                    simulating += (simulating.IsEmpty() ? TEXT("") : TEXT(",")) + primitive->GetName();
+            }
+            UE_LOG(LogOGSimHost, Log,
+                TEXT("[SimHost.RenderTarget] role=%s id=%u capsuleSimulatesPhysics=%d simulatingComponents=[%s]"),
+                runsPrediction() ? TEXT("Client") : TEXT("Authority"), id, capsule->IsSimulatingPhysics() ? 1 : 0,
+                *simulating);
+        }
     }
 #endif
 

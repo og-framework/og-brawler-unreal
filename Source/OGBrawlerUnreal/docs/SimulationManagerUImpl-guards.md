@@ -1278,8 +1278,9 @@ breaks the prohibition with no compile error.
 
 **The prohibition** (og-simulationscheduler-withjolt task 55, design D11 and §8). ⛔ Do not pass
 true for the sweep argument, and do not replace the call with one that sweeps or with a
-non-teleport move. The capsule root is set to the newest render snapshot's pose exactly, with the
-engine's TeleportPhysics teleport type.
+non-teleport move. The capsule root is set to the render pose, with the engine's TeleportPhysics
+teleport type: the newest render snapshot's pose in task 55, the pose interpolated two steps behind the
+host time since task 19 (rationale §18, "The Jolt arm's render interpolation").
 
 **The consequence.** The pose comes from the step world, which has already resolved every contact. A
 swept move tests the capsule again against the engine's own collision scene (the arena and the other
