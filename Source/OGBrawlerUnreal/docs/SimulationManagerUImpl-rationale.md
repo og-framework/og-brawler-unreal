@@ -286,7 +286,7 @@ other side: physics-thread-only, and its correctness rests on nothing else touch
 The Jolt configuration replaces Chaos's implicit marshalling (its game-thread body API, its
 scene-query copy, the tick mapper's atomic, its marshalled input struct, its end-of-physics body
 sync) with five host mechanisms
-(design D §2.4), and Chaos's game-thread copy of the physics scene with a shadow world on a worker client (design D §2.5, "(e) in detail"). A sixth, J6, replaces nothing: it carries the step's measured cost to the game thread for `[SimHost.Window]` (§8). None is a new data crossing between og-simulation structures, so og-simulation's
+(design D §2.4), and Chaos's game-thread copy of the physics scene with a shadow world on a worker client (design D §2.5, "(e) in detail"). A sixth, J6, replaces nothing: it carries the step's measured cost to the game thread for `[SimHost.Window]` (§8). A seventh, J7, replaces Chaos's hand-over of a resimulation's error with its results (task 57). None is a new data crossing between og-simulation structures, so og-simulation's
 threading-crossings table is unchanged; they are this class's own boundary.
 
 | | what | direction | mechanism | why it is safe |
@@ -295,7 +295,8 @@ threading-crossings table is unchanged; they are this class's own boundary.
 | **J2** | the world mutex `m_joltWorldMutex` | GT ↔ step | a UE::FMutex held by `runJoltStep_Step` for each whole step and by the game thread around `tryRegister`'s bind pass and the world build; the bind's wait for it is timed into `[SimHost.Window]` (§8) | the bind needs synchronous ids, so it locks instead of queuing (design D7); the game thread never waits for a step task while holding it (frame-host G-05); the query adapter's access predicate checks it (§18) |
 | **J3** | the published tick offset | step → GT | the frame host's `std::atomic<int64_t>`, stored relaxed in `afterTick` as `tick − physicsStep`, loaded relaxed at `TG_StartPhysics` and added to the dispatch counter | the mapper's own semantics (a lone relaxed offset, read on the game thread); no `+ 1` (§9, frame-host G-03) |
 | **J4** | the frame's step batch | GT → task | first step, count and deadlines copied into the task by value | the step code never touches the game-thread-owned scheduler |
-| **J5** | the render snapshot | step → GT | `m_renderSnapshots`, a `SnapshotChannel<RenderSnapshot, 4>`: `afterTick` fills a pooled slot with `fillRenderSnapshot` and commits it once per step; `applyRenderSnapshot_GameThread` peeks the newest at the top of `OnPostPhysicsStep`, moves every registered capsule to it and releases it (§18) | one writer (the step) and one reader (the game thread) on a lock-free channel that hands the reader only committed slots and never recycles a held one; the reader holds one snapshot at a time, so four slots always leave the writer a free one (a full channel is a `checkf`) |
+| **J5** | the render snapshot | step → GT | `m_renderSnapshots`, a `SnapshotChannel<RenderSnapshot, 4>`: `afterTick` fills a pooled slot with `fillRenderSnapshot` and commits it once per step; `applyRenderSnapshot_GameThread` peeks the newest at the top of `OnPostPhysicsStep`, moves every registered capsule to it and releases it (§18) | one writer (the step) and one reader (the game thread) on a lock-free channel that hands the reader only committed slots and never recycles a held one; since task 19 the reader holds at most the two snapshots that bracket the render time, and four slots still always leave the writer a free one (a full channel is a `checkf`) |
+| **J7** | a resimulation's render correction (client only) | step → GT | `m_renderCorrections`, an `SpscRing<RenderCorrection, 16>`: `beforeSimulate` pushes one correction after a resimulation, before the same step's `afterTick` commits the snapshot it rides; `buildRenderPoses_GameThread` drains it through `correctPoses` after the bracket is chosen (§18, "The Jolt arm's render correction smoothing") | one producer (the step) and one consumer (the game thread) on the same lock-free ring as J1. The push precedes the carrier snapshot's commit, so a game thread that sees the carrier step sees its correction. A full ring drops the correction and counts it (`ringDrops`); the four capture counters beside it are relaxed atomics, read only for the window line |
 | **J6** | step-cost samples | step → GT | the frame host's `SpscRing<StepCostSampleUImpl, 256>`: `afterTick` pushes one sample per step (the time before the normal step, the normal step, the replay depth, whether a resimulation was refused); the frame host drains it on the game thread after every `OnPostPhysicsStep` into `[SimHost.Window]` (§8) | one producer (the step) and one consumer (the game thread) on the same lock-free ring as J1; a full ring drops the sample and counts it. Diagnostic only: nothing decides on it |
 | **shadow hand-over** | the newest saved state slot (worker client only) | step → GT | `m_shadowSlots`, a `SnapshotChannel<ShadowStateSlotUImpl, 3>` whose three slots are pre-reserved to the ring's slot size when the manager is built: `afterTick` copies the step world's ring slot for the step's tick into a pooled slot and commits it, only when the step saved one (`stepAllocatesFrontierSlot`; a Stall step saves none); `restoreShadowWorld_GameThread` peeks the newest at the top of `OnPostPhysicsStep` and, when it is newer than the last one restored, restores `m_shadowWorld` from it (§18) | the same channel argument as J5: one writer, one reader holding one slot, so three slots always leave the writer a free one (a full channel is a `checkf`). The copy is a byte copy into reserved storage and the body-id list fits its reserved capacity, so nothing allocates after construction. The shadow world itself is game-thread-only: built at `BeginPlay`, bound and released by `tryRegister` and the slot release, restored and queried on the game thread; the step never touches it, and the visualizations never touch the step world |
 
@@ -4237,7 +4238,7 @@ client on a worker task.
 | one step: the world mutex, then the step driver's `runTick` and the four hooks | `runJoltStep_Step`, the step hooks | §18, "The Jolt arm's stepping"; `BrawlerStepHooksUImpl-rationale.md` |
 | the per-frame input work before the steps (PROBE A, PROBE 6), the reap after the inline steps, the drain per authority step | the frame host and the hooks | §7, §8 |
 | the world, its statics, the character slots, the bind and the release | this class | §18, "The Jolt arm's world" |
-| the render publish, the interpolation and the capsule apply | the hooks and this class | §18, "The Jolt arm's render publish and apply" and "The Jolt arm's render interpolation" |
+| the render publish, the interpolation, the correction smoothing and the capsule apply | the hooks and this class | §18, "The Jolt arm's render publish and apply", "The Jolt arm's render interpolation" and "The Jolt arm's render correction smoothing" |
 | the game-thread shadow world | this class | §18, "The Jolt arm's game-thread shadow world" |
 | the mechanisms between the game thread and the step (J1–J6, the shadow hand-over) | the frame host, the hooks, this class | §1 |
 | the per-window line `[SimHost.Window]`, the step cost and the thread-ownership asserts | the frame host, the hooks, this class | frame-host rationale §8–§9; hooks rationale §3; §8; §18, "The Jolt arm's stepping" |
@@ -4250,12 +4251,13 @@ client on a worker task.
    offset the step publishes, J3) and dispatch one task with the batch (J4), chained after the previous
    frame's.
 2. The task, for each step: take the world mutex (J2) and run the driver's `runTick`. `beforeTick` drains
-   the occupancy commands (J1); `beforeSimulate` takes the latency start time; after the step,
+   the occupancy commands (J1); `beforeSimulate`, after a resimulation, captures the render correction
+   (J7), then takes the latency start time; after the step,
    `afterTick` stamps the step end, publishes the render snapshot (J5), hands the saved state slot to the
    shadow world, and publishes the tick offset (J3).
 3. `TG_EndPhysics`, game thread: wait for earlier frames' task, then `OnPostPhysicsStep`: restore the
-   shadow world from the newest slot, blend the render pose two steps behind the host time, move the
-   capsules there and write it into the shadow world, then the shared body (the sends, the timing-relay
+   shadow world from the newest slot, blend the render pose two steps behind the host time, add what
+   remains of each correction, move the capsules there and write it into the shadow world, then the shared body (the sends, the timing-relay
    write, the visualization copy with the rendered poses, the ring-out score push, the latency probe).
 
 On the authority step 2 runs inside step 1, on the game thread: its `beforeTick` also releases the
@@ -4284,7 +4286,8 @@ outstanding step (`⛔G-80`), before any teardown.
 
 **Lines.** `[SimHost.Backend]` (both configurations), `[SimHost.Mode]`, `[SimHost.World]`,
 `[SimHost.Frame]`, `[SimHost.FirstStep]`, `[SimHost.Bind]`, `[SimHost.Shadow]`, `[SimHost.RenderTarget]`,
-the non-shipping `[SimHost.RenderApply]` and `[SimHost.RenderSync]` checks and `[SimHost.RenderTrace]`,
+the non-shipping `[SimHost.RenderApply]` and `[SimHost.RenderSync]` checks, `[SimHost.RenderCorrection]`
+and `[SimHost.RenderTrace]`,
 and the per-window `[SimHost.Window]` (§8), on `LogOGSimHost`.
 
 ## §18 The backend switch — `OG_PHYSICS_BACKEND_CHAOS` (og-simulationscheduler-withjolt task 51)
@@ -4746,8 +4749,8 @@ results manager). This configuration now does the same (design D §8).
     nothing.
 * **`og.Render.NewestSnapshot` 1** draws the newest snapshot with no delay and no blend, task 55's
   apply, to measure the difference.
-* **Not done here:** Chaos's correction smoothing, which task 57 adds as an error term on this pose
-  set, and Chaos's optional second results channel.
+* **Not done here:** Chaos's optional second results channel. The correction smoothing (task 57) adds
+  an error term to this pose set after the blend: the next subsection.
 * **The capsule check tolerates the engine's no-move threshold.** The engine does not move a component
   whose new location equals the old one within its kinda-small number (1e-4 cm) on every axis (the
   location comparison in the scene component's internal set-world-location-and-rotation). The blended
@@ -4768,8 +4771,76 @@ results manager). This configuration now does the same (design D §8).
     simulates physics (the registration switches it off; `OGBrawlerUECharacter-rationale.md` §1.2) and
     which of the character's components still do (the cosmetic camera-axis sphere);
   * `og.Render.TraceFrames` 1: one `[SimHost.RenderTrace]` line per frame per character (rendered
-    position, the *next* step's pose, host and render time, the bracket's steps and kinds, alpha), for
-    offline analysis.
+    position, the *next* step's pose, host and render time, the bracket's steps and kinds, alpha, and
+    since task 57 the correction offset `err`), for offline analysis.
+
+### The Jolt arm's render correction smoothing (task 57)
+
+A resimulation rewrites ticks the render has drawn or is about to draw. The render interpolation blends
+the last published step of the old timeline into the first one of the corrected timeline, so the
+whole correction is crossed in one step: the first Jolt PIE showed it as pops on the remote
+characters, which are corrected most. Chaos hides a correction by keeping the body where it was drawn
+and blending the difference out over p.RenderInterp.ErrorCorrectionDuration (0.3 s), snapping above
+p.RenderInterp.MaximumErrorCorrectionBeforeSnapping (250 cm). This configuration does the same with
+og-simulation's engine-free `RenderCorrectionSmoother` (`OGSimulation/RenderCorrectionSmoothing.h`;
+its rationale, with the Chaos semantics it reproduces and every difference, is
+`RenderCorrectionSmoothing-rationale.md` in og-simulation's docs). This class supplies the cvars, the
+capture point, the ring and the lines.
+
+* **Capture, on the step's thread.** The capture itself is og-simulation's engine-free
+  `RenderCorrectionCapture` (`m_renderCorrectionCapture_Step`; its call contract and outcomes are §13
+  of `RenderCorrectionSmoothing-rationale.md`); this class decides when to call it and counts what it
+  returns. On a client (the step driver's `savesTicks`), `publishRenderSnapshot_Step` hands it every
+  snapshot it publishes (`noteShownSnapshot`): the pose the render will draw for that tick. The hooks'
+  `beforeSimulate` calls the frame host's `captureRenderCorrection_Step`, which calls this class's
+  `captureRenderCorrection_Step` with the step's physics step. `beforeSimulate` runs after the
+  driver's replay and before the step: the one point where the storage holds the corrected present
+  tick, which is the tick of the last published snapshot. It calls `onStepAfterReplay` with the
+  driver's granted-resimulation count, the manager's `currentIntegratedTick` and that step, and counts
+  the outcome: every outcome but `NoNewResim` is a resimulation (`resims`), `TickMismatch` adds a tick
+  mismatch, `NoError` a resimulation below Chaos's thresholds (`withoutError`), and on `Captured` it
+  pushes the correction into J7 (§1), counted as `captured` when the ring took it. The correction's
+  carrier step is the step being run, whose snapshot `afterTick` publishes next. The authority never
+  resimulates, so its count never moves and it captures nothing.
+* **Why there, and not on the game thread.** The game thread never receives the replayed ticks: the
+  hooks run once per `runTick`, never during a replay, so only the step's thread ever has both poses of
+  the corrected tick. Chaos is shaped the same way: its rewind data caches each body's pose when the
+  rewind starts and computes the error after the last replayed step, on the physics thread, and the
+  game thread applies it when it moves to the results that carry it.
+* **Apply, on the game thread.** `buildRenderPoses_GameThread` calls `correctPoses` with J7 right after
+  `interpolateRenderPoses`, with the three cvars and the fixed step (`m_renderCorrectionStepSeconds`,
+  the step driver's `dt`, which is the physics settings' async fixed step that Chaos converts with
+  too). It drains J7 and accumulates each correction on the first frame whose bracket reaches its
+  carrier step. The order is a data dependency, not a convention: `correctPoses` takes the bracket's
+  frame, which `interpolateRenderPoses` produces. The error is added to `m_renderPoses`, so everything
+  that reads the pose set moves with it: the capsule (the mouse-aim plane point, `⛔G-83`), the shadow
+  overwrite on a worker client and the visualization copy (the weapon axis, the guard, the projectile
+  pool). The `[SimHost.RenderApply]` and `[SimHost.RenderSync]` checks compare with the pose set, so
+  they hold as before.
+* **The cvars**, read every frame: `og.Render.ErrorCorrectionSeconds` (0.3),
+  `og.Render.ErrorCorrectionMaxCm` (250) and `og.Render.ErrorCorrectionDesyncSeconds` (0.6), Chaos's
+  p.RenderInterp.ErrorCorrectionDuration, MaximumErrorCorrectionBeforeSnapping and
+  MaximumErrorCorrectionDesyncTimeBeforeSnapping with their defaults. With the project's step
+  (0.016667 s) 0.3 s is 17 steps, the error showing for 16 of them; 0 seconds turns the smoothing off
+  (every correction snaps), to compare.
+* **Cost.** On a client, each publish copies the snapshot (48 bodies) once. Every step, on every
+  peer, builds the correction the capture may write on the step's stack (about 3.5 KB, zeroed).
+  Only a resimulation step captures: one storage walk to fill the corrected snapshot, a key lookup per
+  body, and a second walk for the speeds. Each frame drains the ring and updates and applies at most one error per body, in
+  fixed arrays: nothing allocates.
+* **Lines** (`LogOGSimHost`, non-shipping):
+  * `[SimHost.RenderCorrection]`, on a client every 600 frames after the `[SimHost.RenderApply]` line:
+    `resims` (granted resimulations the capture saw), `captured` (pushed into J7), `withoutError`
+    (resimulations below the thresholds), `tickMismatches`, `ringDrops`, then the game thread's
+    `corrections` accumulated, `smoothedBodies` and `snappedBodies`, `maxErrorCm`, `maxAppliedCm`,
+    `decays` (windows that closed), `decayMeanS` and `decayMaxS` (their length from the accumulation,
+    in steps times the step), `activeFrames`, `late`, `pendingDrops`, and the settings (`seconds`,
+    `durationSteps`, `maxCm`, `desyncS`);
+  * a LATE Warning, at most once per window, when a correction reached the game thread after its
+    carrier step had been drawn;
+  * with `og.Render.TraceFrames` 1, one `[SimHost.RenderCorrection]` event line per frame that
+    accumulated a correction, and the `[SimHost.RenderTrace]` line's `err`, the offset the character's
+    root body received that frame.
 
 ### The build rule until task 21
 

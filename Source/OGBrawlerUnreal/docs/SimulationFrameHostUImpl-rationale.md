@@ -163,7 +163,8 @@ crossings document.
 * The window (§8) and its two game-thread feeds from the manager, `noteWorldMutexWait_GameThread` and
   `noteShadowRestore_GameThread`, are game-thread only.
 * `runBatch` and the hook doors (`applyOccupancyCommands_Step`, `releaseDelayedInputsForStep`, the two
-  latency doors, `publishTickOffset_Step`, `publishRenderSnapshot_Step`, `publishShadowSlot_Step`,
+  latency doors, `publishTickOffset_Step`, `captureRenderCorrection_Step`, `publishRenderSnapshot_Step`,
+  `publishShadowSlot_Step`,
   `pushStepCost_Step`) run on the step's thread: a worker on a client, the game thread inline.
 * J2 is held for each whole step (the manager's `runJoltStep_Step`), so the game thread's bind pass
   (manager G-81) waits for at most the rest of one step on a worker client. The game thread never waits

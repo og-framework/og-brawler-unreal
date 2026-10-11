@@ -34,6 +34,7 @@
 #include "OGSimulation/StaticGeometry.h"
 #include "OGSimulation/SimulationStepDriver.h"
 #include "OGSimulation/RenderInterpolation.h"
+#include "OGSimulation/RenderCorrectionSmoothing.h"
 #include "OGBrawlerUnreal/SimulationFrameHostUImpl.h"
 #include "OGBrawlerUnreal/BrawlerStepHooksUImpl.h"
 #endif
@@ -877,6 +878,31 @@ private:
         std::vector<float> frameDisplacementCm;
     };
 
+    struct RenderCorrectionWindowUImpl
+    {
+        uint32 corrections       = 0u;
+        uint32 smoothedBodies    = 0u;
+        uint32 snappedBodies     = 0u;
+        uint32 late              = 0u;
+        uint32 pendingDrops      = 0u;
+        uint32 finished          = 0u;
+        uint64 finishedSteps     = 0u;
+        uint32 maxFinishedSteps  = 0u;
+        uint32 activeFrames      = 0u;
+        double maxErrorCm        = 0.0;
+        double maxAppliedCm      = 0.0;
+        uint64 resimsAtStart     = 0u;
+        uint64 capturedAtStart   = 0u;
+        uint64 withoutErrorAtStart  = 0u;
+        uint64 tickMismatchAtStart  = 0u;
+        uint64 ringDropsAtStart  = 0u;
+    };
+
+    using RenderCorrection         = RenderCorrectionT<RenderSnapshot::kMaxBodies>;
+    using RenderCorrectionSmoothing = RenderCorrectionSmoother<RenderSnapshot::kMaxBodies>;
+    using RenderCorrectionCapturing = RenderCorrectionCapture<RenderSnapshot::kMaxBodies>;
+
+    void captureRenderCorrection_Step(uint64 physicsStep);
     void publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds);
     bool buildRenderPoses_GameThread();
     void syncRenderPoses_GameThread();
@@ -887,6 +913,7 @@ private:
     void checkRenderApply_GameThread();
     void traceRenderFrame_GameThread() const;
     void logRenderApplyWindow_GameThread();
+    void logRenderCorrectionWindow_GameThread();
 
     SnapshotChannel<RenderSnapshot, 4>                   m_renderSnapshots;
     std::unordered_map<unsigned int, RenderTargetUImpl>  m_renderTargetsById;
@@ -898,6 +925,17 @@ private:
     RenderSnapshot                                       m_renderTraceNext;
 #endif
     RenderApplyWindowUImpl                               m_renderApplyWindow;
+
+    float                                                m_renderCorrectionStepSeconds = 0.f;
+    RenderCorrectionCapturing                            m_renderCorrectionCapture_Step;
+    SpscRing<RenderCorrection, 16>                       m_renderCorrections;
+    std::atomic<uint64>                                  m_renderCorrectionResims{0u};
+    std::atomic<uint64>                                  m_renderCorrectionsCaptured{0u};
+    std::atomic<uint64>                                  m_renderCorrectionsWithoutError{0u};
+    std::atomic<uint64>                                  m_renderCorrectionTickMismatches{0u};
+    RenderCorrectionSmoothing                            m_renderCorrectionSmoother;
+    RenderCorrectionFrame                                m_renderCorrectionFrame;
+    RenderCorrectionWindowUImpl                          m_renderCorrectionWindow;
 
     struct ShadowStateSlotUImpl
     {

@@ -37,9 +37,10 @@ public:
 		m_host.releaseDelayedInputsForStep(*upcoming.authorityTick, 1u);
 	}
 
-	void beforeSimulate(const UpcomingTick&)
+	void beforeSimulate(const UpcomingTick& upcoming)
 	{
 		checkInStep(TEXT("beforeSimulate"));
+		m_host.captureRenderCorrection_Step(upcoming.physicsStep);
 		// ⛔G-03  docs/BrawlerStepHooksUImpl-guards.md
 		m_stepStartSeconds = FPlatformTime::Seconds();
 	}

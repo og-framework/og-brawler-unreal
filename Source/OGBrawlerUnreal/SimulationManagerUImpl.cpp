@@ -105,6 +105,29 @@ namespace
 		TEXT("no delay."),
 		ECVF_Default);
 
+	TAutoConsoleVariable<float> CVarRenderErrorCorrectionSeconds(
+		TEXT("og.Render.ErrorCorrectionSeconds"),
+		0.3f,
+		TEXT("Jolt configuration only. How long a resimulation's correction of a rendered body is blended out, in seconds, ")
+		TEXT("converted to physics steps as Chaos converts p.RenderInterp.ErrorCorrectionDuration (0.3 there and here). ")
+		TEXT("0 = no blending: every correction shows as a pop."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<float> CVarRenderErrorCorrectionMaxCm(
+		TEXT("og.Render.ErrorCorrectionMaxCm"),
+		250.f,
+		TEXT("Jolt configuration only. A correction of a body by this many centimetres or more is not blended: the body ")
+		TEXT("snaps to the corrected pose. Chaos's p.RenderInterp.MaximumErrorCorrectionBeforeSnapping (250 there and here)."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<float> CVarRenderErrorCorrectionDesyncSeconds(
+		TEXT("og.Render.ErrorCorrectionDesyncSeconds"),
+		0.6f,
+		TEXT("Jolt configuration only. A correction shorter than the distance the body covers in this many seconds at its ")
+		TEXT("corrected speed is blended even above og.Render.ErrorCorrectionMaxCm. Chaos's ")
+		TEXT("p.RenderInterp.MaximumErrorCorrectionDesyncTimeBeforeSnapping (0.6 there and here). 0 or less = off."),
+		ECVF_Default);
+
 #if !UE_BUILD_SHIPPING
 	TAutoConsoleVariable<int32> CVarRenderTraceFrames(
 		TEXT("og.Render.TraceFrames"),
@@ -1922,6 +1945,7 @@ void ASimulationManagerUImpl::startJoltStepping(UWorld& world, float dt, bool wo
 			StepDriverConfig{ dt, ResimPolicy::OnRequest, 0u });
 	}
 
+	m_renderCorrectionStepSeconds = dt;
 	m_frameHost.begin(*this, *world.PersistentLevel,
 		SimulationFrameHostUImpl::Config{ static_cast<double>(dt), worldIsAuthority, m_joltStepsInline });
 }
@@ -1973,7 +1997,38 @@ void ASimulationManagerUImpl::publishRenderSnapshot_Step(const TickOutcome& outc
 		return;
 
 	fillRenderSnapshot(*snapshot, m_storage, outcome, stepDeadlineSeconds);
+	if (m_stepDriver->savesTicks())
+		m_renderCorrectionCapture_Step.noteShownSnapshot(*snapshot);
 	m_renderSnapshots.commit();
+}
+
+void ASimulationManagerUImpl::captureRenderCorrection_Step(uint64 physicsStep)
+{
+	RenderCorrection correction;
+	const RenderCorrectionCaptureOutcome outcome = m_renderCorrectionCapture_Step.onStepAfterReplay(
+		m_stepDriver->getDiagnostics().grantedResims(), static_cast<SimTick>(m_manager->currentIntegratedTick()),
+		physicsStep, m_storage, correction);
+	switch (outcome)
+	{
+	case RenderCorrectionCaptureOutcome::NoNewResim:
+		return;
+	case RenderCorrectionCaptureOutcome::NoShownHead:
+		m_renderCorrectionResims.fetch_add(1u, std::memory_order_relaxed);
+		return;
+	case RenderCorrectionCaptureOutcome::TickMismatch:
+		m_renderCorrectionResims.fetch_add(1u, std::memory_order_relaxed);
+		m_renderCorrectionTickMismatches.fetch_add(1u, std::memory_order_relaxed);
+		return;
+	case RenderCorrectionCaptureOutcome::NoError:
+		m_renderCorrectionResims.fetch_add(1u, std::memory_order_relaxed);
+		m_renderCorrectionsWithoutError.fetch_add(1u, std::memory_order_relaxed);
+		return;
+	case RenderCorrectionCaptureOutcome::Captured:
+		m_renderCorrectionResims.fetch_add(1u, std::memory_order_relaxed);
+		if (m_renderCorrections.tryPush(correction))
+			m_renderCorrectionsCaptured.fetch_add(1u, std::memory_order_relaxed);
+		return;
+	}
 }
 
 bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
@@ -1999,6 +2054,48 @@ bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
 #endif
 	if (!interpolateRenderPoses(m_renderSnapshots, params, m_renderPoses, m_renderFrame, nextCopy))
 		return false;
+
+	RenderCorrectionParams correction;
+	correction.correctionSeconds = CVarRenderErrorCorrectionSeconds.GetValueOnGameThread();
+	correction.maxCorrectionCm   = CVarRenderErrorCorrectionMaxCm.GetValueOnGameThread();
+	correction.desyncSeconds     = CVarRenderErrorCorrectionDesyncSeconds.GetValueOnGameThread();
+	correction.stepSeconds       = m_renderCorrectionStepSeconds;
+	m_renderCorrectionSmoother.correctPoses(m_renderCorrections, m_renderFrame, correction, m_renderPoses,
+		m_renderCorrectionFrame);
+
+#if !UE_BUILD_SHIPPING
+	const RenderCorrectionFrame& corrected = m_renderCorrectionFrame;
+	RenderCorrectionWindowUImpl& window = m_renderCorrectionWindow;
+	window.corrections      += corrected.corrections;
+	window.smoothedBodies   += corrected.smoothedBodies;
+	window.snappedBodies    += corrected.snappedBodies;
+	window.pendingDrops     += corrected.pendingDrops;
+	window.finished         += corrected.finished;
+	window.finishedSteps    += corrected.finishedSteps;
+	window.maxFinishedSteps  = FMath::Max(window.maxFinishedSteps, corrected.maxFinishedSteps);
+	window.activeFrames     += corrected.active > 0u ? 1u : 0u;
+	window.maxErrorCm        = FMath::Max(window.maxErrorCm, corrected.maxErrorCm);
+	window.maxAppliedCm      = FMath::Max(window.maxAppliedCm, corrected.maxAppliedCm);
+	if (corrected.late > 0u && window.late == 0u)
+	{
+		UE_LOG(LogOGSimHost, Warning,
+			TEXT("[SimHost.RenderCorrection] LATE frame=%llu next=%llu late=%u: a resimulation's correction reached the game ")
+			TEXT("thread after the corrected step it rides had already been drawn, so that step was drawn uncorrected (a pop)"),
+			static_cast<unsigned long long>(GFrameCounter), static_cast<unsigned long long>(m_renderFrame.nextStep),
+			corrected.late);
+	}
+	window.late += corrected.late;
+	if (corrected.corrections > 0u && CVarRenderTraceFrames.GetValueOnGameThread() != 0)
+	{
+		UE_LOG(LogOGSimHost, Log,
+			TEXT("[SimHost.RenderCorrection] event frame=%llu prev=%llu next=%llu alpha=%.4f corrections=%u smoothed=%u ")
+			TEXT("snapped=%u maxErrorCm=%.4f durationSteps=%d"),
+			static_cast<unsigned long long>(GFrameCounter), static_cast<unsigned long long>(m_renderFrame.prevStep),
+			static_cast<unsigned long long>(m_renderFrame.nextStep), m_renderFrame.alpha, corrected.corrections,
+			corrected.smoothedBodies, corrected.snappedBodies, corrected.maxErrorCm,
+			renderCorrectionDurationSteps(correction.correctionSeconds, correction.stepSeconds));
+	}
+#endif
 
 	m_renderPosesValid = true;
 	return true;
@@ -2232,9 +2329,10 @@ void ASimulationManagerUImpl::traceRenderFrame_GameThread() const
 		const RenderBody* const nextBody = findRenderBody(m_renderTraceNext, id, m_joltRootDeclarationIndex);
 		if (!target.applied || nextBody == nullptr)
 			continue;
+		const glm::dvec3 errorCm = m_renderCorrectionSmoother.appliedErrorCm(bracket, id, m_joltRootDeclarationIndex);
 		UE_LOG(LogOGSimHost, Log,
 			TEXT("[SimHost.RenderTrace] role=%s frame=%llu id=%u pos=(%.4f,%.4f,%.4f) nextPos=(%.4f,%.4f,%.4f) host=%.6f ")
-			TEXT("render=%.6f mode=%s prev=%llu/%s next=%llu/%s back=%u alpha=%.4f newest=%llu"),
+			TEXT("render=%.6f mode=%s prev=%llu/%s next=%llu/%s back=%u alpha=%.4f newest=%llu err=(%.4f,%.4f,%.4f)"),
 			runsPrediction() ? TEXT("Client") : TEXT("Authority"), static_cast<unsigned long long>(GFrameCounter), id,
 			target.appliedCm.X, target.appliedCm.Y, target.appliedCm.Z,
 			nextBody->positionCm.x, nextBody->positionCm.y, nextBody->positionCm.z,
@@ -2242,7 +2340,7 @@ void ASimulationManagerUImpl::traceRenderFrame_GameThread() const
 			bracket.newestOnly ? TEXT("newest") : TEXT("interp"),
 			static_cast<unsigned long long>(bracket.prevStep), bracket.hasPrev ? stepKindText(bracket.prevKind) : TEXT("-"),
 			static_cast<unsigned long long>(bracket.nextStep), stepKindText(bracket.nextKind), bracket.nextBack,
-			bracket.alpha, static_cast<unsigned long long>(bracket.newestStep));
+			bracket.alpha, static_cast<unsigned long long>(bracket.newestStep), errorCm.x, errorCm.y, errorCm.z);
 	}
 }
 
@@ -2282,10 +2380,49 @@ void ASimulationManagerUImpl::logRenderApplyWindow_GameThread()
 			window.shadowMaxAngleRad);
 	}
 
+	if (runsPrediction())
+		logRenderCorrectionWindow_GameThread();
+
 	std::vector<float> samples = std::move(window.frameDisplacementCm);
 	samples.clear();
 	window = RenderApplyWindowUImpl{};
 	window.frameDisplacementCm = std::move(samples);
+}
+
+void ASimulationManagerUImpl::logRenderCorrectionWindow_GameThread()
+{
+	RenderCorrectionWindowUImpl& window = m_renderCorrectionWindow;
+	const uint64 resims       = m_renderCorrectionResims.load(std::memory_order_relaxed);
+	const uint64 captured     = m_renderCorrectionsCaptured.load(std::memory_order_relaxed);
+	const uint64 withoutError = m_renderCorrectionsWithoutError.load(std::memory_order_relaxed);
+	const uint64 tickMismatch = m_renderCorrectionTickMismatches.load(std::memory_order_relaxed);
+	const uint64 ringDrops    = m_renderCorrections.drops();
+	const float  seconds      = CVarRenderErrorCorrectionSeconds.GetValueOnGameThread();
+	const double stepSeconds  = static_cast<double>(m_renderCorrectionStepSeconds);
+	const double decayMeanS   = window.finished > 0u
+		? static_cast<double>(window.finishedSteps) / static_cast<double>(window.finished) * stepSeconds : 0.0;
+
+	UE_LOG(LogOGSimHost, Log,
+		TEXT("[SimHost.RenderCorrection] role=Client frames=%u resims=%llu captured=%llu withoutError=%llu tickMismatches=%llu ")
+		TEXT("ringDrops=%llu corrections=%u smoothedBodies=%u snappedBodies=%u maxErrorCm=%.3f maxAppliedCm=%.3f decays=%u ")
+		TEXT("decayMeanS=%.3f decayMaxS=%.3f activeFrames=%u late=%u pendingDrops=%u seconds=%.3f durationSteps=%d ")
+		TEXT("maxCm=%.1f desyncS=%.2f"),
+		m_renderApplyWindow.frames, static_cast<unsigned long long>(resims - window.resimsAtStart),
+		static_cast<unsigned long long>(captured - window.capturedAtStart),
+		static_cast<unsigned long long>(withoutError - window.withoutErrorAtStart),
+		static_cast<unsigned long long>(tickMismatch - window.tickMismatchAtStart),
+		static_cast<unsigned long long>(ringDrops - window.ringDropsAtStart), window.corrections, window.smoothedBodies,
+		window.snappedBodies, window.maxErrorCm, window.maxAppliedCm, window.finished, decayMeanS,
+		static_cast<double>(window.maxFinishedSteps) * stepSeconds, window.activeFrames, window.late, window.pendingDrops,
+		seconds, renderCorrectionDurationSteps(seconds, m_renderCorrectionStepSeconds),
+		CVarRenderErrorCorrectionMaxCm.GetValueOnGameThread(), CVarRenderErrorCorrectionDesyncSeconds.GetValueOnGameThread());
+
+	window = RenderCorrectionWindowUImpl{};
+	window.resimsAtStart       = resims;
+	window.capturedAtStart     = captured;
+	window.withoutErrorAtStart = withoutError;
+	window.tickMismatchAtStart = tickMismatch;
+	window.ringDropsAtStart    = ringDrops;
 }
 #endif
 

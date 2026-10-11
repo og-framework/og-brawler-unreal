@@ -95,6 +95,7 @@ public:
 	void stampLatencyAfterStep_Step(double stepStartSeconds);
 	void stampLatencyStepEnd_Step();
 	void publishTickOffset_Step(int64_t offset);
+	void captureRenderCorrection_Step(uint64_t physicsStep);
 	void publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds);
 	void publishShadowSlot_Step(const TickOutcome& outcome);
 	void pushStepCost_Step(const StepCostSampleUImpl& sample);

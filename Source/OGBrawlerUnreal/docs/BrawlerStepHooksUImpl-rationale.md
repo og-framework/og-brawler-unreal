@@ -18,7 +18,7 @@ has no arm and no reflection markup and is included only from Jolt arms (design 
 | hook | client | authority |
 |---|---|---|
 | `beforeTick(u)` | take `t0` (§3); drain J1 into the driver's `noteOccupancy` | take `t0`; drain J1; `checkf` the game thread (design D2); release the delayed inputs for `*u.authorityTick`, one tick (`⛔G-01`) |
-| `beforeSimulate(u)` | take the step-start time `t1` (`⛔G-03`): after any replay, before the scratch save and the normal step | the same: after the release, immediately before `onGameSimulation` |
+| `beforeSimulate(u)` | capture the render correction through `captureRenderCorrection_Step`, with the upcoming step's physics step (§2; it does work only after a resimulation), then take the step-start time `t1` (`⛔G-03`): after any replay, before the scratch save and the normal step | the same door, which returns at once (the authority never resimulates); then `t1`, after the release, immediately before `onGameSimulation` |
 | `beforePhysics(t)` | `stampLatencyAfterStep_Internal(start time)` | the same |
 | `afterTick(o)` | take `t2` (§3); `stampLatencyStepEnd_Internal()`; publish the render snapshot J5 from the outcome and `currentStepDeadline`; hand the step's saved state slot to the game-thread shadow world (a worker client only, and only when the step saved one); publish J3, `o.tick − o.physicsStep` (`⛔G-02`); push the step-cost sample (J6, §3) | the same; the authority has no shadow world, so the hand-over returns at once |
 
@@ -55,6 +55,14 @@ render publish copies it into the snapshot in `afterTick`.
   which copies that slot into the shadow channel on a worker client and does nothing elsewhere. Never
   in a replay, for the same reason as the render publish. The manager owns the channel, the copy and
   the restore (manager rationale §18, "The Jolt arm's game-thread shadow world").
+* **The render correction capture** (og-simulationscheduler-withjolt task 57). `beforeSimulate` runs
+  after the driver's replay and before the step, so on a resimulation step the storage holds the
+  corrected present tick, the tick of the snapshot the previous `afterTick` published. The host's
+  `captureRenderCorrection_Step` door hands the step's physics step to the manager, which compares the
+  two and pushes the difference for the game thread's smoothing; on any other step it returns after
+  one counter compare. It runs before `t1`, so its cost is in `t1 - t0` with the replay it follows
+  (§3). The manager owns the capture, the ring and the smoothing (manager rationale §18, "The Jolt
+  arm's render correction smoothing").
 * **J3 last.** The offset is stored after the step, from the outcome; the game thread reads it at the
   next `TG_StartPhysics` (frame-host rationale §5). Only the step-cost push follows it, and it changes
   nothing the step or the game thread decides on.
@@ -69,7 +77,8 @@ render publish copies it into the snapshot in `afterTick`.
 
 `afterTick` pushes `StepCostSampleUImpl{t1 - t0, t2 - t1, replayedTicks, resimRefused}` into the frame
 host's step-cost ring J6 through `pushStepCost_Step`. So `t2 - t1` is the normal step on both roles,
-and `t1 - t0` is, on a client, the J1 drain, the resimulation check and any replay, and on the
+and `t1 - t0` is, on a client, the J1 drain, the resimulation check, any replay and the render
+correction capture that follows a replay, and on the
 authority the J1 drain and the input release. The game thread drains the ring and reports both in
 `[SimHost.Window]` (frame-host rationale §8). The push goes last, after the publishes the step and the
 game thread depend on; the times it reports were taken before them. Three platform-clock

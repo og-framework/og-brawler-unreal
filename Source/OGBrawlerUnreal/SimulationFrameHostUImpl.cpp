@@ -290,6 +290,11 @@ void SimulationFrameHostUImpl::publishTickOffset_Step(int64_t offset)
 	m_tickOffset.store(offset, std::memory_order_relaxed);
 }
 
+void SimulationFrameHostUImpl::captureRenderCorrection_Step(uint64_t physicsStep)
+{
+	m_owner->captureRenderCorrection_Step(physicsStep);
+}
+
 void SimulationFrameHostUImpl::publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds)
 {
 	m_owner->publishRenderSnapshot_Step(outcome, stepDeadlineSeconds);
