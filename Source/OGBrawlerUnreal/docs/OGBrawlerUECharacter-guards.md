@@ -348,6 +348,27 @@ this statement.
 
 ---
 
+## G-20 — `PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`
+
+**Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);`.
+
+**Prohibition (og-simulationscheduler-withjolt task 66, new).** Keep the plain form, for the same two
+reasons as G-10.
+* `COND_OwnerOnly`: a client binds every character's Jolt bodies, remote proxies included, and binds each
+  one in the slot the authority chose for it, so it needs every character's slot, not just its own. Under
+  `COND_OwnerOnly` a proxy's slot never arrives, and the client's acquire waits
+  (`[SimHost.Slot] wait=WaitForReplication`) until the component's 600-attempt `checkf` fires.
+* `COND_InitialOnly`: the authority writes the slot in `USimmableUpdateComponent::tryInitializeWithManager`
+  (through `ASimulationManagerUImpl::registerVizVolume`), one or more frames after the component's
+  `BeginPlay`. That can be after the pawn's first bunch, so the initial-only send would carry 0 and the
+  slot would never be sent.
+
+**What breaks if the tag moves.** Nothing mechanical checks the condition, and the LLT targets cannot
+reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot. The
+Chaos configuration never reads the property, so there the failure is silent.
+
+---
+
 ## §R — Retired ids
 
 ⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.

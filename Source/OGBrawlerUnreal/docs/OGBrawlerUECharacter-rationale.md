@@ -384,8 +384,9 @@ across PIE sessions in one editor process, which only moves which colour comes f
 
 ## 6. Replicated state on this class
 
-Three properties replicate: `BrawlerColor`, `RingoutScore` and, since task 25,
-`SimCharacterIdValue`. All three use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10).
+Four properties replicate: `BrawlerColor`, `RingoutScore`, since task 25
+`SimCharacterIdValue`, and since og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1).
+All four use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10, G-20).
 
 > ⛔ REPLICATED. Purely cosmetic: it never reaches the engine-free simulation
 > core, so it cannot affect determinism or the correction path.
@@ -397,7 +398,8 @@ cosmetic: `SimCharacterIdValue` is the simulation character id. It never enters 
 the correction wire (it rides pawn replication only, so it costs the correction wire 0 B), but
 it is the value every peer registers the character under, so a wrong or missing value
 changes which storage entry the peer simulates. The "safe because cosmetic" argument applies to
-`BrawlerColor` and `RingoutScore` only.
+`BrawlerColor` and `RingoutScore` only. `PhysicsSlotValue` (task 66, §9.1) is not cosmetic either: it
+picks the Jolt bodies a character is simulated with, and it too stays off the correction wire.
 
 ### 6.1 `RingoutScore` never reaches the simulation core
 
@@ -479,6 +481,11 @@ writes (§7).
   and that schedules `tryRegisterWithNewFramework` for the tick after). Assignment therefore
   normally lands after the pawn's first replication bunch has gone out. `COND_InitialOnly` would never send the id, and the
   client would wait until the 600-attempt `checkf`.
+
+**`PhysicsSlotValue`** (og-simulationscheduler-withjolt task 66) uses the plain form for the same two
+reasons, guard G-20: every client binds every character, proxies included, in the slot the authority chose,
+so it needs every character's slot; and the authority writes the slot one frame after the component's
+`BeginPlay` at the earliest (in `tryInitializeWithManager`), which can be after the first bunch.
 
 ## 7. The score's two doors — one in, one out
 
@@ -660,6 +667,31 @@ true today:
   (`ScoreboardDisplay-rationale.md` §2.1) is unchanged in shape.
 * `GetSimCharacterId()`'s `static_assert` pins `SimCharacterIdValue` to exactly the underlying
   byte of `SimCharacterId`.
+
+### 9.1 The Jolt physics slot (og-simulationscheduler-withjolt task 66)
+
+`PhysicsSlotValue` is a replicated `uint8` carrying the Jolt world slot the authority chose for this
+character: 0 means "no slot yet", any other value is the slot plus one. `GetPhysicsSlot()` returns it as
+an optional slot, empty for 0, and `SetAuthoritativePhysicsSlot()` is its one write site.
+
+* **Why it exists.** The Jolt world keeps a fixed set of bodies per slot, created once with fixed body ids,
+  so a character's body ids are its slot's. Jolt orders contact solving by body id, so two peers that put
+  the same character in different slots can solve a contact between characters in a different order and
+  drift apart by rounding. The simulation id cannot double as the slot: ids are never reused, so an id
+  taken modulo the slot count collides after joins and leaves. So the authority chooses the slot and
+  replicates it here, and every client binds the character in that slot (`SimulationManagerUImpl-rationale.md`
+  §18, "The Jolt arm's world", the slot table).
+* **Who writes it.** `ASimulationManagerUImpl::tryAcquireJoltSlot` on the authority, the first time the
+  character asks for a slot (from `registerVizVolume`, called by the component's
+  `tryInitializeWithManager`). Its three `checkf`s enforce authority-only, an in-range slot and
+  set-once: a character keeps its slot until it leaves, and a pawn that leaves is destroyed, so a
+  second write would be a bug. A `static_assert` pins that slot + 1 fits the byte.
+* **Who reads it.** Only the Jolt configuration's acquire, on a client, where it is the only input to
+  the slot choice. The property exists in both configurations, because a reflected member cannot sit
+  inside a custom preprocessor block (task 51's arm rule) and the pawn carries no backend arm; the Chaos
+  configuration never writes or reads it, so there it replicates as 0.
+* **Cost.** One byte per character, sent when it changes, which is once. It never enters a composite or
+  the correction wire, so the correction wire format does not change.
 
 ## 10. Input mapping context — four add sites
 

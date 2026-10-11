@@ -195,11 +195,7 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 		if (m_initializationAttempts >= kMaxRegistrationAttempts)
 			checkf(false, TEXT("USimmableUpdateComponent: manager never spawned after %d attempts (netmode=%d)"),
 				kMaxRegistrationAttempts, (int)GetNetMode());
-		if (UWorld* world = GetWorld())
-		{
-			world->GetTimerManager().SetTimerForNextTick(
-				FTimerDelegate::CreateWeakLambda(this, [this]() { tryInitializeWithManager(); }));
-		}
+		scheduleNextInitializationAttempt();
 		return;
 	}
 
@@ -218,8 +214,18 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 			glm::mat4(1.f),
 			collisionCategory::queryRouting};
 
-		m_targetVisualizationVolumeIds.push_back(
-			manager->registerVizVolume(targetVisDescriptor, *Owner));
+		const std::optional<QueryVolumeId> targetVolume = manager->registerVizVolume(targetVisDescriptor, *Owner);
+		if (!targetVolume.has_value())
+		{
+			if (m_initializationAttempts >= kMaxRegistrationAttempts)
+				checkf(false,
+					TEXT("USimmableUpdateComponent: '%s' got no physics slot after %d attempts (netmode=%d); the ")
+					TEXT("manager logs a [SimHost.Slot] wait line naming what it waits for."),
+					*Owner->GetName(), kMaxRegistrationAttempts, (int)GetNetMode());
+			scheduleNextInitializationAttempt();
+			return;
+		}
+		m_targetVisualizationVolumeIds.push_back(*targetVolume);
 	}
 	m_attackTargetVisualizationState.emplace(m_targetVisualizationVolumeIds);
 	m_attackAimVisualizationState.emplace();
@@ -229,6 +235,15 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 	{
 		world->GetTimerManager().SetTimerForNextTick(
 			FTimerDelegate::CreateWeakLambda(this, [this]() { tryRegisterWithNewFramework(); }));
+	}
+}
+
+void USimmableUpdateComponent::scheduleNextInitializationAttempt()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateWeakLambda(this, [this]() { tryInitializeWithManager(); }));
 	}
 }
 

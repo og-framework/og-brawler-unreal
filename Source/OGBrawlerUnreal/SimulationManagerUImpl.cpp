@@ -33,6 +33,7 @@
 #include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
 #if !OG_PHYSICS_BACKEND_CHAOS
 #include "Async/UniqueLock.h"
+#include "OGSimulation/BodySlotAssignment.h"
 #include "OGSimulationJolt/JoltLayerTable.h"
 #include "OGSimulationJolt/JoltStaticWorldBuilder.h"
 #include "OGSimulationUnreal/UEStaticGeometryImporter.h"
@@ -1722,7 +1723,8 @@ const physicsBackendUImpl::VizReader& ASimulationManagerUImpl::getVizReader() co
 #endif
 }
 
-QueryVolumeId ASimulationManagerUImpl::registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner)
+std::optional<QueryVolumeId> ASimulationManagerUImpl::registerVizVolume(const QueryVolumeDescriptor& descriptor,
+	AActor& owner)
 {
 #if OG_PHYSICS_BACKEND_CHAOS
 	FCollisionQueryParams queryParams;
@@ -1730,11 +1732,14 @@ QueryVolumeId ASimulationManagerUImpl::registerVizVolume(const QueryVolumeDescri
 	queryParams.AddIgnoredActor(&owner);
 	return m_queryAdapter->registerVolume(descriptor, queryParams, FActorInstanceHandle(&owner));
 #else
-	const uint32 slot = acquireJoltSlot(owner);
-	if (!m_joltStepsInline)
-		return m_shadowQuery->registerVolume(descriptor, joltSlotRootBodyId(*m_shadowWorld, slot));
+	const std::optional<uint32> slot = tryAcquireJoltSlot(owner);
+	if (!slot.has_value())
+		return std::nullopt;
 
-	return m_queryAdapter->registerVolume(descriptor, joltSlotRootBodyId(*m_joltWorld, slot));
+	if (!m_joltStepsInline)
+		return m_shadowQuery->registerVolume(descriptor, joltSlotRootBodyId(*m_shadowWorld, *slot));
+
+	return m_queryAdapter->registerVolume(descriptor, joltSlotRootBodyId(*m_joltWorld, *slot));
 #endif
 }
 
@@ -1870,28 +1875,69 @@ void ASimulationManagerUImpl::buildShadowWorld(const JoltWorldConfig& stepConfig
 #endif
 }
 
-uint32 ASimulationManagerUImpl::acquireJoltSlot(const AActor& owner)
+std::optional<uint32> ASimulationManagerUImpl::tryAcquireJoltSlot(AActor& owner)
 {
 	if (const auto found = m_joltSlotByOwner.find(&owner); found != m_joltSlotByOwner.end())
 		return found->second;
 
+	AOGBrawlerUECharacter* const character = Cast<AOGBrawlerUECharacter>(&owner);
+	checkf(character != nullptr,
+		TEXT("tryAcquireJoltSlot: '%s' is not an AOGBrawlerUECharacter. The slot the authority chooses reaches the ")
+		TEXT("clients on that class's replicated PhysicsSlotValue, so only that class can hold a Jolt slot."),
+		*owner.GetName());
+
 	std::array<bool, kMaxSimulatableSlots> taken{};
 	for (const auto& entry : m_joltSlotByOwner)
 		taken[entry.second] = true;
+	const auto lowestFree = std::find(taken.begin(), taken.end(), false);
 
-	const auto freeSlot = std::find(taken.begin(), taken.end(), false);
-	checkf(freeSlot != taken.end(),
-		TEXT("acquireJoltSlot: all %u Jolt slots are taken; '%s' cannot get one. The Jolt world has a fixed ")
+	const bool isAuthority = GetNetMode() != NM_Client;
+	// ⛔G-84  docs/SimulationManagerUImpl-guards.md
+	const BodySlotDecision decision = decideBodySlot(isAuthority, character->GetPhysicsSlot(), taken);
+
+	if (decision.outcome == BodySlotOutcome::WaitForReplication || decision.outcome == BodySlotOutcome::WaitForRelease)
+	{
+		const bool forReplication = decision.outcome == BodySlotOutcome::WaitForReplication;
+		uint8& loggedWaits = m_joltSlotWaitsLoggedByOwner[&owner];
+		const uint8 waitBit = forReplication ? 1u : 2u;
+		if ((loggedWaits & waitBit) == 0u)
+		{
+			loggedWaits |= waitBit;
+			FString heldBy = TEXT("-");
+			for (const auto& entry : m_joltSlotByOwner)
+			{
+				if (!forReplication && entry.second == decision.slot)
+					heldBy = entry.first->GetName();
+			}
+			UE_LOG(LogOGSimHost, Log, TEXT("[SimHost.Slot] wait=%s owner=%s slot=%d heldBy=%s"),
+				forReplication ? TEXT("WaitForReplication") : TEXT("WaitForRelease"), *owner.GetName(),
+				forReplication ? -1 : static_cast<int32>(decision.slot), *heldBy);
+		}
+		return std::nullopt;
+	}
+
+	checkf(decision.outcome == BodySlotOutcome::Assigned,
+		TEXT("tryAcquireJoltSlot: all %u Jolt slots are taken; '%s' cannot get one. The Jolt world has a fixed ")
 		TEXT("body set of kMaxSimulatableSlots characters (design D7, task 10)."),
 		kMaxSimulatableSlots, *owner.GetName());
+	if (decision.outcome != BodySlotOutcome::Assigned)
+		return std::nullopt;
 
-	const uint32 slot = static_cast<uint32>(freeSlot - taken.begin());
-	m_joltSlotByOwner.emplace(&owner, slot);
-	return slot;
+	if (isAuthority)
+		character->SetAuthoritativePhysicsSlot(decision.slot);
+	m_joltSlotByOwner.emplace(&owner, decision.slot);
+	m_joltSlotWaitsLoggedByOwner.erase(&owner);
+
+	UE_LOG(LogOGSimHost, Log, TEXT("[SimHost.Slot] assigned role=%s owner=%s slot=%u lowestFreeLocally=%d"),
+		isAuthority ? TEXT("Authority") : TEXT("Client"), *owner.GetName(), decision.slot,
+		lowestFree != taken.end() ? static_cast<int32>(lowestFree - taken.begin()) : -1);
+	return decision.slot;
 }
 
-void ASimulationManagerUImpl::releaseJoltSlot(const AActor& owner)
+void ASimulationManagerUImpl::releaseJoltSlot(const AActor& owner, unsigned int id)
 {
+	m_joltSlotWaitsLoggedByOwner.erase(&owner);
+
 	const auto found = m_joltSlotByOwner.find(&owner);
 	if (found == m_joltSlotByOwner.end())
 		return;
@@ -1901,8 +1947,8 @@ void ASimulationManagerUImpl::releaseJoltSlot(const AActor& owner)
 	m_physAdapter->bindTable().releaseSlot(slot);
 	m_joltSlotByOwner.erase(found);
 
-	UE_LOG(LogOGSimHost, Log, TEXT("[SimHost.Bind] release slot=%u boundBodies=%u slotsInUse=%d"),
-		slot, boundJoltBodyCount(), static_cast<int32>(m_joltSlotByOwner.size()));
+	UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Bind] release id=%u slot=%u boundBodies=%u slotsInUse=%d"),
+		id, slot, boundJoltBodyCount(), static_cast<int32>(m_joltSlotByOwner.size()));
 
 	if (m_shadowWorld.has_value())
 		releaseShadowSlot(slot);
@@ -2733,7 +2779,10 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
 
         AActor* ownerActor = owner.GetOwner();
         const simulatableBrawler::StaticData& staticData = owner.getStaticData();
-        const uint32 slot = acquireJoltSlot(*ownerActor);
+        const std::optional<uint32> acquiredSlot = tryAcquireJoltSlot(*ownerActor);
+        if (!acquiredSlot.has_value())
+            return TryRegisterStatus::Pending;
+        const uint32 slot = *acquiredSlot;
         BodyId parentBodyId;
         {
             const double worldMutexWaitStartSeconds = FPlatformTime::Seconds();
@@ -2762,8 +2811,9 @@ TryRegisterStatus ASimulationManagerUImpl::tryRegister(
             });
         }
 
-        UE_LOG(LogOGSimHost, Log, TEXT("[SimHost.Bind] bind id=%u slot=%u boundBodies=%u slotsInUse=%d"),
-            id, slot, boundJoltBodyCount(), static_cast<int32>(m_joltSlotByOwner.size()));
+        UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Bind] bind id=%u slot=%u body0=%u boundBodies=%u slotsInUse=%d"),
+            id, slot, m_joltWorld->slotBodyId(slot, 0u).GetIndex(), boundJoltBodyCount(),
+            static_cast<int32>(m_joltSlotByOwner.size()));
 
         if (m_shadowWorld.has_value())
             bindShadowSlot(slot, id, *record.simulatable);
@@ -3182,7 +3232,7 @@ void ASimulationManagerUImpl::unregisterFromNewFramework(
 #if !OG_PHYSICS_BACKEND_CHAOS
     m_renderTargetsById.erase(id);
     if (const AActor* ownerActor = owner.GetOwner())
-        releaseJoltSlot(*ownerActor);
+        releaseJoltSlot(*ownerActor, id);
 #endif
 
     UE_LOG(LogOGMgmt, Log, TEXT("NewFramework: unregistered simulatable id=%u"), id);

@@ -1297,6 +1297,35 @@ two applies, in a development build only.
 
 ---
 
+## G-84 — a client never picks a Jolt slot itself: it binds the slot the authority chose, or waits
+
+**Site:** the `decideBodySlot` call in `tryAcquireJoltSlot`, Jolt configuration.
+
+**The prohibition** (og-simulationscheduler-withjolt task 66). ⛔ Do not bypass `decideBodySlot` on a
+client, and do not pass it `true` for `isAuthority` there. ⛔ Do not turn either wait into a pick: when it
+answers `BodySlotOutcome::WaitForReplication` (the pawn's `PhysicsSlotValue` has not arrived) or
+`BodySlotOutcome::WaitForRelease` (the replicated slot is still held here by a character that has left the
+authority), return no slot and let the caller retry. Never fall back to the lowest free slot, to the slot
+the simulation id would give, or to any other slot this peer computes.
+
+**The consequence of getting it wrong.** A slot's bodies have fixed Jolt body ids, so a character's body
+ids are its slot's. A client that picks its own slot puts the character in a different slot from the
+server whenever the two have seen joins and leaves in a different order: a client that joins late binds
+its own pawn first and takes slot 0, while the server gave it the slot after everyone already there. Jolt
+orders contact solving by body id, so a contact between two characters is then solved in a different
+order on the client than on the server, the results differ by rounding, and the exact correction compare
+reports a disagreement the netcode did not cause. Nothing crashes and nothing logs; only the
+`[SimHost.Bind]` lines show it, as the same id with a different slot on two peers.
+
+**What breaks if the tag moves.** The tag marks the decision. The role line above it is not covered, but
+a client that tells the decision it is the authority also writes the slot to the pawn, and the pawn's
+`SetAuthoritativePhysicsSlot` `checkf`s that it runs on the authority, so that edit fails in a
+development build on the first client acquire. A pick typed in place of the waits' early return, or in a
+caller that does not wait on the empty answer (`registerVizVolume`, `tryRegister`), has no check: the
+component's retry budget then never sees a wait, and only the bind lines show the mismatch.
+
+---
+
 ## §R — Retired ids
 
 *(None. No id has been retired. The compile-time conversions above never held an id — the header

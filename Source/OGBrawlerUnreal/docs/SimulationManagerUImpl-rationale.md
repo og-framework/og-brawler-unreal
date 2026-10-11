@@ -4285,7 +4285,7 @@ the scheduler, the two tick functions). `EndPlay` first unregisters the tick fun
 outstanding step (`⛔G-80`), before any teardown.
 
 **Lines.** `[SimHost.Backend]` (both configurations), `[SimHost.Mode]`, `[SimHost.World]`,
-`[SimHost.Frame]`, `[SimHost.FirstStep]`, `[SimHost.Bind]`, `[SimHost.Shadow]`, `[SimHost.RenderTarget]`,
+`[SimHost.Frame]`, `[SimHost.FirstStep]`, `[SimHost.Slot]`, `[SimHost.Bind]`, `[SimHost.Shadow]`, `[SimHost.RenderTarget]`,
 the non-shipping `[SimHost.RenderApply]` and `[SimHost.RenderSync]` checks, `[SimHost.RenderCorrection]`
 and `[SimHost.RenderTrace]`,
 and the per-window `[SimHost.Window]` (§8), on `LogOGSimHost`.
@@ -4396,7 +4396,9 @@ they are until task 21 retires them with the arm.
   them pointers, null on a worker client, until task 56 gave that client its shadow world). In the Chaos configuration
   they always return the Chaos query adapter and reader; `registerVizVolume` builds the query
   parameters the component used to build itself (simple collision, the owner ignored) and registers
-  the volume on the query adapter. They are handles, an exception to §1's narrow-passthrough rule that
+  the volume on the query adapter. It returns an optional volume id: always set in the Chaos
+  configuration, empty in the Jolt configuration while the owner's slot acquire waits (task 66, the slot
+  table below). They are handles, an exception to §1's narrow-passthrough rule that
   they inherit from the accessors they replace: the two visualizers are templates over the adapter
   types and call them directly, on the game thread. The Jolt configuration's answers are below.
 * **The backend token.** The build identity builds its token from `kBackendName` and the fingerprint:
@@ -4467,18 +4469,42 @@ of this class's two files.
   thread holds this manager's J2". An inline host's also accepts "on the game thread", because there the
   game thread runs the steps and queries between them. The "step is running" bit is set by the step
   scope in `runJoltStep_Step`. Both flags are keyed per manager (next subsection).
-* **The slot table.** A character owns one of the world's fixed slots from the first time the
-  manager hears of it until it leaves. `acquireJoltSlot` keys the table by the owning actor and hands
-  out the lowest free slot; `registerVizVolume`, which the component calls before the character's
-  simulation id is known, takes the slot first, and `tryRegister` finds it there. A slot is per peer
-  and never on the wire: a query hit's key uses the simulation id, not the slot.
+* **The slot table** (task 66). A character owns one of the world's fixed slots from the first time the
+  manager hears of it until it leaves, and it owns the **same** slot on every peer. A slot's bodies have
+  fixed Jolt body ids and Jolt orders contact solving by body id, so a character in different slots on two
+  peers can have a contact solved in a different order there (design_resim_analysis §6; the N2 paragraph
+  below). `tryAcquireJoltSlot` keys the table by the owning actor and returns the owner's slot if it has
+  one. Otherwise it asks og-simulation's `decideBodySlot` (`BodySlotAssignment.h`), with the pawn's
+  replicated slot (`AOGBrawlerUECharacter::GetPhysicsSlot`) and the slots taken here (`⛔G-84`):
+  - the authority takes the lowest free slot, as before (so the server's slots are unchanged), and writes
+    it to the pawn's `PhysicsSlotValue` with `SetAuthoritativePhysicsSlot`, which replicates it;
+  - a client takes the replicated slot, even when a lower one is free here. It never picks one itself;
+  - a client with no replicated slot yet (`WaitForReplication`), or whose replicated slot is still held
+    here by a character that has left the authority but not yet this client (`WaitForRelease`), gets no
+    slot. The acquire returns empty and the caller retries on the next frame. The release of the departed
+    character's slot (below) ends a `WaitForRelease`;
+  - all slots taken is `Full`, today's `checkf`.
+
+  Each owner logs one wait line per wait kind, not per attempt,
+  `[SimHost.Slot] wait=<WaitForReplication|WaitForRelease> owner=<name> slot=<slot|-1> heldBy=<name|->`,
+  and one line when it gets its slot,
+  `[SimHost.Slot] assigned role=<Authority|Client> owner=<name> slot=<slot> lowestFreeLocally=<slot|-1>`,
+  both at `Log`. `lowestFreeLocally` is the slot a first-free rule would have picked on that peer.
+  `registerVizVolume`, which the component calls before the character's simulation id is known, takes
+  the slot first and returns an empty volume id while the acquire waits, so the component retries before
+  it builds its visualization states (`SimmableUpdateComponent-rationale.md` §3); `tryRegister` finds the
+  slot there, and its first call returns `Pending` if it does not. The slot rides pawn replication only;
+  a query hit's key still uses the simulation id, not the slot.
 * **The bind** (`tryRegister`'s first call, `⛔G-81`). Under J2, `JoltPhysicsFactory` binds the slot's
   template bodies in declaration order. Its `simulatableId` is the storage key (`toStorageKey` of the simulation id),
   which the authority alone assigns and every client receives on the pawn (§15), so it is the same on
   every peer, as the query adapter's hit order requires. The factory's shape registrar is the query
   adapter's `registerShape`, so child bodies map to their root and their shape enables register. Each
   declaration's query volumes are registered with the slot's root body as the ignored root. Then one
-  `[SimHost.Bind] bind id=<id> slot=<slot> boundBodies=<n> slotsInUse=<k>` line at `Log`. Occupancy
+  `[SimHost.Bind] bind id=<id> slot=<slot> body0=<index> boundBodies=<n> slotsInUse=<k>` line at
+  `Warning`, so it shows at `LogOGSimHost`'s committed level: `body0` is the Jolt body index of the slot's
+  first template body (`JoltWorld::slotBodyId`), so two peers' lines show the same body ids, not only
+  the same slot (task 66; the lines were at `Log` before and never appeared). Occupancy
   is not applied here: the slot stays parked until the step applies the Occupy command the Ready
   path pushes (J1, task 54).
 * **The capsule contract (design D14).** The Chaos factory compared the authored UE capsule with the
@@ -4496,8 +4522,8 @@ of this class's two files.
   release cannot race them (task 11 review N3). A reader with a step-thread caller would need the
   release under J2. The bodies keep their stale user data until the next bind, which is harmless: a
   parked body answers no query and collides with nothing. Query volumes are never unregistered, as in
-  the Chaos configuration. One `[SimHost.Bind] release slot=<slot> boundBodies=<n> slotsInUse=<k>`
-  line at `Log`.
+  the Chaos configuration. One `[SimHost.Bind] release id=<id> slot=<slot> boundBodies=<n> slotsInUse=<k>`
+  line at `Warning` (task 66, as the bind line). The release also forgets the owner's logged waits.
 * **Visualizations.** On an inline host `editVizQuery()` and `getVizReader()` return the step world's
   adapters, which the game thread may query between steps, and `registerVizVolume` registers in the
   same adapter with the slot's root as the ignored root. On a worker client they return the shadow
@@ -4546,12 +4572,15 @@ bit, so a game thread that ever held both managers' mutexes at once would not tr
 cannot deadlock, because a step only ever takes its own manager's mutex. Two client managers in one
 process are already refused at `BeginPlay` (`s_instances`).
 
-**Character contact solving can differ between peers at ULP level** (task 53 review N2). Slots are
-handed out per peer in registration order (above), and Jolt orders contact constraints by body id, so
-the same two characters touching can be solved in a different order on two peers. Queries are
-unaffected (their hits sort by a peer-stable key). Prediction correction absorbs the difference as it
-absorbs Chaos's; nothing claims bitwise cross-peer determinism of the solver. The task-54 headless runs
-(idle characters, no contact) showed no higher resimulation rate than the same-commit Chaos run.
+**Character contact solving and slots** (task 53 review N2, fixed by task 66). Jolt orders contact
+constraints by body id, and a character's body ids are its slot's. Until task 66 each peer handed out
+slots in its own registration order, so a client that joined late bound its own pawn first and put the
+same character in a different slot, with different body ids, from the server; two characters touching
+could then be solved in a different order on the two peers. Since task 66 the authority chooses the slot
+and every client binds that slot (the slot table, above), so every peer gives a character the same body
+ids. Queries were never affected (their hits sort by a peer-stable key). Nothing here claims bitwise
+cross-peer determinism of the solver beyond that: the same bodies, statics and inputs are what Jolt's
+rollback guide asks for, and prediction correction absorbs what remains.
 
 ### The Jolt arm's render publish and apply (task 55)
 

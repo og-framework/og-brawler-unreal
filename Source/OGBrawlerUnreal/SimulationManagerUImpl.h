@@ -394,7 +394,7 @@ public:
 
     physicsBackendUImpl::VizQuery&        editVizQuery();
     const physicsBackendUImpl::VizReader& getVizReader() const;
-    QueryVolumeId registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
+    std::optional<QueryVolumeId> registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
 
@@ -742,8 +742,8 @@ private:
 
     void decideJoltSteppingMode(bool worldIsAuthority);
     void buildJoltWorld(UWorld& world, bool worldIsAuthority);
-    uint32 acquireJoltSlot(const AActor& owner);
-    void releaseJoltSlot(const AActor& owner);
+    std::optional<uint32> tryAcquireJoltSlot(AActor& owner);
+    void releaseJoltSlot(const AActor& owner, unsigned int id);
     BodyId joltSlotRootBodyId(const JoltWorld& world, uint32 slot) const;
     uint32 boundJoltBodyCount() const;
     void startJoltStepping(UWorld& world, float dt, bool worldIsAuthority);
@@ -765,6 +765,7 @@ private:
     std::optional<JoltSpatialQueryAdapter>       m_shadowQuery;
     std::vector<SlotBodyTemplate>                m_joltSlotTemplate;
     std::unordered_map<const AActor*, uint32>    m_joltSlotByOwner;
+    std::unordered_map<const AActor*, uint8>     m_joltSlotWaitsLoggedByOwner;
     UE::FMutex                                   m_joltWorldMutex;
     bool                                         m_joltStepsInline = true;
     uint8                                        m_joltRoleBit     = 0;

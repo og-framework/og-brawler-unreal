@@ -129,8 +129,9 @@ is `TG_DuringPhysics`, and nothing in this file depends on a prerequisite.
 it is not (§11, F-25-1). Long enough for scene startup on a slow load, short enough that a genuine
 wiring bug fails loudly rather than hanging forever. Both loops count against it independently
 (`m_initializationAttempts`, `m_registrationAttempts`), and both end in a `checkf` rather than a silent
-give-up. Within loop two, the manager wait, the task-25 id wait (§13) and the bodies-resolvable wait
-all share the one `m_registrationAttempts` count.
+give-up. Within loop one, the manager wait and the physics-slot wait (§3) share the one
+`m_initializationAttempts` count; within loop two, the manager wait, the task-25 id wait (§13) and the
+bodies-resolvable wait all share the one `m_registrationAttempts` count.
 
 **Deleted commented-out code (task 25).** Two commented-out overrides stood under the constructor in
 the header, `ShouldCreatePhysicsState() const override { return true; }` and `OnCreatePhysicsState()`.
@@ -154,9 +155,19 @@ pair at the end changed no scope (there was no code after that point either); it
 owner's input-collection component, register the target-visualization query volume through the
 manager's `registerVizVolume` (§10), construct the three visualization states, and schedule loop two.
 
+In the Jolt configuration the volume hangs off the character's Jolt slot, so `registerVizVolume` first
+acquires the slot, and it can answer "not yet" (og-simulationscheduler-withjolt task 66): on a client the
+slot is the one the authority chose, read from the pawn's replicated `PhysicsSlotValue`, and the client
+waits until that value has arrived, and until no departed character still holds that slot on this client.
+The manager then returns an empty volume id, and loop one reschedules itself for the next frame
+(`scheduleNextInitializationAttempt`) **before** it builds the visualization states, so the states are
+only ever built over a registered volume. The wait counts against `kMaxRegistrationAttempts` like the
+manager wait, and its `checkf` names the owner. The Chaos configuration never waits here.
+
 **Loop two — `tryRegisterWithNewFramework`.** Waits for the manager, then for the pawn's
 `SimCharacterId` (§13), then for the character's physics bodies to become resolvable — `tryRegister`
-answers `Pending` until they are — and on success does four things in a deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
+answers `Pending` until they are, and in the Jolt configuration also while the character holds no slot,
+which loop one normally rules out — and on success does four things in a deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
 host (§6), and, on the authority only, register the id → component delivery route (§7).
 
 Every step of both loops can legitimately answer "not yet", repeatedly, and "not yet" is never an
@@ -566,7 +577,8 @@ component contains no backend arm and names no adapter type: it includes `Physic
 instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
 query adapter and the game-thread reader, and `registerVizVolume` builds the query parameters this
 file used to build itself (simple collision, the owner ignored), so the volume and the two passes
-behave as before. The visualizers are templates over the adapter types, so the calls compile against
+behave as before. `registerVizVolume` returns an optional volume id, which is empty only in the Jolt
+configuration while the slot acquire waits (§3). The visualizers are templates over the adapter types, so the calls compile against
 whichever pair the manager selects.
 
 In the Jolt configuration the two accessors return the step world's adapters on the authority and on

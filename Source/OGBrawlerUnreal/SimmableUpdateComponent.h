@@ -123,6 +123,7 @@ protected:
 private:
 	void tryInitializeWithManager();
 	void tryRegisterWithNewFramework();
+	void scheduleNextInitializationAttempt();
 	void scheduleNextRegistrationAttempt();
 	SimCharacterId simCharacterId() const;
 	int32 m_initializationAttempts = 0;
