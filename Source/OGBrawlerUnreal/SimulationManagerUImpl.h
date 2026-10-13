@@ -37,6 +37,7 @@
 #include "OGSimulation/RenderCorrectionSmoothing.h"
 #include "OGBrawlerUnreal/SimulationFrameHostUImpl.h"
 #include "OGBrawlerUnreal/BrawlerStepHooksUImpl.h"
+#include "OGSimulationJolt/JoltContactCounter.h"
 #endif
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
@@ -758,6 +759,7 @@ private:
     void compareShadowBindTables_GameThread(const TCHAR* after, uint32 slot, unsigned int id, bool sameResults);
 
     std::optional<JoltRuntimeLeaseUImpl>         m_joltRuntime;
+    std::optional<JoltContactCounter>            m_joltContactCounter;
     std::optional<JoltWorld>                     m_joltWorld;
     std::optional<JoltWorld>                     m_shadowWorld;
     std::optional<JoltPhysicsBodyAdapter>        m_shadowBodyAdapter;
@@ -892,6 +894,11 @@ private:
         uint32 activeFrames      = 0u;
         double maxErrorCm        = 0.0;
         double maxAppliedCm      = 0.0;
+        uint32 policySnaps       = 0u;
+        uint32 rootFramedFrames  = 0u;
+        double maxPolicySnapCm   = 0.0;
+        double maxPolicySnapDeg  = 0.0;
+        uint32 straddleSnaps     = 0u;
         uint64 resimsAtStart     = 0u;
         uint64 capturedAtStart   = 0u;
         uint64 withoutErrorAtStart  = 0u;
@@ -922,9 +929,7 @@ private:
     RenderSnapshot                                       m_renderPoses;
     bool                                                 m_renderPosesValid = false;
     RenderInterpolationFrame                             m_renderFrame;
-#if !UE_BUILD_SHIPPING
-    RenderSnapshot                                       m_renderTraceNext;
-#endif
+    RenderSnapshot                                       m_renderNext;
     RenderApplyWindowUImpl                               m_renderApplyWindow;
 
     float                                                m_renderCorrectionStepSeconds = 0.f;
@@ -979,6 +984,19 @@ private:
     uint32                                               m_shadowBindCompares     = 0u;
     uint32                                               m_shadowBindMismatches   = 0u;
     mutable ShadowWindowUImpl                            m_shadowWindow;
+
+    struct ContactStepUImpl
+    {
+        uint32                tick      = 0u;
+        uint64                worldStep = 0u;
+        JoltContactStepCounts counts;
+    };
+
+    static void onJoltStepWorldStepped_Step(void* manager);
+    void recordContactStep_Step();
+    void logContactSteps_Step(uint64 physicsStep, const TickOutcome& outcome);
+
+    std::vector<ContactStepUImpl>                        m_contactSteps_Step;
 
     SimulationFrameHostUImpl             m_frameHost;
     std::optional<BrawlerStepHooksUImpl> m_stepHooks;
@@ -1056,6 +1074,11 @@ private:
             "JoltRuntime lease must outlive the shadow world as it outlives the step world. Keep m_joltRuntime < "
             "m_shadowWorld < m_shadowBodyAdapter < {m_shadowReader, m_shadowQuery}. Was design D's 'runtime < world "
             "< adapters' row, applied to the shadow world (task 56).");
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_joltContactCounter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_joltWorld),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The step world holds a raw pointer "
+            "to the contact counter (its Jolt contact listener) until it is destroyed, so the counter must outlive the "
+            "world. Keep m_joltContactCounter < m_joltWorld. Was task 78's install rule.");
         static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_manager)
                           < __builtin_offsetof(ASimulationManagerUImpl, m_frameHost)
                    && __builtin_offsetof(ASimulationManagerUImpl, m_frameHost)

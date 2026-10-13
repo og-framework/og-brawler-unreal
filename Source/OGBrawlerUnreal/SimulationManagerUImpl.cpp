@@ -33,6 +33,7 @@
 #include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
 #if !OG_PHYSICS_BACKEND_CHAOS
 #include "Async/UniqueLock.h"
+#include "Misc/StringBuilder.h"
 #include "OGSimulation/BodySlotAssignment.h"
 #include "OGSimulationJolt/JoltLayerTable.h"
 #include "OGSimulationJolt/JoltStaticWorldBuilder.h"
@@ -127,6 +128,15 @@ namespace
 		TEXT("Jolt configuration only. A correction shorter than the distance the body covers in this many seconds at its ")
 		TEXT("corrected speed is blended even above og.Render.ErrorCorrectionMaxCm. Chaos's ")
 		TEXT("p.RenderInterp.MaximumErrorCorrectionDesyncTimeBeforeSnapping (0.6 there and here). 0 or less = off."),
+		ECVF_Default);
+
+	TAutoConsoleVariable<int32> CVarJoltContactCounts(
+		TEXT("og.Jolt.ContactCounts"),
+		0,
+		TEXT("Jolt configuration only. 1 = count the step world's contacts with a passive Jolt contact listener and log one ")
+		TEXT("[SimHost.Contacts] line per simulated step, forward and replayed, that touched a contact (LogOGSimHost, Verbose). ")
+		TEXT("Read once, when the step world is built at the simulation manager's BeginPlay, so set it with ")
+		TEXT("-ini:Engine:[ConsoleVariables]:og.Jolt.ContactCounts=1, not a later console command. 0 = nothing is installed."),
 		ECVF_Default);
 
 #if !UE_BUILD_SHIPPING
@@ -1795,6 +1805,13 @@ void ASimulationManagerUImpl::buildJoltWorld(UWorld& world, bool worldIsAuthorit
 		JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
 
 		m_joltWorld.emplace(m_joltRuntime->runtime, config, &logJoltToSimHost);
+		if (CVarJoltContactCounts.GetValueOnGameThread() == 1)
+		{
+			m_joltContactCounter.emplace();
+			m_contactSteps_Step.reserve(config.ringDepthTicks + 1u);
+			m_joltWorld->physics().SetContactListener(&*m_joltContactCounter);
+			m_joltWorld->setAfterStepObserver(&ASimulationManagerUImpl::onJoltStepWorldStepped_Step, this);
+		}
 
 		JoltStaticWorldBuilder queryableBuilder(*m_joltWorld, &logJoltToSimHost);
 		queryableBuilder.build(queryableStatics);
@@ -1822,6 +1839,18 @@ void ASimulationManagerUImpl::buildJoltWorld(UWorld& world, bool worldIsAuthorit
 
 	if (!m_joltStepsInline)
 		buildShadowWorld(config, queryableStatics, physicsOnlyStatics, stepStaticBodies);
+
+	const bool stepListener   = m_joltWorld->physics().GetContactListener() != nullptr;
+	const bool shadowListener = m_shadowWorld.has_value() && m_shadowWorld->physics().GetContactListener() != nullptr;
+	UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Contacts] installed=%d stepListener=%s shadowListener=%s reserved=%u"),
+		m_joltContactCounter.has_value() ? 1 : 0, stepListener ? TEXT("set") : TEXT("null"),
+		!m_shadowWorld.has_value() ? TEXT("none") : shadowListener ? TEXT("set") : TEXT("null"),
+		static_cast<uint32>(m_contactSteps_Step.capacity()));
+	checkf(stepListener == m_joltContactCounter.has_value() && !shadowListener,
+		TEXT("buildJoltWorld: the contact counter must be the step world's listener exactly when og.Jolt.ContactCounts ")
+		TEXT("was 1 at world build, and the game-thread shadow world never has one (step listener %d, counter %d, shadow ")
+		TEXT("listener %d)."),
+		stepListener ? 1 : 0, m_joltContactCounter.has_value() ? 1 : 0, shadowListener ? 1 : 0);
 }
 
 void ASimulationManagerUImpl::buildShadowWorld(const JoltWorldConfig& stepConfig,
@@ -2009,7 +2038,65 @@ void ASimulationManagerUImpl::runJoltStep_Step(uint64 physicsStep, double stepDe
 	JoltWorldLockScopeUImpl worldLock(m_joltWorldMutex, m_joltRoleBit);
 	JoltStepScopeUImpl      stepScope(m_joltRoleBit);
 	m_stepHooks->currentStepDeadline = stepDeadlineSeconds;
-	m_stepDriver->runTick(physicsStep);
+	const TickOutcome outcome = m_stepDriver->runTick(physicsStep);
+	if (m_joltContactCounter.has_value())
+		logContactSteps_Step(physicsStep, outcome);
+}
+
+void ASimulationManagerUImpl::onJoltStepWorldStepped_Step(void* manager)
+{
+	static_cast<ASimulationManagerUImpl*>(manager)->recordContactStep_Step();
+}
+
+void ASimulationManagerUImpl::recordContactStep_Step()
+{
+	checkf(isJoltStepRunningOnThisThread(),
+		TEXT("recordContactStep_Step: the step world stepped outside runJoltStep_Step. The contact lines take each ")
+		TEXT("step's replay flag from its place in runTick's batch, so every step world step must run inside it."));
+	checkf(m_contactSteps_Step.size() < m_contactSteps_Step.capacity(),
+		TEXT("recordContactStep_Step: one runTick stepped the world more than the %u times reserved at world build ")
+		TEXT("(the ring depth's replays plus the forward step)."),
+		static_cast<uint32>(m_contactSteps_Step.capacity()));
+	m_contactSteps_Step.push_back(ContactStepUImpl{ static_cast<uint32>(m_manager->currentIntegratedTick()),
+		m_joltWorld->physicsStepCount(), m_joltContactCounter->drain() });
+}
+
+void ASimulationManagerUImpl::logContactSteps_Step(uint64 physicsStep, const TickOutcome& outcome)
+{
+	const uint32 steps = static_cast<uint32>(m_contactSteps_Step.size());
+	checkf(steps == outcome.replayedTicks + 1u,
+		TEXT("logContactSteps_Step: one runTick drained %u world steps, but the step driver reports %u replayed ticks ")
+		TEXT("and one forward step. Every step but the batch's last is logged as replayed."),
+		steps, outcome.replayedTicks);
+	if (UE_LOG_ACTIVE(LogOGSimHost, Verbose))
+	{
+		for (uint32 index = 0u; index < steps; ++index)
+		{
+			const ContactStepUImpl&      step   = m_contactSteps_Step[index];
+			const JoltContactStepCounts& counts = step.counts;
+			if (counts.manifolds() == 0u && counts.unrecordedIds == 0u && counts.unrecordedDeclarations == 0u)
+				continue;
+			TStringBuilder<512> ids;
+			for (uint32 idIndex = 0u; idIndex < counts.idCount; ++idIndex)
+			{
+				const JoltContactIdCounts& id = counts.ids[idIndex];
+				ids.Appendf(TEXT("%s%u:%u/%u/%u/%u/%u:0x%x"), idIndex == 0u ? TEXT("") : TEXT(","), id.simulatableId,
+					id.pairCount(JoltContactPairClass::RootRoot), id.pairCount(JoltContactPairClass::RootChild),
+					id.pairCount(JoltContactPairClass::RootStatic), id.pairCount(JoltContactPairClass::ChildChild),
+					id.pairCount(JoltContactPairClass::ChildStatic), id.childDeclarations);
+			}
+			UE_LOG(LogOGSimHost, Verbose,
+				TEXT("[Verbose][SimHost.Contacts] tick=%u step=%llu worldStep=%llu replay=%d manifolds=%u added=%u ")
+				TEXT("rootRoot=%u rootChild=%u rootStatic=%u childChild=%u childStatic=%u staticStatic=%u ids=%s ")
+				TEXT("idsDropped=%u declarationsDropped=%u"),
+				step.tick, physicsStep, step.worldStep, index + 1u < steps ? 1 : 0, counts.manifolds(), counts.added,
+				counts.pairCount(JoltContactPairClass::RootRoot), counts.pairCount(JoltContactPairClass::RootChild),
+				counts.pairCount(JoltContactPairClass::RootStatic), counts.pairCount(JoltContactPairClass::ChildChild),
+				counts.pairCount(JoltContactPairClass::ChildStatic), counts.pairCount(JoltContactPairClass::StaticStatic),
+				counts.idCount == 0u ? TEXT("-") : ids.ToString(), counts.unrecordedIds, counts.unrecordedDeclarations);
+		}
+	}
+	m_contactSteps_Step.clear();
 }
 
 bool ASimulationManagerUImpl::isJoltWorldMutexHeldOnThisThread() const
@@ -2093,12 +2180,7 @@ bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
 	params.renderTimeSeconds =
 		m_frameHost.hostNowSeconds_GameThread() - delaySteps * m_frameHost.stepIntervalSeconds_GameThread();
 
-	RenderSnapshot* nextCopy = nullptr;
-#if !UE_BUILD_SHIPPING
-	if (CVarRenderTraceFrames.GetValueOnGameThread() != 0)
-		nextCopy = &m_renderTraceNext;
-#endif
-	if (!interpolateRenderPoses(m_renderSnapshots, params, m_renderPoses, m_renderFrame, nextCopy))
+	if (!interpolateRenderPoses(m_renderSnapshots, params, m_renderPoses, m_renderFrame, &m_renderNext))
 		return false;
 
 	RenderCorrectionParams correction;
@@ -2107,7 +2189,7 @@ bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
 	correction.desyncSeconds     = CVarRenderErrorCorrectionDesyncSeconds.GetValueOnGameThread();
 	correction.stepSeconds       = m_renderCorrectionStepSeconds;
 	m_renderCorrectionSmoother.correctPoses(m_renderCorrections, m_renderFrame, correction, m_renderPoses,
-		m_renderCorrectionFrame);
+		m_renderCorrectionFrame, &m_renderNext);
 
 #if !UE_BUILD_SHIPPING
 	const RenderCorrectionFrame& corrected = m_renderCorrectionFrame;
@@ -2122,6 +2204,11 @@ bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
 	window.activeFrames     += corrected.active > 0u ? 1u : 0u;
 	window.maxErrorCm        = FMath::Max(window.maxErrorCm, corrected.maxErrorCm);
 	window.maxAppliedCm      = FMath::Max(window.maxAppliedCm, corrected.maxAppliedCm);
+	window.policySnaps      += corrected.policySnaps;
+	window.rootFramedFrames += corrected.rootFramed > 0u ? 1u : 0u;
+	window.maxPolicySnapCm   = FMath::Max(window.maxPolicySnapCm, corrected.maxPolicySnapCm);
+	window.maxPolicySnapDeg  = FMath::Max(window.maxPolicySnapDeg, corrected.maxPolicySnapDeg);
+	window.straddleSnaps    += corrected.straddleSnaps;
 	if (corrected.late > 0u && window.late == 0u)
 	{
 		UE_LOG(LogOGSimHost, Warning,
@@ -2135,11 +2222,12 @@ bool ASimulationManagerUImpl::buildRenderPoses_GameThread()
 	{
 		UE_LOG(LogOGSimHost, Log,
 			TEXT("[SimHost.RenderCorrection] event frame=%llu prev=%llu next=%llu alpha=%.4f corrections=%u smoothed=%u ")
-			TEXT("snapped=%u maxErrorCm=%.4f durationSteps=%d"),
+			TEXT("snapped=%u maxErrorCm=%.4f durationSteps=%d policySnaps=%u rootFramed=%u"),
 			static_cast<unsigned long long>(GFrameCounter), static_cast<unsigned long long>(m_renderFrame.prevStep),
 			static_cast<unsigned long long>(m_renderFrame.nextStep), m_renderFrame.alpha, corrected.corrections,
 			corrected.smoothedBodies, corrected.snappedBodies, corrected.maxErrorCm,
-			renderCorrectionDurationSteps(correction.correctionSeconds, correction.stepSeconds));
+			renderCorrectionDurationSteps(correction.correctionSeconds, correction.stepSeconds), corrected.policySnaps,
+			corrected.rootFramed);
 	}
 #endif
 
@@ -2372,7 +2460,7 @@ void ASimulationManagerUImpl::traceRenderFrame_GameThread() const
 	const RenderInterpolationFrame& bracket = m_renderFrame;
 	for (const auto& [id, target] : m_renderTargetsById)
 	{
-		const RenderBody* const nextBody = findRenderBody(m_renderTraceNext, id, m_joltRootDeclarationIndex);
+		const RenderBody* const nextBody = findRenderBody(m_renderNext, id, m_joltRootDeclarationIndex);
 		if (!target.applied || nextBody == nullptr)
 			continue;
 		const glm::dvec3 errorCm = m_renderCorrectionSmoother.appliedErrorCm(bracket, id, m_joltRootDeclarationIndex);
@@ -2452,7 +2540,8 @@ void ASimulationManagerUImpl::logRenderCorrectionWindow_GameThread()
 		TEXT("[SimHost.RenderCorrection] role=Client frames=%u resims=%llu captured=%llu withoutError=%llu tickMismatches=%llu ")
 		TEXT("ringDrops=%llu corrections=%u smoothedBodies=%u snappedBodies=%u maxErrorCm=%.3f maxAppliedCm=%.3f decays=%u ")
 		TEXT("decayMeanS=%.3f decayMaxS=%.3f activeFrames=%u late=%u pendingDrops=%u seconds=%.3f durationSteps=%d ")
-		TEXT("maxCm=%.1f desyncS=%.2f"),
+		TEXT("maxCm=%.1f desyncS=%.2f policySnaps=%u maxPolicySnapCm=%.3f maxPolicySnapDeg=%.1f rootFramedFrames=%u ")
+		TEXT("straddleSnaps=%u"),
 		m_renderApplyWindow.frames, static_cast<unsigned long long>(resims - window.resimsAtStart),
 		static_cast<unsigned long long>(captured - window.capturedAtStart),
 		static_cast<unsigned long long>(withoutError - window.withoutErrorAtStart),
@@ -2461,7 +2550,8 @@ void ASimulationManagerUImpl::logRenderCorrectionWindow_GameThread()
 		window.snappedBodies, window.maxErrorCm, window.maxAppliedCm, window.finished, decayMeanS,
 		static_cast<double>(window.maxFinishedSteps) * stepSeconds, window.activeFrames, window.late, window.pendingDrops,
 		seconds, renderCorrectionDurationSteps(seconds, m_renderCorrectionStepSeconds),
-		CVarRenderErrorCorrectionMaxCm.GetValueOnGameThread(), CVarRenderErrorCorrectionDesyncSeconds.GetValueOnGameThread());
+		CVarRenderErrorCorrectionMaxCm.GetValueOnGameThread(), CVarRenderErrorCorrectionDesyncSeconds.GetValueOnGameThread(),
+		window.policySnaps, window.maxPolicySnapCm, window.maxPolicySnapDeg, window.rootFramedFrames, window.straddleSnaps);
 
 	window = RenderCorrectionWindowUImpl{};
 	window.resimsAtStart       = resims;

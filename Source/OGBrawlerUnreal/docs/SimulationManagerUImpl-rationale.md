@@ -4548,7 +4548,8 @@ own documents. This class's part:
   tick functions.
 * **`runJoltStep_Step(physicsStep, deadline)`**, called by the frame host for each step of a batch on
   the step's thread: J2 scope, step scope (the "step is running" bit), the deadline into the hooks, then
-  `m_stepDriver->runTick(physicsStep)`. It is one of the step driver's two doors (the other is the
+  `m_stepDriver->runTick(physicsStep)`, and, when the contact counter is installed, that tick's contact
+  lines (the contact counts, below). It is one of the step driver's two doors (the other is the
   frame host's `applyOccupancyCommands_Step`), and it first `checkf`s that the frame host's batch is
   running on this thread and, in the inline mode, that this is the game thread (frame-host rationale
   §9). `isJoltStepRunningOnThisThread` reads the "step is running" bit for the frame host's and the
@@ -4742,6 +4743,12 @@ results manager). This configuration now does the same (design D §8).
   cvars, computes the render time, passes the snap distance, and calls it with J5 and the pose set; it
   keeps the core's per-frame summary (`m_renderFrame`) for the window line and the trace. Task 19 had
   the same code in this class; task 67 moved it unchanged, so another game can reuse it.
+* **The *next* copy**, `m_renderNext`: every frame, in every build including Shipping, the core also
+  copies the bracket's *next* snapshot, unblended, through its `nextCopy` argument into this member.
+  The correction smoothing reads it (the snapped bodies' straddle, next subsection), and the
+  `[SimHost.RenderTrace]` line reads its root pose. It is one bounded copy of a flat snapshot per frame,
+  into a member, so nothing allocates. It used to be taken only for the trace, under
+  `og.Render.TraceFrames`, in non-shipping builds.
 * **The bracket** follows Chaos's rule: *next* is the oldest published
   snapshot whose deadline is at or after the render time, *prev* the one before it, and alpha is the
   render time's position between their two deadlines. With no snapshot after the render time the
@@ -4846,6 +4853,24 @@ capture point, the ring and the lines.
   overwrite on a worker client and the visualization copy (the weapon axis, the guard, the projectile
   pool). The `[SimHost.RenderApply]` and `[SimHost.RenderSync]` checks compare with the pose set, so
   they hold as before.
+* **The weapon and the guard snap.** Their declarations (`dAttackRadialSimulation::PhysicsDeclaration`,
+  `dAttackGuardSimulation::PhysicsDeclaration`) declare `RenderCorrectionMode::SnapInRootFrame`;
+  the movement capsule and the projectiles keep `Smooth`. `correctPoses` therefore keeps no error for
+  those two bodies: it draws each at its interpolated corrected pose plus the offset the capsule is
+  being drawn with, so the blade angle and the guard facing are the corrected ones from the first
+  corrected frame and both stay on the character (§14 of `RenderCorrectionSmoothing-rationale.md` in
+  og-simulation's docs). The capsule carries a `LinearBodyState`, so its `RenderBody::hasRotation`
+  is 0, which the smoother's root-frame pass checks of every root. The policy is compile-time and
+  always on: there is no cvar, so nothing here reads one. This class only counts it, in the lines
+  below.
+* **On the straddle they take the corrected rotation.** `correctPoses` also gets `m_renderNext`. On
+  the bracket whose *prev* is the last old-timeline step and whose *next* is a correction's carrier
+  step, the interpolation would turn the weapon and the guard from the old rotation to the corrected
+  one across that step: for one rendered frame or so, a blade between the two. The smoother instead
+  gives those two bodies *next*'s rotation on that bracket. Their position stays the blended one plus
+  the capsule's offset, so they stay on the character (§15 of `RenderCorrectionSmoothing-rationale.md`
+  in og-simulation's docs). Chaos drew the weapon from the newest tick, so a correction popped there
+  with no in-between frame; this keeps that, two steps behind like everything else.
 * **The cvars**, read every frame: `og.Render.ErrorCorrectionSeconds` (0.3),
   `og.Render.ErrorCorrectionMaxCm` (250) and `og.Render.ErrorCorrectionDesyncSeconds` (0.6), Chaos's
   p.RenderInterp.ErrorCorrectionDuration, MaximumErrorCorrectionBeforeSnapping and
@@ -4863,13 +4888,96 @@ capture point, the ring and the lines.
     (resimulations below the thresholds), `tickMismatches`, `ringDrops`, then the game thread's
     `corrections` accumulated, `smoothedBodies` and `snappedBodies`, `maxErrorCm`, `maxAppliedCm`,
     `decays` (windows that closed), `decayMeanS` and `decayMaxS` (their length from the accumulation,
-    in steps times the step), `activeFrames`, `late`, `pendingDrops`, and the settings (`seconds`,
-    `durationSteps`, `maxCm`, `desyncS`);
+    in steps times the step), `activeFrames`, `late`, `pendingDrops`, the settings (`seconds`,
+    `durationSteps`, `maxCm`, `desyncS`), then the snapped bodies: `policySnaps` (corrected bodies
+    whose error was dropped because they snap, summed over the window), `maxPolicySnapCm` and
+    `maxPolicySnapDeg` (the largest dropped position and rotation error) and `rootFramedFrames`
+    (frames on which at least one snapped body was moved by its capsule's smoothing offset), and
+    `straddleSnaps` (snapped bodies given the carrier step's rotation on a straddle, summed over the
+    window). A snapped body is not in `smoothedBodies`, `snappedBodies`, `maxErrorCm` or
+    `maxAppliedCm`;
   * a LATE Warning, at most once per window, when a correction reached the game thread after its
     carrier step had been drawn;
   * with `og.Render.TraceFrames` 1, one `[SimHost.RenderCorrection]` event line per frame that
-    accumulated a correction, and the `[SimHost.RenderTrace]` line's `err`, the offset the character's
-    root body received that frame.
+    accumulated a correction, ending with that frame's `policySnaps` and `rootFramed` (the snapped
+    bodies moved by their capsule's offset that frame), and the `[SimHost.RenderTrace]` line's `err`,
+    the offset the character's root body received that frame.
+
+### The Jolt arm's contact counts (task 78)
+
+A session log could not tell a divergence caused by contact from one caused by different play: no line
+recorded which bodies touched. With `og.Jolt.ContactCounts` 1 this class installs og-simulation-jolt's
+`JoltContactCounter` (a passive Jolt contact listener; what it counts, why it changes no physics and
+why its counts are exact on any job system are in `JoltContactCounter-rationale.md` in
+og-simulation-jolt's docs) and logs, after every simulated step that touched a contact, one
+`[SimHost.Contacts]` line.
+
+* **The cvar is read once, when the step world is built** (`buildJoltWorld`, right after the world is
+  constructed, at `BeginPlay`). Jolt calls the listener from inside a step, and a resimulation is many
+  steps in one `runTick`: a listener installed or removed mid-session would count part of a step or
+  part of a replay, and the drain buffer is sized there. A later console command changes nothing, so
+  the cvar is set at startup through the engine ini override (below). The help text says so.
+* **The step world only.** `m_joltContactCounter` becomes the step world's contact listener, and
+  `onJoltStepWorldStepped_Step` its after-step observer (`JoltWorld-rationale.md` §14 in
+  og-simulation-jolt's docs). The game-thread shadow world never steps, only restores, so it would count
+  nothing, and it never gets a listener. `m_joltContactCounter` is declared before `m_joltWorld`, and
+  `compositionContractsHold` asserts it: the world holds a raw pointer to its listener until it is
+  destroyed.
+* **Logged once at world build** (Warning):
+
+  ```
+  [SimHost.Contacts] installed=<0|1> stepListener=<set|null> shadowListener=<set|null|none> reserved=<records>
+  ```
+
+  A `checkf` behind it requires the step world's listener to be set exactly when the counter was installed, and the shadow world's to be null. With
+  the cvar 0 the line reads `installed=0 stepListener=null`: no listener, no observer, and the only
+  per-step cost is one `has_value` check in `runJoltStep_Step` and one null check in the world's step.
+* **One record per world step.** The observer runs on the step's thread after each world step, forward
+  and replayed. `recordContactStep_Step` drains the counter into `m_contactSteps_Step` with the
+  manager's `currentIntegratedTick` (the tick that step integrated) and the world's
+  `physicsStepCount`. The buffer is reserved at world build for the ring depth plus one (a resimulation
+  replays at most the ticks the ring holds, then one forward step); the authority has no ring and never
+  replays, so it reserves one. A `checkf` fires before a push past the reservation.
+* **The replay flag is the record's place in the batch.** The step driver runs a resimulation's replayed
+  steps before the forward step inside one `runTick`, and its hooks fire once per `runTick`, none
+  during the replay, so no hook can mark a replayed step. After `runTick` returns,
+  `logContactSteps_Step` checks that it drained exactly `replayedTicks` + 1 records (the driver's
+  `TickOutcome`) and logs every record but the last as replayed. The buffer is cleared after each
+  `runTick`, logged or not.
+* **The line** (`LogOGSimHost`, Verbose; only for a step with a contact, and the strings are built only
+  when the category is at Verbose):
+
+  ```
+  [Verbose][SimHost.Contacts] tick=%u step=%llu worldStep=%llu replay=%d manifolds=%u added=%u rootRoot=%u rootChild=%u rootStatic=%u childChild=%u childStatic=%u staticStatic=%u ids=%s idsDropped=%u declarationsDropped=%u
+  ```
+
+  * `tick` joins `[DivergenceProbe.Correction]`'s tick; `step` is the scheduler's physics step of the
+    `runTick`, the same on a resimulation's replayed lines and its forward line, and the value
+    `[Resim.Prepare]` prints as `chaosStep`; `worldStep` orders the lines one by one.
+  * `added` counts the manifolds that were not in the contact cache the step started from. On the first
+    replayed step that cache is the restored snapshot's, so `added` there is what a restored cache did
+    not hold.
+  * The six pair counts sum to `manifolds`; `staticStatic` counts unbound non-root dynamic bodies and
+    is 0 in this game.
+  * `ids` lists each simulation character id that took part, sorted, as
+    `id:rootRoot/rootChild/rootStatic/childChild/childStatic:0x<declarations>`, or a dash. The declaration
+    mask has bit i for each child body of declaration index i that touched: the brawler's composite
+    order, 0 the weapon (`dAttackRadialSimulation`), 1 the guard, 2 to 4 the projectiles; the capsule
+    (5) is the root and is not a child. The line prints indices, not names: the counter is
+    game-agnostic, and the mapping is this paragraph.
+  * `idsDropped` and `declarationsDropped` are the counter's overflow counts; the brawler binds at most
+    8 ids with 6 declarations, so both are 0.
+* **Enable it** with the cvar and the category, on each peer that should log:
+
+  ```
+  -ini:Engine:[ConsoleVariables]:og.Jolt.ContactCounts=1 -ini:Engine:[Core.Log]:LogOGSimHost=Verbose
+  ```
+
+  The game module registers the cvar after the engine applies the ini's console variables; the engine
+  keeps such a value in a placeholder and applies it when the cvar is registered, which is before the
+  world's `BeginPlay`. The build line shows `installed=1`.
+* **The Chaos arm has no equivalent.** The cvar, the counter and the line exist only in the Jolt arm;
+  a Chaos build prints no `[SimHost.Contacts]` line, and Chaos collision events are out of scope.
 
 ### The build rule until task 21
 
