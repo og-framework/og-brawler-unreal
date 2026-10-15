@@ -117,7 +117,6 @@ Source/
   OGBrawlerUnreal/     Main game module                  [BUSL-1.1]
   OGSimulationUnreal/  UE simulation adapters module     [MPL-2.0]
   dVolume/             Volume simulation module           [MPL-2.0]
-  JoltPhysicsModule/   Jolt physics integration          [MPL-2.0]
   ProceduralMountainSide/  Procedural terrain module     [MPL-2.0 → BUSL-1.1 pending C8]
   OGSimulationTests/   LLT target (extern/og-simulation-tests submodule)  [MPL-2.0]
   OGBrawlerTests/      LLT target (extern/og-brawler-tests submodule)     [BUSL-1.1]

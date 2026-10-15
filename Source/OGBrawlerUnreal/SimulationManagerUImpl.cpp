@@ -538,92 +538,6 @@ namespace
 	}
 #endif
 
-	enum class OGLogRoute : uint8
-	{
-		SimTick, ResimProbe, Sim, Net, RelayProbe, DivergenceProbe, Mgmt
-	};
-
-	struct OGLogRouteEntry
-	{
-		const TCHAR* prefix;
-		OGLogRoute   route;
-	};
-
-	constexpr OGLogRouteEntry kOGLogRoutes[] = {
-		{ TEXT("[Resim.Input]"),                     OGLogRoute::SimTick },
-		{ TEXT("[ResimProbe"),                       OGLogRoute::ResimProbe },
-		{ TEXT("[TimeResync."),                      OGLogRoute::Sim },
-		{ TEXT("[Resim."),                           OGLogRoute::Sim },
-		{ TEXT("[ResimCheck.Divergence]"),           OGLogRoute::Sim },
-		{ TEXT("[ResimCheck.PrepareRestore]"),       OGLogRoute::Sim },
-		{ TEXT("[ResimCheck.Check]"),                OGLogRoute::SimTick },
-		{ TEXT("[ResimCheck.IsSimilar]"),            OGLogRoute::SimTick },
-		{ TEXT("[ResimCheck.TriggerRewind]"),        OGLogRoute::SimTick },
-		{ TEXT("[AuthoritySimulation]"),             OGLogRoute::SimTick },
-		{ TEXT("[ClientPrediction]"),                OGLogRoute::SimTick },
-		{ TEXT("[PredictionSimulation]"),            OGLogRoute::SimTick },
-		{ TEXT("[PostPrediction]"),                  OGLogRoute::SimTick },
-		{ TEXT("[CollectInput]"),                    OGLogRoute::SimTick },
-		{ TEXT("[ServerReceive]"),                   OGLogRoute::Net },
-		{ TEXT("[ReceiveLocalInput]"),               OGLogRoute::Net },
-		{ TEXT("[SendCorrectionStateToClients]"),    OGLogRoute::Net },
-		{ TEXT("[SendRemoteInputToClients]"),        OGLogRoute::Net },
-		{ TEXT("[SendLocalInputToServer]"),          OGLogRoute::Net },
-		{ TEXT("[ReceiveCorrectionState]"),          OGLogRoute::Net },
-		{ TEXT("[ReceiveCorrectionInput]"),          OGLogRoute::Net },
-		{ TEXT("[InjectCorrectionState]"),           OGLogRoute::Net },
-		{ TEXT("[InjectCorrectionInput]"),           OGLogRoute::Net },
-		{ TEXT("[DrainOutOfOrder]"),                 OGLogRoute::Net },
-		{ TEXT("[InputGap]"),                        OGLogRoute::Net },
-		{ TEXT("[InputDrop]"),                       OGLogRoute::Net },
-		{ TEXT("[DelayShift]"),                      OGLogRoute::Net },
-		{ TEXT("[InputStats]"),                      OGLogRoute::Net },
-		{ TEXT("[Park]"),                            OGLogRoute::Net },
-		{ TEXT("[Release]"),                         OGLogRoute::Net },
-		{ TEXT("[InputDomain]"),                     OGLogRoute::Net },
-		{ TEXT("[RelaySkip]"),                       OGLogRoute::Net },
-		{ TEXT("[RelayProbe"),                       OGLogRoute::RelayProbe },
-		{ TEXT("[DivergenceProbe"),                  OGLogRoute::DivergenceProbe },
-		{ TEXT("SimulationManager:"),                OGLogRoute::Mgmt },
-		{ TEXT("tryRegister:"),                      OGLogRoute::Mgmt },
-		{ TEXT("NewFramework:"),                     OGLogRoute::Mgmt }
-	};
-
-	constexpr TCHAR ogLogRouteFoldCase(TCHAR c)
-	{
-		return (c >= TEXT('A') && c <= TEXT('Z')) ? static_cast<TCHAR>(c - TEXT('A') + TEXT('a')) : c;
-	}
-
-	constexpr bool ogLogRouteStartsWith(const TCHAR* text, const TCHAR* prefix)
-	{
-		for (; *prefix != 0; ++text, ++prefix)
-		{
-			if (*text == 0 || ogLogRouteFoldCase(*text) != ogLogRouteFoldCase(*prefix))
-				return false;
-		}
-		return true;
-	}
-
-	constexpr bool ogLogRoutesAreAllReachable()
-	{
-		for (std::size_t later = 0; later < std::size(kOGLogRoutes); ++later)
-		{
-			for (std::size_t earlier = 0; earlier < later; ++earlier)
-			{
-				if (ogLogRouteStartsWith(kOGLogRoutes[later].prefix, kOGLogRoutes[earlier].prefix))
-					return false;
-			}
-		}
-		return true;
-	}
-
-	static_assert(ogLogRoutesAreAllReachable(),
-		"RouteOGMessage: a route's prefix BEGINS WITH an earlier route's prefix, so the earlier "
-		"route always wins and the later one can never be taken. FString::StartsWith ignores "
-		"case and so does this check. Was the ORDER IS LOAD-BEARING fence: [Resim.Input] must be "
-		"matched ahead of the [Resim. catch-all, and widening that catch-all to [Resim would "
-		"swallow every [ResimCheck. line.");
-
 	void RouteOGMessage(const char* msg)
 	{
 		FString fmsg(msg);
@@ -654,6 +568,9 @@ namespace
 		{
 			if (!body.StartsWith(entry.prefix))
 				continue;
+
+			if (severity == ELogVerbosity::Log)
+				severity = entry.plainLevel;
 
 			switch (entry.route)
 			{
@@ -773,7 +690,7 @@ int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 Last
 	ASimulationManagerUImpl* manager = m_manager;
 	if (manager == nullptr)
 	{
-		UE_LOG(LogOGSimTick, Log, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d manager=null rewind=0"),
+		OG_LOG_ROUTED(LogOGSimTick, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d manager=null rewind=0"),
 			LastCompletedStep);
 		return INDEX_NONE;
 	}
@@ -785,7 +702,7 @@ int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 Last
 	const bool willRewind = correctionTick != std::numeric_limits<unsigned int>::max() && correctionTick != 0u;
 	if (!willRewind)
 	{
-		UE_LOG(LogOGSimTick, Log, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d correctionTick=%u rewind=0"),
+		OG_LOG_ROUTED(LogOGSimTick, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d correctionTick=%u rewind=0"),
 			LastCompletedStep, correctionTick);
 		return INDEX_NONE;
 	}
@@ -3260,7 +3177,7 @@ void ASimulationManagerUImpl::releaseDelayedInputsForStep(int32 firstTick, int32
     if (!m_receptionCoordinator.has_value())
         return;
 
-    UE_LOG(LogOGNet, Log, TEXT("[ReleaseBatch] first=%d numSteps=%d"), firstTick, numSteps);
+    OG_LOG_ROUTED(LogOGNet, TEXT("[ReleaseBatch] first=%d numSteps=%d"), firstTick, numSteps);
 
     auto deliver = [this](unsigned int id, uint32 captureTick,
                           const simulatableBrawler::PlayerInput& input) -> bool

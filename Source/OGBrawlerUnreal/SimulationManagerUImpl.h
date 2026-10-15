@@ -14,6 +14,7 @@
 #include <optional>
 #include <memory>
 #include <set>
+#include <iterator>
 #include "Engine/World.h"
 #include "PhysicsPublic.h"
 #include "Runtime/PhysicsCore/Public/PhysicsInterfaceDeclaresCore.h"
@@ -82,6 +83,137 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGLatencyBudget, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGSimHost, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
+
+enum class OGLogRoute : uint8
+{
+	SimTick, ResimProbe, Sim, Net, RelayProbe, DivergenceProbe, Mgmt
+};
+
+struct OGLogRouteEntry
+{
+	const TCHAR*        prefix;
+	OGLogRoute          route;
+	ELogVerbosity::Type plainLevel;
+};
+
+inline constexpr OGLogRouteEntry kOGLogRoutes[] = {
+	{ TEXT("[Resim.Input]"),                     OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ResimProbe"),                       OGLogRoute::ResimProbe,      ELogVerbosity::Log },
+	{ TEXT("[TimeResync."),                      OGLogRoute::Sim,             ELogVerbosity::Log },
+	{ TEXT("[Resim."),                           OGLogRoute::Sim,             ELogVerbosity::Log },
+	{ TEXT("[ResimCheck.Divergence]"),           OGLogRoute::Sim,             ELogVerbosity::Log },
+	{ TEXT("[ResimCheck.PrepareRestore]"),       OGLogRoute::Sim,             ELogVerbosity::Log },
+	{ TEXT("[ResimCheck.Check]"),                OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ResimCheck.IsSimilar]"),            OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ResimCheck.TriggerRewind]"),        OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[AuthoritySimulation]"),             OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ClientPrediction]"),                OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[PredictionSimulation]"),            OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[PostPrediction]"),                  OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[CollectInput]"),                    OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ServerReceive]"),                   OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[ReceiveLocalInput] DISCARD"),       OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[ReceiveLocalInput]"),               OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[SendCorrectionStateToClients]"),    OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[SendRemoteInputToClients]"),        OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[SendLocalInputToServer]"),          OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[ReceiveCorrectionState]"),          OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[ReceiveCorrectionInput]"),          OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[InjectCorrectionState]"),           OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[InjectCorrectionInput]"),           OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[DrainOutOfOrder]"),                 OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[InputGap]"),                        OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[InputDrop]"),                       OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[DelayShift]"),                      OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[InputStats]"),                      OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[Park]"),                            OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[Release]"),                         OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[ReleaseBatch]"),                    OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[InputDomain]"),                     OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[RelaySkip]"),                       OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[RelayProbe"),                       OGLogRoute::RelayProbe,      ELogVerbosity::Log },
+	{ TEXT("[DivergenceProbe"),                  OGLogRoute::DivergenceProbe, ELogVerbosity::Log },
+	{ TEXT("SimulationManager:"),                OGLogRoute::Mgmt,            ELogVerbosity::Log },
+	{ TEXT("tryRegister:"),                      OGLogRoute::Mgmt,            ELogVerbosity::Log },
+	{ TEXT("NewFramework:"),                     OGLogRoute::Mgmt,            ELogVerbosity::Log }
+};
+
+constexpr TCHAR ogLogRouteFoldCase(TCHAR c)
+{
+	return (c >= TEXT('A') && c <= TEXT('Z')) ? static_cast<TCHAR>(c - TEXT('A') + TEXT('a')) : c;
+}
+
+constexpr bool ogLogRouteStartsWith(const TCHAR* text, const TCHAR* prefix)
+{
+	for (; *prefix != 0; ++text, ++prefix)
+	{
+		if (*text == 0 || ogLogRouteFoldCase(*text) != ogLogRouteFoldCase(*prefix))
+			return false;
+	}
+	return true;
+}
+
+constexpr bool ogLogRoutesAreAllReachable()
+{
+	for (std::size_t later = 0; later < std::size(kOGLogRoutes); ++later)
+	{
+		for (std::size_t earlier = 0; earlier < later; ++earlier)
+		{
+			if (ogLogRouteStartsWith(kOGLogRoutes[later].prefix, kOGLogRoutes[earlier].prefix))
+				return false;
+		}
+	}
+	return true;
+}
+
+static_assert(ogLogRoutesAreAllReachable(),
+	"RouteOGMessage: a route's prefix BEGINS WITH an earlier route's prefix, so the earlier "
+	"route always wins and the later one can never be taken. FString::StartsWith ignores "
+	"case and so does this check. Was the ORDER IS LOAD-BEARING fence: [Resim.Input] must be "
+	"matched ahead of the [Resim. catch-all, and widening that catch-all to [Resim would "
+	"swallow every [ResimCheck. line.");
+
+constexpr bool ogLogRoutePlainLevelsAreLogOrVerbose()
+{
+	for (const OGLogRouteEntry& entry : kOGLogRoutes)
+	{
+		if (entry.plainLevel != ELogVerbosity::Log && entry.plainLevel != ELogVerbosity::Verbose)
+			return false;
+	}
+	return true;
+}
+
+static_assert(ogLogRoutePlainLevelsAreLogOrVerbose(),
+	"kOGLogRoutes: a row's plainLevel is the level of a line that carries no [Verbose] or "
+	"[Warning] token, and it may only be Log (rare events) or Verbose (per tick, per packet, "
+	"per relay). A line that must reach Warning says so with its own [Warning] token.");
+
+constexpr const OGLogRouteEntry* ogLogRouteFor(const TCHAR* line)
+{
+	for (const OGLogRouteEntry& entry : kOGLogRoutes)
+	{
+		if (ogLogRouteStartsWith(line, entry.prefix))
+			return &entry;
+	}
+	return nullptr;
+}
+
+#define OG_LOG_ROUTED(Category, Format, ...) \
+	do \
+	{ \
+		constexpr const OGLogRouteEntry* ogLogRouteEntryForSite = ogLogRouteFor(Format); \
+		static_assert(ogLogRouteEntryForSite != nullptr, \
+			"OG_LOG_ROUTED: the format's leading tag has no kOGLogRoutes row, so it has no level. " \
+			"Add a row (prefix, route, plainLevel) or log this line with UE_LOG at a fixed level."); \
+		if constexpr (ogLogRouteEntryForSite->plainLevel == ELogVerbosity::Verbose) \
+		{ \
+			UE_LOG(Category, Verbose, Format, ##__VA_ARGS__); \
+		} \
+		else \
+		{ \
+			UE_LOG(Category, Log, Format, ##__VA_ARGS__); \
+		} \
+	} while (0)
 
 struct FMovementStaticDataCVars
 {

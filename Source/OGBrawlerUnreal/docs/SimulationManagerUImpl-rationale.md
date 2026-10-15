@@ -881,6 +881,164 @@ is the request/grant/refusal ledger and the requested-vs-granted pin; `[ResimPro
 apply edge and the replay span; `[ResimProbe.Landing]` is the frontier-landing split;
 `[ResimProbe.Stranded]` is the per-event Verbose companion to it.
 
+### Levels — the `plainLevel` column (og-simulationscheduler-withjolt task 80)
+
+**Every row of `kOGLogRoutes` carries a third field, `plainLevel`: the level of a routed line that
+carries no `[Verbose]` or `[Warning]` token.** `RouteOGMessage` starts every line at `Log`, sets
+`Verbose` or `Warning` from a leading token, and only then, on the matching row, replaces a
+remaining `Log` with the row's `plainLevel`. A token therefore always wins: the per-window
+`[Warning]` summaries and the per-event `[Verbose]` probe detail are logged exactly as their
+emitters mark them, whatever the row says. That is also why G-50's predicate is untouched: every
+`[DivergenceProbe` line carries a token, so the row's `plainLevel` never applies to one.
+
+The table lives in `SimulationManagerUImpl.h`, not in this `.cpp`, so that log sites in other files
+can read a row at compile time (below). `RouteOGMessage` itself stays in this file.
+
+**Why.** With a visible `-log` console, every log line costs a synchronous console write on the
+thread that logs it (the research note on the gate-22 dedicated-server frame rate: about 1.4 ms per
+line at gate 22, 12–20 ms step outliers, and a 3.2 s join hitch when one unbounded receive loop logged
+761 packets). At `LogOGNet=Log` and `LogOGSimTick=Log` every tick and every received packet wrote a
+line. Now `Log` carries only rare events, and the per-tick lines need `Verbose`.
+
+**The rule.** A row whose token-less lines arrive per tick, per packet or per relay (about 10 lines
+per second per peer or more in normal play) is `Verbose`. A row for rare events (gaps, drops, delay
+shifts, stats windows, resyncs, resim prepare and finish, join and leave) is `Log`. A `static_assert`
+(`ogLogRoutePlainLevelsAreLogOrVerbose`) admits only those two values: a line that must reach
+`Warning` says so with its own token.
+
+**The table, with the rates that classified it.** Rates are token-less lines per second in the
+gate-22 Jolt packaged final run (`LogOGNet=Log`, `LogOGSimTick=Log`; server 234 s with up to three
+clients, client 1 191 s, client 3 76 s). "token" means every line of that row carries `[Verbose]`
+or `[Warning]`, so `plainLevel` does not apply to it. Before this task every row behaved as `Log`.
+
+| row | category | rate (server / client) | `plainLevel` |
+|---|---|---|---|
+| `[Resim.Input]` | `LogOGSimTick` | token (`[Verbose]`) | `Verbose` |
+| `[ResimProbe` | `LogOGResimProbe` | token | `Log` |
+| `[TimeResync.` | `LogOGSim` | – / ≤ 0.7 (join) | `Log` |
+| `[Resim.` | `LogOGSim` | – / ≤ 5.0 (`[Resim.Post]`) | `Log` |
+| `[ResimCheck.Divergence]` | `LogOGSim` | – / ≤ 1.0 | `Log` |
+| `[ResimCheck.PrepareRestore]` | `LogOGSim` | – / ≤ 2.8 | `Log` |
+| `[ResimCheck.Check]` | `LogOGSimTick` | – / 142–172 | `Verbose` |
+| `[ResimCheck.IsSimilar]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
+| `[ResimCheck.TriggerRewind]` | `LogOGSimTick` | Chaos only: one per physics step | `Verbose` |
+| `[AuthoritySimulation]` | `LogOGSimTick` | 60 / – | `Verbose` |
+| `[ClientPrediction]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
+| `[PredictionSimulation]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
+| `[PostPrediction]` | `LogOGSimTick` | – / 142–172 | `Verbose` |
+| `[CollectInput]` | `LogOGSimTick` | 116 / 142–172 | `Verbose` |
+| `[ServerReceive]` | `LogOGNet` | 573 / – | `Verbose` |
+| `[ReceiveLocalInput] DISCARD` | `LogOGNet` | 0 (rare: a too-far-future input) | `Log` |
+| `[ReceiveLocalInput]` | `LogOGNet` | 116 / – | `Verbose` |
+| `[SendCorrectionStateToClients]` | `LogOGNet` | 49 / – | `Verbose` |
+| `[SendRemoteInputToClients]` | `LogOGNet` | no emitter | `Log` |
+| `[SendLocalInputToServer]` | `LogOGNet` | – / 94–99 | `Verbose` |
+| `[ReceiveCorrectionState]` | `LogOGNet` | – / 57–59 | `Verbose` |
+| `[ReceiveCorrectionInput]` | `LogOGNet` | no emitter | `Log` |
+| `[InjectCorrectionState]` | `LogOGNet` | – / 57–59 | `Verbose` |
+| `[InjectCorrectionInput]` | `LogOGNet` | no emitter | `Log` |
+| `[DrainOutOfOrder]` | `LogOGNet` | no emitter | `Log` |
+| `[InputGap]`, `[InputDrop]`, `[DelayShift]`, `[InputStats]`, `[InputDomain]` | `LogOGNet` | token (`[Warning]`) | `Log` |
+| `[Park]` | `LogOGNet` | 116 / – | `Verbose` |
+| `[Release]` | `LogOGNet` | 116 / – | `Verbose` |
+| `[ReleaseBatch]` | `LogOGNet` | 60 / – | `Verbose` |
+| `[RelaySkip]` | `LogOGNet` | token | `Log` |
+| `[RelayProbe` | `LogOGRelayProbe` | token | `Log` |
+| `[DivergenceProbe` | `LogOGDivergenceProbe` | token | `Log` |
+| `SimulationManager:`, `tryRegister:`, `NewFramework:` | `LogOGMgmt` | ≤ 0.04 | `Log` |
+
+Notes on the rows:
+
+* **`[ReceiveLocalInput] DISCARD` is its own row, ahead of `[ReceiveLocalInput]`.** The core emits
+  both from one callback (`SimulationNetSync.h`); the first is per input, the second is a rare
+  anomaly with no token. The more specific row keeps the anomaly at `Log`. The reachability
+  `static_assert` keeps it ahead: below `[ReceiveLocalInput]` it could never be taken.
+* **`[ReleaseBatch]` is a row although `RouteOGMessage` never sees it.** It is logged directly, by
+  `releaseDelayedInputsForStep`, and its row exists so that site reads its level from the table.
+* **`[Resim.Input]` and the token rows.** Their `plainLevel` has no effect today. `[Resim.Input]` is
+  `Verbose` because it is a per-replayed-tick line; the token rows are `Log` so a future token-less
+  line there is not hidden by accident.
+* **Four rows have no emitter in the tree:** `[SendRemoteInputToClients]` (its write is retired in
+  `SimulationNetSync.h`), `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]` and
+  `[DrainOutOfOrder]`. With no rate to classify them they stay `Log`. They are candidates for
+  deletion; this task did not delete them.
+* **The `LogOGSim` rows stay `Log`**, and the committed `Config/DefaultEngine.ini` sets
+  `LogOGSim=Log`, so the committed output is unchanged. Resim lifecycle lines are at most about 5 per
+  second on a client.
+
+**Direct log sites read the same table: `OG_LOG_ROUTED`.** Six per-tick or per-packet lines in this
+module are logged with `UE_LOG` directly rather than through `RouteOGMessage`. They now use
+`OG_LOG_ROUTED(Category, Format, ...)` (`SimulationManagerUImpl.h`), which looks up the row whose
+prefix begins `Format` at compile time, fails the build if there is none, and expands to
+`UE_LOG(Category, Verbose, ...)` or `UE_LOG(Category, Log, ...)` from that row's `plainLevel`. So the
+level is set in one place for routed and direct lines alike. The sites:
+
+| row | site | file |
+|---|---|---|
+| `[ReleaseBatch]` | `releaseDelayedInputsForStep` | `SimulationManagerUImpl.cpp` |
+| `[ResimCheck.TriggerRewind]` | `TriggerRewindIfNeeded_Internal`, the two `rewind=0` lines (Chaos only) | `SimulationManagerUImpl.cpp` |
+| `[ServerReceive]` | `ServerReceiveRemoteMove_Implementation`, the no-coordinator path | `SimmableUpdateComponent.cpp` |
+| `[ReceiveCorrectionState]` | `OnRep_CorrectionState` | `SimmableUpdateComponent.cpp` |
+| `[ClientPrediction]` | `buildPlayerInput` | `OGBrawlerInputCollectionComponent.cpp` |
+
+The category stays at the site. Nothing checks that it is the row's category; all six agree today.
+
+**Direct sites that stay at a fixed `Log`:**
+
+* the `rewind=1` line of `TriggerRewindIfNeeded_Internal` (Chaos only). It is a resim request, a
+  rare event, but it shares the `[ResimCheck.TriggerRewind]` tag with the per-step `rewind=0` lines,
+  and the text that tells them apart is at the end of the line, where no prefix row can reach it.
+* `[RelayDelayFloor]` and `[ConnectionTier]` (session and tier events, at most about 0.1 per second;
+  `[ConnectionTier]` also in `SimmableUpdateComponent.cpp`). They have no row and need none.
+
+**What an operator types now.** Per-tick and per-packet diagnostics need
+`LogOGNet=Verbose` and `LogOGSimTick=Verbose` (on the command line,
+`-ini:Engine:[Core.Log]:LogOGNet=Verbose`). At `Log` those categories carry only the rare lines. At
+the committed `Warning` nothing changed. Lines read at `Verbose` are prefixed `Verbose: ` after the
+category, and the capture extractors match on the tag anywhere in the line.
+
+**What the compiler checks.** Each arm below was compiled out of tree: a copy of the header with the
+same line count, a scratch translation unit that includes it, and UBT's own compiler response file
+for `SimmableUpdateComponent.cpp` (same flags, same shared PCH). The tree was not modified.
+
+| check | poison | result |
+|---|---|---|
+| `ogLogRoutesAreAllReachable` (unchanged, now in the header) | `[ReceiveLocalInput] DISCARD` row moved below `[ReceiveLocalInput]` | `C2338`, "a route's prefix BEGINS WITH an earlier route's prefix" |
+| `ogLogRoutePlainLevelsAreLogOrVerbose` | the `[Park]` row's `plainLevel` set to `Warning` | `C2338`, "a row's plainLevel is the level of a line that carries no [Verbose] or [Warning] token" |
+| `OG_LOG_ROUTED`'s row lookup | `OG_LOG_ROUTED(LogOGNet, TEXT("[NoSuchTag] x=%d"), x)` | `C2338`, "the format's leading tag has no kOGLogRoutes row" |
+| control | the unpoisoned header, ten `static_assert`s on `ogLogRouteFor` (for example `[ServerReceive]` is `Verbose`, `[ReceiveLocalInput] DISCARD` is `Log`, `[RelayDelayFloor]` has no row) and two `OG_LOG_ROUTED` uses | compiles, 0 errors |
+
+**Measured.** Headless sessions on the editor binary (Jolt, Development): a `-game -server` with the
+committed ini plus the level under test, and two idle `-nullrhi` clients on loopback, about 95 s
+each. `[SimHost.Window]` p99 in µs, the range over the steady 10 s windows after both clients joined:
+
+| run | `preUs` p99 | `stepUs` p99 | `postPhysicsUs` p99 | lost steps |
+|---|---|---|---|---|
+| before, `Log`, visible console | 2895–3835 | 379–2915 | 1529–3702 | 0 |
+| after, `Log`, visible console | 19–23 | 134–160 | 139–176 | 0 |
+| after, `Log`, no console | 17–26 | 149–228 | 141–185 | 0 |
+| before, `Warning`, visible console | 13–14 | 106–118 | 88–108 | 0 |
+| after, `Verbose`, no console | 137–157 | 197–215 | 190–215 | 0 |
+
+`LogOGNet` / `LogOGSimTick` lines at `Log` and `Verbose` in the same sessions:
+
+| run | server | client 1 |
+|---|---|---|
+| before, `Log` | 91 513 at `Log`: the 8 per-tick tags plus `[RelayDelayFloor]` ×2 and `[ConnectionTier]` ×1 | 54 006 at `Log`: the 9 per-tick tags plus `[ConnectionTier]` ×2 and `[RelayDelayFloor]` ×1 |
+| after, `Log` | 3 at `Log`: `[RelayDelayFloor]` ×2, `[ConnectionTier]` ×1 | 3 at `Log`: `[ConnectionTier]` ×2, `[RelayDelayFloor]` ×1 |
+| after, `Verbose` | the same 3 at `Log`, plus 91 453 at `Verbose` (the 8 per-tick tags) | the same 3 at `Log`, plus 53 725 at `Verbose` (the 9 per-tick tags and `[Resim.Input]`) |
+
+The server's per-tick tags are `[ServerReceive]`, `[CollectInput]`, `[Park]`, `[ReceiveLocalInput]`,
+`[Release]`, `[ReleaseBatch]`, `[AuthoritySimulation]` and `[SendCorrectionStateToClients]`; the
+client's are `[ResimCheck.Check]`, `[CollectInput]`, `[PostPrediction]`, `[SendLocalInputToServer]`,
+`[PredictionSimulation]`, `[ResimCheck.IsSimilar]`, `[ClientPrediction]`, `[ReceiveCorrectionState]`
+and `[InjectCorrectionState]`. The `LogOGSim` lines (resim lifecycle, resyncs) are at `Log` in all
+three runs.
+
+At the committed `Warning`, the set of category, level and tag triples in the before and after
+sessions is identical on the server; on the clients it differs by one run-dependent
+`[InputRelay]` warning that one client hit in each run.
+
 ---
 
 ## §5 The client's effective input delay
@@ -1128,8 +1286,8 @@ The frame's game-thread work is three pieces (split by og-simulationscheduler-wi
 * `onFrameStepsDue_GameThread(firstUpcomingSimTick, numSteps)` holds PROBE A, then the coordinator
   test (`⛔G-70`), then PROBE 6 and `[PacketBudget]` (§8). Nothing in it releases input.
 * `releaseDelayedInputsForStep(firstTick, numSteps)` is the drain only. It tests the coordinator
-  itself, prints one `[ReleaseBatch] first=<tick> numSteps=<n>` line on `LogOGNet` at `Log` (the
-  category of the coordinator's `[Release]` lines), and calls
+  itself, prints one `[ReleaseBatch] first=<tick> numSteps=<n>` line on `LogOGNet` at `Verbose` (the
+  category and level of the coordinator's `[Release]` lines; its `kOGLogRoutes` row, §4), and calls
   `ServerReceptionCoordinator::releaseDelayedInputs` with the per-id callback.
 * The reap, `ServerReceptionCoordinator::reapConnections`, is called by the host.
 
@@ -4376,9 +4534,9 @@ they are until task 21 retires them with the arm.
   bindings are deleted (§11 C20).
 * **The split** of the frame's game-thread work into `onFrameStepsDue_GameThread`, the drain and the
   reap (§7).
-* **`[ReleaseBatch] first=<tick> numSteps=<n>`**, one line per drain call, on `LogOGNet` at `Log`,
-  after the drain's coordinator test and before it drains. The committed `LogOGNet=Warning` hides
-  it. In the Chaos configuration there is one per physics frame, with `n` equal to the frame's step
+* **`[ReleaseBatch] first=<tick> numSteps=<n>`**, one line per drain call, on `LogOGNet` at `Verbose`
+  (its `kOGLogRoutes` row, §4), after the drain's coordinator test and before it drains. The committed
+  `LogOGNet=Warning` hides it, and so does `LogOGNet=Log`. In the Chaos configuration there is one per physics frame, with `n` equal to the frame's step
   count; the Jolt host will print one per step with `n = 1`. Every `[Release]` line's `releaseTick`
   lies in `[first, first + n)` of the nearest `[ReleaseBatch]` before it. `[Release]` prints
   absolute ticks, which differ between runs, so the two backends are compared by distributions,

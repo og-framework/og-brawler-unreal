@@ -12,7 +12,7 @@ When no header is present, the default license for the repository applies
 | Part of the repository | License |
 |---|---|
 | `Source/OGBrawlerUnreal/`<br>`Source/OGBrawlerTests/`<br>`Source/ProceduralMountainSide/`<br>`Source/*.Target.cs` (root brawler-game targets) | **BUSL-1.1** — see `LICENSE` |
-| `Source/OGSimulationUnreal/`<br>`Source/dVolume/`<br>`Source/JoltPhysicsModule/`<br>`Source/OGSimulationTests/` | **MPL-2.0** — see `LICENSES/MPL-2.0.txt` |
+| `Source/OGSimulationUnreal/`<br>`Source/dVolume/`<br>`Source/OGSimulationTests/` | **MPL-2.0** — see `LICENSES/MPL-2.0.txt` |
 
 > **Per-file SPDX is authoritative**: a handful of files inside the BSL subtrees carry `SPDX-License-Identifier: MPL-2.0` (e.g., `OGBrawlerUnreal/DShapeUImplementation.h/.cpp` — generic dVolume wrappers that have no brawler-specific content and may eventually move to `OGSimulationUnreal/`). When in doubt, read the file's SPDX header.
 

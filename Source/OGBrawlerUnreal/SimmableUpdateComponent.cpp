@@ -417,7 +417,7 @@ void USimmableUpdateComponent::OnRep_CorrectionState()
 	{
 		simulatableBrawler::State peeked;
 		const uint32 tick = m_simulationStateCorrectionSyncedBuffer.readInto(peeked);
-		UE_LOG(LogOGNet, Log,
+		OG_LOG_ROUTED(LogOGNet,
 			TEXT("[ReceiveCorrectionState] id=%u tick=%u"),
 			toStorageKey(simCharacterId()), tick);
 		if (ASimulationManagerUImpl* latencyManager = ASimulationManagerUImpl::instanceFor(/*isAuthority=*/false))
@@ -641,7 +641,7 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInp
 		bundle.forEachSlot<simulatableBrawler::PlayerInput>(
 			[this, id](uint32 captureTick, const simulatableBrawler::PlayerInput& input)
 			{
-				UE_LOG(LogOGNet, Log, TEXT("[ServerReceive] id=%u tick=%u"), id, captureTick);
+				OG_LOG_ROUTED(LogOGNet, TEXT("[ServerReceive] id=%u tick=%u"), id, captureTick);
 				if (m_onRemoteMoveReceivedCallback)
 					m_onRemoteMoveReceivedCallback(captureTick, input);
 			});

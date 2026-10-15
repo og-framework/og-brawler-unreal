@@ -785,3 +785,18 @@ and before the tier's RTT sample and the core per-slot loop. They are measuremen
 neither feeds the tier, the delay or the queue, and the `WIRE` sample goes to the probe only (G-22's
 one-sample-per-bundle rule is about the tier's sample, and this is a separate one, also once per
 bundle).
+
+## §15 The two per-packet log lines (og-simulationscheduler-withjolt task 80)
+
+Two lines in this file are logged with `OG_LOG_ROUTED`, not with `UE_LOG` at a fixed level:
+
+* `[ReceiveCorrectionState]` in `OnRep_CorrectionState` (client, one per correction: 57–59 per
+  second per client in the gate-22 Jolt packaged final run);
+* `[ServerReceive]` on the path of `ServerReceiveRemoteMove_Implementation` taken when there is no
+  reception coordinator or no root connection (authority, one per bundle slot).
+
+Their level is their row's `plainLevel` in `kOGLogRoutes` (`SimulationManagerUImpl.h`), `Verbose`
+for both, so `LogOGNet=Log` does not print them and `LogOGNet=Verbose` does. The rule, the table
+and the rates that set it are `SimulationManagerUImpl-rationale.md` §4. `[ConnectionTier]` in
+`sendConnectionTierToOwningClient` is a tier event, not a per-packet line, and stays a `UE_LOG` at
+`Log`.
