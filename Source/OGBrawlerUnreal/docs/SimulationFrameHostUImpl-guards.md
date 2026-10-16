@@ -21,7 +21,8 @@ scheduler and the driver's doors are `checkf`s (rationale §9).
 
 **The prohibition** (design D2, F9). ⛔ Do not dispatch an authority step to a worker, and do not key
 the inline-or-worker choice on the engine's ShouldUseThreadingForPerformance or any other engine
-threading switch. The choice is the manager's `m_joltStepsInline`, fixed at `BeginPlay` from the role
+threading switch. The choice is the Jolt host's `m_joltStepsInline` (`JoltBackendWorldsUImpl`), fixed at
+`BeginPlay` from the role
 (authority always inline; a client on a worker unless `og.Sim.RunInline` is 1).
 
 **The consequence.** The authority's per-step input release (`BrawlerStepHooksUImpl-guards.md` G-01)
@@ -85,7 +86,7 @@ paused world on resume, ignores slomo, and catches up a clamped hitch the engine
 ## G-05 — the game thread never waits for a step task while holding the world mutex
 
 **Site:** the `WaitUntilTasksComplete` call in `waitForOutstandingSteps` (the `EndPlay` wait, called
-from the manager's `⛔G-80` site).
+from `JoltBackendUImpl::onEndPlayBegin`, the site of `JoltBackendUImpl-guards.md` G-01).
 
 **The prohibition** (design §2.4, "No deadlock"). ⛔ Do not wait for a step task, here or in
 `endSteps_GameThread`, while this thread holds the manager's world mutex (J2), and do not take J2
@@ -94,7 +95,7 @@ around either wait.
 **The consequence.** A step task takes J2 for each whole tick. A game thread that holds J2 and waits
 for that task deadlocks: the task waits for the mutex, the game thread waits for the task.
 
-**Enforcement.** Both waits begin with a `checkf` on the manager's "this thread holds J2" flag. The
+**Enforcement.** Both waits begin with a `checkf` on the Jolt host's "this thread holds J2" flag. The
 end-of-physics wait never blocks the game thread itself: it holds the tick group open with
 `DontCompleteUntil` and runs `OnPostPhysicsStep` as a game-thread task once the steps finish (the
 engine's own end-of-physics pattern), so the tag marks the one blocking wait.

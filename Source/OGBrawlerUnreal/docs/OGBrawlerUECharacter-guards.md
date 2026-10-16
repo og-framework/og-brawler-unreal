@@ -90,8 +90,8 @@ writer (a movement component, or re-basing the class on the engine's walking-paw
   path.
 * **Jolt configuration** (og-simulationscheduler-withjolt task 19): the character's body is a Jolt
   slot body built from the movement descriptor, and this capsule does not simulate
-  (`ASimulationManagerUImpl::tryRegister` switches its physics simulation off). The render sync,
-  `ASimulationManagerUImpl::applyRenderSnapshot_GameThread`, is the only writer: once per frame at the
+  (`tryRegister`'s Ready path, `JoltBackendUImpl::onRegistered_GameThread`, switches its physics simulation
+  off). The render sync, `JoltBackendUImpl::applyRenderSnapshot_GameThread`, is the only writer: once per frame at the
   end of physics it teleports the capsule to the interpolated render pose. A second writer moves the
   capsule between two applies, and the capsule is the mouse-aim plane point and the camera anchor, so
   the aim fed into the next simulated tick is measured from the wrong point. In a development build

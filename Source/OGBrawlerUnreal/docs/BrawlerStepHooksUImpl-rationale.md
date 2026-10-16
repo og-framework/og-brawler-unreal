@@ -12,8 +12,9 @@ Companion to `Source/OGBrawlerUnreal/BrawlerStepHooksUImpl.h` (og-simulationsche
 The brawler's implementation of og-simulation's `StepHooks` concept, which `SimulationStepDriver`
 calls on the step's thread once per `runTick`, never during a replay. It holds a reference to the frame
 host and calls only the host's step doors, so the header needs neither the manager's type nor the
-driver's: it is complete before the manager declares it, and a `static_assert` checks the concept. It
-has no arm and no reflection markup and is included only from Jolt arms (design §2.6).
+driver's: it is complete before the Jolt host (`JoltBackendUImpl`) declares it, and a `static_assert` checks
+the concept. It has no arm and no reflection markup and is included only from `JoltBackendUImpl.h`, which
+compiles only in the Jolt configuration (design §2.6; from the manager header's Jolt arm until task 83).
 
 | hook | client | authority |
 |---|---|---|
@@ -23,14 +24,15 @@ has no arm and no reflection markup and is included only from Jolt arms (design 
 | `afterTick(o)` | take `t2` (§3); `stampLatencyStepEnd_Internal()`; publish the render snapshot J5 from the outcome and `currentStepDeadline`; hand the step's saved state slot to the game-thread shadow world (a worker client only, and only when the step saved one); publish J3, `o.tick − o.physicsStep` (`⛔G-02`); push the step-cost sample (J6, §3) | the same; the authority has no shadow world, so the hand-over returns at once |
 
 Every hook first `checkf`s that a step of this manager is running on this thread (§3).
-`currentStepDeadline` is set by the manager before each `runTick` from the frame's batch (J4); the
+`currentStepDeadline` is set by the Jolt host's `runJoltStep_Step` before each `runTick` from the frame's
+batch (J4); the
 render publish copies it into the snapshot in `afterTick`.
 
 ## 2. Why each hook does what it does
 
 * **J1 first.** Occupancy must reach the driver on the driver's thread, before the step reads the world,
   and before the replay, so a vacated slot is cleared from every held tick before a replay could restore
-  it (driver G-05). The game thread never applies occupancy (manager G-81).
+  it (driver G-05). The game thread never applies occupancy (`JoltBackendUImpl-guards.md` G-02).
 * **The drain per step** (design D3, D4). Each authority tick releases exactly the inputs due for it,
   immediately before it is simulated. No receipt lands between inline steps (receipts happen in the
   engine's receive dispatch), so the queue contents are those of the Chaos configuration's batch; the
@@ -47,22 +49,21 @@ render publish copies it into the snapshot in `afterTick`.
   simulatable's state, so the snapshot is filled from og-simulation's storage, not from Jolt. It runs
   once per `runTick` on both roles and never during a replay (the driver calls no hook then), so a
   replay never shows intermediate poses. Every step publishes, not only a frame's last: the render
-  interpolation (task 19) blends consecutive steps' snapshots by their deadlines. The manager owns
-  the channel and the fill (manager rationale §18, "The Jolt arm's render publish and apply").
+  interpolation (task 19) blends consecutive steps' snapshots by their deadlines. The Jolt host owns
+  the channel and the fill (`JoltBackendUImpl-rationale.md` §5).
 * **The shadow hand-over** (design D §2.5, "(e) in detail"; og-simulationscheduler-withjolt task 56).
   `afterTick` runs after the driver's ring save, so the step world's ring already holds this step's tick
-  when the step saved one. The host's `publishShadowSlot_Step` door hands the outcome to the manager,
+  when the step saved one. The host's `publishShadowSlot_Step` door hands the outcome to the Jolt host,
   which copies that slot into the shadow channel on a worker client and does nothing elsewhere. Never
-  in a replay, for the same reason as the render publish. The manager owns the channel, the copy and
-  the restore (manager rationale §18, "The Jolt arm's game-thread shadow world").
+  in a replay, for the same reason as the render publish. The Jolt host owns the channel, the copy and
+  the restore (`JoltBackendUImpl-rationale.md` §6).
 * **The render correction capture** (og-simulationscheduler-withjolt task 57). `beforeSimulate` runs
   after the driver's replay and before the step, so on a resimulation step the storage holds the
   corrected present tick, the tick of the snapshot the previous `afterTick` published. The host's
-  `captureRenderCorrection_Step` door hands the step's physics step to the manager, which compares the
+  `captureRenderCorrection_Step` door hands the step's physics step to the Jolt host, which compares the
   two and pushes the difference for the game thread's smoothing; on any other step it returns after
   one counter compare. It runs before `t1`, so its cost is in `t1 - t0` with the replay it follows
-  (§3). The manager owns the capture, the ring and the smoothing (manager rationale §18, "The Jolt
-  arm's render correction smoothing").
+  (§3). The Jolt host owns the capture, the ring and the smoothing (`JoltBackendUImpl-rationale.md` §8).
 * **J3 last.** The offset is stored after the step, from the outcome; the game thread reads it at the
   next `TG_StartPhysics` (frame-host rationale §5). Only the step-cost push follows it, and it changes
   nothing the step or the game thread decides on.
@@ -87,7 +88,7 @@ the replaying tick's `t1 - t0`.
 
 **The step-context asserts.** Every hook begins with `checkInStep`, a `checkf` that this manager's
 step flag is set on this thread (the frame host's `isStepRunningOnThisThread`, backed by the
-manager's per-role "step is running" bit, which `runJoltStep_Step` sets around `runTick`). The hooks
+Jolt host's per-role "step is running" bit, which its `runJoltStep_Step` sets around `runTick`). The hooks
 reach the step driver (J1 into `noteOccupancy`), the world and the step-owned mailboxes; called from
 anywhere but a step, they race the running step. In `beforeTick` and `afterTick` the check follows the
 time stamp, so the stamp stays the first statement; the check compiles out of shipping builds.

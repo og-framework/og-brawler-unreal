@@ -139,7 +139,8 @@ FName FSimulationEndStepsTickFunctionUImpl::DiagnosticContext(bool bDetailed)
 	return FName(TEXT("OGSimEndSteps"));
 }
 
-void SimulationFrameHostUImpl::begin(ASimulationManagerUImpl& owner, ULevel& level, const Config& config)
+void SimulationFrameHostUImpl::begin(ASimulationManagerUImpl& owner, JoltBackendUImpl& backend, ULevel& level,
+	const Config& config)
 {
 	checkf(m_owner == nullptr, TEXT("SimulationFrameHostUImpl::begin: the frame host is already running."));
 	checkf(!config.isAuthority || config.stepsInline,
@@ -147,6 +148,7 @@ void SimulationFrameHostUImpl::begin(ASimulationManagerUImpl& owner, ULevel& lev
 		TEXT("delivers into UObjects. Was design D2 (task 18)."));
 
 	m_owner       = &owner;
+	m_backend     = &backend;
 	m_isAuthority = config.isAuthority;
 	m_stepsInline = config.stepsInline;
 
@@ -209,7 +211,7 @@ void SimulationFrameHostUImpl::waitForOutstandingSteps()
 	if (m_owner == nullptr)
 		return;
 
-	checkf(!m_owner->isJoltWorldMutexHeldOnThisThread(),
+	checkf(!m_backend->isJoltWorldMutexHeldOnThisThread(),
 		TEXT("SimulationFrameHostUImpl::waitForOutstandingSteps: this thread holds the Jolt world mutex (J2) and is ")
 		TEXT("about to wait for a step task that takes it: a deadlock. Was frame-host G-05."));
 
@@ -256,7 +258,7 @@ bool SimulationFrameHostUImpl::isRunningBatchOnThisThread() const
 
 bool SimulationFrameHostUImpl::isStepRunningOnThisThread() const
 {
-	return m_owner != nullptr && m_owner->isJoltStepRunningOnThisThread();
+	return m_owner != nullptr && m_backend->isJoltStepRunningOnThisThread();
 }
 
 void SimulationFrameHostUImpl::applyOccupancyCommands_Step()
@@ -267,7 +269,7 @@ void SimulationFrameHostUImpl::applyOccupancyCommands_Step()
 		TEXT("driver: from anywhere else it races the running step, and the occupancy timeline no longer records the ")
 		TEXT("body set the world stepped with."));
 	while (std::optional<OccupancyCommandUImpl> command = m_occupancyCommands.tryPop())
-		m_owner->m_stepDriver->noteOccupancy(command->slot, command->occupied);
+		m_backend->m_stepDriver->noteOccupancy(command->slot, command->occupied);
 }
 
 void SimulationFrameHostUImpl::releaseDelayedInputsForStep(SimTick authorityTick, uint32_t numSteps)
@@ -292,17 +294,17 @@ void SimulationFrameHostUImpl::publishTickOffset_Step(int64_t offset)
 
 void SimulationFrameHostUImpl::captureRenderCorrection_Step(uint64_t physicsStep)
 {
-	m_owner->captureRenderCorrection_Step(physicsStep);
+	m_backend->captureRenderCorrection_Step(physicsStep);
 }
 
 void SimulationFrameHostUImpl::publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds)
 {
-	m_owner->publishRenderSnapshot_Step(outcome, stepDeadlineSeconds);
+	m_backend->publishRenderSnapshot_Step(outcome, stepDeadlineSeconds);
 }
 
 void SimulationFrameHostUImpl::publishShadowSlot_Step(const TickOutcome& outcome)
 {
-	m_owner->publishShadowSlot_Step(outcome);
+	m_backend->publishShadowSlot_Step(outcome);
 }
 
 void SimulationFrameHostUImpl::pushStepCost_Step(const StepCostSampleUImpl& sample)
@@ -398,7 +400,7 @@ uint32_t SimulationFrameHostUImpl::pumpAndRunSteps_GameThread(float deltaSeconds
 
 void SimulationFrameHostUImpl::endSteps_GameThread(const FGraphEventRef& completion)
 {
-	checkf(!m_owner->isJoltWorldMutexHeldOnThisThread(),
+	checkf(!m_backend->isJoltWorldMutexHeldOnThisThread(),
 		TEXT("SimulationFrameHostUImpl::endSteps_GameThread: the game thread holds the Jolt world mutex (J2) at end of ")
 		TEXT("physics, where it waits for step tasks that take it: a deadlock. Was frame-host G-05."));
 
@@ -424,9 +426,9 @@ void SimulationFrameHostUImpl::endSteps_GameThread(const FGraphEventRef& complet
 		[owner, endStartSeconds]()
 		{
 			ASimulationManagerUImpl* const manager = owner.Get();
-			if (manager == nullptr || !manager->m_frameHost.m_tickFunctionsRegistered)
+			if (manager == nullptr || !manager->m_backend.m_frameHost.m_tickFunctionsRegistered)
 				return;
-			manager->m_frameHost.runPostPhysicsStep_GameThread(endStartSeconds);
+			manager->m_backend.m_frameHost.runPostPhysicsStep_GameThread(endStartSeconds);
 		},
 		TStatId{}, &prerequisites, ENamedThreads::GameThread));
 }
@@ -550,7 +552,7 @@ void SimulationFrameHostUImpl::runBatch(const StepBatch& batch)
 
 	const BatchScopeUImpl batchScope(*this);
 	for (uint32 index = 0u; index < batch.count; ++index)
-		m_owner->runJoltStep_Step(batch.first + index, batch.deadlines[index]);
+		m_backend->runJoltStep_Step(batch.first + index, batch.deadlines[index]);
 }
 
 #endif

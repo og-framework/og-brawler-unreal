@@ -5,8 +5,9 @@ Companion to `Source/OGBrawlerUnreal/SimulationFrameHostUImpl.h` and
 `Source/OGBrawlerUnreal/SimulationFrameHostUImpl.cpp` (og-simulationscheduler-withjolt task 54; design D
 rev 6, D1–D10, D15, §2.1–§2.4; the window line, the step cost and the ownership asserts are task 52's,
 design D19 and D20). Prohibitions: `SimulationFrameHostUImpl-guards.md`. The step hooks it
-serves are `BrawlerStepHooksUImpl.h` (`BrawlerStepHooksUImpl-rationale.md`); the manager that owns it is
-`SimulationManagerUImpl` (`SimulationManagerUImpl-rationale.md` §18).
+serves are `BrawlerStepHooksUImpl.h` (`BrawlerStepHooksUImpl-rationale.md`); the Jolt host that owns it is
+`JoltBackendUImpl` (`JoltBackendUImpl-rationale.md` §4), a member of the manager `ASimulationManagerUImpl`
+(`SimulationManagerUImpl-rationale.md` §18).
 
 ---
 
@@ -26,16 +27,21 @@ the reap, and the same roles on the same threads (design D1).
 The host is a plain C++ class. The two tick functions are plain `FTickFunction` subclasses, not
 reflected structs (the engine has the same pattern in the pose-search interaction island), so nothing
 here needs UHT. The `.cpp`'s whole body is one `#if !OG_PHYSICS_BACKEND_CHAOS` arm, and the header has
-no arm and is included only from the manager header's Jolt arm and this `.cpp` (design §2.6 rules 1
-and 2): UBT compiles every `.cpp`, and in the Chaos configuration this one compiles to nothing.
+no arm and is included only from `JoltBackendUImpl.h`, `BrawlerStepHooksUImpl.h` and this `.cpp`, all of
+them compiled only in the Jolt configuration (design §2.6 rules 1 and 2; until task 83 the manager header's
+Jolt arm included it instead of `JoltBackendUImpl.h`): UBT compiles every `.cpp`, and in the Chaos
+configuration this one compiles to nothing.
 
-**Ownership.** The manager holds the host by value (`m_frameHost`), then the hooks (`m_stepHooks`),
-then the step driver (`m_stepDriver`), all after `m_manager`; `compositionContractsHold` asserts that
-order, so destruction runs driver, hooks, host, manager. The host calls back into the manager
-(`onFrameStepsDue_GameThread`, the drain, `OnPostPhysicsStep`, the per-step body `runJoltStep_Step`,
-the driver's `noteOccupancy`), which is why it is a class with a `.cpp` that includes the manager
-header rather than a header-only template: the manager is incomplete where it declares the host. The
-manager names it a friend for those private calls.
+**Ownership.** The Jolt host `JoltBackendUImpl` holds the host by value (`m_frameHost`), then the hooks
+(`m_stepHooks`), then the step driver (`m_stepDriver`), as its last members, and the manager declares the
+Jolt host (`m_backend`) after `m_manager`. The Jolt host's `compositionContractsHold` asserts frame host <
+hooks < driver and the manager's asserts `m_manager < m_backend`, so destruction runs driver, hooks, host,
+manager. The host calls back into the manager (`onFrameStepsDue_GameThread`, the drain, the latency stamps,
+`OnPostPhysicsStep`) and into the Jolt host (the per-step body `runJoltStep_Step`, the driver's
+`noteOccupancy`, the render and shadow publish doors, the world-mutex and step-flag predicates), which is
+why it is a class with a `.cpp` that includes the manager header rather than a header-only template: both are
+incomplete where the Jolt host declares the frame host. `begin` takes both, and both name it a friend for those
+private calls (task 83; until then the manager held all of them, and was the only friend).
 
 ## 2. The frame, step by step
 
@@ -61,7 +67,7 @@ frame, its step count and its own duration to the window.
    normal task priority; high task priority on a normal thread when there are none). It becomes
    `m_pendingSteps`.
 
-`runBatch` marks this thread as running the host's batch (§9) and calls the manager's
+`runBatch` marks this thread as running the host's batch (§9) and calls the Jolt host's
 `runJoltStep_Step(first + i, deadline[i])` for each step in order. That function takes the world mutex J2 and sets the step flag (§6), hands the deadline to the hooks
 (`currentStepDeadline`, which the render publish in `afterTick` copies into the snapshot), and runs
 `driver.runTick`.
@@ -87,9 +93,9 @@ J6, and closes the window when it is due (§8).
 `OnPostPhysicsStep` runs every frame, with or without steps, as the scene's post-tick delegate did,
 so the correction rotation still advances once per game frame. Its body is the shared one (manager
 rationale §13.5 and design §4.2): the sends, the timing-relay write, the visualization copy, the
-ring-out score push, the latency probe, preceded by the render apply (manager rationale §18, "The
-Jolt arm's render publish and apply"), and on a worker client by the shadow-world restore before that
-(manager rationale §18, "The Jolt arm's game-thread shadow world").
+ring-out score push, the latency probe, preceded by the render apply (`JoltBackendUImpl-rationale.md` §5), and on a worker
+client by the shadow-world restore before that (`JoltBackendUImpl-rationale.md` §6), both through the Jolt host's
+`beforePresent_GameThread`.
 
 ## 3. One task per frame, and block mode 0
 
@@ -111,14 +117,14 @@ accumulates nothing; slomo and the world's per-frame clamp reach the simulation 
 `m_hostTimeSeconds` starts at 0 with the scheduler.
 
 **The render clock reads the same time base** (og-simulationscheduler-withjolt task 19, design §8).
-The render snapshots carry each step's deadline from this scheduler, so the manager's render
+The render snapshots carry each step's deadline from this scheduler, so the Jolt host's render
 interpolation takes its render time from two game-thread doors on this host rather than from a
 clock of its own: `hostNowSeconds_GameThread` (`m_hostTimeSeconds`, as accumulated at this frame's
 `TG_StartPhysics`) and `stepIntervalSeconds_GameThread` (the scheduler's step size over its rate
 scale, so a delay of N steps stays N steps when task 38's dilation changes the rate). Both are
 game-thread only, like the scheduler (§9). A second clock (the platform's wall time, say) would drift
-from the deadlines by every paused, clamped or dilated frame, and the interpolation with it (manager
-rationale §18, "The Jolt arm's render interpolation").
+from the deadlines by every paused, clamped or dilated frame, and the interpolation with it
+(`JoltBackendUImpl-rationale.md` §7).
 
 **Catch-up cap (design D5).** `og.Sim.MaxCatchUpSteps`, read once in `begin`, default **60 on both
 roles**: Chaos's one-second clamp at 60 Hz, which applies to every role. The scheduler drops the rest
@@ -137,12 +143,12 @@ These replace Chaos's implicit marshalling. None is a new crossing between og-si
 they are listed in the manager rationale's crossing table (§1), not in og-simulation's threading
 crossings document.
 
-* **J1, occupancy commands** (game thread → step). `SpscRing<OccupancyCommandUImpl, 64>`. The manager
+* **J1, occupancy commands** (game thread → step). `SpscRing<OccupancyCommandUImpl, 64>`. The Jolt host
   pushes `Occupy{slot}` after a character's `registerSimulatable` on `tryRegister`'s Ready path and
   `Vacate{slot}` when it releases the slot (`pushOccupancy_GameThread`); a full ring is a `checkf`
   (a lost command leaves the world stepping the wrong body set). The hooks drain it first thing in
   `beforeTick` into the driver's `noteOccupancy`, so occupancy is never applied from the game thread
-  (manager G-81). One producer, the game thread; one consumer, whichever thread runs the step, and the
+  (`JoltBackendUImpl-guards.md` G-02). One producer, the game thread; one consumer, whichever thread runs the step, and the
   steps are serialized by the task chain.
 * **J3, the published tick offset** (step → game thread). `std::atomic<int64_t> m_tickOffset{0}`.
   `afterTick` stores `outcome.tick − outcome.physicsStep` (relaxed); the game thread loads it (relaxed)
@@ -160,25 +166,25 @@ crossings document.
 
 * The tick functions, the scheduler, `m_pendingSteps` / `m_blockingSteps`, `begin`, the waits and
   `pushOccupancy_GameThread` are game-thread only.
-* The window (§8) and its two game-thread feeds from the manager, `noteWorldMutexWait_GameThread` and
+* The window (§8) and its two game-thread feeds from the Jolt host, `noteWorldMutexWait_GameThread` and
   `noteShadowRestore_GameThread`, are game-thread only.
 * `runBatch` and the hook doors (`applyOccupancyCommands_Step`, `releaseDelayedInputsForStep`, the two
   latency doors, `publishTickOffset_Step`, `captureRenderCorrection_Step`, `publishRenderSnapshot_Step`,
   `publishShadowSlot_Step`,
   `pushStepCost_Step`) run on the step's thread: a worker on a client, the game thread inline.
-* J2 is held for each whole step (the manager's `runJoltStep_Step`), so the game thread's bind pass
-  (manager G-81) waits for at most the rest of one step on a worker client. The game thread never waits
+* J2 is held for each whole step (the Jolt host's `runJoltStep_Step`), so the game thread's bind pass
+  (`JoltBackendUImpl-guards.md` G-02) waits for at most the rest of one step on a worker client. The game thread never waits
   for a step task while holding J2 (`⛔G-05`): `EndPlay`'s wait and end-of-physics both `checkf` it,
   and no game-thread J2 scope spans a tick group.
 
 ## 7. Lifecycle
 
-* `BeginPlay` (manager `startJoltStepping`, after the role branches): the hooks and the driver are
+* `BeginPlay` (the Jolt host's `startJoltStepping`, through `startStepping`, after the role branches): the hooks and the driver are
   built under J2 (the driver parks every slot in its constructor), then `begin` emplaces the scheduler
   (`dt`, the cap, 0.75–1.25, start time 0) and registers the two tick functions on the persistent level,
   the end function with the start function as prerequisite.
-* `EndPlay` (manager, first statements): `unregisterTickFunctions`, then `waitForOutstandingSteps`
-  (manager `⛔G-80`): no step runs after it, before any teardown. Unregistering also clears the flag
+* `EndPlay` (its first statement, the Jolt host's `onEndPlayBegin`): `unregisterTickFunctions`, then
+  `waitForOutstandingSteps` (`JoltBackendUImpl-guards.md` G-01): no step runs after it, before any teardown. Unregistering also clears the flag
   the end-of-physics task checks (§2), so no post-physics pass runs after it either.
 
 ## 8. Step cost and the window line (design D19, J6)
@@ -219,8 +225,8 @@ up to the burst more steps than its seconds hold.
 **Mailboxes.** j1Drops, the occupancy ring's drops (a full ring is a `checkf`, so it stays 0), and
 j6Drops, the step-cost ring's.
 
-**The world mutex.** j2Waits and j2WaitUs: the game thread's waits for J2, timed by the manager around
-`tryRegister`'s bind (manager rationale §8). Under the shadow-world ruling (design OQ13 = (e)) that bind
+**The world mutex.** j2Waits and j2WaitUs: the game thread's waits for J2, timed by the Jolt host around
+`tryRegister`'s bind, `createBodies_GameThread` (manager rationale §8). Under the shadow-world ruling (design OQ13 = (e)) that bind
 is the game thread's only J2 scope while the host steps, so on a worker client a wait appears only in a
 window that contains a join.
 
@@ -241,8 +247,8 @@ still running lands in a later frame. Diagnostic only: nothing decides on it. Th
 These are the costs design §2.5 priced from estimates (the normal step and the replay), measured on the
 build and the platform that run.
 
-**Shadow world.** shadowRestores, shadowRestoreUs and shadowRefused: the manager's per-frame restore
-on a worker client (manager rationale §18), fed through `noteShadowRestore_GameThread`. No sample on
+**Shadow world.** shadowRestores, shadowRestoreUs and shadowRefused: the Jolt host's per-frame restore
+on a worker client (`JoltBackendUImpl-rationale.md` §6), fed through `noteShadowRestore_GameThread`. No sample on
 an inline host.
 
 **Percentiles** are nearest-rank, as in the latency-budget probe (og-simulation's `nearestRankIndex`),
@@ -275,14 +281,15 @@ protects.
 * **The render clock's doors are the game thread's.** `stepIntervalSeconds_GameThread` reads the
   scheduler through `schedulerOnOwningThread()`; `hostNowSeconds_GameThread` reads `m_hostTimeSeconds`,
   which `TG_StartPhysics` writes, and `checkf`s the game thread itself (§4).
-* **The driver stays the manager's, asserted at its two doors.** The driver needs the manager's private
-  manager type, so it is a manager member (task 54's review, A1), and nothing reaches `m_stepDriver`
-  after `startJoltStepping` builds it except two doors. `runJoltStep_Step` `checkf`s that this thread
+* **The driver stays the Jolt host's, asserted at its two doors.** The driver needs the manager's private
+  manager type, so it was a manager member (task 54's review, A1); since task 81 it names that type through
+  `BrawlerCompositionUImpl`, and since task 83 it is a member of `JoltBackendUImpl`. Nothing reaches
+  `m_stepDriver` after `startJoltStepping` builds it except two doors. `runJoltStep_Step` `checkf`s that this thread
   is running the frame host's batch (`isRunningBatchOnThisThread`: a thread-local `runBatch` sets and
   restores on exit) and, in the inline mode, that it is the game thread. `applyOccupancyCommands_Step`
-  `checkf`s the step-context flag. The manager names the frame host a friend, which gives the host
-  every private member of the manager, not only these doors.
-* **Each hook checks the step-context flag** (`isStepRunningOnThisThread`: the manager's per-role
+  `checkf`s the step-context flag. The manager and the Jolt host name the frame host a friend, which gives
+  the host every private member of both, not only these doors.
+* **Each hook checks the step-context flag** (`isStepRunningOnThisThread`: the Jolt host's per-role
   "step is running" bit, set by `runJoltStep_Step`'s step scope), naming the hook (hooks rationale §3).
 * **No thread check on a worker client's step.** A worker client's batch normally runs on a task
   thread, but the task graph may retract a step task and run it inline on a thread that waits for it,

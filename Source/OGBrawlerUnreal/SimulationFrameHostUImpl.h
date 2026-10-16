@@ -19,6 +19,7 @@
 #include <vector>
 
 class ASimulationManagerUImpl;
+class JoltBackendUImpl;
 class SimulationFrameHostUImpl;
 class ULevel;
 
@@ -76,7 +77,7 @@ public:
 	SimulationFrameHostUImpl(const SimulationFrameHostUImpl&) = delete;
 	SimulationFrameHostUImpl& operator=(const SimulationFrameHostUImpl&) = delete;
 
-	void begin(ASimulationManagerUImpl& owner, ULevel& level, const Config& config);
+	void begin(ASimulationManagerUImpl& owner, JoltBackendUImpl& backend, ULevel& level, const Config& config);
 	void unregisterTickFunctions();
 	void waitForOutstandingSteps();
 
@@ -161,6 +162,7 @@ private:
 	void logWindow_GameThread(double nowSeconds);
 
 	ASimulationManagerUImpl*               m_owner       = nullptr;
+	JoltBackendUImpl*                      m_backend     = nullptr;
 	bool                                   m_isAuthority = false;
 	bool                                   m_stepsInline = true;
 	bool                                   m_tickFunctionsRegistered = false;

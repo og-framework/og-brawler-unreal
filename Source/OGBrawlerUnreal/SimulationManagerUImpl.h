@@ -16,30 +16,13 @@
 #include <set>
 #include <iterator>
 #include "Engine/World.h"
-#include "PhysicsPublic.h"
-#include "Runtime/PhysicsCore/Public/PhysicsInterfaceDeclaresCore.h"
-#include "Runtime/Engine/Public/Physics/Experimental/PhysScene_Chaos.h"
-#include "Chaos/ChaosEngineInterface.h"
-#include "Runtime/Experimental/Chaos/Public/Chaos/SimCallbackInput.h"
-#include "Runtime/Experimental/Chaos/Public/Chaos/SimCallbackObject.h"
 #include "Runtime/CoreUObject/Public/UObject/Object.h"
 
 #include "OGSimulation/SimulationManager.h"
 #include "OGSimulation/RenderSnapshot.h"
 #include "OGSimulation/SimulatableList.h"
 #include "OGSimulation/SystemsExecutor.h"
-#if OG_PHYSICS_BACKEND_CHAOS
-#include "OGSimulationUnreal/PCTimeManagement/ChaosTickMapper.h"
-#else
-#include "Async/Mutex.h"
-#include "OGSimulation/StaticGeometry.h"
-#include "OGSimulation/SimulationStepDriver.h"
-#include "OGSimulation/RenderInterpolation.h"
-#include "OGSimulation/RenderCorrectionSmoothing.h"
-#include "OGBrawlerUnreal/SimulationFrameHostUImpl.h"
-#include "OGBrawlerUnreal/BrawlerStepHooksUImpl.h"
-#include "OGSimulationJolt/JoltContactCounter.h"
-#endif
+#include "OGBrawlerUnreal/PhysicsBackendHostUImpl.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
 #include "OGSimulation/SimulationManagerConcept.h"
@@ -66,6 +49,7 @@
 
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
+#include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 
@@ -237,188 +221,6 @@ class ASimulationTimingRelay;
 class ASimulationConnectionRelay;
 class AOGBrawlerUECharacter;
 
-#if OG_PHYSICS_BACKEND_CHAOS
-struct FSimulationState2 : public Chaos::FSimCallbackOutput
-{
-	FSimulationState2()
-		: FSimCallbackOutput()
-		, bIsValid(false)
-	{
-	}
-
-	virtual ~FSimulationState2() {}
-
-public:
-	void Reset() { bIsValid = false; }
-	void Copy(const FSimulationState2& Value);
-	bool IsValid() const { return bIsValid; }
-	bool bIsValid;
-	float DeltaTime;
-};
-
-struct FSimulationInput2 : public Chaos::FSimCallbackInput
-{
-	virtual ~FSimulationInput2() {}
-
-	void Reset()
-	{
-		bInitialized = false;
-		m_world = nullptr;
-		m_manager = nullptr;
-	}
-
-	bool bInitialized = false;
-	UWorld* m_world;
-	ASimulationManagerUImpl* m_manager = nullptr;
-
-private:
-};
-
-class ASimulationManagerUImpl;
-
-struct FRewindPushProbeStashedBody
-{
-	PhysicsBodyState pushed;
-	PhysicsBodyState beforePush;
-	BodyId           bodyId{};
-	unsigned int     simulatableId = 0;
-	// ⛔G-02  docs/SimulationManagerUImpl-guards.md
-	const char*      bodyName = nullptr;
-	bool             wireCarriesRotationAndSpin = false;
-	bool             movedAtPush = false;
-};
-
-class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<
-	FSimulationInput2,
-	FSimulationState2,
-	Chaos::ESimCallbackOptions::Presimulate |
-	Chaos::ESimCallbackOptions::Rewind |
-	Chaos::ESimCallbackOptions::PostSolve>
-{
-public:
-	virtual FName GetFNameForStatId() const override;
-
-	void setManager(ASimulationManagerUImpl* manager)
-	{
-		m_manager = manager;
-	}
-
-private:
-	virtual void OnPreSimulate_Internal() override;
-	virtual void OnPostSolve_Internal() override;
-	virtual void ProcessInputs_Internal(int32 PhysicsStep);
-	virtual void ProcessInputs_External(int32 PhysicsStep);
-
-	virtual int32 TriggerRewindIfNeeded_Internal(int32 LastCompletedStep);
-
-	virtual void ApplyCorrections_Internal(int32 PhysicsStep, Chaos::FSimCallbackInput* Input) override;
-
-	virtual void FirstPreResimStep_Internal(int32 PhysicsStep);
-
-	ASimulationManagerUImpl* m_manager = nullptr;
-
-	TArray<FRewindPushProbeStashedBody> m_pushProbeStash;
-	int32    m_pushProbeStashFrame      = INDEX_NONE;
-	uint32_t m_pushProbeStashSimTick    = 0;
-	int32    m_pushProbeStashBodies     = 0;
-	int32    m_pushProbeStashUnresolved = 0;
-
-	void readPushProbeVerdict_Internal();
-	void discardPushProbeStash(const TCHAR* reason);
-
-	template <typename InputT, typename OutputT, Chaos::ESimCallbackOptions OptionsT>
-	static constexpr Chaos::ESimCallbackOptions registeredOptionsOf(
-		const Chaos::TSimCallbackObject<InputT, OutputT, OptionsT>*) { return OptionsT; }
-
-	template <typename Self>
-	static constexpr bool everyRegisteredHookIsOverridden()
-	{
-		using Opt = Chaos::ESimCallbackOptions;
-		constexpr Opt options = registeredOptionsOf(static_cast<const Self*>(nullptr));
-		static_assert(!EnumHasAnyFlags(options, Opt::Presimulate)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPreSimulate_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::Presimulate but does not "
-			"override OnPreSimulate_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PreIntegrate)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPreIntegrate_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreIntegrate but does not "
-			"override OnPreIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PostIntegrate)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPostIntegrate_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostIntegrate but does not "
-			"override OnPostIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::MidPhaseModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnMidPhaseModification_Internal), void (Self::*)(Chaos::FMidPhaseModifierAccessor&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::MidPhaseModification but does not "
-			"override OnMidPhaseModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::CCDModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnCCDModification_Internal), void (Self::*)(Chaos::FCCDModifierAccessor&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::CCDModification but does not "
-			"override OnCCDModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::StrainModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnStrainModification_Internal), void (Self::*)(Chaos::FStrainModifierAccessor&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::StrainModification but does not "
-			"override OnStrainModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::ContactModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnContactModification_Internal), void (Self::*)(Chaos::FCollisionContactModifier&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::ContactModification but does not "
-			"override OnContactModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PreSolve)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPreSolve_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreSolve but does not "
-			"override OnPreSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PostSolve)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPostSolve_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostSolve but does not "
-			"override OnPostSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		return true;
-	}
-
-	void assertEveryRegisteredHookIsOverridden()
-	{
-		static_assert(everyRegisteredHookIsOverridden<FSimulationManagerAsyncCallback>());
-	}
-};
-#else
-struct JoltRuntimeLeaseUImpl
-{
-	explicit JoltRuntimeLeaseUImpl(JoltRuntime::LogFn logger) : runtime(JoltRuntime::acquire(logger)) {}
-	~JoltRuntimeLeaseUImpl() { JoltRuntime::release(); }
-
-	JoltRuntimeLeaseUImpl(const JoltRuntimeLeaseUImpl&) = delete;
-	JoltRuntimeLeaseUImpl& operator=(const JoltRuntimeLeaseUImpl&) = delete;
-
-	JoltRuntime& runtime;
-};
-#endif
-
 UCLASS()
 class ASimulationManagerUImpl : public AActor,
                                 public ISimulationTimingRelayListener,
@@ -449,30 +251,6 @@ public:
 
         m_manager->editClientClock().requestInputDelayIncreaseStall(deltaDelayTicks);
     }
-#if OG_PHYSICS_BACKEND_CHAOS
-    void onGameSimulation(const SimulationUpdateInfo& info)
-    {
-        m_manager->onGameSimulation(info);
-    }
-    void onPostGameSimulation(const SimulationUpdateInfo& info) { m_manager->onPostGameSimulation(info); }
-    unsigned int onCheckIsSimilar() { return m_manager->onCheckIsSimilar(); }
-    void prepareResimulation(int32_t chaosStep, uint32_t simTick) { m_manager->prepareResimulation(chaosStep, simTick); }
-
-    void noteResimRequest(unsigned int anchorTick, int32 lastCompletedStep, int32 requestedChaosFrame)
-    {
-        if (!m_manager.has_value() || !m_manager->runsPrediction())
-            return;
-        m_manager->editResimGateProbe().noteRequest(
-            static_cast<std::uint32_t>(anchorTick), lastCompletedStep, requestedChaosFrame);
-    }
-
-    void noteResimGrant(int32 grantedChaosFrame)
-    {
-        if (!m_manager.has_value() || !m_manager->runsPrediction())
-            return;
-        m_manager->editResimGateProbe().noteGrant(grantedChaosFrame);
-    }
-#endif
     void onPostSimulationGameThread();
 
     virtual void BeginPlay() override;
@@ -517,13 +295,6 @@ public:
         bool isAuthority);
 
     void unregisterFromNewFramework(SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority);
-
-#if OG_PHYSICS_BACKEND_CHAOS
-    void InjectInputs_External(int32 PhysicsStep, int32 NumSteps);
-
-    ChaosTickMapper& editChaosTickMapper() { return m_chaosTickMapper; }
-    const ChaosTickMapper& getChaosTickMapper() const { return m_chaosTickMapper; }
-#endif
 
     physicsBackendUImpl::VizQuery&        editVizQuery();
     const physicsBackendUImpl::VizReader& getVizReader() const;
@@ -794,6 +565,10 @@ public:
         "brawlerRingout::kMaxSpawnPoints' prose fence of SimulationManagerUImpl.h (task 11).");
 
 private:
+    friend class ChaosBackendUImpl;
+    friend class JoltBackendUImpl;
+    friend class SimulationFrameHostUImpl;
+
     std::set<unsigned int> m_authorityRegisteredIds;
 
     brawlerRingout::SpawnSlotAllocator m_spawnSlots;
@@ -858,52 +633,11 @@ private:
     LatencyClockCounts                                 m_latencyClockPosted_Physics;
     LatencyClockCounts                                 m_latencyClockLatest;
     LatencyClockCounts                                 m_latencyClockAtWindowStart;
-    latencyBudget::ScalarWindowStats                   m_chaosDilationWindow;
-    std::optional<int32>                               m_lastPhysicsTickOffset;
-    uint32                                             m_physicsTickOffsetResets = 0u;
     uint64                                             m_latencyMailboxDropped   = 0u;
     std::unordered_map<unsigned int, uint32>           m_latencyLastHandedCorrectionTick;
     FDelegateHandle                                    m_latencyPostTickFlushHandle;
 
-#if OG_PHYSICS_BACKEND_CHAOS
-    FSimulationManagerAsyncCallback* m_asyncCallback;
-
-    FDelegateHandle m_injectInputsExternalCallbackHandle;
-    FDelegateHandle m_hysScenePostTickCallbackHandle;
-#else
-    friend class SimulationFrameHostUImpl;
-
-    void decideJoltSteppingMode(bool worldIsAuthority);
-    void buildJoltWorld(UWorld& world, bool worldIsAuthority);
-    std::optional<uint32> tryAcquireJoltSlot(AActor& owner);
-    void releaseJoltSlot(const AActor& owner, unsigned int id);
-    BodyId joltSlotRootBodyId(const JoltWorld& world, uint32 slot) const;
-    uint32 boundJoltBodyCount() const;
-    void startJoltStepping(UWorld& world, float dt, bool worldIsAuthority);
-    void runJoltStep_Step(uint64 physicsStep, double stepDeadlineSeconds);
-    bool isJoltWorldMutexHeldOnThisThread() const;
-    bool isJoltStepRunningOnThisThread() const;
-
-    void buildShadowWorld(const JoltWorldConfig& stepConfig, const StaticWorldDescription& queryableStatics,
-        const StaticWorldDescription& physicsOnlyStatics, const std::vector<JPH::BodyID>& stepStaticBodies);
-    void bindShadowSlot(uint32 slot, unsigned int id, const SimulatableBrawler& simulatable);
-    void releaseShadowSlot(uint32 slot);
-    void compareShadowBindTables_GameThread(const TCHAR* after, uint32 slot, unsigned int id, bool sameResults);
-
-    std::optional<JoltRuntimeLeaseUImpl>         m_joltRuntime;
-    std::optional<JoltContactCounter>            m_joltContactCounter;
-    std::optional<JoltWorld>                     m_joltWorld;
-    std::optional<JoltWorld>                     m_shadowWorld;
-    std::optional<JoltPhysicsBodyAdapter>        m_shadowBodyAdapter;
-    std::optional<JoltPhysicsBodyReaderAdapter>  m_shadowReader;
-    std::optional<JoltSpatialQueryAdapter>       m_shadowQuery;
-    std::vector<SlotBodyTemplate>                m_joltSlotTemplate;
-    std::unordered_map<const AActor*, uint32>    m_joltSlotByOwner;
-    std::unordered_map<const AActor*, uint8>     m_joltSlotWaitsLoggedByOwner;
-    UE::FMutex                                   m_joltWorldMutex;
-    bool                                         m_joltStepsInline = true;
-    uint8                                        m_joltRoleBit     = 0;
-#endif
+    physicsBackendUImpl::BackendWorlds m_backendWorlds;
 
     std::function<void(uint32_t, double)> m_onTimingInfoReceivedCallback;
 
@@ -916,13 +650,12 @@ private:
 
     static FMovementStaticDataCVars readMovementStaticDataCVars();
 
-    // ⛔G-18  docs/SimulationManagerUImpl-guards.md
-    using BrawlerSimulatables    = SimulatableList<SimulatableBrawler>;
-    using BrawlerStorage         = apply_t<SimulationObjectStorage,     BrawlerSimulatables>;
-    using BrawlerNetSync         = apply_t<SimulationNetSync,           BrawlerSimulatables>;
-    using BrawlerInputResolution = apply_t<SimulationInputResolution,   BrawlerSimulatables>;
-    using BrawlerReconciliation  = apply_t<SimulationReconciliation,    BrawlerSimulatables>;
-    using RenderSnapshot         = RenderSnapshotT<kMaxSimulatableSlots * 6>;
+    using BrawlerSimulatables    = BrawlerCompositionUImpl::Simulatables;
+    using BrawlerStorage         = BrawlerCompositionUImpl::Storage;
+    using BrawlerNetSync         = BrawlerCompositionUImpl::NetSync;
+    using BrawlerInputResolution = BrawlerCompositionUImpl::InputResolution;
+    using BrawlerReconciliation  = BrawlerCompositionUImpl::Reconciliation;
+    using RenderSnapshot         = BrawlerCompositionUImpl::RenderSnapshot;
 
     BrawlerStorage m_storage;
 
@@ -939,28 +672,12 @@ private:
     BrawlerInputResolution m_inputResolution{ m_storage, m_reconciliation };
     BrawlerNetSync         m_netSync{ m_storage, m_reconciliation, m_inputResolution };
 
-    template <typename... SimulatableTs>
-    using BrawlerIntegrationExecFor_UE = SimulationIntegrationExecutor<
-        simulatableBrawler::StaticData, physicsBackendUImpl::BodyAdapter, physicsBackendUImpl::QueryAdapter, SimulatableTs...>;
-    using BrawlerIntegrationExec = apply_t<BrawlerIntegrationExecFor_UE, BrawlerSimulatables>;
+    template <typename... SimulatableTs> using BrawlerIntegrationExecFor_UE = BrawlerCompositionUImpl::IntegrationExecFor<SimulatableTs...>;
+    using BrawlerIntegrationExec = BrawlerCompositionUImpl::IntegrationExec;
 
-    using BrawlerHitDetectionSystem =
-        brawlerHitDetection::System<physicsBackendUImpl::BodyAdapter, physicsBackendUImpl::QueryAdapter>;
+    using BrawlerHitDetectionSystem = BrawlerCompositionUImpl::HitDetectionSystem;
 
-    using BrawlerSystemsExec = SimulationSystemsExecutor<
-        BrawlerSimulatables,
-        simulatableBrawler::StaticData,
-        BrawlerHitDetectionSystem,
-        brawlerHitRouting::System,
-        brawlerRingout::ScoreSystem>;
-    static_assert(brawlerHitDetection::firesBefore<BrawlerSystemsExec,
-                      BrawlerHitDetectionSystem, brawlerHitRouting::System>,
-        "BrawlerSystemsExec must fire brawlerHitDetection::System BEFORE brawlerHitRouting::System "
-        "(firing order is template order): both run in preIntegrate, and routing branch 2 reads "
-        "the hitsThisTick the detector writes earlier in the SAME pass, branch 5 the guard block. "
-        "Reversed, routing reads them after the radial's integrate cleared them and before the "
-        "detector refilled them, so NO melee hit and NO guard block is ever routed - "
-        "og-netcode-v2-field-defects tasks 9 and 20.");
+    using BrawlerSystemsExec = BrawlerCompositionUImpl::SystemsExec;
 
     // ⛔G-75  docs/SimulationManagerUImpl-guards.md
     std::optional<BrawlerSystemsExec> m_systemsExec;
@@ -968,178 +685,11 @@ private:
     using IntegrationLayerType = BrawlerIntegrationExec;
     std::optional<IntegrationLayerType> m_integrationLayer;
 
-    using ManagerType = SimulationManager<
-        BrawlerIntegrationExec, BrawlerNetSync, BrawlerInputResolution, BrawlerReconciliation,
-        BrawlerSystemsExec, BrawlerStorage, simulatableBrawler::StaticData>;
+    using ManagerType = BrawlerCompositionUImpl::Manager;
     std::optional<ManagerType> m_manager;
-
-#if !OG_PHYSICS_BACKEND_CHAOS
-    using BrawlerStepDriver =
-        SimulationStepDriver<ManagerType, JoltWorld, BrawlerIntegrationExec, BrawlerStepHooksUImpl>;
-
-    struct RenderTargetUImpl
-    {
-        TWeakObjectPtr<AOGBrawlerUECharacter> character;
-        FVector                               appliedCm = FVector::ZeroVector;
-        bool                                  applied   = false;
-    };
-
-    struct RenderApplyWindowUImpl
-    {
-        uint32 frames          = 0u;
-        uint32 appliedFrames   = 0u;
-        uint32 applied         = 0u;
-        uint32 missing         = 0u;
-        uint32 exact           = 0u;
-        uint32 outOfTolerance  = 0u;
-        uint32 held            = 0u;
-        uint32 moved           = 0u;
-        double maxErrorCm      = 0.0;
-        double maxHeldDriftCm  = 0.0;
-        double pathCm          = 0.0;
-        uint64 firstAppliedStep = 0u;
-        uint64 lastAppliedStep  = 0u;
-        uint32 interpolated    = 0u;
-        uint32 newestMode      = 0u;
-        uint32 atNewest        = 0u;
-        uint32 beyondOldest    = 0u;
-        uint32 snaps           = 0u;
-        uint32 maxNextBack     = 0u;
-        uint32 shadowBodies    = 0u;
-        uint32 shadowExact     = 0u;
-        uint32 shadowOutOfTolerance = 0u;
-        double shadowMaxErrorCm     = 0.0;
-        double shadowMaxAngleRad    = 0.0;
-        std::vector<float> frameDisplacementCm;
-    };
-
-    struct RenderCorrectionWindowUImpl
-    {
-        uint32 corrections       = 0u;
-        uint32 smoothedBodies    = 0u;
-        uint32 snappedBodies     = 0u;
-        uint32 late              = 0u;
-        uint32 pendingDrops      = 0u;
-        uint32 finished          = 0u;
-        uint64 finishedSteps     = 0u;
-        uint32 maxFinishedSteps  = 0u;
-        uint32 activeFrames      = 0u;
-        double maxErrorCm        = 0.0;
-        double maxAppliedCm      = 0.0;
-        uint32 policySnaps       = 0u;
-        uint32 rootFramedFrames  = 0u;
-        double maxPolicySnapCm   = 0.0;
-        double maxPolicySnapDeg  = 0.0;
-        uint32 straddleSnaps     = 0u;
-        uint64 resimsAtStart     = 0u;
-        uint64 capturedAtStart   = 0u;
-        uint64 withoutErrorAtStart  = 0u;
-        uint64 tickMismatchAtStart  = 0u;
-        uint64 ringDropsAtStart  = 0u;
-    };
-
-    using RenderCorrection         = RenderCorrectionT<RenderSnapshot::kMaxBodies>;
-    using RenderCorrectionSmoothing = RenderCorrectionSmoother<RenderSnapshot::kMaxBodies>;
-    using RenderCorrectionCapturing = RenderCorrectionCapture<RenderSnapshot::kMaxBodies>;
-
-    void captureRenderCorrection_Step(uint64 physicsStep);
-    void publishRenderSnapshot_Step(const TickOutcome& outcome, double stepDeadlineSeconds);
-    bool buildRenderPoses_GameThread();
-    void syncRenderPoses_GameThread();
-    void applyRenderSnapshot_GameThread();
-    void updateVisualizationAtRenderPoses_GameThread();
-    void overwriteShadowPoses_GameThread();
-    void checkRenderTargetsHeld_GameThread();
-    void checkRenderApply_GameThread();
-    void traceRenderFrame_GameThread() const;
-    void logRenderApplyWindow_GameThread();
-    void logRenderCorrectionWindow_GameThread();
-
-    SnapshotChannel<RenderSnapshot, 4>                   m_renderSnapshots;
-    std::unordered_map<unsigned int, RenderTargetUImpl>  m_renderTargetsById;
-    uint8                                                m_joltRootDeclarationIndex = 0;
-    RenderSnapshot                                       m_renderPoses;
-    bool                                                 m_renderPosesValid = false;
-    RenderInterpolationFrame                             m_renderFrame;
-    RenderSnapshot                                       m_renderNext;
-    RenderApplyWindowUImpl                               m_renderApplyWindow;
-
-    float                                                m_renderCorrectionStepSeconds = 0.f;
-    RenderCorrectionCapturing                            m_renderCorrectionCapture_Step;
-    SpscRing<RenderCorrection, 16>                       m_renderCorrections;
-    std::atomic<uint64>                                  m_renderCorrectionResims{0u};
-    std::atomic<uint64>                                  m_renderCorrectionsCaptured{0u};
-    std::atomic<uint64>                                  m_renderCorrectionsWithoutError{0u};
-    std::atomic<uint64>                                  m_renderCorrectionTickMismatches{0u};
-    RenderCorrectionSmoothing                            m_renderCorrectionSmoother;
-    RenderCorrectionFrame                                m_renderCorrectionFrame;
-    RenderCorrectionWindowUImpl                          m_renderCorrectionWindow;
-
-    struct ShadowStateSlotUImpl
-    {
-        ShadowStateSlotUImpl();
-
-        JoltStateSlot state;
-        uint64        sequence = 0u;
-    };
-
-    struct ShadowWindowUImpl
-    {
-        uint32 frames               = 0u;
-        uint32 restores             = 0u;
-        uint32 unchanged            = 0u;
-        uint32 refused              = 0u;
-        uint32 hashEqual            = 0u;
-        uint32 hashDiffer           = 0u;
-        uint32 occupiedSlots        = 0u;
-        uint64 vizQueryShadow       = 0u;
-        uint64 vizQueryStep         = 0u;
-        uint64 vizReaderShadow      = 0u;
-        uint64 vizReaderStep        = 0u;
-        uint64 shadowQueryAccessesAtStart         = 0u;
-        uint64 stepQueryGameThreadAccessesAtStart = 0u;
-        uint64 publishedAtStart     = 0u;
-        uint64 missingAtStart       = 0u;
-        double maxRestoreMs         = 0.0;
-        uint32 lastRestoredTick     = 0u;
-    };
-
-    void publishShadowSlot_Step(const TickOutcome& outcome);
-    void restoreShadowWorld_GameThread();
-    void logShadowWindow_GameThread();
-
-    SnapshotChannel<ShadowStateSlotUImpl, 3>             m_shadowSlots;
-    std::atomic<uint64>                                  m_shadowSlotsPublished{0u};
-    std::atomic<uint64>                                  m_shadowSlotsMissing{0u};
-    uint64                                               m_shadowRestoredSequence = 0u;
-    uint64                                               m_shadowRestoredFrame    = 0u;
-    uint32                                               m_shadowBindCompares     = 0u;
-    uint32                                               m_shadowBindMismatches   = 0u;
-    mutable ShadowWindowUImpl                            m_shadowWindow;
-
-    struct ContactStepUImpl
-    {
-        uint32                tick      = 0u;
-        uint64                worldStep = 0u;
-        JoltContactStepCounts counts;
-    };
-
-    static void onJoltStepWorldStepped_Step(void* manager);
-    void recordContactStep_Step();
-    void logContactSteps_Step(uint64 physicsStep, const TickOutcome& outcome);
-
-    std::vector<ContactStepUImpl>                        m_contactSteps_Step;
-
-    SimulationFrameHostUImpl             m_frameHost;
-    std::optional<BrawlerStepHooksUImpl> m_stepHooks;
-    std::optional<BrawlerStepDriver>     m_stepDriver;
-#endif
+    physicsBackendUImpl::Backend m_backend{ *this, m_backendWorlds };
 
     static ASimulationManagerUImpl* s_instances[2];
-
-#if OG_PHYSICS_BACKEND_CHAOS
-    ChaosTickMapper m_chaosTickMapper;
-#endif
 
     struct PendingRegistration
     {
@@ -1176,10 +726,13 @@ private:
             "component ending play - one abandoned mid-Pending included - so a counter drifts downward and "
             "disarms the cap. Was the 'A SET, not a counter' prose fence of SimulationManagerUImpl.h "
             "(task 11).");
-#if !OG_PHYSICS_BACKEND_CHAOS
-        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_joltRuntime)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_joltWorld)
-                   && __builtin_offsetof(ASimulationManagerUImpl, m_joltWorld)
+        static_assert(std::is_same_v<ManagerType, BrawlerCompositionUImpl::Manager>,
+            "ASimulationManagerUImpl::ManagerType must BE BrawlerCompositionUImpl::Manager. ManagerType is private, so "
+            "a backend host declared outside this class (task 83's JoltBackendUImpl, whose step driver is "
+            "SimulationStepDriver<Manager, JoltWorld, BrawlerStepHooksUImpl>) names the manager "
+            "through BrawlerCompositionUImpl; a ManagerType that drifts from it hands that host a different "
+            "SimulationManager instantiation than m_manager. Added by task 81.");
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_backendWorlds)
                           < __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
                    && __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
                           < __builtin_offsetof(ASimulationManagerUImpl, m_physReaderAdapter)
@@ -1187,42 +740,23 @@ private:
                           < __builtin_offsetof(ASimulationManagerUImpl, m_queryAdapter)
                    && __builtin_offsetof(ASimulationManagerUImpl, m_queryAdapter)
                           < __builtin_offsetof(ASimulationManagerUImpl, m_integrationLayer),
-            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The Jolt world "
-            "must outlive every adapter bound to it (the reader holds the body adapter's bind table, "
-            "the integration layer holds the adapters), and the JoltRuntime lease must outlive the "
-            "world (the last JoltRuntime::release unregisters Jolt's types and deletes its Factory). Keep "
-            "m_joltRuntime < m_joltWorld < m_physAdapter < {m_physReaderAdapter, m_queryAdapter} < "
-            "m_integrationLayer. Was design D's compile-time row 'runtime < world < adapters' (task 18).");
-        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_joltRuntime)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowWorld)
-                   && __builtin_offsetof(ASimulationManagerUImpl, m_shadowWorld)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowBodyAdapter)
-                   && __builtin_offsetof(ASimulationManagerUImpl, m_shadowBodyAdapter)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowReader)
-                   && __builtin_offsetof(ASimulationManagerUImpl, m_shadowBodyAdapter)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_shadowQuery),
-            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The game-thread shadow world "
-            "must outlive its own adapters (the reader holds the shadow body adapter's bind table), and the "
-            "JoltRuntime lease must outlive the shadow world as it outlives the step world. Keep m_joltRuntime < "
-            "m_shadowWorld < m_shadowBodyAdapter < {m_shadowReader, m_shadowQuery}. Was design D's 'runtime < world "
-            "< adapters' row, applied to the shadow world (task 56).");
-        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_joltContactCounter)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_joltWorld),
-            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The step world holds a raw pointer "
-            "to the contact counter (its Jolt contact listener) until it is destroyed, so the counter must outlive the "
-            "world. Keep m_joltContactCounter < m_joltWorld. Was task 78's install rule.");
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The backend's worlds must outlive "
+            "every adapter bound to them (the Jolt step world; the reader holds the body adapter's bind table, the "
+            "integration layer holds the adapters), so m_backendWorlds sits above the adapters in both configurations "
+            "(it is empty on Chaos). Keep m_backendWorlds < m_physAdapter < {m_physReaderAdapter, m_queryAdapter} < "
+            "m_integrationLayer. Was design D's compile-time row 'runtime < world < adapters' (task 18); its "
+            "runtime < world half is JoltBackendWorldsUImpl's own row since task 83.");
         static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_manager)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_frameHost)
-                   && __builtin_offsetof(ASimulationManagerUImpl, m_frameHost)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_stepHooks)
-                   && __builtin_offsetof(ASimulationManagerUImpl, m_stepHooks)
-                          < __builtin_offsetof(ASimulationManagerUImpl, m_stepDriver),
-            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The step driver unregisters its "
-            "resync callback from the manager's client clock in its destructor and holds the hooks, and the hooks "
-            "hold the frame host, so the driver must go first, then the hooks, then the frame host, all while the "
-            "manager is alive. Keep m_manager < m_frameHost < m_stepHooks < m_stepDriver. Was design D's "
-            "compile-time row 'manager < hooks < driver' (task 18).");
-#endif
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_backend),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The backend holds the Jolt step "
+            "driver, which unregisters its resync callback from the manager's client clock in its destructor, so the "
+            "backend must go before the manager. Keep m_manager < m_backend. Was design D's compile-time row "
+            "'manager < hooks < driver' (task 18); its frame host < hooks < driver half is JoltBackendUImpl's own "
+            "row since task 83.");
+        static_assert(physicsBackendUImpl::PhysicsBackendHost<physicsBackendUImpl::Backend>,
+            "physicsBackendUImpl::Backend must provide every entry point of the seam (the PhysicsBackendHost concept, "
+            "PhysicsBackendHostUImpl.h): this class calls each one from exactly one site, unconditionally, in both "
+            "configurations. Added by task 83.");
         return true;
     }
 

@@ -88,6 +88,25 @@ public:
 		ptApi->SetR(uWorldTransform.GetRotation());
 	}
 
+	// PhysicsBodyPoseWriter: position and quaternion, no matrix in between. Used by
+	// SimulationIntegrationExecutor::pushCorrectedBodyStatesAll, which the Chaos host calls from
+	// FirstPreResimStep_Internal (ChaosBackendUImpl.cpp). Same conversions and setters as the
+	// hand-written rollback write it replaced (uglm::toFVector -> SetX, uglm::toFQuat -> SetR).
+	// The physics-thread SetX/SetR also set P/Q, and wake a sleeping body.
+	void setBodyPose(BodyId bodyId, const glm::vec3& position, const glm::quat& rotation)
+	{
+		auto* proxy = resolveProxy(bodyId);
+		ensureAlwaysMsgf(proxy != nullptr, TEXT("ChaosPhysicsBodyAdapter::setBodyPose — unresolved BodyId %u"), bodyId.value);
+		if (!proxy)
+		{
+			return;
+		}
+
+		auto* ptApi = proxy->GetPhysicsThreadAPI();
+		ptApi->SetX(uglm::toFVector(position));
+		ptApi->SetR(uglm::toFQuat(rotation));
+	}
+
 	void addBodyTorque(BodyId bodyId, const glm::vec3& torque)
 	{
 		auto* proxy = resolveProxy(bodyId);
@@ -195,8 +214,10 @@ public:
 	// callback, so `GetV()`/`GetW()` are already end-of-step values. Reading P/Q here is
 	// what makes the captured tuple internally consistent -- pose and velocity from the
 	// same instant -- and what makes slot[T] mean "the state AFTER tick T", which is what
-	// the rollback push consumes (`SimulationManagerUImpl.cpp` `FirstPreResimStep_Internal`
-	// writes it straight onto the particle before the frame that replays tick T+1 integrates).
+	// the rollback push consumes (`ChaosBackendUImpl.cpp` `FirstPreResimStep_Internal`, through
+	// `pushCorrectedBodyStatesAll` and the setters above, writes it straight onto the particle
+	// before the frame that replays tick T+1 integrates, unless the body's start-of-step state
+	// already equals it; see captureStartOfStepBodyState below).
 	//
 	// WHY NOT `ptApi->GetP()`: `FRigidBodyHandle_Internal` HAS NO `GetP()`/`GetQ()`
 	// (`PhysicsProxy/SingleParticlePhysicsProxy.h` @5.6 -- the class is PreV/PreW/SetX/
@@ -233,6 +254,32 @@ public:
 		return PhysicsBodyState{};
 	}
 
+	// PhysicsBodyStartOfStepReader: the state the body's NEXT step starts integrating from -- X/R,
+	// NOT the P/Q captureBodyState reads. The rollback push reads the restored body through this
+	// (SimulationIntegrationExecutor::pushCorrectedBodyStatesAll, from the Chaos host's
+	// FirstPreResimStep_Internal). At that phase FRewindData::RewindToFrame has restored X/R/V/W
+	// from the recorded history and left P/Q stale, and the replayed step integrates from X/R, so
+	// a P/Q read here would compare against (and hand back the rotation of) a pre-rewind pose.
+	// The same reads as the Chaos host's rewind-push probe (`readLiveBodyForPushProbe`'s
+	// startOfStep): X/R through the particle handle, V/W through the physics-thread API.
+	// Unresolved body: the same fallback as captureBodyState -- a default PhysicsBodyState, no
+	// ensure.
+	PhysicsBodyState captureStartOfStepBodyState(BodyId bodyId) const
+	{
+		if (auto* proxy = resolveProxy(bodyId))
+		{
+			auto* ptApi = proxy->GetPhysicsThreadAPI();
+			const Chaos::FConstGenericParticleHandle particle(proxy->GetHandle_LowLevel());
+			PhysicsBodyState s;
+			s.position = uglm::toGLMVec3(particle->GetX());
+			s.rotation = uglm::toGLMQuat(FQuat(particle->GetR()));
+			s.linearVelocity = uglm::toGLMVec3(ptApi->GetV());
+			s.angularVelocity = uglm::toGLMVec3(ptApi->GetW());
+			return s;
+		}
+		return PhysicsBodyState{};
+	}
+
 private:
 	Chaos::FSingleParticlePhysicsProxy* resolveProxy(BodyId bodyId) const
 	{
@@ -244,3 +291,5 @@ private:
 
 static_assert(PhysicsBodyAdapter<ChaosPhysicsBodyAdapter>);
 static_assert(PhysicsBodyReaderAdapter<ChaosPhysicsBodyAdapter>);
+static_assert(PhysicsBodyPoseWriter<ChaosPhysicsBodyAdapter>, "ChaosPhysicsBodyAdapter must model PhysicsBodyPoseWriter, or the rollback push silently falls back to the matrix path");
+static_assert(PhysicsBodyStartOfStepReader<ChaosPhysicsBodyAdapter>, "ChaosPhysicsBodyAdapter must model PhysicsBodyStartOfStepReader, or the rollback push reads the restored body through captureBodyState (the stale P/Q): its restore skip can skip a corrected body, and a LinearBodyState body gets the stale rotation");

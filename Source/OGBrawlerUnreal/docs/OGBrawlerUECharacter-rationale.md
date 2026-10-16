@@ -122,12 +122,13 @@ In the **Jolt configuration** (the default since task 18; the switch is describe
   the movement descriptor (`kCharacterCapsuleBody`, 42 / 96, `isRoot`); the descriptor's
   `simulatePhysics` makes that slot body dynamic. Nothing adopts this capsule, and `applyDescriptor`
   never runs on it, so it keeps the Pawn collision profile from the constructor for its whole life.
-* **It does not simulate.** `ASimulationManagerUImpl::tryRegister`, on the registration's Ready path,
+* **It does not simulate.** `ASimulationManagerUImpl::tryRegister`, on the registration's Ready path
+  (`JoltBackendUImpl::onRegistered_GameThread`),
   switches its physics simulation off and logs one `[SimHost.RenderTarget]` line per character with
   `capsuleSimulatesPhysics=0` and the names of the character's components that still simulate. Only
   `CameraAxis` is expected there (§3).
 * **One writer.** The render sync is the only thing that moves it: once per frame, at the end of
-  physics, `ASimulationManagerUImpl::applyRenderSnapshot_GameThread` teleports the actor to the
+  physics, `JoltBackendUImpl::applyRenderSnapshot_GameThread` teleports the actor to the
   simulated root body's pose interpolated two steps behind the host time (`og.Render.InterpolationDelaySteps`),
   as Chaos's sync did. Guard G-03 names the writer per configuration.
 * **It stays input.** The capsule is still the mouse-aim plane point
@@ -679,9 +680,9 @@ an optional slot, empty for 0, and `SetAuthoritativePhysicsSlot()` is its one wr
   the same character in different slots can solve a contact between characters in a different order and
   drift apart by rounding. The simulation id cannot double as the slot: ids are never reused, so an id
   taken modulo the slot count collides after joins and leaves. So the authority chooses the slot and
-  replicates it here, and every client binds the character in that slot (`SimulationManagerUImpl-rationale.md`
-  §18, "The Jolt arm's world", the slot table).
-* **Who writes it.** `ASimulationManagerUImpl::tryAcquireJoltSlot` on the authority, the first time the
+  replicates it here, and every client binds the character in that slot (`JoltBackendUImpl-rationale.md`
+  §3, the slot table).
+* **Who writes it.** `JoltBackendUImpl::tryAcquireJoltSlot` on the authority, the first time the
   character asks for a slot (from `registerVizVolume`, called by the component's
   `tryInitializeWithManager`). Its three `checkf`s enforce authority-only, an in-range slot and
   set-once: a character keeps its slot until it leaves, and a pawn that leaves is destroyed, so a

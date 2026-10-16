@@ -536,8 +536,7 @@ one or two steps ahead of it. The root (movement) body is left at the newest tic
 character is the capsule and its mesh, which the render sync already moved, and this movement draw's
 outline is documented as the simulation's belief, built from a body pose and a probe reading of the same
 tick. Every other `State` and `DerivedState` value in the copy stays the newest tick's. In the Chaos
-configuration the copy is unchanged (`SimulationManagerUImpl-rationale.md` §18, "The Jolt arm's render
-interpolation").
+configuration the copy is unchanged (`JoltBackendUImpl-rationale.md` §7).
 
 **The movement cvar is read per frame, deliberately (guard G-26).** Task 16 made `StaticData` cvars
 read once, at construction, so a tunable cannot move under a running session and put two peers on
@@ -584,7 +583,7 @@ whichever pair the manager selects.
 In the Jolt configuration the two accessors return the step world's adapters on the authority and on
 a client stepping inline (`og.Sim.RunInline`), and the game-thread shadow world's on a client that
 steps on a worker, where the step's own world may be queried only by the step or under the world
-mutex (`SimulationManagerUImpl-rationale.md` §18, "The Jolt arm's game-thread shadow world"). Either
+mutex (`JoltBackendUImpl-rationale.md` §6). Either
 way the component gets a world it may query on the game thread, so both passes run on every peer, as
 in the Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
 and the component skipped the two passes there; task 56 removed that skip.)
