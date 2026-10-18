@@ -339,8 +339,8 @@ void AOGBrawlerUECharacter::SetAuthoritativePhysicsSlot(uint32 Slot)
 		"does not fit.");
 	checkf(HasAuthority(),
 		TEXT("SetAuthoritativePhysicsSlot called on a non-authority peer. Only the authority chooses a Jolt slot ")
-		TEXT("(JoltBackendUImpl::tryAcquireJoltSlot); a client binds the slot it receives through ")
-		TEXT("replication of PhysicsSlotValue."));
+		TEXT("(og-simulation-jolt's JoltTickWorldHost::acquire, through TickDriverBackendUImpl::callWithSlotRequest); a client ")
+		TEXT("binds the slot it receives through replication of PhysicsSlotValue."));
 	checkf(Slot < kMaxSimulatableSlots,
 		TEXT("SetAuthoritativePhysicsSlot: slot %u is not a slot of the Jolt world (kMaxSimulatableSlots = %u)."),
 		Slot, kMaxSimulatableSlots);

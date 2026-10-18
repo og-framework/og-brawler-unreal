@@ -32,11 +32,11 @@ struct BrawlerCompositionUImpl
 
 	template <typename... SimulatableTs>
 	using IntegrationExecFor = SimulationIntegrationExecutor<
-		simulatableBrawler::StaticData, physicsBackendUImpl::BodyAdapter, physicsBackendUImpl::QueryAdapter, SimulatableTs...>;
+		simulatableBrawler::StaticData, EngineTraits::BodyAdapter, EngineTraits::QueryAdapter, SimulatableTs...>;
 	using IntegrationExec = apply_t<IntegrationExecFor, Simulatables>;
 
 	using HitDetectionSystem =
-		brawlerHitDetection::System<physicsBackendUImpl::BodyAdapter, physicsBackendUImpl::QueryAdapter>;
+		brawlerHitDetection::System<EngineTraits::BodyAdapter, EngineTraits::QueryAdapter>;
 
 	using SystemsExec = SimulationSystemsExecutor<
 		Simulatables,

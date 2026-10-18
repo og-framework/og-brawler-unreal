@@ -99,8 +99,8 @@ void logJoltToBuildIdentity(const char* message)
 
 BackendIdentity resolveBackendIdentity()
 {
-	BackendIdentity identity{ "none", std::string(physicsBackendUImpl::kBackendName) };
-	if (const std::optional<uint64_t> value = physicsBackendUImpl::computeDeterminismFingerprint(&logJoltToBuildIdentity))
+	BackendIdentity identity{ "none", std::string(EngineTraits::kName) };
+	if (const std::optional<uint64_t> value = EngineTraits::computeDeterminismFingerprint(&logJoltToBuildIdentity))
 	{
 		char hex[17];
 		std::snprintf(hex, sizeof(hex), "%016" PRIx64, *value);

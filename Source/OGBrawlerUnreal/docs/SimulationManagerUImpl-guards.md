@@ -47,9 +47,9 @@ below this line with the task that added it; it is not folded into the table abo
 * **G-18** — retired by og-simulationscheduler-withjolt task 81, 2026-10-15, when the alias chain moved to
   `BrawlerCompositionUImpl.h`; its successor is that file's G-01. See §R.
 * **G-02, G-51 to G-55, G-71, G-76, G-77** — retired by og-simulationscheduler-withjolt task 82, 2026-10-15,
-  when the Chaos host moved to `ChaosBackendUImpl`; their successors are that file's G-01 to G-09. See §R.
+  when the Chaos host moved to `ChaosTickBackendUImpl`; their successors are that file's G-01 to G-09. See §R.
 * **G-80 to G-84** — retired by og-simulationscheduler-withjolt task 83, 2026-10-15, when the Jolt
-  host moved to `JoltBackendUImpl`; their successors are that file's G-01 to G-05. See §R.
+  host moved to `TickDriverBackendUImpl`; their successors are that file's G-01 to G-05. See §R.
 * **G-85** — og-simulationscheduler-withjolt task 83 (rework 1), 2026-10-15: `EndPlay`'s first statement, the
   backend's `onEndPlayBegin`; the half of the old G-80 that is typed in this class.
 
@@ -71,7 +71,7 @@ below this line with the task that added it; it is not folded into the table abo
 
 ---
 
-*G-02 moved to `ChaosBackendUImpl-guards.md` as G-01 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
+*G-02 moved to `ChaosTickBackendUImpl-guards.md` as G-01 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -412,11 +412,14 @@ its `field=` tail. A latched bool loses the console switch mid-session.
 **What breaks if the tag moves.** The other half of this pair is the `DivergenceProbe` row of
 `kOGLogRoutes`. That row is now checked by a `static_assert`, but only for ORDER; nothing
 checks that the row and this predicate name the same category. This tag is the only thing
-that says so at the predicate.
+that says so at the predicate. Since og-tickdriver task 12 the row is og-simulation's (its
+`kSimulationLogRoutes`, route `SimulationLogRoute::DivergenceProbe`), and the category is chosen
+here by `ogLogRouteOf`'s `DivergenceProbe` case in `SimulationManagerUImpl.h`, then by
+`RouteOGMessage`'s `OGLogRoute::DivergenceProbe` arm. A re-route is typed at either of those two.
 
 ---
 
-*G-51, G-52, G-53, G-54, G-55 moved to `ChaosBackendUImpl-guards.md` as G-02, G-03, G-04, G-05, G-06 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
+*G-51, G-52, G-53, G-54, G-55 moved to `ChaosTickBackendUImpl-guards.md` as G-02, G-03, G-04, G-05, G-06 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -752,7 +755,7 @@ on it: `releaseDelayedInputsForStep` tests the coordinator itself, and the Chaos
 
 ---
 
-*G-71 moved to `ChaosBackendUImpl-guards.md` as G-07 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
+*G-71 moved to `ChaosTickBackendUImpl-guards.md` as G-07 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -812,10 +815,10 @@ never finished registering.
 The two emplace sites it governs are in `SimulationManagerUImpl.cpp`, one per role branch, each between
 `m_integrationLayer.emplace(...)` and `m_manager.emplace(...)`.
 
-**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<physicsBackendUImpl::BodyAdapter,
-physicsBackendUImpl::QueryAdapter>`, the backend's types from `PhysicsBackendUImpl.h`) is constructed
+**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<EngineTraits::BodyAdapter,
+EngineTraits::QueryAdapter>`, the backend's types from `PhysicsBackendUImpl.h`) is constructed
 from `*m_physAdapter` and `*m_queryAdapter`, the SAME two objects `m_integrationLayer` integrates with.
-⛔ Never from `m_physReaderAdapter` (a `physicsBackendUImpl::ReaderAdapter`), and never before the
+⛔ Never from `m_physReaderAdapter` (an `EngineTraits::ReaderAdapter`), and never before the
 adapters are emplaced or after `m_manager` is.
 
 **Rewritten for the traits types (og-simulationscheduler-withjolt task 51).** The text named the Chaos
@@ -844,7 +847,7 @@ particle, as the physics step left it.
 
 ---
 
-*G-76, G-77 moved to `ChaosBackendUImpl-guards.md` as G-08, G-09 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
+*G-76, G-77 moved to `ChaosTickBackendUImpl-guards.md` as G-08, G-09 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -902,7 +905,7 @@ crash depends on the collector's purge order.
 
 ---
 
-*G-80, G-81, G-82, G-83, G-84 moved to `JoltBackendUImpl-guards.md` as G-01, G-02, G-03, G-04, G-05 (og-simulationscheduler-withjolt task 83), with the Jolt host's code. See §R.*
+*G-80, G-81, G-82, G-83, G-84 moved to `TickDriverBackendUImpl-guards.md` as G-01, G-02, G-03, G-04, G-05 (og-simulationscheduler-withjolt task 83), with the Jolt host's code. See §R.*
 
 ## G-85 — `m_backend.onEndPlayBegin()` stays the first statement of `EndPlay`: nothing moves above it
 
@@ -914,7 +917,7 @@ not add one above it, and do not drop the call. Everything else in `EndPlay` (G-
 table and listener unregistration, the post-tick-flush unbind, the backend's `onEndPlayWorld`) runs after it. The
 rule is the same in both configurations:
 - on Jolt, `onEndPlayBegin` unregisters the frame host's two tick functions and waits for every outstanding step
-  task (`JoltBackendUImpl-guards.md` G-01);
+  task (`TickDriverBackendUImpl-guards.md` G-01);
 - on Chaos it is an empty inline body today; a Chaos teardown that must run first belongs inside it, not above it.
 
 **The consequence of getting it wrong.** On a worker client the frame's step task runs on another thread through
@@ -958,87 +961,87 @@ The class now holds only one-line re-exports of the struct's members. **Successo
 `BrawlerCompositionUImpl-guards.md` G-01 — the aliases live inside the struct, never at file scope, and
 `Simulatables` is the single source of truth.
 
-### G-02 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-01
+### G-02 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-01
 
 **Was:** *"`bodyName` stores a pointer to a STRING LITERAL, and only a string literal"*. Its tag sat in `SimulationManagerUImpl.h`, above `FRewindPushProbeStashedBody::bodyName`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-01.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-01.
 
-### G-51 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-02
+### G-51 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-02
 
 **Was:** *"the push-probe verdict read stays at the top of `OnPreSimulate_Internal`, and its `else` stays"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the push-probe verdict read at the top of `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-02.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-02.
 
-### G-52 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-03
+### G-52 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-03
 
 **Was:** *"the push probe reads X/R, never P/Q"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the X/R reads in `readLiveBodyForPushProbe`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-03.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-03.
 
-### G-53 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-04
+### G-53 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-04
 
 **Was:** *"the push probe compares with the production predicate, over the fields the body's wire shape carries"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `pushProbeFieldsSimilar`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-04.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-04.
 
-### G-54 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-05
+### G-54 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-05
 
 **Was:** *"the push-probe verdict's denominator is `nonInert`, and `VACUOUS` is a third verdict"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `pushProbeVerdictText`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-05.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-05.
 
-### G-55 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-06
+### G-55 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-06
 
 **Was:** *"`noteResimGrant` is recorded before `prepareResimulation`"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `noteResimGrant` call in `FirstPreResimStep_Internal`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-06.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-06.
 
-### G-71 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-07
+### G-71 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-07
 
 **Was:** *"the upcoming sim tick comes from the mapper, and the `+ 1` is derived"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `firstUpcomingSimTick` in the Chaos configuration's input hook.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-07.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-07.
 
-### G-76 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-08
+### G-76 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-08
 
 **Was:** *"the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `writeRestoredBodyState` call in `FirstPreResimStep_Internal`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-08.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-08.
 
-### G-77 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosBackendUImpl-guards.md` G-09
+### G-77 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-09
 
 **Was:** *"the restored-state write sets only the fields the body's wire shape carries"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `wireCarriesRotationAndSpin` branch of `writeRestoredBodyState`.
 
-**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into `ChaosBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosBackendUImpl-guards.md` G-09.
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-09.
 
 
-### G-80 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `JoltBackendUImpl-guards.md` G-01
+### G-80 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-01
 
 **Was:** *"`EndPlay` waits for every outstanding step task before any teardown"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the second statement of `EndPlay`, the frame host's wait for outstanding steps.
 
-**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into `JoltBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `JoltBackendUImpl-guards.md` G-01.
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-01.
 
-### G-81 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `JoltBackendUImpl-guards.md` G-02
+### G-81 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-02
 
-**Was:** *"the Jolt bind runs under the world mutex, and the game thread never applies occupancy"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the `JoltWorldLockScopeUImpl` line of `tryRegister`'s first-call bind.
+**Was:** *"the Jolt bind runs under the world mutex, and the game thread never applies occupancy"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the world-mutex scope line (JoltWorldLockScopeUImpl, since deleted) of `tryRegister`'s first-call bind.
 
-**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into `JoltBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `JoltBackendUImpl-guards.md` G-02.
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-02.
 
-### G-82 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `JoltBackendUImpl-guards.md` G-03
+### G-82 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-03
 
 **Was:** *"the shadow world is built by the step world's calls, and every bind and release is mirrored into it"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the shadow world's construction in `buildShadowWorld`.
 
-**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into `JoltBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `JoltBackendUImpl-guards.md` G-03.
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-03.
 
-### G-83 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `JoltBackendUImpl-guards.md` G-04
+### G-83 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-04
 
-**Was:** *"the render apply teleports the capsule: no sweep"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the actor move (the engine's SetActorLocationAndRotation) in `applyRenderSnapshot_GameThread`.
+**Was:** *"the render apply teleports the capsule: no sweep"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the actor move (the engine's SetActorLocationAndRotation) in the render apply (applyRenderSnapshot_GameThread, since deleted).
 
-**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into `JoltBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `JoltBackendUImpl-guards.md` G-04.
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-04.
 
-### G-84 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `JoltBackendUImpl-guards.md` G-05
+### G-84 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-05
 
-**Was:** *"a client never picks a Jolt slot itself: it binds the slot the authority chose, or waits"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the `decideBodySlot` call in `tryAcquireJoltSlot`.
+**Was:** *"a client never picks a Jolt slot itself: it binds the slot the authority chose, or waits"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the `decideBodySlot` call in the slot acquire (tryAcquireJoltSlot, since deleted).
 
-**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into `JoltBackendUImpl`, and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `JoltBackendUImpl-guards.md` G-05.
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-05.

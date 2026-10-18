@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/ChaosBackendUImpl-rationale.md · docs/ChaosBackendUImpl-guards.md
+// docs/ChaosTickBackendUImpl-rationale.md · docs/ChaosTickBackendUImpl-guards.md
 
 #pragma once
 
@@ -22,14 +22,14 @@
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
 #include "OGSimulationUnreal/PCTimeManagement/ChaosTickMapper.h"
 #include "OGBrawler/SimulatableBrawler.h"
-#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
+#include "OGSimulationUnreal/ChaosEngineTraitsUImpl.h"
 
 #include <cstdint>
 #include <optional>
 #include <type_traits>
 
 class ASimulationManagerUImpl;
-class ChaosBackendUImpl;
+class ChaosTickBackendUImpl;
 class USimmableUpdateComponent;
 class AOGBrawlerUECharacter;
 class AActor;
@@ -65,7 +65,7 @@ struct FSimulationInput2 : public Chaos::FSimCallbackInput
 
 	bool bInitialized = false;
 	UWorld* m_world;
-	ChaosBackendUImpl* m_manager = nullptr;
+	ChaosTickBackendUImpl* m_manager = nullptr;
 
 private:
 };
@@ -76,7 +76,7 @@ struct FRewindPushProbeStashedBody
 	PhysicsBodyState beforePush;
 	BodyId           bodyId{};
 	unsigned int     simulatableId = 0;
-	// ⛔G-01  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-01  docs/ChaosTickBackendUImpl-guards.md
 	const char*      bodyName = nullptr;
 	bool             wireCarriesRotationAndSpin = false;
 	bool             movedAtPush = false;
@@ -92,7 +92,7 @@ class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<
 public:
 	virtual FName GetFNameForStatId() const override;
 
-	void setManager(ChaosBackendUImpl* manager)
+	void setManager(ChaosTickBackendUImpl* manager)
 	{
 		m_manager = manager;
 	}
@@ -109,7 +109,7 @@ private:
 
 	virtual void FirstPreResimStep_Internal(int32 PhysicsStep);
 
-	ChaosBackendUImpl* m_manager = nullptr;
+	ChaosTickBackendUImpl* m_manager = nullptr;
 
 	TArray<FRewindPushProbeStashedBody> m_pushProbeStash;
 	int32    m_pushProbeStashFrame      = INDEX_NONE;
@@ -202,17 +202,17 @@ private:
 	}
 };
 
-struct ChaosBackendWorldsUImpl
+struct ChaosTickBackendWorldsUImpl
 {
 };
 
-class ChaosBackendUImpl
+class ChaosTickBackendUImpl
 {
 public:
-	ChaosBackendUImpl(ASimulationManagerUImpl& owner, ChaosBackendWorldsUImpl&) : m_owner(owner) {}
+	ChaosTickBackendUImpl(ASimulationManagerUImpl& owner, ChaosTickBackendWorldsUImpl&) : m_owner(owner) {}
 
-	ChaosBackendUImpl(const ChaosBackendUImpl&) = delete;
-	ChaosBackendUImpl& operator=(const ChaosBackendUImpl&) = delete;
+	ChaosTickBackendUImpl(const ChaosTickBackendUImpl&) = delete;
+	ChaosTickBackendUImpl& operator=(const ChaosTickBackendUImpl&) = delete;
 
 	void buildWorld(UWorld& world, float dt, bool worldIsAuthority);
 	void startStepping(UWorld& world, float dt, bool worldIsAuthority);
@@ -221,8 +221,8 @@ public:
 	void beforePresent_GameThread() {}
 	void updateVisualization_GameThread();
 
-	physicsBackendUImpl::VizQuery&        editVizQuery();
-	const physicsBackendUImpl::VizReader& getVizReader() const;
+	ChaosEngineTraitsUImpl::VizQuery&        editVizQuery();
+	const ChaosEngineTraitsUImpl::VizReader& getVizReader() const;
 	std::optional<QueryVolumeId> registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
 	bool createBodies_GameThread(USimmableUpdateComponent& owner, AOGBrawlerUECharacter& character,

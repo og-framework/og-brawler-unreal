@@ -528,7 +528,8 @@ and the body pose describe one tick and can be combined — which the servo-erro
 `BrawlerMovementVisualization.h` rests on. The call is a pure reader: every argument is a `const&`.
 
 **In the Jolt configuration the copy's attached bodies carry the rendered pose** (og-simulationscheduler-withjolt
-task 19). Right after the copy, the manager's `updateVisualizationAtRenderPoses_GameThread` writes the
+task 19). Right after the copy, the presenter's `updateVisualization_GameThread` (og-simulation's `TickDriverPresenter`,
+called through the manager's Jolt backend) writes the
 render interpolation's pose (two steps behind the host time, the pose the capsule is moved to) into the
 copy's body states of every declaration except the root: the radial weapon axis, the guard and the
 projectile pool. So the weapon, guard and projectile passes draw where the rendered character is, not
@@ -536,7 +537,7 @@ one or two steps ahead of it. The root (movement) body is left at the newest tic
 character is the capsule and its mesh, which the render sync already moved, and this movement draw's
 outline is documented as the simulation's belief, built from a body pose and a probe reading of the same
 tick. Every other `State` and `DerivedState` value in the copy stays the newest tick's. In the Chaos
-configuration the copy is unchanged (`JoltBackendUImpl-rationale.md` §7).
+configuration the copy is unchanged (`TickDriverBackendUImpl-rationale.md` §7).
 
 **The movement cvar is read per frame, deliberately (guard G-26).** Task 16 made `StaticData` cvars
 read once, at construction, so a tunable cannot move under a running session and put two peers on
@@ -583,7 +584,7 @@ whichever pair the manager selects.
 In the Jolt configuration the two accessors return the step world's adapters on the authority and on
 a client stepping inline (`og.Sim.RunInline`), and the game-thread shadow world's on a client that
 steps on a worker, where the step's own world may be queried only by the step or under the world
-mutex (`JoltBackendUImpl-rationale.md` §6). Either
+mutex (`TickDriverBackendUImpl-rationale.md` §6). Either
 way the component gets a world it may query on the game thread, so both passes run on every peer, as
 in the Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
 and the component skipped the two passes there; task 56 removed that skip.)

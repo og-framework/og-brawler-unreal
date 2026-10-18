@@ -8,13 +8,16 @@
 <!-- lint-external-ref: FPBDRigidsEvolutionGBF::Integrate -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: SetXR -- Chaos engine particle-handle method, outside every scan root -->
 <!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
-# `ChaosBackendUImpl.h` and `.cpp` — guards
+# `ChaosTickBackendUImpl.h` and `.cpp` — guards
 
 The prohibitions on the Chaos host: the async callback, its rewind-push probe, the restored-state write and the
 input hook's tick. Every entry here moved from `SimulationManagerUImpl-guards.md` in og-simulationscheduler-withjolt
 task 82, with the code it guards; each names its old id. In the source a single line
-`// ⛔G-nn  docs/ChaosBackendUImpl-guards.md` sits directly above the statement or declaration where the forbidden
+`// ⛔G-nn  docs/ChaosTickBackendUImpl-guards.md` sits directly above the statement or declaration where the forbidden
 edit would be typed.
+
+Named ChaosBackendUImpl-guards.md until og-tickdriver task 15b (historical name), when the class and its files were
+renamed `ChaosTickBackendUImpl`. The ids did not change; every citation was re-pointed.
 
 **If this file and the source disagree, the source is authoritative and this file is stale.** Fix this file; do not
 soften the source to match it.
@@ -27,7 +30,7 @@ again appear as a `⛔G-nn` **tag**.
 entry here, every live entry is referenced by exactly one tag, no id is duplicated, and no retired id reappears as
 a tag. ⚠ It checks that an entry EXISTS. It never checks that this text is TRUE.
 
-⛔ **Nothing in this file is a rationale.** That lives in `ChaosBackendUImpl-rationale.md`.
+⛔ **Nothing in this file is a rationale.** That lives in `ChaosTickBackendUImpl-rationale.md`.
 
 **Re-verified when moved (task 82).** The body names `G-01` lists (`CharacterCapsule`, `WeaponAxis`, `GuardAxis`,
 and the projectile slots' literal-returning initializer); `isSimilarToField` and `kDefaultSimilarityEpsilon` where
@@ -42,7 +45,7 @@ only on the first replayed step (`G-08`). `G-06`'s engine claims were not re-rea
 
 *Was `SimulationManagerUImpl-guards.md` G-02; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
-**Tag site:** `ChaosBackendUImpl.h`, directly above `FRewindPushProbeStashedBody::bodyName`.
+**Tag site:** `ChaosTickBackendUImpl.h`, directly above `FRewindPushProbeStashedBody::bodyName`.
 
 **The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
 
@@ -200,7 +203,7 @@ a word.
 
 *Was `SimulationManagerUImpl-guards.md` G-55; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
-**Site:** the `m_manager->noteResimGrant(PhysicsStep);` line in `FirstPreResimStep_Internal`. `m_manager` is the callback's `ChaosBackendUImpl*`, which forwards to the session's resim-gate probe.
+**Site:** the `m_manager->noteResimGrant(PhysicsStep);` line in `FirstPreResimStep_Internal`. `m_manager` is the callback's `ChaosTickBackendUImpl*`, which forwards to the session's resim-gate probe.
 
 **The prohibition, as it stood in the source:**
 
@@ -228,8 +231,8 @@ entry. They are carried as they stood.
 
 *Was `SimulationManagerUImpl-guards.md` G-71; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
-**Site:** `const int32 firstUpcomingSimTick =` in `ChaosBackendUImpl::InjectInputs_External`, the Chaos
-configuration's input hook (`ChaosBackendUImpl-rationale.md` §2). Re-sited there from
+**Site:** `const int32 firstUpcomingSimTick =` in `ChaosTickBackendUImpl::InjectInputs_External`, the Chaos
+configuration's input hook (`ChaosTickBackendUImpl-rationale.md` §2). Re-sited there from
 `releaseDelayedInputsForStep` by og-simulationscheduler-withjolt task 51, id kept: the computation is the
 same, and it feeds the session's `onFrameStepsDue_GameThread`, the drain and the reap with one value, as it
 did before the split. It retires with the Chaos configuration in task 21.
@@ -265,7 +268,7 @@ and, at the reap and in PROBE A:
 The quoted `physicsStep` is the hook's `PhysicsStep` parameter since the re-siting.
 
 **Why a guard and not a derivation tag.** This line has two readings: the derivation of the
-`+ 1` (`ChaosBackendUImpl-rationale.md` §4) and the prohibition on any other tick source. The rule gives
+`+ 1` (`ChaosTickBackendUImpl-rationale.md` §4) and the prohibition on any other tick source. The rule gives
 a coinciding G and D one tag and merges the entries, so that section is this entry's derivation.
 
 **The consequence.** Dropping the `+ 1` shifts every player's input by one tick. Swapping in the
@@ -283,8 +286,8 @@ bodies as its last step. The prohibition against moving the write above `prepare
 structural and was dropped. The rule that the probe's passes bracket the write now names this call.*
 
 **Site:** the `m_manager->prepareResimulation(PhysicsStep, simTick);` call in
-`FSimulationManagerAsyncCallback::FirstPreResimStep_Internal` (`ChaosBackendUImpl.cpp`). It reaches
-`SimulationManager::prepareResimulation` through `ChaosBackendUImpl::prepareResimulation` and the owner's
+`FSimulationManagerAsyncCallback::FirstPreResimStep_Internal` (`ChaosTickBackendUImpl.cpp`). It reaches
+`SimulationManager::prepareResimulation` through `ChaosTickBackendUImpl::prepareResimulation` and the owner's
 `m_manager`. That call restores og-sim state from the correction cache and then, last, writes the restored
 bodies through `SimulationIntegrationExecutor::pushCorrectedBodyStatesAll`.
 
@@ -312,7 +315,7 @@ comment preceded it.
 **Why a direct write is sound here.** The push writes through `ChaosPhysicsBodyAdapter`: `setBodyPose`
 (`SetX`, `SetR`), then `setBodyLinearVelocity` (`SetV`) and, for a full `PhysicsBodyState` declaration,
 `setBodyAngularVelocity` (`SetW`). A body whose declared state already equals its start-of-step state
-is skipped (og-simulation's restore skip, `ChaosBackendUImpl-rationale.md` §5). These are the
+is skipped (og-simulation's restore skip, `ChaosTickBackendUImpl-rationale.md` §5). These are the
 physics-thread API's setters, which the adapter uses every tick (`setBodyTransform`,
 `setBodyLinearVelocity`, `setBodyAngularVelocity`). The sub-sims make
 them during replayed steps too. They land in the same phase as `FRewindData::ApplyTargets`: after
@@ -329,7 +332,7 @@ constant 0.0359505 rotation component), and the storm ended only at the next swi
 `ensureMsgf` checks only that the two passes visit the same bodies in the same order, not where they sit.
 What the push writes, and that it runs after the cache restore, is covered by og-simulation's push and
 step-driver tests, and the adapter's `static_assert`s pin that the Chaos adapter reads
-the restored body at the start-of-step phase (`PhysicsBodyStartOfStepReader`). But `ChaosBackendUImpl.cpp` is a UE module file that neither LLT target compiles,
+the restored body at the start-of-step phase (`PhysicsBodyStartOfStepReader`). But `ChaosTickBackendUImpl.cpp` is a UE module file that neither LLT target compiles,
 so this tag and the probe's PIE run are the only checks on the call's position.
 
 ---
@@ -339,7 +342,7 @@ so this tag and the probe's PIE run are the only checks on the call's position.
 *Added by og-simulationscheduler-withjolt task 84. Task 88 moved its call from the probe's before pass to its
 after pass, with the stash of `pushed`; the predicate and its tag did not change.*
 
-**Site:** `pushProbeRestoreSkipFires` (`ChaosBackendUImpl.cpp`), called from the probe's after pass in
+**Site:** `pushProbeRestoreSkipFires` (`ChaosTickBackendUImpl.cpp`), called from the probe's after pass in
 `FirstPreResimStep_Internal`, below the `prepareResimulation` call.
 
 **The prohibition.** ⛔ **Keep `pushProbeRestoreSkipFires` identical to og-simulation's restore-skip
@@ -355,7 +358,7 @@ deviation: how many bodies per rewind the push left unwritten (and unwoken). A p
 the push's still prints a plausible number, and nothing compares the two.
 
 **What breaks if the tag moves.** Nothing mechanical. The push's predicate is private to an og-simulation
-class template, so this file cannot call it, and `ChaosBackendUImpl.cpp` is built by no LLT target.
+class template, so this file cannot call it, and `ChaosTickBackendUImpl.cpp` is built by no LLT target.
 
 ---
 
@@ -366,7 +369,7 @@ class template, so this file cannot call it, and `ChaosBackendUImpl.cpp` is buil
 ### G-09 — RETIRED by og-simulationscheduler-withjolt task 84 (2026-10-15): the wire-shape field rule moved into og-simulation's push
 
 **Was:** *"the restored-state write sets only the fields the body's wire shape carries"*. Its tag sat in
-`ChaosBackendUImpl.cpp`, above the `if (wireCarriesRotationAndSpin)` branch of `writeRestoredBodyState`. It
+`ChaosTickBackendUImpl.cpp`, above the `if (wireCarriesRotationAndSpin)` branch of `writeRestoredBodyState`. It
 said: never write rotation or angular velocity for a body whose `bodyStateOf` is not exactly
 `PhysicsBodyState`, because a `LinearBodyState`'s widening fabricates an identity rotation and a zero
 angular velocity; and the flag was shared with the probe, so the probe compared exactly the fields the write
@@ -380,5 +383,5 @@ wrote.
 Chaos is written with `setBodyPose(position, restored.rotation)` and `setBodyLinearVelocity`. The restored
 rotation is the body's own start-of-step R (`captureStartOfStepBodyState`), narrowed to float; the
 fabricated identity rotation and zero spin are never written. That narrowing is the one field change
-against the deleted function, which left R untouched (`ChaosBackendUImpl-rationale.md` §5). The probe's
+against the deleted function, which left R untouched (`ChaosTickBackendUImpl-rationale.md` §5). The probe's
 `cmp=` flag (`⛔G-04`) is computed with the same `std::is_same_v` predicate in the probe's first pass.

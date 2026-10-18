@@ -25,6 +25,7 @@ public static class OGBrawlerUnrealTargetCommon
 
 		Rules.ExtraModuleNames.Add("OGBrawlerUnreal");
 		Rules.ExtraModuleNames.Add("OGSimulationUnreal");
+		Rules.ExtraModuleNames.Add("OGSimulationJoltUnreal");
 		Rules.ExtraModuleNames.Add("DVolumeModule");
 		Rules.ExtraModuleNames.Add("ProceduralMountainSide");
 

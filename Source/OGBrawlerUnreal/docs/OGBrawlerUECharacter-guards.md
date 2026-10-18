@@ -41,7 +41,9 @@ backend (radius and half-height compared with `FMath::IsNearlyEqual`):
 * **Chaos configuration:** `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root branch, which
   adopts this capsule as the root body.
 * **Jolt configuration** (og-simulationscheduler-withjolt task 53, design D14): the check in
-  `ASimulationManagerUImpl::tryRegister`'s first-call bind. Jolt builds the character body from the
+  `ASimulationManagerUImpl::tryRegister`'s first-call bind, which is
+  `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's `createBodies_GameThread`, since
+  og-tickdriver task 15a. Jolt builds the character body from the
   descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
   camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
 
@@ -90,8 +92,9 @@ writer (a movement component, or re-basing the class on the engine's walking-paw
   path.
 * **Jolt configuration** (og-simulationscheduler-withjolt task 19): the character's body is a Jolt
   slot body built from the movement descriptor, and this capsule does not simulate
-  (`tryRegister`'s Ready path, `JoltBackendUImpl::onRegistered_GameThread`, switches its physics simulation
-  off). The render sync, `JoltBackendUImpl::applyRenderSnapshot_GameThread`, is the only writer: once per frame at the
+  (`tryRegister`'s Ready path, `TickDriverBackendUImpl::onRegistered_GameThread`, switches its physics simulation
+  off). The render sync, og-simulation's presenter through `UERenderTargetTable::applyRootPose`, is the only
+  writer: once per frame at the
   end of physics it teleports the capsule to the interpolated render pose. A second writer moves the
   capsule between two applies, and the capsule is the mouse-aim plane point and the camera anchor, so
   the aim fed into the next simulated tick is measured from the wrong point. In a development build

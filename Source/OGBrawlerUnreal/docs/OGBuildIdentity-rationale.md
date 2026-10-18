@@ -155,9 +155,11 @@ a Warning that names both fingerprints (the policy below).
 The fingerprint is og-simulation-jolt's `determinismFingerprint`: the Jolt version and feature bits,
 the instruction set the library was compiled for, fused multiply-add, the step's FP mode and the
 state hash of a short probe simulation, folded into one 64-bit value
-(`JoltDeterminismFingerprint-rationale.md`). The traits header computes it
-(`physicsBackendUImpl::computeDeterminismFingerprint`, which acquires the Jolt runtime, runs the probe
-and releases the runtime; the Chaos configuration has none), and the build identity computes it once,
+(`JoltDeterminismFingerprint-rationale.md`). The configuration's engine traits compute it
+(`EngineTraits::computeDeterminismFingerprint`, which the build identity calls directly since og-tickdriver task 15b
+and through a forwarder of the same name in `PhysicsBackendUImpl.h` before it: since og-tickdriver task 15a
+`JoltEngineTraitsUImpl::computeDeterminismFingerprint` acquires the Jolt runtime, runs the probe and releases the
+runtime; the Chaos configuration has none), and the build identity computes it once,
 on first use, and keeps it for the process. The first use is `applyNetworkVersion` at
 `FCoreDelegates::OnPostEngineInit`, so the start line (§1) already carries the full token, and the probe
 runs before any world exists. It takes about 2 ms; the runtime's two lines

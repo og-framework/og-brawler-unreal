@@ -15,10 +15,13 @@
 #include <memory>
 #include <set>
 #include <iterator>
+#include <array>
+#include <cstddef>
 #include "Engine/World.h"
 #include "Runtime/CoreUObject/Public/UObject/Object.h"
 
 #include "OGSimulation/SimulationManager.h"
+#include "OGSimulation/SimulationLogRoutes.h"
 #include "OGSimulation/RenderSnapshot.h"
 #include "OGSimulation/SimulatableList.h"
 #include "OGSimulation/SystemsExecutor.h"
@@ -47,6 +50,7 @@
 #include "OGBrawler/BrawlerRingoutSimulation.h"
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
 
+#include "OGSimulationUnreal/OGSimulationUnreal.h"
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
@@ -65,7 +69,6 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGLatencyBudget, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
-DECLARE_LOG_CATEGORY_EXTERN(LogOGSimHost, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
 enum class OGLogRoute : uint8
@@ -80,47 +83,136 @@ struct OGLogRouteEntry
 	ELogVerbosity::Type plainLevel;
 };
 
-inline constexpr OGLogRouteEntry kOGLogRoutes[] = {
-	{ TEXT("[Resim.Input]"),                     OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+inline constexpr OGLogRouteEntry kOGGameLogRoutes[] = {
 	{ TEXT("[ResimProbe"),                       OGLogRoute::ResimProbe,      ELogVerbosity::Log },
-	{ TEXT("[TimeResync."),                      OGLogRoute::Sim,             ELogVerbosity::Log },
-	{ TEXT("[Resim."),                           OGLogRoute::Sim,             ELogVerbosity::Log },
-	{ TEXT("[ResimCheck.Divergence]"),           OGLogRoute::Sim,             ELogVerbosity::Log },
-	{ TEXT("[ResimCheck.PrepareRestore]"),       OGLogRoute::Sim,             ELogVerbosity::Log },
-	{ TEXT("[ResimCheck.Check]"),                OGLogRoute::SimTick,         ELogVerbosity::Verbose },
-	{ TEXT("[ResimCheck.IsSimilar]"),            OGLogRoute::SimTick,         ELogVerbosity::Verbose },
 	{ TEXT("[ResimCheck.TriggerRewind]"),        OGLogRoute::SimTick,         ELogVerbosity::Verbose },
-	{ TEXT("[AuthoritySimulation]"),             OGLogRoute::SimTick,         ELogVerbosity::Verbose },
 	{ TEXT("[ClientPrediction]"),                OGLogRoute::SimTick,         ELogVerbosity::Verbose },
-	{ TEXT("[PredictionSimulation]"),            OGLogRoute::SimTick,         ELogVerbosity::Verbose },
-	{ TEXT("[PostPrediction]"),                  OGLogRoute::SimTick,         ELogVerbosity::Verbose },
-	{ TEXT("[CollectInput]"),                    OGLogRoute::SimTick,         ELogVerbosity::Verbose },
 	{ TEXT("[ServerReceive]"),                   OGLogRoute::Net,             ELogVerbosity::Verbose },
-	{ TEXT("[ReceiveLocalInput] DISCARD"),       OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[ReceiveLocalInput]"),               OGLogRoute::Net,             ELogVerbosity::Verbose },
-	{ TEXT("[SendCorrectionStateToClients]"),    OGLogRoute::Net,             ELogVerbosity::Verbose },
 	{ TEXT("[SendRemoteInputToClients]"),        OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[SendLocalInputToServer]"),          OGLogRoute::Net,             ELogVerbosity::Verbose },
 	{ TEXT("[ReceiveCorrectionState]"),          OGLogRoute::Net,             ELogVerbosity::Verbose },
 	{ TEXT("[ReceiveCorrectionInput]"),          OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[InjectCorrectionState]"),           OGLogRoute::Net,             ELogVerbosity::Verbose },
 	{ TEXT("[InjectCorrectionInput]"),           OGLogRoute::Net,             ELogVerbosity::Log },
 	{ TEXT("[DrainOutOfOrder]"),                 OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[InputGap]"),                        OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[InputDrop]"),                       OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[DelayShift]"),                      OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[InputStats]"),                      OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[Park]"),                            OGLogRoute::Net,             ELogVerbosity::Verbose },
-	{ TEXT("[Release]"),                         OGLogRoute::Net,             ELogVerbosity::Verbose },
 	{ TEXT("[ReleaseBatch]"),                    OGLogRoute::Net,             ELogVerbosity::Verbose },
-	{ TEXT("[InputDomain]"),                     OGLogRoute::Net,             ELogVerbosity::Log },
-	{ TEXT("[RelaySkip]"),                       OGLogRoute::Net,             ELogVerbosity::Log },
 	{ TEXT("[RelayProbe"),                       OGLogRoute::RelayProbe,      ELogVerbosity::Log },
-	{ TEXT("[DivergenceProbe"),                  OGLogRoute::DivergenceProbe, ELogVerbosity::Log },
 	{ TEXT("SimulationManager:"),                OGLogRoute::Mgmt,            ELogVerbosity::Log },
 	{ TEXT("tryRegister:"),                      OGLogRoute::Mgmt,            ELogVerbosity::Log },
 	{ TEXT("NewFramework:"),                     OGLogRoute::Mgmt,            ELogVerbosity::Log }
 };
+
+inline constexpr OGLogRoute kOGLogRouteUnmapped = static_cast<OGLogRoute>(0xFF);
+
+constexpr OGLogRoute ogLogRouteOf(SimulationLogRoute route)
+{
+	switch (route)
+	{
+	case SimulationLogRoute::SimTick:         return OGLogRoute::SimTick;
+	case SimulationLogRoute::Sim:             return OGLogRoute::Sim;
+	case SimulationLogRoute::Net:             return OGLogRoute::Net;
+	case SimulationLogRoute::DivergenceProbe: return OGLogRoute::DivergenceProbe;
+	}
+	return kOGLogRouteUnmapped;
+}
+
+constexpr ELogVerbosity::Type ogLogVerbosityOf(HostLogLevel level)
+{
+	switch (level)
+	{
+	case HostLogLevel::Verbose: return ELogVerbosity::Verbose;
+	case HostLogLevel::Log:     return ELogVerbosity::Log;
+	case HostLogLevel::Warning: return ELogVerbosity::Warning;
+	}
+	return ELogVerbosity::NoLogging;
+}
+
+constexpr std::size_t ogSimulationLogRoutePrefixLength(const char* prefix)
+{
+	std::size_t length = 0;
+	while (prefix[length] != 0)
+		++length;
+	return length;
+}
+
+constexpr std::size_t ogLongestSimulationLogRoutePrefix()
+{
+	std::size_t longest = 0;
+	for (const SimulationLogRouteEntry& entry : kSimulationLogRoutes)
+	{
+		if (ogSimulationLogRoutePrefixLength(entry.prefix) > longest)
+			longest = ogSimulationLogRoutePrefixLength(entry.prefix);
+	}
+	return longest;
+}
+
+constexpr bool ogSimulationLogRoutePrefixesArePrintableAscii()
+{
+	for (const SimulationLogRouteEntry& entry : kSimulationLogRoutes)
+	{
+		for (const char* c = entry.prefix; *c != 0; ++c)
+		{
+			if (*c < 0x20 || *c > 0x7E)
+				return false;
+		}
+	}
+	return true;
+}
+
+static_assert(ogSimulationLogRoutePrefixesArePrintableAscii(),
+	"kSimulationLogRoutes: a prefix holds a character outside printable ASCII. Each prefix is widened "
+	"to TCHAR one char at a time, which is exact for ASCII only.");
+
+struct OGSimulationLogRouteWidePrefix
+{
+	TCHAR text[ogLongestSimulationLogRoutePrefix() + 1];
+};
+
+constexpr std::array<OGSimulationLogRouteWidePrefix, std::size(kSimulationLogRoutes)> ogWidenSimulationLogRoutePrefixes()
+{
+	std::array<OGSimulationLogRouteWidePrefix, std::size(kSimulationLogRoutes)> wide{};
+	for (std::size_t row = 0; row < std::size(kSimulationLogRoutes); ++row)
+	{
+		const char* prefix = kSimulationLogRoutes[row].prefix;
+		for (std::size_t i = 0; prefix[i] != 0; ++i)
+			wide[row].text[i] = static_cast<TCHAR>(prefix[i]);
+	}
+	return wide;
+}
+
+inline constexpr std::array<OGSimulationLogRouteWidePrefix, std::size(kSimulationLogRoutes)> kOGSimulationLogRoutePrefixes =
+	ogWidenSimulationLogRoutePrefixes();
+
+inline constexpr std::size_t kOGSimulationLogRouteCount = std::size(kSimulationLogRoutes);
+
+constexpr std::array<OGLogRouteEntry, kOGSimulationLogRouteCount + std::size(kOGGameLogRoutes)> ogConcatenateLogRoutes()
+{
+	std::array<OGLogRouteEntry, kOGSimulationLogRouteCount + std::size(kOGGameLogRoutes)> routes{};
+	for (std::size_t row = 0; row < kOGSimulationLogRouteCount; ++row)
+	{
+		routes[row] = { kOGSimulationLogRoutePrefixes[row].text,
+			ogLogRouteOf(kSimulationLogRoutes[row].route),
+			ogLogVerbosityOf(kSimulationLogRoutes[row].plainLevel) };
+	}
+	for (std::size_t row = 0; row < std::size(kOGGameLogRoutes); ++row)
+		routes[kOGSimulationLogRouteCount + row] = kOGGameLogRoutes[row];
+	return routes;
+}
+
+inline constexpr std::array<OGLogRouteEntry, kOGSimulationLogRouteCount + std::size(kOGGameLogRoutes)> kOGLogRoutes =
+	ogConcatenateLogRoutes();
+
+constexpr bool ogLogRoutesAreAllMapped()
+{
+	for (const OGLogRouteEntry& entry : kOGLogRoutes)
+	{
+		if (entry.route == kOGLogRouteUnmapped)
+			return false;
+	}
+	return true;
+}
+
+static_assert(ogLogRoutesAreAllMapped(),
+	"kOGLogRoutes: an og-simulation row's SimulationLogRoute has no OGLogRoute in ogLogRouteOf, so "
+	"RouteOGMessage would drop its lines. Map the new route to a LogOG* category.");
 
 constexpr TCHAR ogLogRouteFoldCase(TCHAR c)
 {
@@ -137,6 +229,26 @@ constexpr bool ogLogRouteStartsWith(const TCHAR* text, const TCHAR* prefix)
 	return true;
 }
 
+constexpr bool ogLogRouteBlocksAreDisjoint()
+{
+	for (std::size_t simRow = 0; simRow < kOGSimulationLogRouteCount; ++simRow)
+	{
+		for (std::size_t gameRow = kOGSimulationLogRouteCount; gameRow < std::size(kOGLogRoutes); ++gameRow)
+		{
+			if (ogLogRouteStartsWith(kOGLogRoutes[simRow].prefix, kOGLogRoutes[gameRow].prefix)
+				|| ogLogRouteStartsWith(kOGLogRoutes[gameRow].prefix, kOGLogRoutes[simRow].prefix))
+				return false;
+		}
+	}
+	return true;
+}
+
+static_assert(ogLogRouteBlocksAreDisjoint(),
+	"kOGLogRoutes: a prefix in the og-simulation block and a prefix in this module's block BEGIN WITH "
+	"one another (compared ignoring case, as FString::StartsWith compares), so one line can match a "
+	"row in each block and the block order decides its route. The og-simulation block comes first only "
+	"because no line can match both; give the new row a tag no prefix in the other block begins with.");
+
 constexpr bool ogLogRoutesAreAllReachable()
 {
 	for (std::size_t later = 0; later < std::size(kOGLogRoutes); ++later)
@@ -149,7 +261,6 @@ constexpr bool ogLogRoutesAreAllReachable()
 	}
 	return true;
 }
-
 static_assert(ogLogRoutesAreAllReachable(),
 	"RouteOGMessage: a route's prefix BEGINS WITH an earlier route's prefix, so the earlier "
 	"route always wins and the later one can never be taken. FString::StartsWith ignores "
@@ -296,8 +407,8 @@ public:
 
     void unregisterFromNewFramework(SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority);
 
-    physicsBackendUImpl::VizQuery&        editVizQuery();
-    const physicsBackendUImpl::VizReader& getVizReader() const;
+    EngineTraits::VizQuery&        editVizQuery();
+    const EngineTraits::VizReader& getVizReader() const;
     std::optional<QueryVolumeId> registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
@@ -565,9 +676,8 @@ public:
         "brawlerRingout::kMaxSpawnPoints' prose fence of SimulationManagerUImpl.h (task 11).");
 
 private:
-    friend class ChaosBackendUImpl;
-    friend class JoltBackendUImpl;
-    friend class SimulationFrameHostUImpl;
+    friend physicsBackendUImpl::Backend;
+    template <typename SessionT> friend class BrawlerTickDriverGameUImpl;
 
     std::set<unsigned int> m_authorityRegisteredIds;
 
@@ -644,9 +754,9 @@ private:
     ASimulationTimingRelay* m_timingRelay = nullptr;
     ASimulationTimingRelay* findTimingRelay();
 
-    std::optional<physicsBackendUImpl::BodyAdapter>   m_physAdapter;
-    std::optional<physicsBackendUImpl::ReaderAdapter> m_physReaderAdapter;
-    std::optional<physicsBackendUImpl::QueryAdapter>  m_queryAdapter;
+    std::optional<EngineTraits::BodyAdapter>   m_physAdapter;
+    std::optional<EngineTraits::ReaderAdapter> m_physReaderAdapter;
+    std::optional<EngineTraits::QueryAdapter>  m_queryAdapter;
 
     static FMovementStaticDataCVars readMovementStaticDataCVars();
 
@@ -728,8 +838,8 @@ private:
             "(task 11).");
         static_assert(std::is_same_v<ManagerType, BrawlerCompositionUImpl::Manager>,
             "ASimulationManagerUImpl::ManagerType must BE BrawlerCompositionUImpl::Manager. ManagerType is private, so "
-            "a backend host declared outside this class (task 83's JoltBackendUImpl, whose step driver is "
-            "SimulationStepDriver<Manager, JoltWorld, BrawlerStepHooksUImpl>) names the manager "
+            "a backend host declared outside this class (TickDriverBackendUImpl, task 83's Jolt host, whose tick driver's step driver is "
+            "SimulationStepDriver<Manager, JoltWorld, TickDriverStepHooks<...>>) names the manager "
             "through BrawlerCompositionUImpl; a ManagerType that drifts from it hands that host a different "
             "SimulationManager instantiation than m_manager. Added by task 81.");
         static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_backendWorlds)
@@ -745,14 +855,15 @@ private:
             "integration layer holds the adapters), so m_backendWorlds sits above the adapters in both configurations "
             "(it is empty on Chaos). Keep m_backendWorlds < m_physAdapter < {m_physReaderAdapter, m_queryAdapter} < "
             "m_integrationLayer. Was design D's compile-time row 'runtime < world < adapters' (task 18); its "
-            "runtime < world half is JoltBackendWorldsUImpl's own row since task 83.");
+            "runtime < world half is og-simulation-jolt's JoltTickWorlds' own row (runtime < contactCounter < stepWorld) "
+            "since og-tickdriver task 10, and was the Jolt host's worlds struct's from task 83.");
         static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_manager)
                           < __builtin_offsetof(ASimulationManagerUImpl, m_backend),
             "ASimulationManagerUImpl members destruct in REVERSE declaration order. The backend holds the Jolt step "
             "driver, which unregisters its resync callback from the manager's client clock in its destructor, so the "
             "backend must go before the manager. Keep m_manager < m_backend. Was design D's compile-time row "
-            "'manager < hooks < driver' (task 18); its frame host < hooks < driver half is JoltBackendUImpl's own "
-            "row since task 83.");
+            "'manager < hooks < driver' (task 18); its hooks < driver half is og-simulation's SimulationTickDriver's "
+            "own row, and the tick driver last is TickDriverBackendUImpl's, since og-tickdriver task 8.");
         static_assert(physicsBackendUImpl::PhysicsBackendHost<physicsBackendUImpl::Backend>,
             "physicsBackendUImpl::Backend must provide every entry point of the seam (the PhysicsBackendHost concept, "
             "PhysicsBackendHostUImpl.h): this class calls each one from exactly one site, unconditionally, in both "

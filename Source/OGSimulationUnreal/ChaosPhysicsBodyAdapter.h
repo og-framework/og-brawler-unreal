@@ -90,7 +90,7 @@ public:
 
 	// PhysicsBodyPoseWriter: position and quaternion, no matrix in between. Used by
 	// SimulationIntegrationExecutor::pushCorrectedBodyStatesAll, which the Chaos host calls from
-	// FirstPreResimStep_Internal (ChaosBackendUImpl.cpp). Same conversions and setters as the
+	// FirstPreResimStep_Internal (ChaosTickBackendUImpl.cpp). Same conversions and setters as the
 	// hand-written rollback write it replaced (uglm::toFVector -> SetX, uglm::toFQuat -> SetR).
 	// The physics-thread SetX/SetR also set P/Q, and wake a sleeping body.
 	void setBodyPose(BodyId bodyId, const glm::vec3& position, const glm::quat& rotation)
@@ -214,7 +214,7 @@ public:
 	// callback, so `GetV()`/`GetW()` are already end-of-step values. Reading P/Q here is
 	// what makes the captured tuple internally consistent -- pose and velocity from the
 	// same instant -- and what makes slot[T] mean "the state AFTER tick T", which is what
-	// the rollback push consumes (`ChaosBackendUImpl.cpp` `FirstPreResimStep_Internal`, through
+	// the rollback push consumes (`ChaosTickBackendUImpl.cpp` `FirstPreResimStep_Internal`, through
 	// `pushCorrectedBodyStatesAll` and the setters above, writes it straight onto the particle
 	// before the frame that replays tick T+1 integrates, unless the body's start-of-step state
 	// already equals it; see captureStartOfStepBodyState below).

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/ChaosBackendUImpl-rationale.md · docs/ChaosBackendUImpl-guards.md
+// docs/ChaosTickBackendUImpl-rationale.md · docs/ChaosTickBackendUImpl-guards.md
 
 #if OG_PHYSICS_BACKEND_CHAOS
-#include "ChaosBackendUImpl.h"
+#include "ChaosTickBackendUImpl.h"
 
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
+#include "OGBrawlerUnreal/BrawlerChaosBindingUImpl.h"
 #include "OGSimulation/CompilerControl.h"
 #include "OGSimulation/SimulationComparison.h"
 #include "OGSimulationUnreal/ChaosPhysicsFactory.h"
@@ -21,19 +22,6 @@
 
 namespace
 {
-	template <typename QueryAdapterOptional>
-	void emplaceBrawlerQueryAdapter(QueryAdapterOptional& queryAdapter, UWorld* world)
-	{
-		queryAdapter.emplace(world, std::initializer_list<ChaosCategoryMapping>{
-			{ collisionCategory::body,         ECollisionChannel::ECC_GameTraceChannel2 },
-			{ collisionCategory::guard,        ECollisionChannel::ECC_GameTraceChannel3 },
-			{ collisionCategory::queryRouting, ECollisionChannel::ECC_GameTraceChannel4 },
-			{ collisionCategory::projectile,   ECollisionChannel::ECC_GameTraceChannel5 },
-			{ collisionCategory::world,        ECollisionChannel::ECC_WorldStatic       },
-			{ collisionCategory::character,    ECollisionChannel::ECC_GameTraceChannel6 }
-		});
-	}
-
 	const TCHAR* pushProbeResimTypeText(Chaos::EResimType type)
 	{
 		switch (type)
@@ -67,7 +55,7 @@ namespace
 		LivePushProbeRead read;
 		auto* ptApi = proxy.GetPhysicsThreadAPI();
 		const Chaos::FConstGenericParticleHandle particle(proxy.GetHandle_LowLevel());
-		// ⛔G-03  docs/ChaosBackendUImpl-guards.md
+		// ⛔G-03  docs/ChaosTickBackendUImpl-guards.md
 		read.startOfStep.position        = uglm::toGLMVec3(particle->GetX());
 		read.startOfStep.rotation        = uglm::toGLMQuat(FQuat(particle->GetR()));
 		read.startOfStep.linearVelocity  = uglm::toGLMVec3(ptApi->GetV());
@@ -92,7 +80,7 @@ namespace
 		return std::abs(std::abs(glm::dot(a, b)) - 1.f);
 	}
 
-	// ⛔G-04  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-04  docs/ChaosTickBackendUImpl-guards.md
 	bool pushProbeFieldsSimilar(const PhysicsBodyState& a, const PhysicsBodyState& b,
 	                            bool wireCarriesRotationAndSpin)
 	{
@@ -119,7 +107,7 @@ namespace
 		return worst;
 	}
 
-	// ⛔G-10  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-10  docs/ChaosTickBackendUImpl-guards.md
 	bool pushProbeRestoreSkipFires(const PhysicsBodyState& pushed, const PhysicsBodyState& startOfStep,
 	                               bool wireCarriesRotationAndSpin)
 	{
@@ -140,7 +128,7 @@ namespace
 		int32 movedAtPush        = 0;
 	};
 
-	// ⛔G-05  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-05  docs/ChaosTickBackendUImpl-guards.md
 	const TCHAR* pushProbeVerdictText(const PushProbeTally& tally)
 	{
 		if (tally.nonInert == 0)
@@ -247,7 +235,7 @@ void FSimulationManagerAsyncCallback::OnPreSimulate_Internal()
 	const bool isFirstResimulationFrame = rigidsEvolution->IsResetting(); 
 	SimulationUpdateInfo updateInfo(isResimulating, isFirstResimulationFrame);
 
-	// ⛔G-02  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-02  docs/ChaosTickBackendUImpl-guards.md
 	if (m_pushProbeStashFrame != INDEX_NONE)
 	{
 		if (isFirstResimulationFrame)
@@ -307,7 +295,7 @@ void FSimulationManagerAsyncCallback::ProcessInputs_External(int32 PhysicsStep)
 int32 FSimulationManagerAsyncCallback::TriggerRewindIfNeeded_Internal(int32 LastCompletedStep)
 {
 
-	ChaosBackendUImpl* manager = m_manager;
+	ChaosTickBackendUImpl* manager = m_manager;
 	if (manager == nullptr)
 	{
 		OG_LOG_ROUTED(LogOGSimTick, TEXT("[ResimCheck.TriggerRewind] lastCompletedStep=%d manager=null rewind=0"),
@@ -351,7 +339,7 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 	if (m_manager == nullptr || !m_manager->runsPrediction())
 		return;
 
-	// ⛔G-06  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-06  docs/ChaosTickBackendUImpl-guards.md
 	m_manager->noteResimGrant(PhysicsStep);
 
 	const uint32_t simTick = static_cast<uint32_t>(
@@ -403,7 +391,7 @@ void FSimulationManagerAsyncCallback::FirstPreResimStep_Internal(int32 PhysicsSt
 			});
 	}
 
-	// ⛔G-08  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-08  docs/ChaosTickBackendUImpl-guards.md
 	m_manager->prepareResimulation(PhysicsStep, simTick);
 
 	if (pushProbeActive)
@@ -502,7 +490,7 @@ void FSimulationManagerAsyncCallback::discardPushProbeStash(const TCHAR* reason)
 	m_pushProbeStashFrame = INDEX_NONE;
 }
 
-void ChaosBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)
+void ChaosTickBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)
 {
 	FSimulationInput2* asyncInput = m_asyncCallback->GetProducerInputData_External();
 	asyncInput->Reset();
@@ -510,7 +498,7 @@ void ChaosBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)
 	asyncInput->m_world = m_owner.GetWorld();
 	asyncInput->m_manager = this;
 
-	// ⛔G-07  docs/ChaosBackendUImpl-guards.md
+	// ⛔G-07  docs/ChaosTickBackendUImpl-guards.md
 	const int32 firstUpcomingSimTick =
 		static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(PhysicsStep))) + 1;
 
@@ -523,57 +511,57 @@ void ChaosBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSteps)
 	}
 }
 
-const ServerTickClock& ChaosBackendUImpl::getServerClock() const
+const ServerTickClock& ChaosTickBackendUImpl::getServerClock() const
 {
 	return m_owner.getServerClock();
 }
 
-const ClientPredictionClock& ChaosBackendUImpl::getClientClock() const
+const ClientPredictionClock& ChaosTickBackendUImpl::getClientClock() const
 {
 	return m_owner.getClientClock();
 }
 
-bool ChaosBackendUImpl::runsPrediction() const
+bool ChaosTickBackendUImpl::runsPrediction() const
 {
 	return m_owner.runsPrediction();
 }
 
-SimulationObjectStorage<SimulatableBrawler>& ChaosBackendUImpl::editStorage()
+SimulationObjectStorage<SimulatableBrawler>& ChaosTickBackendUImpl::editStorage()
 {
 	return m_owner.editStorage();
 }
 
-void ChaosBackendUImpl::stampLatencyAfterStep_Internal(double stepStartSeconds)
+void ChaosTickBackendUImpl::stampLatencyAfterStep_Internal(double stepStartSeconds)
 {
 	m_owner.stampLatencyAfterStep_Internal(stepStartSeconds);
 }
 
-void ChaosBackendUImpl::stampLatencyStepEnd_Internal()
+void ChaosTickBackendUImpl::stampLatencyStepEnd_Internal()
 {
 	m_owner.stampLatencyStepEnd_Internal();
 }
 
-void ChaosBackendUImpl::onGameSimulation(const SimulationUpdateInfo& info)
+void ChaosTickBackendUImpl::onGameSimulation(const SimulationUpdateInfo& info)
 {
 	m_owner.m_manager->onGameSimulation(info);
 }
 
-void ChaosBackendUImpl::onPostGameSimulation(const SimulationUpdateInfo& info)
+void ChaosTickBackendUImpl::onPostGameSimulation(const SimulationUpdateInfo& info)
 {
 	m_owner.m_manager->onPostGameSimulation(info);
 }
 
-unsigned int ChaosBackendUImpl::onCheckIsSimilar()
+unsigned int ChaosTickBackendUImpl::onCheckIsSimilar()
 {
 	return m_owner.m_manager->onCheckIsSimilar();
 }
 
-void ChaosBackendUImpl::prepareResimulation(int32_t chaosStep, uint32_t simTick)
+void ChaosTickBackendUImpl::prepareResimulation(int32_t chaosStep, uint32_t simTick)
 {
 	m_owner.m_manager->prepareResimulation(chaosStep, simTick);
 }
 
-void ChaosBackendUImpl::noteResimRequest(unsigned int anchorTick, int32 lastCompletedStep, int32 requestedChaosFrame)
+void ChaosTickBackendUImpl::noteResimRequest(unsigned int anchorTick, int32 lastCompletedStep, int32 requestedChaosFrame)
 {
 	if (!m_owner.m_manager.has_value() || !m_owner.m_manager->runsPrediction())
 		return;
@@ -581,14 +569,14 @@ void ChaosBackendUImpl::noteResimRequest(unsigned int anchorTick, int32 lastComp
 		static_cast<std::uint32_t>(anchorTick), lastCompletedStep, requestedChaosFrame);
 }
 
-void ChaosBackendUImpl::noteResimGrant(int32 grantedChaosFrame)
+void ChaosTickBackendUImpl::noteResimGrant(int32 grantedChaosFrame)
 {
 	if (!m_owner.m_manager.has_value() || !m_owner.m_manager->runsPrediction())
 		return;
 	m_owner.m_manager->editResimGateProbe().noteGrant(grantedChaosFrame);
 }
 
-void ChaosBackendUImpl::buildWorld(UWorld& world, float dt, bool)
+void ChaosTickBackendUImpl::buildWorld(UWorld& world, float dt, bool)
 {
 	FPhysScene* physScene = world.GetPhysicsScene();
 	if (physScene == nullptr)
@@ -607,10 +595,10 @@ void ChaosBackendUImpl::buildWorld(UWorld& world, float dt, bool)
 	Chaos::FPBDRigidsSolver& rigidsSolver = solver->CastChecked();
 	m_owner.m_physAdapter.emplace(rigidsSolver);
 	m_owner.m_physReaderAdapter.emplace(rigidsSolver);
-	emplaceBrawlerQueryAdapter(m_owner.m_queryAdapter, &world);
+	m_owner.m_queryAdapter.emplace(&world, BrawlerChaosBindingUImpl::categoryChannels());
 }
 
-void ChaosBackendUImpl::startStepping(UWorld& world, float, bool)
+void ChaosTickBackendUImpl::startStepping(UWorld& world, float, bool)
 {
 	FPhysScene* physScene = world.GetPhysicsScene();
 	if (physScene == nullptr)
@@ -634,7 +622,7 @@ void ChaosBackendUImpl::startStepping(UWorld& world, float, bool)
 		&m_owner, [this](int32 PhysicsStep, int32 NumSteps) { InjectInputs_External(PhysicsStep, NumSteps); });
 }
 
-void ChaosBackendUImpl::onEndPlayWorld(UWorld& world)
+void ChaosTickBackendUImpl::onEndPlayWorld(UWorld& world)
 {
 	if (FPhysScene* PhysScene = world.GetPhysicsScene())
 	{
@@ -661,22 +649,22 @@ void ChaosBackendUImpl::onEndPlayWorld(UWorld& world)
 	}
 }
 
-void ChaosBackendUImpl::updateVisualization_GameThread()
+void ChaosTickBackendUImpl::updateVisualization_GameThread()
 {
 	updateVisualizationAll(m_owner.m_storage);
 }
 
-physicsBackendUImpl::VizQuery& ChaosBackendUImpl::editVizQuery()
+ChaosEngineTraitsUImpl::VizQuery& ChaosTickBackendUImpl::editVizQuery()
 {
 	return m_owner.m_queryAdapter.value();
 }
 
-const physicsBackendUImpl::VizReader& ChaosBackendUImpl::getVizReader() const
+const ChaosEngineTraitsUImpl::VizReader& ChaosTickBackendUImpl::getVizReader() const
 {
 	return m_owner.m_physReaderAdapter.value();
 }
 
-std::optional<QueryVolumeId> ChaosBackendUImpl::registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner)
+std::optional<QueryVolumeId> ChaosTickBackendUImpl::registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner)
 {
 	FCollisionQueryParams queryParams;
 	queryParams.bTraceComplex = false;
@@ -684,7 +672,7 @@ std::optional<QueryVolumeId> ChaosBackendUImpl::registerVizVolume(const QueryVol
 	return m_owner.m_queryAdapter->registerVolume(descriptor, queryParams, FActorInstanceHandle(&owner));
 }
 
-bool ChaosBackendUImpl::createBodies_GameThread(USimmableUpdateComponent& owner, AOGBrawlerUECharacter& character,
+bool ChaosTickBackendUImpl::createBodies_GameThread(USimmableUpdateComponent& owner, AOGBrawlerUECharacter& character,
 	SimulatableBrawler& simulatable, unsigned int id)
 {
 	FBodyInstanceAsyncPhysicsTickHandle parentHandle =
@@ -715,7 +703,7 @@ bool ChaosBackendUImpl::createBodies_GameThread(USimmableUpdateComponent& owner,
 	return true;
 }
 
-void ChaosBackendUImpl::sampleLatencyWindow_GameThread(bool isClient)
+void ChaosTickBackendUImpl::sampleLatencyWindow_GameThread(bool isClient)
 {
 	if (isClient)
 	{
@@ -738,7 +726,7 @@ void ChaosBackendUImpl::sampleLatencyWindow_GameThread(bool isClient)
 	}
 }
 
-void ChaosBackendUImpl::logLatencyWindow_GameThread(bool isClient)
+void ChaosTickBackendUImpl::logLatencyWindow_GameThread(bool isClient)
 {
 	if (isClient)
 	{

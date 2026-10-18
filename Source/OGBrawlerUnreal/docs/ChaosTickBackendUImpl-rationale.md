@@ -15,11 +15,11 @@
 <!-- lint-external-ref: RewindToFrame -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: AddUObject -- Unreal Engine delegate method, outside every scan root -->
 <!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
-# `ChaosBackendUImpl` — rationale
+# `ChaosTickBackendUImpl` — rationale
 
-Companion to `Source/OGBrawlerUnreal/ChaosBackendUImpl.h` and `Source/OGBrawlerUnreal/ChaosBackendUImpl.cpp`. Both
+Companion to `Source/OGBrawlerUnreal/ChaosTickBackendUImpl.h` and `Source/OGBrawlerUnreal/ChaosTickBackendUImpl.cpp`. Both
 source files carry no prose: a two-line docs pointer, code, assertion messages, and one-line tags `⛔G-nn` → an entry
-in `ChaosBackendUImpl-guards.md`.
+in `ChaosTickBackendUImpl-guards.md`.
 
 > **Licence.** This tier is **BUSL-1.1**, matching the code it describes.
 
@@ -27,6 +27,12 @@ in `ChaosBackendUImpl-guards.md`.
 * **§2** is the host itself: ownership, the delegates, the input hook, and the two pieces `buildWorld` moved.
 * **§3**, **§4** and **§5** moved here from `SimulationManagerUImpl-rationale.md` (§8's rewind-push probe, §9's tick
   alignment, §14's first replayed step) in og-simulationscheduler-withjolt task 82, with the code they describe.
+* **Names before og-tickdriver task 15b (historical):**
+  class ChaosBackendUImpl (historical name), in ChaosBackendUImpl.h and ChaosBackendUImpl.cpp (historical file names);
+  this document ChaosBackendUImpl-rationale.md and its guards ChaosBackendUImpl-guards.md (historical names);
+  worlds struct ChaosBackendWorldsUImpl (historical name).
+  Task 15b renamed them by who schedules the steps (Chaos's own tick), and changed nothing else. The sections below
+  use today's names, also where they tell what an earlier task did.
 
 ---
 
@@ -36,12 +42,13 @@ The user asked whether `ASimulationManagerUImpl` could be split so that the Chao
 separate (og-simulationscheduler-withjolt phase F, 2026-10-15). The UImpl is the brawler's per-role simulation
 session: the netcode session, the relay listeners, registration and input, the per-frame sends, the latency budget
 and log routing. None of that depends on the physics engine. Task 82 moved the Chaos host out of it, into this
-class; task 83 did the same for the Jolt host (`JoltBackendUImpl`).
+class; task 83 did the same for the Jolt host (JoltBackendUImpl, its historical name; since og-tickdriver task 15b
+the template `TickDriverBackendUImpl`).
 
 **What it is.**
 
 * **Plain C++, not reflected.** It holds a reference to its owner, `ASimulationManagerUImpl`, and the owner declares
-  it a friend, so its bodies read the owner's members exactly as the code did when it lived in the owner.
+  it a friend (`friend physicsBackendUImpl::Backend;`, which names this class in the Chaos configuration), so its bodies read the owner's members exactly as the code did when it lived in the owner.
 * **Not copyable.** The copy constructor and assignment are deleted; it is a member of its owner and nothing else.
 * **The owner calls it through one fixed set of entry points, "the seam".** The table is in
   `SimulationManagerUImpl-rationale.md` §18. Each entry point is called from exactly one place, the site where the
@@ -49,10 +56,12 @@ class; task 83 did the same for the Jolt host (`JoltBackendUImpl`).
   Chaos body; task 83 added empty inline bodies for the rest (`onEndPlayBegin`, `beforePresent_GameThread`,
   `onRegistered_GameThread`, `onUnregistered_GameThread`) and the concept that checks the set
   (`PhysicsBackendHostUImpl.h`).
-* **The header has no `#if`.** Chaos headers exist in both configurations, so `ChaosBackendUImpl.h` compiles in both.
+* **The header has no `#if`.** Chaos headers exist in both configurations, so `ChaosTickBackendUImpl.h` compiles in both.
   Only the selector `PhysicsBackendHostUImpl.h`, which the owner includes, includes it, and only in the Chaos
-  configuration (task 83; the owner included it directly before). **The `.cpp` is a whole-file arm,** like
-  `SimulationFrameHostUImpl.cpp` and `JoltBackendUImpl.cpp`: in the Jolt configuration it compiles to nothing.
+  configuration (task 83; the owner included it directly before). **The `.cpp` is a whole-file arm,** as
+  `BrawlerJoltBindingUImpl.cpp` is on the Jolt side (and the Jolt host's own `.cpp` was until og-tickdriver task 15e
+  made the host a header template in OGSimulationUnreal): in the Jolt configuration it compiles to nothing. (The Jolt frame host's `.cpp` was a third
+  such arm until og-tickdriver task 11 moved it to OGSimulationUnreal as `UETickDriverHost.cpp`, which has none.)
 
 **What it holds.** The async callback `FSimulationManagerAsyncCallback` and its input and output types; the
 rewind-push probe's stash type; the callback pointer and the two delegate handles; the `ChaosTickMapper`; the
@@ -60,7 +69,7 @@ rewind-push probe's stash type; the callback pointer and the two delegate handle
 input hook `InjectInputs_External`; the six passthroughs the callback calls (`onGameSimulation` …
 `noteResimGrant`; task 84 added a seventh for the push and task 88 removed it again, because
 `prepareResimulation` now pushes, §5); and forwarders to the owner's shared members (`editStorage`, the two clocks, `runsPrediction`,
-the two `stampLatency*_Internal` calls). The callback and its input hold a `ChaosBackendUImpl*` where they used to
+the two `stampLatency*_Internal` calls). The callback and its input hold a `ChaosTickBackendUImpl*` where they used to
 hold the owner.
 
 ---
@@ -69,10 +78,10 @@ hold the owner.
 
 **Ownership.** The owner declares `physicsBackendUImpl::Backend m_backend{ *this, m_backendWorlds };`, which is this
 class in the Chaos configuration, directly after `std::optional<ManagerType> m_manager`, so the backend is destroyed
-before the manager. Task 82 declared `ChaosBackendUImpl m_backend{ *this };` inside an `#if`; task 83 gave both hosts
+before the manager. Task 82 declared ChaosBackendUImpl m_backend{ *this }; (the historical name) inside an `#if`; task 83 gave both hosts
 the same two-argument constructor so the declaration has none. The second argument is the owner's `m_backendWorlds`,
-which in the Chaos configuration is `ChaosBackendWorldsUImpl`, an empty struct: the Chaos host has no state that must
-outlive the owner's adapters, so the constructor ignores it (`JoltBackendUImpl-rationale.md` §1 says why the Jolt host
+which in the Chaos configuration is `ChaosTickBackendWorldsUImpl`, an empty struct: the Chaos host has no state that must
+outlive the owner's adapters, so the constructor ignores it (`TickDriverBackendUImpl-rationale.md` §1 says why the Jolt host
 needs it). Its own destruction is
 trivial: the callback object is freed by the engine in `onEndPlayWorld`, never by a destructor. `m_asyncCallback`
 starts as `nullptr`. When it was the owner's member it had no initializer and read as null only because the engine
@@ -98,7 +107,10 @@ calls is unchanged.
 * **The adapter emplacement** (`m_physAdapter`, `m_physReaderAdapter`, `m_queryAdapter`) ran in each role branch of
   `BeginPlay`, after the instance slot was taken, the timing-relay listener registered and the role's logger lambdas
   defined. It now runs once, in `buildWorld`, called where the Jolt configuration builds its world: after the ini
-  reads, before the role branches. The two branches' copies were identical.
+  reads, before the role branches. The two branches' copies were identical. The query adapter takes the brawler's
+  six-row category table from the Chaos binding, `BrawlerChaosBindingUImpl::categoryChannels`, since og-tickdriver
+  task 15a; until then the rows were an inline list in this file's emplaceBrawlerQueryAdapter helper
+  (`BrawlerChaosBindingUImpl-rationale.md` §2).
 * **The solver checks** (scene and solver present, solver async dt equal to the step dt) ran before
   `createLatencyBudget`. They now run at the top of `buildWorld`.
 * **Why it is safe.** Nothing between the old and the new positions reads an adapter. In the tree before task 82,
@@ -337,7 +349,7 @@ safe to read from the game thread, which is why the resolution specifies it.
 drain releases input for each of them. The normal fixed-tick case is `NumSteps == 1` and collapses
 to a single drain.
 
-In the Chaos configuration the caller is `ChaosBackendUImpl::InjectInputs_External`, bound to the rewind callback's
+In the Chaos configuration the caller is `ChaosTickBackendUImpl::InjectInputs_External`, bound to the rewind callback's
 `InjectInputsExternal` delegate (`FNetworkPhysicsCallback`). Chaos broadcasts it on the game thread,
 once per physics frame, as it hands the frame's steps to the solver. It computes
 `firstUpcomingSimTick` (`⛔G-07`) and passes the same value to `onFrameStepsDue_GameThread`, the drain

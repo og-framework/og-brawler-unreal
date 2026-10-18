@@ -50,7 +50,6 @@ DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
 DEFINE_LOG_CATEGORY(LogOGResimProbe);
 DEFINE_LOG_CATEGORY(LogOGLatencyBudget);
 DEFINE_LOG_CATEGORY(LogOGChaosDilation);
-DEFINE_LOG_CATEGORY(LogOGSimHost);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 #define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
@@ -493,7 +492,7 @@ void ASimulationManagerUImpl::BeginPlay()
 	{
 		const std::string_view fingerprint = buildIdentityUImpl::backendFingerprint();
 		UE_LOG(LogOGSimHost, Warning, TEXT("[SimHost.Backend] backend=%hs fingerprint=%.*hs"),
-			physicsBackendUImpl::kBackendName, static_cast<int32>(fingerprint.size()), fingerprint.data());
+			EngineTraits::kName, static_cast<int32>(fingerprint.size()), fingerprint.data());
 	}
 
 	m_backend.startStepping(*uWorld, dt, worldIsAuthority);
@@ -786,12 +785,12 @@ void ASimulationManagerUImpl::OnPostPhysicsStep()
 	tickLatencyBudget_GameThread();
 }
 
-physicsBackendUImpl::VizQuery& ASimulationManagerUImpl::editVizQuery()
+EngineTraits::VizQuery& ASimulationManagerUImpl::editVizQuery()
 {
 	return m_backend.editVizQuery();
 }
 
-const physicsBackendUImpl::VizReader& ASimulationManagerUImpl::getVizReader() const
+const EngineTraits::VizReader& ASimulationManagerUImpl::getVizReader() const
 {
 	return m_backend.getVizReader();
 }

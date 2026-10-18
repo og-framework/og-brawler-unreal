@@ -10,7 +10,7 @@ public class OGBrawlerUnreal : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJoltUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent" });
 		PrivateDependencyModuleNames.Add("ApplicationCore");
 		PublicDefinitions.Add("OG_PHYSICS_BACKEND_CHAOS=" + PhysicsBackendChaos);
 		SetupIrisSupport(Target);

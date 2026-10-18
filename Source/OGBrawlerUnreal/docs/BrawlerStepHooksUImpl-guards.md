@@ -1,59 +1,45 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-# `BrawlerStepHooksUImpl.h` — guards
+# BrawlerStepHooksUImpl — guards (historical: retired ids only)
 
-Prohibitions with a tagged site in `Source/OGBrawlerUnreal/BrawlerStepHooksUImpl.h`
-(og-simulationscheduler-withjolt task 54; design D, §7.1c). Ids are opaque, stable, and retired rather
-than reused. The reasoning lives in `BrawlerStepHooksUImpl-rationale.md`.
+The brawler's engine-hosted step hooks, a header in `Source/OGBrawlerUnreal/` written by
+og-simulationscheduler-withjolt task 54, were **deleted by og-tickdriver task 8 (2026-10-16)**. og-simulation's
+`TickDriverStepHooks` (og-tickdriver task 3) replaced them, constructed by the tick driver `SimulationTickDriver`
+(task 7). The hooks' explanation went with them: `TickDriverStepHooks-rationale.md` (og-simulation) for the hooks,
+and `BrawlerTickDriverGameUImpl-rationale.md` for what the brawler's game binding does at each hook.
 
-**If this file and the source disagree, the source is authoritative and this file is stale.**
-
-The concept conformance is a `static_assert` and needs no entry; so are the game-thread `checkf` of an
-authority `beforeTick` (design D2), its `authorityTick` presence check, and every hook's step-context
-`checkf` (rationale §3).
-
----
-
-## G-01 — the authority `beforeTick` drains one tick's input, and nothing else
-
-**Site:** `m_host.releaseDelayedInputsForStep(*upcoming.authorityTick, 1u);` in `beforeTick`.
-
-**The prohibition** (design D3, F5). ⛔ The authority hook releases the delayed inputs for
-`*upcoming.authorityTick` with a step count of 1: the drain only. Do not call PROBE A, PROBE 6
-(`onFrameStepsDue_GameThread`) or `reapConnections` from here, do not release more than one tick, and
-do not substitute another tick for `authorityTick`.
-
-**The consequence.** The probes and the reap are per-frame instruments (frame-host G-02, G-06): per
-step, PROBE A records `dFrame0` samples and the reap moves the receipt gate's reference to the frame's
-last tick. A count above 1 releases the inputs of later ticks into the queue early, which is the batch
-pattern the per-step drain replaced (design D4). `authorityTick` is the tick the driver will simulate
-(`serverTick + 1`, checked by the driver after the step); another tick releases for the wrong one.
+This file is kept only as the record of the three ids the header's tags used, so that none is ever reused. It has
+no live entry and no source file.
 
 ---
 
-## G-02 — the published offset is the outcome's integrated tick minus its physics step
+## §R — Retired ids
 
-**Site:** the `m_host.publishTickOffset_Step(...)` call in `afterTick`.
+⛔ **An id is never reused.** A retired id may be named in prose; it may never again appear as a `⛔G-nn` tag.
 
-**The prohibition** (design D8, §2.4). ⛔ The offset is `outcome.tick − outcome.physicsStep`, from the
-outcome. Do not read a clock here, and do not add or subtract 1.
+### G-01 — RETIRED by og-tickdriver task 8 (2026-10-16): the authority's one-tick release moved into og-simulation's step hooks
 
-**The consequence.** The game thread adds the offset to its dispatch counter to get the frame's first
-upcoming tick (frame-host G-03), which PROBE A and the authority's reap use. `outcome.tick` is the tick
-the step integrated, so the sum is already the upcoming tick; a `± 1` shifts it, and a clock read (the
-prediction clock moves in the replay and on Skip/Stall) breaks the "advances by the dispatched step
-count" property the mapper had.
+**Was:** *"the authority beforeTick drains one tick's input, and nothing else"*. Its tag sat above the authority
+`beforeTick`'s call of the frame host's input release, with a step count of 1.
 
----
+**Why it retired.** Task 8 deleted the header. The release is now og-simulation's `beforeTick`, which calls the
+game's `releaseInputsForAuthorityTick` with the upcoming authority tick. **Successors:** `TickDriverStepHooks-guards.md`
+G-01 (og-simulation; the hook releases that tick and calls no per-frame game hook), and
+`BrawlerTickDriverGameUImpl-guards.md` G-01 (the binding forwards it to `releaseDelayedInputsForStep` with a step
+count of 1, the half of this prohibition that is typed in the brawler's file).
 
-## G-03 — the step-start time is taken in `beforeSimulate`, on both roles
+### G-02 — RETIRED by og-tickdriver task 8 (2026-10-16): the published offset moved into og-simulation's step hooks
 
-**Site:** `m_stepStartSeconds = FPlatformTime::Seconds();` in `beforeSimulate`.
+**Was:** *"the published offset is the outcome's integrated tick minus its physics step"*. Its tag sat above the
+`afterTick` offset publish.
 
-**The prohibition** (design D9, D18). ⛔ Do not take the "consumed" time in `beforeTick` or in
-`beforePhysics`. `beforeSimulate` runs after any replay and immediately before the normal step consumes
-input, which is the instant the Chaos configuration stamps (before `onGameSimulation`).
+**Why it retired.** Task 8 deleted the header; og-simulation's `afterTick` publishes the same difference.
+**Successor:** `TickDriverStepHooks-guards.md` G-02.
 
-**The consequence.** `beforeTick` runs before the client's replay, so the time would be early by the
-whole replay; `beforePhysics` runs after the integrate, so it would be late by input collection, the
-pre-integrate systems and the integrate. Either biases the H4, H6 and H6c hops against the Chaos
-build at gate 22.
+### G-03 — RETIRED by og-tickdriver task 8 (2026-10-16): the step-start time moved into og-simulation's step hooks
+
+**Was:** *"the step-start time is taken in beforeSimulate, on both roles"*. Its tag sat above the `beforeSimulate`
+clock read.
+
+**Why it retired.** Task 8 deleted the header; og-simulation's `beforeSimulate` takes `t1` at the same point, from
+the engine clock (FPlatformTime::Seconds through `SimulationEngineUImpl`). **Successor:**
+`TickDriverStepHooks-guards.md` G-03.

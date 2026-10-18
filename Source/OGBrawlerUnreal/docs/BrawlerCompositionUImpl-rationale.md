@@ -14,9 +14,10 @@ systems executors and the manager built from them) was a chain of private aliase
 `ASimulationManagerUImpl`. A class declared outside the UImpl could not name any of them. Three
 consumers need to:
 
-* **The task-54 review, finding A1.** The Jolt step driver was then
-  `SimulationStepDriver<ManagerType, JoltWorld, BrawlerIntegrationExec, BrawlerStepHooksUImpl>` (since task 88
-  `SimulationStepDriver<Manager, JoltWorld, BrawlerStepHooksUImpl>`). Its first
+* **The task-54 review, finding A1.** The Jolt step driver was then a `SimulationStepDriver` over
+  `ManagerType`, `JoltWorld`, `BrawlerIntegrationExec` and the brawler's step hooks (since task 88 over the
+  manager, the world and the hooks; since og-tickdriver task 8 it is og-simulation's tick driver's own member,
+  over its `TickDriverStepHooks`). Its first
   and third arguments were private to the UImpl, so the driver and the hooks had to stay UImpl members
   instead of moving to the frame host. The review accepted that as a real type cycle.
 * **Task 83 (the backend split).** It moves the Jolt host, step driver included, out of the UImpl into
@@ -48,8 +49,9 @@ a traits type (D2) is. Only the struct's name reaches file scope (`⛔G-01`).
 
 The UImpl keeps every old name as a one-line re-export of the member, so none of its member
 declarations or uses changed. `IntegrationLayerType` is still the UImpl's own alias of
-`BrawlerIntegrationExec`, and the Jolt-only `BrawlerStepDriver` stays in the UImpl until task 83 moves
-it.
+`BrawlerIntegrationExec`, and the Jolt-only step-driver alias stayed in the UImpl until task 83 moved it
+(og-tickdriver task 8 replaced it with `TickDriverBackendUImpl`'s tick-driver alias, over the game binding
+`BrawlerTickDriverGameUImpl`).
 
 **`Simulatables` is the single source of truth for the pack.** The storage, the three peers, the
 integration executor and the systems executor are all derived from it, and the manager from them;
@@ -67,8 +69,9 @@ fires on are not set here: each system declares its own role affinity, and the e
 hook on the role the manager hands it.
 
 **The 6 in `RenderSnapshot`** is the number of bodies in the brawler's physics composite. The
-`static_assert` at the top of `JoltBackendUImpl::publishRenderSnapshot_Step` checks it against
-`physicsDeclarationCountOf<BrawlerPhysicsComposite>`.
+class-scope `static_assert` in og-simulation's `TickDriverPresenter` checks it: the snapshot's `kMaxBodies` must equal
+the render source's `kMaxSimulatableSlots` times the presenter's `kDeclarationsPerSlot` (`declarationCountOf` the
+source's `PhysicsComposite`, the brawler's physics composite).
 
 **No backend switch.** The adapter types come from `PhysicsBackendUImpl.h`, which holds the switch, so
 this header has no `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `SimulationManagerUImpl.h`;
