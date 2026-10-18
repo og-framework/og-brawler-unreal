@@ -364,7 +364,7 @@ says which is which.
   factory wrote, on this thread, so it needs no lock and is true on the next attempt.
 * **The release** (`unregisterFromNewFramework`, last, through `onUnregistered_GameThread`, when the component still
   has an owner): the tick backend's `releaseSlot`, which calls the world host's `release` with the tick driver's
-  `pushOccupancy` as the occupancy door. It frees the
+  `pushBodySlotOccupancy` as the occupancy door. It frees the
   slot, pushes the slot's Vacate command (J1), clears the slot's bind-table entries, logs `[SimHost.Bind] release`
   at `Warning` and mirrors the release into the shadow world, on the game thread without J2. The body adapter's
   step-side reads of the bind table (the locked-rotation inertia) never read the entries a release clears; the
@@ -446,7 +446,7 @@ og-simulation-jolt's `JoltTickWorldHost`, held in `m_backendWorlds` (§1, §3). 
 * **J1 sites.** `tryRegister`'s Ready path (`onRegistered_GameThread`) pushes an Occupy command after `registerSimulatable` and
   `notifyCharacterRegistered`; the world host's `release` pushes a Vacate command, through the door
   the tick backend's `releaseSlot` passes, before it clears the bind table. Both go through the driver's
-  `pushOccupancy`, and the J2 wait reaches the window through its `noteWorldLockWait`, all through the tick backend's
+  `pushBodySlotOccupancy`, and the J2 wait reaches the window through its `noteWorldLockWait`, all through the tick backend's
   `driver()`, which `OG_CHECK`s that `start` built the driver (a `checkf` with the id until og-tickdriver task 15d). The shadow restore reaches the window through the driver's `noteShadowRestore` too,
   by the restore note the presenter passes (§6).
   A rejoin that rebinds the slot before the step drains the Vacate is safe: J1 is FIFO, so the
@@ -970,9 +970,9 @@ the same type this class's own presenter alias named before.
 | `startDriverStepping`, after the `m_backendWorlds` row and the persistent-level `checkf` | `start` | `bindIntegratedTickSource` with the manager; the presenter; the driver; returns the driver to `m_frameHost.begin` |
 | `onEndPlayBegin`, after `unregisterTickFunctions` | `stop` | the driver's `stop()`, when it was built |
 | `createBodies_GameThread`, inside `callWithSlotRequest`, after the capsule check | `acquireAndBind` | the world host's `acquire`, then, with a slot, its `bind` with the driver's `noteWorldLockWait` |
-| `onRegistered_GameThread`, before the character cast and `registerTarget` | `onRegistered` | the world host's `slotOf`, an `OG_CHECK` that there is a slot, the driver's `pushOccupancy(slot, true)`, the presenter's `onRegistered` |
+| `onRegistered_GameThread`, before the character cast and `registerTarget` | `onRegistered` | the world host's `slotOf`, an `OG_CHECK` that there is a slot, the driver's `pushBodySlotOccupancy(slot, true)`, the presenter's `onRegistered` |
 | `onUnregistered_GameThread`, first | `forgetPresenterTarget` | the presenter's `onUnregistered` with the slot (or 0), when the presenter was built |
-| `onUnregistered_GameThread`, after `unregisterTarget`, when the component has an owner | `releaseSlot` | the world host's `release` with the driver's `pushOccupancy` |
+| `onUnregistered_GameThread`, after `unregisterTarget`, when the component has an owner | `releaseSlot` | the world host's `release` with the driver's `pushBodySlotOccupancy` |
 | `beforePresent_GameThread` | `present` | the presenter's `present_GameThread` with the driver as the clock and the world host |
 | `updateVisualization_GameThread` | `updateVisualization` | the presenter's `updateVisualization_GameThread` with the game binding's storage |
 | the three visualization doors | `editVizQuery`, `getVizReader`, `registerVizVolume` | the world host's doors of the same names |
