@@ -21,8 +21,8 @@ collide.
   the engine (og-netcode-v2-field-defects task 10's fix). It moved to `ChaosTickBackendUImpl-rationale.md` §5
   with the Chaos host (og-simulationscheduler-withjolt task 82), as did §8's rewind-push probe and §9's
   derivation of the `+ 1`.
-* **§16** is the latency-budget probe's host side: its stamp sites, threads and measurement errors
-  (og-simulationscheduler-withjolt task 1).
+* **§16**, the latency-budget probe's host side (og-simulationscheduler-withjolt task 1), moved to
+  `LatencyBudgetDiagnosticsUImpl-rationale.md` §6 with the code (og-tickdriver task 18).
 * **§17**, the map of the Jolt host, moved to `TickDriverBackendUImpl-rationale.md` §2 with the Jolt host
   (og-simulationscheduler-withjolt task 83). The frame host and the game's tick-driver binding have their own
   documents, OGSimulationUnreal's `UETickDriverHost-rationale.md` (since og-tickdriver task 11; a game-module
@@ -55,17 +55,12 @@ collide.
 <!-- lint-external-ref: FPBDRigidsSolver::ConditionalApplyRewind_Internal -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FRewindData::SetTargetStateAtFrame -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: TickFlush -- Unreal Engine method, outside every scan root -->
-<!-- lint-external-ref: UWorld::OnPostTickFlush -- Unreal Engine method, outside every scan root (§16) -->
-<!-- lint-external-ref: FChaosScene::GetNetworkDeltaTimeScale -- Unreal Engine method, outside every scan root (§16) -->
-<!-- lint-external-ref: FChaosScene -- Unreal Engine type, outside every scan root (§16) -->
+<!-- lint-external-ref: FChaosScene -- Unreal Engine type, outside every scan root -->
 <!-- lint-external-ref: OnPhysScenePreTick -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in task 51 (§13.1 quotes the old source) -->
 <!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in task 51 (§13.1 quotes the old source) -->
 <!-- lint-external-ref: editQueryAdapter -- RETIRED in task 51 (§18): the public query-adapter accessor, replaced by editVizQuery. It must NOT resolve -->
 <!-- lint-external-ref: getPhysicsBodyReaderAdapter -- RETIRED in task 51 (§18): the public reader accessor, replaced by getVizReader; §12 quotes its old declaration verbatim. It must NOT resolve -->
-<!-- lint-external-ref: FPlatformTime::Seconds -- Unreal Engine function, outside every scan root (§16) -->
-<!-- lint-external-ref: SendTo -- Unreal Engine socket method, outside every scan root (§16) -->
-<!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root (§16) -->
-<!-- lint-external-ref: net.IpConnectionUseSendTasks=1 -- Unreal Engine console variable and value, outside every scan root (§16) -->
+<!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root -->
 <!-- lint-external-ref: OutBytes -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: OutPackets -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: StatPeriod -- Unreal Engine stat window, outside every scan root -->
@@ -537,7 +532,8 @@ tolerated. ⛔ Do not reintroduce a clock accessor for a display: give the displ
 The probe is game-thread-owned. Its physics-thread stamps reach it through a single-producer
 mailbox (synchronized), the one game-to-physics value it needs is an atomic, and every other read
 its stamp sites make is same-thread with its writer. The CROSSING count is unchanged; the full
-argument, read by read, is §16's *Threads* table.
+argument, read by read, is the *Threads* table of `LatencyBudgetDiagnosticsUImpl-rationale.md` §6
+(this document's §16 until og-tickdriver task 18 moved the probe into that class).
 
 ### One acknowledged wart
 
@@ -906,8 +902,8 @@ The source names each family by its prefix; the members are:
 | `LogOGRelayProbe` | `[RelayProbe.Read]`, `[RelayProbe.Arrival]`, `[RelayProbe.Stale]`, `[RelayProbe.Miss]`, `[RelayProbe.Delta]`, `[RelayProbe.Frame]`, `[RelayProbe.Write]`, `[RelayProbe.Budget]` |
 | `LogOGResimProbe` | `[ResimProbe.Gate]`, `[ResimProbe.Chaos]`, `[ResimProbe.Apply]`, `[ResimProbe.Landing]`, `[ResimProbe.Request]`, `[ResimProbe.Stranded]`, `[ResimProbe.Session]`, `[ResimProbe.Frame]`, `[ResimProbe.PushTarget]`, `[ResimProbe.PushVerdict]`, `[ResimProbe.SlotMap]` |
 | `LogOGDivergenceProbe` | `[DivergenceProbe.Correction]`, `[DivergenceProbe.Window]` |
-| `LogOGLatencyBudget` | `[LatencyBudget]`, `[LatencyBudget.Window]` (logged with `UE_LOG` directly, not routed; §16) |
-| `LogOGChaosDilation` | `[ChaosDilation]` (logged with `UE_LOG` directly, not routed; §16) |
+| `LogOGLatencyBudget` | `[LatencyBudget]`, `[LatencyBudget.Window]` (logged with `UE_LOG` directly, not routed; declared in `LatencyBudgetDiagnosticsUImpl.h` since og-tickdriver task 18, which compiles it out of Shipping; that class's rationale §6) |
+| `LogOGChaosDilation` | `[ChaosDilation]` (logged with `UE_LOG` directly, not routed; declared and gated with `LogOGLatencyBudget`) |
 
 `[RelayProbe.Miss]` says *why* each miss missed — an in-span coverage hole, asking above the
 newest arrival, or below the oldest; `[RelayProbe.Delta]` is the signed probe-tick-to-newest
@@ -4073,162 +4069,16 @@ The departed pawn's id was unregistered at its EndPlay and is never handed out a
 
 ## §16 The latency-budget probe — stamp sites, threads and errors (og-simulationscheduler-withjolt task 1)
 
-**What it is.** A measurement of today's Chaos build, per hop, that the scheduler migration is
-compared against. The engine-free instrument is `latencyBudget::LatencyBudgetProbe`
-(`OGSimulation/LatencyBudgetProbe.h`; its own rationale explains keys, joins, counters, windows and
-percentiles). This section is the host side: where each hop is stamped, on which thread, and how far
-each stamp can sit from the event it names. **It changes no gameplay behaviour, timing or netcode:
-every addition is a timestamp and a counter.**
-
-### Ownership
-
-Each manager instance owns one probe, created in `BeginPlay` by `createLatencyBudget` with the role's
-hop mask (`kServerHops` on the authority world, `kClientHops` on a client world), plus two
-single-producer mailboxes: `m_latencyMailbox` (stamps) and `m_latencyClockMailbox` (the prediction
-clock's event counts). All three are created before the solver callback is registered and are never
-reset before the actor is destroyed, so a physics step can never reach a null or freed mailbox. PIE
-in one process has two instances and two probes; the `role=` field tells their lines apart.
-
-### Threads — the probe adds no unsynchronized crossing
-
-The probe itself is **game-thread-owned** and has no internal lock. Everything reaches it one of
-three ways:
-
-| path | used by | synchronization |
-|---|---|---|
-| `stampLatency` / `noteLatencyWireSample` | every game-thread site | same thread as the owner; both `checkf` that they run on the game thread |
-| `postLatencyEvent_Internal` → `m_latencyMailbox` → drained in `tickLatencyBudget_GameThread` | every physics-thread site | the mailbox's release/acquire pair (`LatencyBudgetProbe-guards.md` G-01) |
-| `m_latencyClockMailbox` | the client clock's skip/stall/hard-resync counts | the same mailbox type |
-
-Every physics-thread read a stamp makes is **same-thread with its writer**: `m_storage`'s per-step
-walk (the core walks it on that thread every step), `getLastUsedCaptureTick` (written by
-`collectInputAll` on that thread), the relayed-read observation ring (noted by `collectInputAll` on
-that thread), `currentIntegratedTick` and the client clock's diagnostics (both advanced by
-`onGameSimulation` on that thread). Every game-thread read is same-thread as well: the correction
-buffer's tick (written by `sendCorrectionAll` inside `onPostSimulationGameThread`),
-`m_delayedInputComponentsById`, the scene's network delta-time scale (written by the engine's
-time-dilation client RPC) and the local player controller's physics tick offset (written by the
-engine's timestamp-setup client RPC). The one value that crosses from the game thread to the physics
-thread, the input-sample time, is a `std::atomic<double>` on the input collection component.
-**The §1 CROSSING count stays three**, and this paragraph is the argument for it, made rather than
-assumed.
-
-On a dedicated server the physics thread *is* the game thread (Chaos steps inline), so the mailbox
-is pushed and drained by one thread. That is a legal degenerate case of single-producer,
-single-consumer.
-
-### Why the capture stamp is a wrapper in `tryRegister`, not a line in the provider lambda
-
-`USimmableUpdateComponent`'s provider lambda may not capture the manager (its guard G-05). The
-capture stamp therefore lives in `wrapInputProviderWithLatencyStamp`, which `tryRegister` applies to
-a client's provider before handing it to the core. The wrapper calls the component's lambda, then
-posts `InputSampled` and `Captured` for `step.getTick()`. It captures `this`, the manager that owns
-the core container the callable is stored in, so it adds no lifetime edge to another actor, and the
-same input-collection pointer the inner lambda already holds. **An empty provider is returned
-unchanged**: provider presence is the core's local-versus-remote identity test, and a `checkf`
-states that the wrapper never changes it.
-
-### The hop table: stamp sites and known measurement error
-
-Times are `FPlatformTime::Seconds` (one monotonic clock per process). "GT" is the game thread and
-"PT" the physics thread (a task-graph worker on a client, the game thread on a dedicated server).
-
-| hop | start: file · function (thread) | end: file · function (thread) | known error |
-|---|---|---|---|
-| `H1` | `OGBrawlerInputCollectionComponent.cpp` · `updateGameThreadCache`, first statement after the owner check (GT) | `SimulationManagerUImpl.cpp` · the wrapper from `wrapInputProviderWithLatencyStamp`, after the provider returns (PT) | Starts at the frame's input refresh, not at the device event: Enhanced Input dispatched the frame's events earlier in the same frame, and the OS queued them up to one frame before that, so the true input age is **under**-stated by up to one game frame. The sample time is a relaxed atomic, unordered with the caches the capture reads, so a capture racing a refresh can pair a new time with the previous frame's values: an error of at most one frame, rare. |
-| `H2` | the same wrapper, `Captured` (PT) | `SimmableUpdateComponent.cpp` · `sendLocalInputToAuthority`, after `ServerReceiveRemoteMove(bundle)`, once per capture tick in the bundle, first send wins (GT) | Microseconds. Redundant re-sends of the same capture are duplicates and do not move the hop. |
-| `H3` (client) | `sendLocalInputToAuthority` (GT) | `SimulationManagerUImpl.cpp` · `onLatencyPostTickFlush`, bound to `UWorld::OnPostTickFlush` (GT) | See *the `H3` hook* below. |
-| `H3` (server) | `SimmableUpdateComponent.cpp` · the relay host's flush callback bound in `attachInputRelayHost`, fired from `ASimulationInputRelay::PreReplication` after a flush published entries (GT, inside the net driver's flush) | `onLatencyPostTickFlush` (GT) | Measures the rest of that flush after this relay's pre-update. The same send caveats as the client row. |
-| `H3c` | `SimulationManagerUImpl.cpp` · `tickLatencyBudget_GameThread`, when a character's correction-buffer tick changed since the last frame (GT, end of `OnPostPhysicsStep`) | `onLatencyPostTickFlush` (GT) | A property leaves only when the replication system polls and sends it; a correction written but not sent at this flush still reads as left. A **lower** bound. The start is late by the frame's `updateVisualizationAll` work. |
-| `H4` | `SimmableUpdateComponent.cpp` · `ServerReceiveRemoteMove_Implementation`, after the version fence, once per capture tick in the bundle, first arrival wins (GT, inside the net driver's receive dispatch) | `SimulationManagerUImpl.cpp` · `stampLatencyAfterStep_Internal`, for the capture tick `getLastUsedCaptureTick` reports after the step, stamped with that step's start time (PT) | The datagram reached the socket before the frame's receive dispatch: up to one server frame **under**-stated. An underrun step reports the sentinel and stamps nothing. |
-| `H4r` | as `H4` | the relay flush callback (as `H3` server) | The hand-off is the flush into the replicated ring, not the staging write at receipt: staging is synchronous with receipt and would read zero. |
-| `H5` | `stampLatencyStepEnd_Internal`, from `OnPostSolve_Internal`, per character, for `currentIntegratedTick` (PT; inline on a dedicated server) | as `H3c` start | `noEnd` counts the ticks a character's state was not written: the correction rotation (`CorrectionRotationK`) skips a character on purpose, so on a rotation of 2 about half the ticks have no end. |
-| `H6` | `SimmableUpdateComponent.cpp` · `onRelayedInputRingArrived`, once per capture tick in the ring, first arrival wins (GT, from the ring's OnRep) | `stampLatencyAfterStep_Internal`: the relayed-read observation for the step's tick names the applied capture tick, stamped with the step's start time (PT) | The bytes arrived up to one client frame before the OnRep. Only reads that applied a relayed capture stamp an end; a miss stamps nothing and the capture finalizes as `noEnd`. |
-| `H6c` | `SimmableUpdateComponent.cpp` · `OnRep_CorrectionState`, for the peeked tick (GT) | `stampLatencyAfterStep_Internal`: a pending stamp at the start of the first client step after receipt (PT) | Measures when the correction is available to the next step, not when a resimulation applies it. |
-| `H7` | `stampLatencyStepEnd_Internal` (PT) | `tickLatencyBudget_GameThread`, after `updateVisualizationAll`: the newest pending tick per character only (GT) | Not the photon. The engine interpolates the physics proxies roughly two steps behind on the game thread, and the render thread and GPU add one or two frames more. A step that ends between the mailbox drain and this stamp is stamped one frame late. On a dedicated server it measures the per-frame visualization pass, which draws nothing. |
-| `WIRE` | client: `onTimingInfoReceived`, the raw round trip the timing relay hands `NetworkTimeEstimator::updateRTT`, halved (GT) | — | Half of a round trip assumes symmetric paths. Server: `ServerReceiveRemoteMove_Implementation`, `readRoundTripMs` of the root connection, halved, once per bundle (GT). The two roles' values come from different estimators. |
-
-**H1 and H2 are measured for a remote client's own characters only.** A listen host's local players
-have no client provider, so the host role has no capture path to stamp.
-
-### The Jolt configuration's stamp sites (og-simulationscheduler-withjolt task 54)
-
-The hop table above names the Chaos configuration's step-side sites. In the Jolt configuration "PT" is
-the step's thread (the tick driver's task on a client, the game thread inline on the authority), every
-game-thread site is unchanged, and the step-side sites move to the step hooks (design D9, D18):
-
-| stamp | Chaos configuration | Jolt configuration |
-|---|---|---|
-| step-start time for `H4`, `H6`, `H6c` and the clock counts | `OnPreSimulate_Internal`, immediately before `onGameSimulation` | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03, the successor of the step hooks' retired G-03); on a client early only by the Jolt scratch save |
-| `stampLatencyAfterStep_Internal(start)` | `OnPreSimulate_Internal`, after `onGameSimulation` | `beforePhysics`, after `onGameSimulation`, before the physics step |
-| `stampLatencyStepEnd_Internal` (`H5`, `H7` starts) | `OnPostSolve_Internal` | `afterTick`, after the post-step pass and the ring save: microseconds later |
-
-Both configurations take the start time at the same instant, so gate 22 compares them like for like.
-`[ChaosDilation]` is the Chaos configuration's only (§18).
-
-### The `H3` hook
-
-`UWorld::OnPostTickFlush` is broadcast by the world's tick immediately after the net drivers'
-`TickFlush`, and it is the earliest engine hook after it. The actual `SendTo` runs inside
-`TickFlush` (the connection's flush of its send buffer), so the stamp is late by whatever
-`TickFlush` did after this connection's send: sub-millisecond with one connection, longer on a busy
-server. It is early, or simply wrong, whenever the message did not leave at this flush:
-
-* a client rendering faster than its `MaxNetTickRate` (120) skips a connection tick, so the packet
-  leaves at the next frame;
-* a saturated connection or the bandwidth limit defers the bunch;
-* `net.IpConnectionUseSendTasks=1` (default 0) moves the `SendTo` onto a task after the flush;
-* a replicated property (the correction, the relay ring) is sent only when the replication system
-  polls it, so a write can wait a poll period.
-
-In each case `H3` reads as though the message left this frame. Task 2's baseline should read `H3` as
-a lower bound.
-
-### The `[ChaosDilation]` line (client only)
-
-Per window, from `tickLatencyBudget_GameThread`, in the Chaos configuration only (§18). Since task 82 the
-Chaos host samples and logs it, through `sampleLatencyWindow_GameThread` and `logLatencyWindow_GameThread`:
-
-* `min` / `mean` / `max` / `samples`: the physics scene's network delta-time scale, sampled once per
-  game frame from the world's physics scene (`GetPhysicsScene`, an `FChaosScene`;
-  `FChaosScene::GetNetworkDeltaTimeScale`, beside the setter the engine's time-dilation client RPC
-  calls). It is the engine's physics time dilation, active today. Until task 51 the same scene
-  arrived as `OnPostPhysicsStep`'s argument: the scene's post-tick delegate passes the scene that
-  broadcasts it, which is the world's one physics scene.
-* `resets` / `offset`: how many times the first local player controller's network physics tick
-  offset changed in the window, and its current value. The engine's timestamp-setup client RPC
-  writes that offset. ⚠ A reset to the **same** value is invisible to this poll, and only the first
-  local player controller is read.
-* `skips` / `stalls` / `hardResyncs`: the window's increase in `ClientPredictionClock`'s Skip, Stall
-  and HardResync counts, read on the physics thread and carried by `m_latencyClockMailbox`. A client
-  that joins mid-session shows one hard resync in its first window.
-
-### Log lines and categories
-
-```
-[LatencyBudget] role=Client hop=H2 p50=0.131 p95=0.273 p99=0.308 max=0.397 n=601 unit=ms noStart=0 noEnd=0 outOfOrder=0 overflow=0
-[LatencyBudget.Window] role=Client seconds=10.01 stale=0 duplicate=2402 laneOverflow=0 mailboxDropped=0
-[ChaosDilation] role=Client min=0.9762 mean=0.9998 max=1.0237 samples=1000 resets=0 offset=537 skips=0 stalls=0 hardResyncs=0
-```
-
-One `[LatencyBudget]` line per enabled hop and one `[LatencyBudget.Window]` line per window, both
-under **`LogOGLatencyBudget`**; the `[ChaosDilation]` line under its own **`LogOGChaosDilation`**
-(one category per probe family, §4). All three are `Warning`. They are logged with `UE_LOG` directly
-from this class (the `[ChaosDilation]` line from its Chaos host since task 82), never as core SIMLOG strings, so `RouteOGMessage` has no arm for them and its route
-table is unchanged. `Config/DefaultEngine.ini` pins `LogOGLatencyBudget=Warning`;
-`LogOGChaosDilation` has no ini line and runs at its declared default (`Log`), which prints its
-`Warning` line. `duplicate` counts the copies first-stamp-wins discarded (an input re-sent in
-several redundant bundles, a capture carried by more than one relay round), so a large number there
-is the expected state, not a fault.
-
-### Verified, and what was not
-
-A headless run (one `-server` process and two `-game -nullrhi` clients on the ThirdPerson map, 2026-10-06)
-printed every enabled hop on both roles, with `stale=0` and `mailboxDropped=0`. Representative
-p50s: client `H6` 90 ms and server `H4` 149 ms (the relay-delay floor and the input delay, as
-expected), `H5`'s `noEnd` about half its ticks (the rotation), and the dilation scale moving between
-0.976 and 1.024. A headless client is smoother than a rendering one, so these numbers are wiring
-evidence, not a baseline; the baseline is task 2's.
+Moved to `LatencyBudgetDiagnosticsUImpl-rationale.md` §6 (og-tickdriver task 18), with the code it describes: the
+probe, its mailboxes, its stamp functions and its window logging left this class for `LatencyBudgetDiagnosticsUImpl`, a
+class that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1 (every build but Shipping). This class holds one
+member, `m_latencyBudgetDiagnostics`, and the `get`/`edit` pair `getLatencyBudgetDiagnostics()` /
+`editLatencyBudgetDiagnostics()`; every former call site is now an `editLatencyBudgetDiagnostics()` call at the same
+point, on the same thread, in the same order: `onTimingInfoReceived` (the `WIRE` sample, first), `BeginPlay` (`begin`,
+where the probe was created and the post-tick flush bound), `EndPlay` (`end`, inside the world test, before
+`onEndPlayWorld`), `tryRegister` (`wrapInputProvider`, on the client branch), `unregisterFromNewFramework`
+(`forgetCharacter`) and the last statement of `OnPostPhysicsStep` (`tick_GameThread`). The old-to-new name map is
+`LatencyBudgetDiagnosticsUImpl-rationale.md` §5.
 
 ---
 
@@ -4309,7 +4159,9 @@ Since task 53 the arm had also held three pieces that task 51 left shared: the r
 construction in `BeginPlay` (with the solver lookup above the branches), `tryRegister`'s first-call bind
 (`ChaosPhysicsFactory` and the volume registration), and `registerVizVolume`'s query parameters. They moved too.
 The callback and its input hold a `ChaosTickBackendUImpl*` instead of this class. One member stayed here,
-`m_latencyClockAtWindowStart`, for a reason `ChaosTickBackendUImpl-rationale.md` §2 gives.
+the clock counts at the window start (m_latencyClockAtWindowStart, historical name), for a reason
+`ChaosTickBackendUImpl-rationale.md` §2 gives, until og-tickdriver task 18 moved it into `LatencyBudgetDiagnosticsUImpl`
+(`m_clockAtWindowStart`).
 
 The guards on that code moved with it. This class's G-02, G-51 to G-55, G-71, G-76 and G-77 are retired
 (`SimulationManagerUImpl-guards.md` §R) and are `ChaosTickBackendUImpl-guards.md` G-01 to G-09.
@@ -4339,15 +4191,15 @@ og-tickdriver task 15b).
 | `buildWorld` | `BeginPlay`, after the ini reads, before the role branches | the solver checks, then the adapter emplacement (both moved, `ChaosTickBackendUImpl-rationale.md` §2) | the static import, then the world host's `build` |
 | `startStepping` | the end of `BeginPlay` | the post-tick delegate, the async callback, the `InjectInputsExternal` delegate | `startDriverStepping` |
 | `onEndPlayBegin` | the first statement of `EndPlay`, and it stays first (`⛔G-85`) | empty | unregister the tick functions and wait for outstanding steps (`TickDriverBackendUImpl-guards.md` G-01) |
-| `onEndPlayWorld` | `EndPlay`, inside the world test, after the latency handle | remove both delegates, free the callback | empty |
+| `onEndPlayWorld` | `EndPlay`, inside the world test, after the latency diagnostics' `end` | remove both delegates, free the callback | empty |
 | `beforePresent_GameThread` | `OnPostPhysicsStep`, before the post-simulation pass | empty | the presenter's `present_GameThread` (og-simulation's `TickDriverPresenter`) |
 | `updateVisualization_GameThread` | `OnPostPhysicsStep`, after the timing buffer | `updateVisualizationAll` | the presenter's `updateVisualization_GameThread` |
 | `editVizQuery`, `getVizReader`, `registerVizVolume` | the three public doors of the same names, which keep their signatures and forward | the query adapter, the reader, the volume with the owner ignored | the step world or the shadow world, by stepping mode |
 | `createBodies_GameThread` | `tryRegister`'s first pass; `false` returns `TryRegisterStatus::Pending` | the `ChaosPhysicsFactory` bind; returns `true` | the slot acquire and the Jolt bind; `false` where it waits for a slot |
 | `onRegistered_GameThread` | `tryRegister`'s Ready path | empty | the occupancy push and the render target |
 | `onUnregistered_GameThread` | `unregisterFromNewFramework` | empty | the render target and the slot release |
-| `sampleLatencyWindow_GameThread` | `tickLatencyBudget_GameThread`, before the window closes | the dilation scale and the tick-offset poll | empty |
-| `logLatencyWindow_GameThread` | `tickLatencyBudget_GameThread`, after `[LatencyBudget.Window]` | the `[ChaosDilation]` line and its reset | empty |
+| `editDiagnostics().sampleLatencyWindow_GameThread` | `LatencyBudgetDiagnosticsUImpl::tick_GameThread`, before the window closes (since og-tickdriver task 18; this class's own latency tick before) | the dilation scale and the tick-offset poll | empty |
+| `editDiagnostics().logLatencyWindow_GameThread` | `LatencyBudgetDiagnosticsUImpl::tick_GameThread`, after `[LatencyBudget.Window]` | the `[ChaosDilation]` line and its reset | empty |
 
 The root-capsule check after `tryRegister`'s bind reads the movement declaration's stamped
 `bindings.parentBodyId`, because `createBodies_GameThread` returns only whether the bind happened
@@ -4387,7 +4239,7 @@ the value is the one the check compared before (`TickDriverBackendUImpl-rational
 
 * `OnPostPhysicsStep` takes no argument. The Chaos configuration binds the scene's post-tick delegate
   to a weak lambda that drops the scene and calls it. The `[ChaosDilation]` block reads the scene
-  from `GetWorld()` instead (§16). The two empty physics-scene hooks (pre-tick and step) and their
+  from `GetWorld()` instead (`LatencyBudgetDiagnosticsUImpl-rationale.md` §6). The two empty physics-scene hooks (pre-tick and step) and their
   bindings are deleted (§11 C20).
 * **The split** of the frame's game-thread work into `onFrameStepsDue_GameThread`, the drain and the
   reap (§7).

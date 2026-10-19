@@ -260,7 +260,7 @@ void FSimulationManagerAsyncCallback::OnPreSimulate_Internal()
 	input->m_manager->onGameSimulation(updateInfo);
 
 	if (!isResimulating)
-		input->m_manager->stampLatencyAfterStep_Internal(stepStartSeconds);
+		input->m_manager->editDiagnostics().stampLatencyAfterStep_Internal(stepStartSeconds);
 }
 
 void FSimulationManagerAsyncCallback::OnPostSolve_Internal()
@@ -279,7 +279,7 @@ void FSimulationManagerAsyncCallback::OnPostSolve_Internal()
 	input->m_manager->onPostGameSimulation(updateInfo);
 
 	if (!isResimulating)
-		input->m_manager->stampLatencyStepEnd_Internal();
+		input->m_manager->editDiagnostics().stampLatencyStepEnd_Internal();
 }
 
 void FSimulationManagerAsyncCallback::ProcessInputs_Internal(int32 PhysicsStep)
@@ -531,16 +531,6 @@ SimulationObjectStorage<SimulatableBrawler>& ChaosTickBackendUImpl::editStorage(
 	return m_owner.editStorage();
 }
 
-void ChaosTickBackendUImpl::stampLatencyAfterStep_Internal(double stepStartSeconds)
-{
-	m_owner.stampLatencyAfterStep_Internal(stepStartSeconds);
-}
-
-void ChaosTickBackendUImpl::stampLatencyStepEnd_Internal()
-{
-	m_owner.stampLatencyStepEnd_Internal();
-}
-
 void ChaosTickBackendUImpl::onGameSimulation(const SimulationUpdateInfo& info)
 {
 	m_owner.m_manager->onGameSimulation(info);
@@ -703,47 +693,59 @@ bool ChaosTickBackendUImpl::createBodies_GameThread(USimmableUpdateComponent& ow
 	return true;
 }
 
-void ChaosTickBackendUImpl::sampleLatencyWindow_GameThread(bool isClient)
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+void ChaosTickBackendUImpl::Diagnostics::stampLatencyAfterStep_Internal(double stepStartSeconds)
+{
+	m_host.m_owner.editLatencyBudgetDiagnostics().stampAfterStep_Internal(stepStartSeconds);
+}
+
+void ChaosTickBackendUImpl::Diagnostics::stampLatencyStepEnd_Internal()
+{
+	m_host.m_owner.editLatencyBudgetDiagnostics().stampStepEnd_Internal();
+}
+
+void ChaosTickBackendUImpl::Diagnostics::sampleLatencyWindow_GameThread(bool isClient)
 {
 	if (isClient)
 	{
-		FChaosScene* scene = m_owner.GetWorld() != nullptr ? m_owner.GetWorld()->GetPhysicsScene() : nullptr;
+		FChaosScene* scene = m_host.m_owner.GetWorld() != nullptr ? m_host.m_owner.GetWorld()->GetPhysicsScene() : nullptr;
 		if (scene != nullptr)
-			m_chaosDilationWindow.add(static_cast<double>(scene->GetNetworkDeltaTimeScale()));
+			m_host.m_chaosDilationWindow.add(static_cast<double>(scene->GetNetworkDeltaTimeScale()));
 
-		const UWorld* world = m_owner.GetWorld();
+		const UWorld* world = m_host.m_owner.GetWorld();
 		const APlayerController* localController =
 			world != nullptr ? world->GetFirstPlayerController() : nullptr;
 		if (localController != nullptr && localController->GetNetworkPhysicsTickOffsetAssigned())
 		{
 			const int32 offset = localController->GetNetworkPhysicsTickOffset();
-			if (!m_lastPhysicsTickOffset.has_value() || *m_lastPhysicsTickOffset != offset)
+			if (!m_host.m_lastPhysicsTickOffset.has_value() || *m_host.m_lastPhysicsTickOffset != offset)
 			{
-				m_lastPhysicsTickOffset = offset;
-				++m_physicsTickOffsetResets;
+				m_host.m_lastPhysicsTickOffset = offset;
+				++m_host.m_physicsTickOffsetResets;
 			}
 		}
 	}
 }
 
-void ChaosTickBackendUImpl::logLatencyWindow_GameThread(bool isClient)
+void ChaosTickBackendUImpl::Diagnostics::logLatencyWindow_GameThread(bool isClient)
 {
 	if (isClient)
 	{
+		const LatencyBudgetDiagnosticsUImpl::ClockCounts clock =
+			m_host.m_owner.getLatencyBudgetDiagnostics().clockCountsInWindow();
 		UE_LOG(LogOGChaosDilation, Warning,
 			TEXT("[ChaosDilation] role=Client min=%.4f mean=%.4f max=%.4f samples=%u resets=%u ")
 			TEXT("offset=%d skips=%u stalls=%u hardResyncs=%u"),
-			m_chaosDilationWindow.min, m_chaosDilationWindow.mean(), m_chaosDilationWindow.max,
-			m_chaosDilationWindow.samples, m_physicsTickOffsetResets,
-			m_lastPhysicsTickOffset.value_or(0),
-			m_owner.m_latencyClockLatest.skips - m_owner.m_latencyClockAtWindowStart.skips,
-			m_owner.m_latencyClockLatest.stalls - m_owner.m_latencyClockAtWindowStart.stalls,
-			m_owner.m_latencyClockLatest.hardResyncs - m_owner.m_latencyClockAtWindowStart.hardResyncs);
-		m_chaosDilationWindow.reset();
-		m_physicsTickOffsetResets   = 0u;
-		m_owner.m_latencyClockAtWindowStart = m_owner.m_latencyClockLatest;
+			m_host.m_chaosDilationWindow.min, m_host.m_chaosDilationWindow.mean(), m_host.m_chaosDilationWindow.max,
+			m_host.m_chaosDilationWindow.samples, m_host.m_physicsTickOffsetResets,
+			m_host.m_lastPhysicsTickOffset.value_or(0),
+			clock.skips, clock.stalls, clock.hardResyncs);
+		m_host.m_chaosDilationWindow.reset();
+		m_host.m_physicsTickOffsetResets = 0u;
+		m_host.m_owner.editLatencyBudgetDiagnostics().restartClockWindow();
 	}
 }
+#endif
 
 OGSIM_OPTIMIZE_ON
 

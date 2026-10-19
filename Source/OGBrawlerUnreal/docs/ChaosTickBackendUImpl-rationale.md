@@ -65,11 +65,12 @@ the template `TickDriverBackendUImpl`).
 
 **What it holds.** The async callback `FSimulationManagerAsyncCallback` and its input and output types; the
 rewind-push probe's stash type; the callback pointer and the two delegate handles; the `ChaosTickMapper`; the
-`[ChaosDilation]` window (`m_chaosDilationWindow`, `m_lastPhysicsTickOffset`, `m_physicsTickOffsetResets`); the
+`[ChaosDilation]` window (`m_chaosDilationWindow`, `m_lastPhysicsTickOffset`, `m_physicsTickOffsetResets`, a fenced block
+that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1, `⛔G-11`); the
 input hook `InjectInputs_External`; the six passthroughs the callback calls (`onGameSimulation` …
 `noteResimGrant`; task 84 added a seventh for the push and task 88 removed it again, because
-`prepareResimulation` now pushes, §5); and forwarders to the owner's shared members (`editStorage`, the two clocks, `runsPrediction`,
-the two `stampLatency*_Internal` calls). The callback and its input hold a `ChaosTickBackendUImpl*` where they used to
+`prepareResimulation` now pushes, §5); and forwarders to the owner's shared members (`editStorage`, the two clocks, `runsPrediction`). The two latency stamp
+forwarders the callback calls sit on the host's diagnostics view since og-tickdriver task 18 (§2). The callback and its input hold a `ChaosTickBackendUImpl*` where they used to
 hold the owner.
 
 ---
@@ -112,29 +113,37 @@ calls is unchanged.
   task 15a; until then the rows were an inline list in this file's emplaceBrawlerQueryAdapter helper
   (`BrawlerChaosBindingUImpl-rationale.md` §2).
 * **The solver checks** (scene and solver present, solver async dt equal to the step dt) ran before
-  `createLatencyBudget`. They now run at the top of `buildWorld`.
+  the latency probe's creation (createLatencyBudget, historical name; the latency diagnostics' `begin` since
+  og-tickdriver task 18). They now run at the top of `buildWorld`.
 * **Why it is safe.** Nothing between the old and the new positions reads an adapter. In the tree before task 82,
   the first statement of `SimulationManagerUImpl.cpp` that names any of the three adapters was the emplacement
-  itself. What lies between is `createLatencyBudget` (three allocations), the post-tick-flush registration, the
+  itself. What lies between is the latency probe's creation (three allocations), the post-tick-flush registration, the
   three ini reads, the `s_instances` check and store, the timing-relay `registerInstance` (a static pointer store)
   and the two logger lambda definitions. `BeginPlay` runs on the game thread, and the async callback is registered
   only at its end, so no other thread can observe the order.
 
-**Two things stayed on the owner, and why.**
+**Two things stayed on the owner, and why** (the first until og-tickdriver task 18).
 
-* **`m_latencyClockAtWindowStart`.** Only the `[ChaosDilation]` line reads it, but its type is the owner's private
-  `LatencyClockCounts`. This header is included by the owner's header before the owner's class is complete, so a
-  backend member cannot name that type. The backend reads and writes the owner's member, as the code always did.
-  Task 83's selector header does not change this.
+* **The clock counts at the window start** (m_latencyClockAtWindowStart, historical name). Only the `[ChaosDilation]`
+  line reads them, but their type was the owner's private one (LatencyClockCounts, historical name). This header is
+  included by the owner's header before the owner's class is complete, so a backend member could not name that type,
+  and the backend read and wrote the owner's member, as the code always did. Since og-tickdriver task 18 the member is
+  `m_clockAtWindowStart` of `LatencyBudgetDiagnosticsUImpl`, and the host reads the window's counts through
+  `clockCountsInWindow` (on `getLatencyBudgetDiagnostics()`) and restarts them through `restartClockWindow` (on
+  `editLatencyBudgetDiagnostics()`), at the same two points.
 * **The root-capsule check in `tryRegister`.** It compared the movement declaration's own body with a local
   `parentBodyId` that each backend's bind computed. The seam's `createBodies_GameThread` returns only whether the bind
   happened, so the check now reads the movement declaration's `bindings.parentBodyId`, which both binds stamp with
   that same value on every declaration. Its message is unchanged.
 
 **The `[ChaosDilation]` window** is sampled once per game frame by `sampleLatencyWindow_GameThread` and logged and
-reset by `logLatencyWindow_GameThread`, both called from the owner's `tickLatencyBudget_GameThread` where the two
-Chaos blocks were. What the line means is in `SimulationManagerUImpl-rationale.md` §16.
-
+reset by `logLatencyWindow_GameThread`. Since og-tickdriver task 18 both sit on the host's diagnostics view, the
+by-value `ChaosTickBackendUImpl::Diagnostics` that `editDiagnostics()` returns (`DiagnosticsConventions.md` §1), with the
+two stamp forwarders the async callback calls (`stampLatencyAfterStep_Internal`, `stampLatencyStepEnd_Internal`), and
+the latency diagnostics' `tick_GameThread` calls the pair where the owner's latency tick did. The window's three members
+are a fenced block (`⛔G-11`) that, like the view's bodies, exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1: at 0
+(Shipping) the view's four members are inline no-ops and the `[ChaosDilation]` line is compiled out. What the line means
+is in `LatencyBudgetDiagnosticsUImpl-rationale.md` §6.
 ---
 
 ## §3 The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only

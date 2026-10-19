@@ -97,6 +97,7 @@ public:
 	void sendConnectionTierToOwningClient(unsigned int id, uint8_t tier);
 
 	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
+	const FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() const { return m_simulationStateCorrectionSyncedBuffer; }
 
 	FRelayedInputRing&       getRelayedInputRing();
 	const FRelayedInputRing& getRelayedInputRing() const;

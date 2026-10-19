@@ -362,6 +362,29 @@ class template, so this file cannot call it, and `ChaosTickBackendUImpl.cpp` is 
 
 ---
 
+## G-11 — DIAGNOSTIC ONLY — READ BY NOTHING IN PRODUCTION: the `[ChaosDilation]` window
+
+*Added by og-tickdriver task 18.*
+
+**Site:** `latencyBudget::ScalarWindowStats m_chaosDilationWindow;` (`ChaosTickBackendUImpl.h`), the first of the three
+members (`m_chaosDilationWindow`, `m_lastPhysicsTickOffset`, `m_physicsTickOffsetResets`) of the block that exists only
+while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1.
+
+**The prohibition.** ⛔ These three members are the `[ChaosDilation]` line's window, and only the host's diagnostics view
+(`ChaosTickBackendUImpl::Diagnostics`) reads or writes them. Do not read one from the host's production code (the async
+callback, the input hook, the mapper, the seam's other entry points), do not add an accessor that hands one out, and
+do not move a production value into this block: the engine's network delta-time scale and the player controller's
+physics tick offset are observed here, never acted on.
+
+**The consequence.** The block is compiled out of Shipping and out of the fence build
+(`LatencyBudgetDiagnosticsUImpl-rationale.md` §2, §4). A production reader either fails to compile there or, if it is
+itself gated to compile, makes Shipping behave differently from Development.
+
+**What breaks if the tag moves.** Nothing mechanical: the gate makes an ungated reader fail to compile in a Shipping or
+fence build, but an edit inside the view can still hand a member out.
+
+---
+
 ## §R — Retired ids
 
 *(The whole file retires with the Chaos configuration in task 21.)*

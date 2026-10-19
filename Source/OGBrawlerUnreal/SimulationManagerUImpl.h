@@ -40,7 +40,7 @@
 #include "OGSimulation/Network/ServerReceptionCoordinator.h"
 #include "OGSimulation/Network/RelayWritePathProbe.h"
 #include "OGSimulation/Network/ReplicatedTierConsumer.h"
-#include "OGSimulation/LatencyBudgetProbe.h"
+#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
@@ -67,8 +67,6 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOG, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGRelayProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
-DECLARE_LOG_CATEGORY_EXTERN(LogOGLatencyBudget, Log, All);
-DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
 enum class OGLogRoute : uint8
@@ -375,7 +373,7 @@ public:
 
     virtual void onTimingInfoReceived(uint32_t authorityTick, double roundTripTime) override
     {
-        noteLatencyWireSample(roundTripTime);
+        editLatencyBudgetDiagnostics().noteWireSample(roundTripTime);
         if (m_onTimingInfoReceivedCallback)
         {
             m_onTimingInfoReceivedCallback(authorityTick, roundTripTime);
@@ -387,13 +385,8 @@ public:
         m_manager->editNetworkEstimator().recordAuthorityTick(authorityTick);
     }
 
-    using LatencyMailbox = latencyBudget::SpscMailbox<latencyBudget::Event, 4096>;
-    void stampLatency(latencyBudget::Stream stream, unsigned int lane, uint32 tick,
-                      latencyBudget::Point point);
-    void noteLatencyWireSample(double roundTripSeconds);
-    void postLatencyEvent_Internal(const latencyBudget::Event& event);
-    void stampLatencyAfterStep_Internal(double stepStartSeconds);
-    void stampLatencyStepEnd_Internal();
+    const LatencyBudgetDiagnosticsUImpl& getLatencyBudgetDiagnostics() const { return m_latencyBudgetDiagnostics; }
+    LatencyBudgetDiagnosticsUImpl&       editLatencyBudgetDiagnostics()       { return m_latencyBudgetDiagnostics; }
     void OnPostPhysicsStep();
 
     SimCharacterId allocateSimCharacterId();
@@ -678,6 +671,7 @@ public:
 private:
     friend physicsBackendUImpl::Backend;
     template <typename SessionT> friend class BrawlerTickDriverGameUImpl;
+    friend class LatencyBudgetDiagnosticsUImpl;
 
     std::set<unsigned int> m_authorityRegisteredIds;
 
@@ -724,28 +718,7 @@ private:
 
     inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
 
-    struct LatencyClockCounts
-    {
-        uint32 skips       = 0u;
-        uint32 stalls      = 0u;
-        uint32 hardResyncs = 0u;
-        bool operator==(const LatencyClockCounts&) const = default;
-    };
-    using LatencyClockMailbox = latencyBudget::SpscMailbox<LatencyClockCounts, 64>;
-    BrawlerInputProviderFn wrapInputProviderWithLatencyStamp(
-        unsigned int id, const USimmableUpdateComponent& owner, BrawlerInputProviderFn inputProvider);
-    void createLatencyBudget(bool isAuthority);
-    void tickLatencyBudget_GameThread();
-    void onLatencyPostTickFlush();
-    std::unique_ptr<latencyBudget::LatencyBudgetProbe> m_latencyProbe;
-    std::unique_ptr<LatencyMailbox>                    m_latencyMailbox;
-    std::unique_ptr<LatencyClockMailbox>               m_latencyClockMailbox;
-    LatencyClockCounts                                 m_latencyClockPosted_Physics;
-    LatencyClockCounts                                 m_latencyClockLatest;
-    LatencyClockCounts                                 m_latencyClockAtWindowStart;
-    uint64                                             m_latencyMailboxDropped   = 0u;
-    std::unordered_map<unsigned int, uint32>           m_latencyLastHandedCorrectionTick;
-    FDelegateHandle                                    m_latencyPostTickFlushHandle;
+    LatencyBudgetDiagnosticsUImpl m_latencyBudgetDiagnostics{ std::as_const(*this) };
 
     physicsBackendUImpl::BackendWorlds m_backendWorlds;
 
@@ -842,6 +815,11 @@ private:
             "SimulationStepDriver<Manager, JoltWorld, TickDriverStepHooks<...>>) names the manager "
             "through BrawlerCompositionUImpl; a ManagerType that drifts from it hands that host a different "
             "SimulationManager instantiation than m_manager. Added by task 81.");
+        static_assert(std::is_same_v<BrawlerInputProviderFn, LatencyBudgetDiagnosticsUImpl::InputProvider>,
+            "tryRegister hands a client's BrawlerInputProviderFn to LatencyBudgetDiagnosticsUImpl::wrapInputProvider and "
+            "registers what it returns. The two spellings must name ONE std::function type: a different one would "
+            "convert, wrapping the provider in a second heap-allocated callable on every registration. Added by "
+            "og-tickdriver task 18.");
         static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_backendWorlds)
                           < __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
                    && __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)

@@ -16,6 +16,7 @@
 #include "OGSimulation/PhysicsBodyState.h"
 #include "OGSimulation/QueryGeometry.h"
 #include "OGSimulation/LatencyBudgetProbe.h"
+#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
 #include "OGSimulation/SimulationManager.h"
 #include "OGSimulation/SimulationObjectStorage.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
@@ -230,15 +231,32 @@ public:
 	void onRegistered_GameThread(USimmableUpdateComponent&, unsigned int) {}
 	void onUnregistered_GameThread(USimmableUpdateComponent&, unsigned int) {}
 
-	void sampleLatencyWindow_GameThread(bool isClient);
-	void logLatencyWindow_GameThread(bool isClient);
+	class Diagnostics
+	{
+	public:
+		explicit Diagnostics(ChaosTickBackendUImpl& host) : m_host(host) {}
+
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+		void sampleLatencyWindow_GameThread(bool isClient);
+		void logLatencyWindow_GameThread(bool isClient);
+		void stampLatencyAfterStep_Internal(double stepStartSeconds);
+		void stampLatencyStepEnd_Internal();
+#else
+		void sampleLatencyWindow_GameThread(bool) {}
+		void logLatencyWindow_GameThread(bool) {}
+		void stampLatencyAfterStep_Internal(double) {}
+		void stampLatencyStepEnd_Internal() {}
+#endif
+
+	private:
+		[[maybe_unused]] ChaosTickBackendUImpl& m_host;
+	};
+	Diagnostics editDiagnostics() { return Diagnostics(*this); }
 
 	const ServerTickClock& getServerClock() const;
 	const ClientPredictionClock& getClientClock() const;
 	bool runsPrediction() const;
 	SimulationObjectStorage<SimulatableBrawler>& editStorage();
-	void stampLatencyAfterStep_Internal(double stepStartSeconds);
-	void stampLatencyStepEnd_Internal();
 
 	void onGameSimulation(const SimulationUpdateInfo& info);
 	void onPostGameSimulation(const SimulationUpdateInfo& info);
@@ -262,7 +280,10 @@ private:
 
 	ChaosTickMapper m_chaosTickMapper;
 
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+	// ⛔G-11  docs/ChaosTickBackendUImpl-guards.md
 	latencyBudget::ScalarWindowStats m_chaosDilationWindow;
 	std::optional<int32>             m_lastPhysicsTickOffset;
 	uint32                           m_physicsTickOffsetResets = 0u;
+#endif
 };

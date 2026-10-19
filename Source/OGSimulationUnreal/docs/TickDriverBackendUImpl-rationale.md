@@ -77,8 +77,11 @@ and the UImpl lost its last `OG_PHYSICS_BACKEND_CHAOS`.
 * **The owner calls it through the seam,** the fixed set of entry points in `SimulationManagerUImpl-rationale.md`
   §18, each from exactly one call site and with no `#if`. `PhysicsBackendHostUImpl.h` defines the concept
   `PhysicsBackendHost`, which lists the set, and the owner asserts that its backend satisfies it
-  (`PhysicsBackendHostUImpl-rationale.md`). Three entry points have no Jolt work and are empty inline bodies here:
-  `onEndPlayWorld`, `sampleLatencyWindow_GameThread` and `logLatencyWindow_GameThread`. The others call the
+  (`PhysicsBackendHostUImpl-rationale.md`). Entry points with no Jolt work are empty inline bodies here:
+  `onEndPlayWorld`, and the two latency-window hooks `sampleLatencyWindow_GameThread` and
+  `logLatencyWindow_GameThread`, which since og-tickdriver task 18 sit on the empty diagnostics view `editDiagnostics()`
+  returns (a by-value `Diagnostics` with no state, header-only like the rest of this class; the game's
+  latency diagnostics call it, `DiagnosticsConventions.md` §1). The others call the
   functions that held the Jolt arms before (`startStepping` calls `startDriverStepping`; since og-tickdriver task 9
   `beforePresent_GameThread` and `updateVisualization_GameThread` call og-simulation's presenter's two game-thread
   doors, §5; since og-tickdriver task 10 `buildWorld` imports the statics and calls the world host's `build`, and the

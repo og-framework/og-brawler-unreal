@@ -420,11 +420,12 @@ void USimmableUpdateComponent::OnRep_CorrectionState()
 		OG_LOG_ROUTED(LogOGNet,
 			TEXT("[ReceiveCorrectionState] id=%u tick=%u"),
 			toStorageKey(simCharacterId()), tick);
-		if (ASimulationManagerUImpl* latencyManager = ASimulationManagerUImpl::instanceFor(/*isAuthority=*/false))
-		{
-			latencyManager->stampLatency(latencyBudget::Stream::State, toStorageKey(simCharacterId()),
-				tick, latencyBudget::Point::ClientReceived);
-		}
+		LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
+			[this, tick](LatencyBudgetDiagnosticsUImpl& diagnostics)
+			{
+				diagnostics.stamp(latencyBudget::Stream::State, toStorageKey(simCharacterId()),
+					tick, latencyBudget::Point::ClientReceived);
+			});
 	}
 	if (m_onCorrectionStateReceivedCallback)
 		m_onCorrectionStateReceivedCallback(m_simulationStateCorrectionSyncedBuffer);
@@ -516,20 +517,22 @@ void USimmableUpdateComponent::attachInputRelayHost(ASimulationInputRelay* host)
 		host->setOnRingFlushedCallback(
 			[weakSelf](const FRelayedInputRing& ring)
 			{
-				USimmableUpdateComponent* self = weakSelf.Get();
-				ASimulationManagerUImpl* latencyManager =
-					ASimulationManagerUImpl::instanceFor(/*isAuthority=*/true);
-				if (self == nullptr || latencyManager == nullptr)
-					return;
-				const unsigned int id = toStorageKey(self->simCharacterId());
-				ring.forEachEntry<simulatableBrawler::PlayerInput>(
-					[latencyManager, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
+				LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/true,
+					[&weakSelf, &ring](LatencyBudgetDiagnosticsUImpl& diagnostics)
 					{
-						if (captureTick != kNoInputCaptureTick)
-						{
-							latencyManager->stampLatency(latencyBudget::Stream::Input, id, captureTick,
-								latencyBudget::Point::Handed);
-						}
+						USimmableUpdateComponent* self = weakSelf.Get();
+						if (self == nullptr)
+							return;
+						const unsigned int id = toStorageKey(self->simCharacterId());
+						ring.forEachEntry<simulatableBrawler::PlayerInput>(
+							[&diagnostics, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
+							{
+								if (captureTick != kNoInputCaptureTick)
+								{
+									diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+										latencyBudget::Point::Handed);
+								}
+							});
 					});
 			});
 	}
@@ -555,19 +558,20 @@ void USimmableUpdateComponent::onRelayedInputRingArrived(const FRelayedInputRing
 			toStorageKey(simCharacterId()));
 	}
 
-	if (ASimulationManagerUImpl* latencyManager = ASimulationManagerUImpl::instanceFor(/*isAuthority=*/false))
-	{
-		const unsigned int id = toStorageKey(simCharacterId());
-		ring.forEachEntry<simulatableBrawler::PlayerInput>(
-			[latencyManager, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
-			{
-				if (captureTick != kNoInputCaptureTick)
+	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
+		[this, &ring](LatencyBudgetDiagnosticsUImpl& diagnostics)
+		{
+			const unsigned int id = toStorageKey(simCharacterId());
+			ring.forEachEntry<simulatableBrawler::PlayerInput>(
+				[&diagnostics, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
 				{
-					latencyManager->stampLatency(latencyBudget::Stream::Input, id, captureTick,
-						latencyBudget::Point::ClientReceived);
-				}
-			});
-	}
+					if (captureTick != kNoInputCaptureTick)
+					{
+						diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+							latencyBudget::Point::ClientReceived);
+					}
+				});
+		});
 
 	if (m_onRelayedInputReceivedCallback)
 		m_onRelayedInputReceivedCallback(ring);
@@ -583,16 +587,17 @@ void USimmableUpdateComponent::sendLocalInputToAuthority(
 		queue, currentTick, static_cast<uint8>(redundancyDepth), bundle);
 	ServerReceiveRemoteMove(bundle);
 
-	if (ASimulationManagerUImpl* latencyManager = ASimulationManagerUImpl::instanceFor(/*isAuthority=*/false))
-	{
-		const unsigned int id = toStorageKey(simCharacterId());
-		bundle.forEachSlot<simulatableBrawler::PlayerInput>(
-			[latencyManager, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
-			{
-				latencyManager->stampLatency(latencyBudget::Stream::Input, id, captureTick,
-					latencyBudget::Point::Handed);
-			});
-	}
+	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
+		[this, &bundle](LatencyBudgetDiagnosticsUImpl& diagnostics)
+		{
+			const unsigned int id = toStorageKey(simCharacterId());
+			bundle.forEachSlot<simulatableBrawler::PlayerInput>(
+				[&diagnostics, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
+				{
+					diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+						latencyBudget::Point::Handed);
+				});
+		});
 }
 
 void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInputRedundancyBundle& bundle)
@@ -623,17 +628,18 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInp
 
 	const unsigned int id = toStorageKey(simCharacterId());
 
-	if (authorityManager != nullptr)
-	{
-		bundle.forEachSlot<simulatableBrawler::PlayerInput>(
-			[authorityManager, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
-			{
-				authorityManager->stampLatency(latencyBudget::Stream::Input, id, captureTick,
-					latencyBudget::Point::ServerReceived);
-			});
-		if (rootConn != nullptr)
-			authorityManager->noteLatencyWireSample(readRoundTripMs(rootConn) / 1000.0);
-	}
+	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/true,
+		[&bundle, id, rootConn](LatencyBudgetDiagnosticsUImpl& diagnostics)
+		{
+			bundle.forEachSlot<simulatableBrawler::PlayerInput>(
+				[&diagnostics, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
+				{
+					diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+						latencyBudget::Point::ServerReceived);
+				});
+			if (rootConn != nullptr)
+				diagnostics.noteWireSample(readRoundTripMs(rootConn) / 1000.0);
+		});
 
 	// ⛔G-21  docs/SimmableUpdateComponent-guards.md
 	if (coordinator == nullptr || rootConn == nullptr)

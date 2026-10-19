@@ -757,10 +757,10 @@ The id is replicated with the pawn, not on the correction wire, so no wire forma
 
 ## §14 Latency-budget stamps (og-simulationscheduler-withjolt task 1)
 
-Five sites in this file stamp the manager's latency-budget probe. Each is a timestamp and nothing
+Five sites in this file stamp the latency-budget probe. Each is a timestamp and nothing
 else: it reads values the code beside it already has, writes only the probe, and changes no input,
 no wire byte and no ordering of the netcode it sits next to. The hop table, the threads and every
-site's measurement error are `SimulationManagerUImpl-rationale.md` §16; this list only says what
+site's measurement error are `LatencyBudgetDiagnosticsUImpl-rationale.md` §6; this list only says what
 each site does here.
 
 | site | stamp | thread |
@@ -771,14 +771,23 @@ each site does here.
 | `onRelayedInputRingArrived`, before the core callback | `ClientReceived` for every capture tick in the ring (client) | GAME |
 | `attachInputRelayHost`, authority only | binds the relay host's flush callback, which stamps `Handed` for every capture tick a flush published | GAME |
 
-Every stamp goes through `ASimulationManagerUImpl::stampLatency`, which `checkf`s the game thread.
+Every stamp goes through `LatencyBudgetDiagnosticsUImpl::stamp`, which `checkf`s the game thread, and
+every site reaches it through `LatencyBudgetDiagnosticsUImpl::withInstance`, which runs the site's stamps
+on the role's instance (the manager's `editLatencyBudgetDiagnostics()`) when there is one. Since
+og-tickdriver task 18 that is a no-op in Shipping, so the role's manager lookup each site made only to
+stamp (`ASimulationManagerUImpl::instanceFor`) is not made there either
+(`LatencyBudgetDiagnosticsUImpl-rationale.md` §2). The relay host's flush callback is still bound on the
+authority; its body is the one `withInstance` call.
 Repeated capture ticks (redundant bundle slots, repeated relay entries) are expected: the probe keeps
 the first stamp and counts the rest.
 
 **The provider lambda is unchanged, and G-05 still holds.** The capture stamp needs the manager, which
 that lambda may not capture, so it is a wrapper the manager applies in `tryRegister`
-(`SimulationManagerUImpl-rationale.md` §16). The only addition to the header is
-`getOwnerInputCollection`, a `const` read the wrapper uses to reach the input-sample time.
+(`LatencyBudgetDiagnosticsUImpl-rationale.md` §6). The only addition to the header for the stamps was
+`getOwnerInputCollection`, a `const` read the wrapper uses to reach the input-sample time. og-tickdriver task 18 added a
+second, a `const` overload of `getSyncedCorrectionStateBuffer`, so that the latency diagnostics read the correction
+buffer's tick through a const path only (`LatencyBudgetDiagnosticsUImpl-rationale.md` §3); production callers still
+get the mutable overload.
 
 **G-19's order is unchanged.** The `ServerReceived` loop and the `WIRE` sample sit after the fence
 and before the tier's RTT sample and the core per-slot loop. They are measurement, not netcode policy:

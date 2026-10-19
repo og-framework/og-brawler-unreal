@@ -75,8 +75,12 @@ public:
 	void onRegistered_GameThread(Component& owner, unsigned int id);
 	void onUnregistered_GameThread(Component& owner, unsigned int id);
 
-	void sampleLatencyWindow_GameThread(bool) {}
-	void logLatencyWindow_GameThread(bool) {}
+	struct Diagnostics
+	{
+		void sampleLatencyWindow_GameThread(bool) {}
+		void logLatencyWindow_GameThread(bool) {}
+	};
+	Diagnostics editDiagnostics() { return {}; }
 
 private:
 	static uint64 slotKeyOf(const AActor* owner);

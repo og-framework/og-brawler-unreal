@@ -43,8 +43,8 @@ concept PhysicsBackendHost = requires(BackendT& backend, const BackendT& constBa
 	{ backend.createBodies_GameThread(component, character, simulatable, id) } -> std::same_as<bool>;
 	{ backend.onRegistered_GameThread(component, id) } -> std::same_as<void>;
 	{ backend.onUnregistered_GameThread(component, id) } -> std::same_as<void>;
-	{ backend.sampleLatencyWindow_GameThread(flag) } -> std::same_as<void>;
-	{ backend.logLatencyWindow_GameThread(flag) } -> std::same_as<void>;
+	{ backend.editDiagnostics().sampleLatencyWindow_GameThread(flag) } -> std::same_as<void>;
+	{ backend.editDiagnostics().logLatencyWindow_GameThread(flag) } -> std::same_as<void>;
 };
 
 #if OG_PHYSICS_BACKEND_CHAOS

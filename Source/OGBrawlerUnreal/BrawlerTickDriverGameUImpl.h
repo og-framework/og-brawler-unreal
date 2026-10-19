@@ -58,9 +58,9 @@ public:
 		m_session.releaseDelayedInputsForStep(static_cast<int32>(authorityTick), 1);
 	}
 
-	void onStepStarted(double stepStartSeconds) { m_session.stampLatencyAfterStep_Internal(stepStartSeconds); }
+	void onStepStarted(double stepStartSeconds) { m_session.editLatencyBudgetDiagnostics().stampAfterStep_Internal(stepStartSeconds); }
 
-	void onStepEnded() { m_session.stampLatencyStepEnd_Internal(); }
+	void onStepEnded() { m_session.editLatencyBudgetDiagnostics().stampStepEnd_Internal(); }
 
 	void onPostPhysics() { m_session.OnPostPhysicsStep(); }
 

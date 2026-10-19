@@ -99,8 +99,8 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 	if (ch == nullptr)
 		return;
 
-	// Latency-budget hop H1 start: this frame's input sample (docs/SimulationManagerUImpl-rationale.md §16).
-	m_inputSampledSeconds.store(FPlatformTime::Seconds(), std::memory_order_relaxed);
+	// Latency-budget hop H1 start: this frame's input sample (docs/LatencyBudgetDiagnosticsUImpl-rationale.md §6).
+	noteInputSampled();
 
 	// Resolve camera forward: PCM with FollowCamera fallback.
 	// Single home for the resolution previously duplicated in OGBrawlerUECharacter::Tick
