@@ -36,7 +36,7 @@ static_assert(
 
 static_assert(
     SimulationIntegrationExecutorConcept<
-        SimulationIntegrationExecutor<simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableBrawler>>,
+        SimulationIntegrationExecutor<simulatableBrawler::StaticData, EngineTraits::BodyAdapter, EngineTraits::QueryAdapter, SimulatableBrawler>>,
     "SimulationIntegrationExecutor must satisfy SimulationIntegrationExecutorConcept");
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,9 @@ public:
 
 	virtual void BeginPlay() override;
 
+	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId,
+		FString& ErrorMessage) override;
+
 	// The server's join/leave log for the host launcher [og-brawler-uploadtosteam task 13].
 	// Lines and rules: Source/OGBrawlerUnreal/docs/SessionLog-guards.md and -rationale.md.
 	virtual void PostLogin(APlayerController* newPlayer) override;

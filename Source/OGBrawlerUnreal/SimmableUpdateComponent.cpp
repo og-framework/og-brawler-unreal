@@ -3,8 +3,6 @@
 
 #include "SimmableUpdateComponent.h"
 #include "OGSimulation/CompilerControl.h"
-#include "Chaos/ChaosEngineInterface.h"
-#include "Chaos/Declares.h"
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/DAttackRadialVisualization.h"
@@ -19,24 +17,13 @@
 #include "Logging/LogMacros.h"
 
 
-#include "Chaos/Box.h"
-#include "Chaos/PBDRigidParticles.h"
-#include "Chaos/Vector.h"
 #include "Math/Vector.h"
 #include "Runtime/Core/Public/Templates/SharedPointer.h"
-#include "Runtime/Experimental/ChaosCore/Public/Chaos/Real.h"
-#include "Runtime/Experimental/ChaosCore/Public/Chaos/Vector.h"
-#include "Runtime/Experimental/ChaosCore/Public/Chaos/Core.h"
 #include "Runtime/Engine/Public/Physics/PhysicsFiltering.h"
-#include "Runtime/PhysicsCore/Public/Chaos/ChaosEngineInterface.h"
-#include "PBDRigidsSolver.h"
-#include "PhysicsProxy/SingleParticlePhysicsProxy.h"
-#include "Runtime/Experimental/Chaos/Public/PhysicsProxy/SingleParticlePhysicsProxy.h"
 
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
-#include "Physics/Experimental/PhysScene_Chaos.h"
 
 #include "OGBrawlerUnreal/DAttackCircleUImplementation.h"
 #include "OGBrawlerUnreal/DShapeUImplementation.h"
@@ -208,11 +195,7 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 		if (m_initializationAttempts >= kMaxRegistrationAttempts)
 			checkf(false, TEXT("USimmableUpdateComponent: manager never spawned after %d attempts (netmode=%d)"),
 				kMaxRegistrationAttempts, (int)GetNetMode());
-		if (UWorld* world = GetWorld())
-		{
-			world->GetTimerManager().SetTimerForNextTick(
-				FTimerDelegate::CreateWeakLambda(this, [this]() { tryInitializeWithManager(); }));
-		}
+		scheduleNextInitializationAttempt();
 		return;
 	}
 
@@ -224,21 +207,25 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 
 	// ⛔G-03  docs/SimmableUpdateComponent-guards.md
 
-	ChaosSpatialQueryAdapter& queryAdapter = manager->editQueryAdapter();
-
 	{
-		FCollisionQueryParams queryParams;
-		queryParams.bTraceComplex = false;
-		queryParams.AddIgnoredActor(Owner);
-
 		QueryVolumeDescriptor targetVisDescriptor{
 			SphereGeometry{m_staticData->m_attackCircle.getOuterRadius() * 2.f},
 			collisionCategory::bodyAndGuard,
 			glm::mat4(1.f),
 			collisionCategory::queryRouting};
 
-		m_targetVisualizationVolumeIds.push_back(
-			queryAdapter.registerVolume(targetVisDescriptor, queryParams, FActorInstanceHandle(Owner)));
+		const std::optional<QueryVolumeId> targetVolume = manager->registerVizVolume(targetVisDescriptor, *Owner);
+		if (!targetVolume.has_value())
+		{
+			if (m_initializationAttempts >= kMaxRegistrationAttempts)
+				checkf(false,
+					TEXT("USimmableUpdateComponent: '%s' got no physics slot after %d attempts (netmode=%d); the ")
+					TEXT("manager logs a [SimHost.Slot] wait line naming what it waits for."),
+					*Owner->GetName(), kMaxRegistrationAttempts, (int)GetNetMode());
+			scheduleNextInitializationAttempt();
+			return;
+		}
+		m_targetVisualizationVolumeIds.push_back(*targetVolume);
 	}
 	m_attackTargetVisualizationState.emplace(m_targetVisualizationVolumeIds);
 	m_attackAimVisualizationState.emplace();
@@ -248,6 +235,15 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 	{
 		world->GetTimerManager().SetTimerForNextTick(
 			FTimerDelegate::CreateWeakLambda(this, [this]() { tryRegisterWithNewFramework(); }));
+	}
+}
+
+void USimmableUpdateComponent::scheduleNextInitializationAttempt()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateWeakLambda(this, [this]() { tryInitializeWithManager(); }));
 	}
 }
 
@@ -421,9 +417,15 @@ void USimmableUpdateComponent::OnRep_CorrectionState()
 	{
 		simulatableBrawler::State peeked;
 		const uint32 tick = m_simulationStateCorrectionSyncedBuffer.readInto(peeked);
-		UE_LOG(LogOGNet, Log,
+		OG_LOG_ROUTED(LogOGNet,
 			TEXT("[ReceiveCorrectionState] id=%u tick=%u"),
 			toStorageKey(simCharacterId()), tick);
+		LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
+			[this, tick](LatencyBudgetDiagnosticsUImpl& diagnostics)
+			{
+				diagnostics.stamp(latencyBudget::Stream::State, toStorageKey(simCharacterId()),
+					tick, latencyBudget::Point::ClientReceived);
+			});
 	}
 	if (m_onCorrectionStateReceivedCallback)
 		m_onCorrectionStateReceivedCallback(m_simulationStateCorrectionSyncedBuffer);
@@ -510,6 +512,31 @@ void USimmableUpdateComponent::attachInputRelayHost(ASimulationInputRelay* host)
 				self->onRelayedInputRingArrived(ring);
 		});
 
+	if (GetNetMode() != NM_Client)
+	{
+		host->setOnRingFlushedCallback(
+			[weakSelf](const FRelayedInputRing& ring)
+			{
+				LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/true,
+					[&weakSelf, &ring](LatencyBudgetDiagnosticsUImpl& diagnostics)
+					{
+						USimmableUpdateComponent* self = weakSelf.Get();
+						if (self == nullptr)
+							return;
+						const unsigned int id = toStorageKey(self->simCharacterId());
+						ring.forEachEntry<simulatableBrawler::PlayerInput>(
+							[&diagnostics, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
+							{
+								if (captureTick != kNoInputCaptureTick)
+								{
+									diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+										latencyBudget::Point::Handed);
+								}
+							});
+					});
+			});
+	}
+
 	if (m_onRelayedInputReceivedCallback)
 		m_onRelayedInputReceivedCallback(host->getRelayedInputRing());
 }
@@ -531,6 +558,21 @@ void USimmableUpdateComponent::onRelayedInputRingArrived(const FRelayedInputRing
 			toStorageKey(simCharacterId()));
 	}
 
+	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
+		[this, &ring](LatencyBudgetDiagnosticsUImpl& diagnostics)
+		{
+			const unsigned int id = toStorageKey(simCharacterId());
+			ring.forEachEntry<simulatableBrawler::PlayerInput>(
+				[&diagnostics, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
+				{
+					if (captureTick != kNoInputCaptureTick)
+					{
+						diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+							latencyBudget::Point::ClientReceived);
+					}
+				});
+		});
+
 	if (m_onRelayedInputReceivedCallback)
 		m_onRelayedInputReceivedCallback(ring);
 }
@@ -544,6 +586,18 @@ void USimmableUpdateComponent::sendLocalInputToAuthority(
 	buildRedundancyBundle<simulatableBrawler::PlayerInput>(
 		queue, currentTick, static_cast<uint8>(redundancyDepth), bundle);
 	ServerReceiveRemoteMove(bundle);
+
+	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
+		[this, &bundle](LatencyBudgetDiagnosticsUImpl& diagnostics)
+		{
+			const unsigned int id = toStorageKey(simCharacterId());
+			bundle.forEachSlot<simulatableBrawler::PlayerInput>(
+				[&diagnostics, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
+				{
+					diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+						latencyBudget::Point::Handed);
+				});
+		});
 }
 
 void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInputRedundancyBundle& bundle)
@@ -574,13 +628,26 @@ void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInp
 
 	const unsigned int id = toStorageKey(simCharacterId());
 
+	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/true,
+		[&bundle, id, rootConn](LatencyBudgetDiagnosticsUImpl& diagnostics)
+		{
+			bundle.forEachSlot<simulatableBrawler::PlayerInput>(
+				[&diagnostics, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
+				{
+					diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
+						latencyBudget::Point::ServerReceived);
+				});
+			if (rootConn != nullptr)
+				diagnostics.noteWireSample(readRoundTripMs(rootConn) / 1000.0);
+		});
+
 	// ⛔G-21  docs/SimmableUpdateComponent-guards.md
 	if (coordinator == nullptr || rootConn == nullptr)
 	{
 		bundle.forEachSlot<simulatableBrawler::PlayerInput>(
 			[this, id](uint32 captureTick, const simulatableBrawler::PlayerInput& input)
 			{
-				UE_LOG(LogOGNet, Log, TEXT("[ServerReceive] id=%u tick=%u"), id, captureTick);
+				OG_LOG_ROUTED(LogOGNet, TEXT("[ServerReceive] id=%u tick=%u"), id, captureTick);
 				if (m_onRemoteMoveReceivedCallback)
 					m_onRemoteMoveReceivedCallback(captureTick, input);
 			});
@@ -746,7 +813,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		{
 			dAttackTargetVisualizationTwo::Input attackTargetVisualizationInput(DeltaTime,
 				tmpAimInput,
-				vizManager->editQueryAdapter(),
+				vizManager->editVizQuery(),
 				rendererFunctorImpl,
 				DAttackTargetVisualizationCVars::legacyEnemyRangeArcsEnabled);
 			dAttackTargetVisualizationTwo::visualize(attackTargetVisualizationInput,
@@ -764,8 +831,8 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 					vizPlayerInput->aimDirection,
 					vizPlayerInput->moveStick,
 					vizPlayerInput->moveDirectionWorld,
-					vizManager->getPhysicsBodyReaderAdapter(),
-					vizManager->editQueryAdapter(),
+					vizManager->getVizReader(),
+					vizManager->editVizQuery(),
 					rendererFunctorImpl);
 				dAttackBlockPredictionVisualization::visualize(blockPredInput,
 					m_attackBlockPredictionVisualizationState.value(),

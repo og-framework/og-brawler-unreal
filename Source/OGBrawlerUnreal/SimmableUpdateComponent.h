@@ -26,8 +26,7 @@
 #include <vector>
 #include "InputActionValue.h"
 
-#include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
-#include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
+#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGSimulationUnreal/RelayedInputRing.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
@@ -40,7 +39,6 @@ class DAttackCircle;
 class UInputAction;
 class UEnhancedInputComponent;
 class USimmableUpdateComponent;
-class ChaosTickMapper;
 class UOGBrawlerInputCollectionComponent;
 class ASimulationInputRelay;
 
@@ -56,9 +54,6 @@ public:
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override final;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
-	void setAttackAxisBody(FBodyInstance* attackAxisBody) { m_attackAxisBody = attackAxisBody; }
-	void setAttackAxisBody(FBodyInstanceAsyncPhysicsTickHandle attackAxisPhysicsHandle) { m_attackAxisPhysicshandle = attackAxisPhysicsHandle; }
 
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
@@ -102,6 +97,7 @@ public:
 	void sendConnectionTierToOwningClient(unsigned int id, uint8_t tier);
 
 	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
+	const FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() const { return m_simulationStateCorrectionSyncedBuffer; }
 
 	FRelayedInputRing&       getRelayedInputRing();
 	const FRelayedInputRing& getRelayedInputRing() const;
@@ -118,6 +114,8 @@ public:
 
 	void onRelayedInputRingArrived(const FRelayedInputRing& ring);
 
+	const UOGBrawlerInputCollectionComponent* getOwnerInputCollection() const { return m_ownerInputCollection; }
+
 
 protected:
 	virtual void BeginPlay();
@@ -126,6 +124,7 @@ protected:
 private:
 	void tryInitializeWithManager();
 	void tryRegisterWithNewFramework();
+	void scheduleNextInitializationAttempt();
 	void scheduleNextRegistrationAttempt();
 	SimCharacterId simCharacterId() const;
 	int32 m_initializationAttempts = 0;
@@ -158,9 +157,6 @@ private:
 
 
 	UOGBrawlerInputCollectionComponent* m_ownerInputCollection = nullptr;
-
-	FBodyInstance* m_attackAxisBody;
-	FBodyInstanceAsyncPhysicsTickHandle m_attackAxisPhysicshandle;
 
 
 	dAttackRadialVisualization::State m_visualizationState;

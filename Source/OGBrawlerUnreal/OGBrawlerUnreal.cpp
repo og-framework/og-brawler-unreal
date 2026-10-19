@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+// docs/OGBrawlerUnreal-rationale.md
 
 #include "OGBrawlerUnreal.h"
 #include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
@@ -20,7 +21,6 @@ public:
         buildIdentityUImpl::registerNetworkVersionHook();
 
 #if PLATFORM_WINDOWS
-        // Start the named pipe server in a detached thread
         std::thread(DAttackPipeServer::NamedPipeServer).detach();
 #endif
     }

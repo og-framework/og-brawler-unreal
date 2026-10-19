@@ -3,6 +3,7 @@
 
 #include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
 
+#include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/FileHelper.h"
@@ -10,7 +11,11 @@
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 
+#include <cinttypes>
+#include <cstdio>
+
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
+#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 
 DEFINE_LOG_CATEGORY(LogOGBuildIdentity);
 
@@ -73,16 +78,77 @@ BuildIdentity resolveBuildIdentity()
 	return devIdentity();
 }
 
+struct BackendIdentity
+{
+	std::string fingerprint;
+	std::string token;
+};
+
+void logJoltToBuildIdentity(const char* message)
+{
+	const FString line(UTF8_TO_TCHAR(message));
+	if (line.StartsWith(TEXT("[Warning]")))
+	{
+		UE_LOG(LogOGBuildIdentity, Warning, TEXT("OGBuildIdentity: Jolt: %s"), *line);
+	}
+	else
+	{
+		UE_LOG(LogOGBuildIdentity, Log, TEXT("OGBuildIdentity: Jolt: %s"), *line);
+	}
+}
+
+BackendIdentity resolveBackendIdentity()
+{
+	BackendIdentity identity{ "none", std::string(EngineTraits::kName) };
+	if (const std::optional<uint64_t> value = EngineTraits::computeDeterminismFingerprint(&logJoltToBuildIdentity))
+	{
+		char hex[17];
+		std::snprintf(hex, sizeof(hex), "%016" PRIx64, *value);
+		identity.fingerprint = hex;
+		identity.token += ':';
+		identity.token += hex;
+	}
+	return identity;
+}
+
+const BackendIdentity& backendIdentity()
+{
+	static const BackendIdentity identity = resolveBackendIdentity();
+	return identity;
+}
+
+FString backendRefusalText(buildIdentityUImpl::BackendLoginVerdict verdict, const FString& serverToken,
+	const FString& clientToken)
+{
+	using buildIdentityUImpl::BackendLoginVerdict;
+
+	switch (verdict)
+	{
+	case BackendLoginVerdict::MissingFromClient:
+		return FString::Printf(
+			TEXT("Different build: the client reports no physics backend, this server runs %s."), *serverToken);
+	case BackendLoginVerdict::DifferentBackend:
+		return FString::Printf(TEXT("Different physics backend: this server runs %s, the client runs %s."),
+			*serverToken, *clientToken);
+	case BackendLoginVerdict::DifferentFingerprint:
+	case BackendLoginVerdict::Match:
+		break;
+	}
+	return FString();
+}
+
 void applyNetworkVersion()
 {
 	const BuildIdentity& identity = buildIdentityUImpl::buildIdentity();
 	const FString        label    = joinScreenUImpl::toFString(identity.label);
+	const FString        backend  = joinScreenUImpl::toFString(buildIdentityUImpl::backendToken());
 
 	if (buildIdentityUImpl::overridesNetworkVersion(identity.label))
 		FNetworkVersion::SetProjectVersion(*(FNetworkVersion::GetProjectVersion() + TEXT("+") + label));
 
-	UE_LOG(LogOGBuildIdentity, Display, TEXT("OGBuildIdentity: label=%s source=%s networkProjectVersion=%s"), *label,
-		sourceName(identity.source), *FNetworkVersion::GetProjectVersion());
+	UE_LOG(LogOGBuildIdentity, Display,
+		TEXT("OGBuildIdentity: label=%s source=%s backend=%s networkProjectVersion=%s"), *label,
+		sourceName(identity.source), *backend, *FNetworkVersion::GetProjectVersion());
 }
 
 } // namespace
@@ -99,6 +165,40 @@ const BuildIdentity& buildIdentity()
 std::string_view buildLabel()
 {
 	return buildIdentity().label;
+}
+
+std::string_view backendFingerprint()
+{
+	return backendIdentity().fingerprint;
+}
+
+std::string_view backendToken()
+{
+	return backendIdentity().token;
+}
+
+FString backendLoginOption()
+{
+	return joinScreenUImpl::toFString(kBackendLoginOptionKey) + TEXT("=") + joinScreenUImpl::toFString(backendToken());
+}
+
+bool refuseMismatchedBackendLogin(const FString& loginOptions, FString& errorMessage)
+{
+	const FString clientToken = UGameplayStatics::ParseOption(loginOptions, joinScreenUImpl::toFString(kBackendLoginOptionKey));
+	const BackendLoginVerdict verdict = classifyBackendLogin(backendToken(), joinScreenUImpl::toUtf8(clientToken));
+	if (verdict == BackendLoginVerdict::DifferentFingerprint)
+	{
+		UE_LOG(LogOGBuildIdentity, Warning,
+			TEXT("OGBuildIdentity: admitted a login with a different Jolt determinism fingerprint: this server runs %s, "
+			     "the client runs %s."),
+			*joinScreenUImpl::toFString(backendToken()), *clientToken);
+	}
+	if (!refusesBackendLogin(verdict))
+		return false;
+
+	errorMessage = backendRefusalText(verdict, joinScreenUImpl::toFString(backendToken()), clientToken);
+	UE_LOG(LogOGBuildIdentity, Warning, TEXT("OGBuildIdentity: refused a login: %s"), *errorMessage);
+	return true;
 }
 
 void registerNetworkVersionHook()

@@ -8,9 +8,11 @@
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGSimulation/SimulationTimeContext.h"
 #include "OGSimulation/Network/LocalInputCache.h"
+#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
 
+#include <atomic>
 #include <optional>
 
 #include "OGBrawlerInputCollectionComponent.generated.h"
@@ -53,6 +55,24 @@ public:
 	// Physics-thread-safe cache reads. Valid after the first updateGameThreadCache() call.
 	glm::vec3 resolveCameraForward() const { return m_camForwardCache; }
 	glm::vec3 resolveMouseAim() const { return m_mouseAimCache; }
+
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+	// Diagnostics view (og-simulation's DiagnosticsConventions.md §1; og-tickdriver task 18). Read only by
+	// LatencyBudgetDiagnosticsUImpl's capture wrapper; it exists only while OG_LATENCY_BUDGET_DIAGNOSTICS is 1
+	// (every build but Shipping). inputSampledSeconds(): wall time (FPlatformTime::Seconds) of the latest
+	// updateGameThreadCache call, or 0 before the first. Written on the game thread, read at capture on the
+	// physics thread (atomic, relaxed): the latency-budget probe's hop H1 start. Feeds no simulation input.
+	class Diagnostics
+	{
+	public:
+		explicit Diagnostics(const UOGBrawlerInputCollectionComponent& component) : m_component(component) {}
+		double inputSampledSeconds() const { return m_component.m_inputSampledSeconds.load(std::memory_order_relaxed); }
+
+	private:
+		const UOGBrawlerInputCollectionComponent& m_component;
+	};
+	Diagnostics getDiagnostics() const { return Diagnostics(*this); }
+#endif
 
 	// Direction-build helpers — physics-thread-safe (read caches + statics only).
 	// buildAimDirection is always unit length. buildMoveDirectionWorld is zero below the move
@@ -171,6 +191,22 @@ private:
 	// pre-refactor m_camForward on SimmableUpdateComponent.
 	glm::vec3 m_camForwardCache = glm::vec3(1.f, 0.f, 0.f);
 	glm::vec3 m_mouseAimCache   = glm::vec3(0.f, 0.f, 0.f);
+
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+	// DIAGNOSTIC ONLY — READ BY NOTHING IN PRODUCTION. The latency-budget probe's hop H1 start, read only
+	// through getDiagnostics(); compiled out with the probe when OG_LATENCY_BUDGET_DIAGNOSTICS is 0, so a
+	// production reader does not compile there (docs/LatencyBudgetDiagnosticsUImpl-rationale.md §2).
+	std::atomic<double> m_inputSampledSeconds{ 0.0 };
+#endif
+
+	// The one write of m_inputSampledSeconds: a no-op when OG_LATENCY_BUDGET_DIAGNOSTICS is 0, so its
+	// call site in updateGameThreadCache carries no #if.
+	void noteInputSampled()
+	{
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+		m_inputSampledSeconds.store(FPlatformTime::Seconds(), std::memory_order_relaxed);
+#endif
+	}
 
 	// Cached raw input state. m_moveKeys = WASD + D-pad (Move action), m_leftStick = gamepad
 	// left stick (MoveStick action), m_rightStick = gamepad right stick (Aim action).

@@ -15,6 +15,11 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "OGSimulationJoltUnreal",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "DVolumeModule",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"

@@ -251,6 +251,14 @@ public:
 
     bool hasRelayedInputCallback() const { return static_cast<bool>(m_onRelayedInputReceivedCallback); }
 
+    // SERVER: called from PreReplication after a flush published entries, with the
+    // ring as just published. Observation only (the latency-budget probe's relay
+    // hand-off stamp); it must not write the ring.
+    void setOnRingFlushedCallback(std::function<void(const FRelayedInputRing&)> fn)
+    {
+        m_onRingFlushedCallback = std::move(fn);
+    }
+
     // Ring OnReps that landed with nobody to route them to. Expected to be a
     // small number during the join window and then constant forever; a value that
     // keeps climbing means the owner never resolved, i.e. the link is broken and
@@ -302,6 +310,7 @@ private:
     FRelayedInputRing m_relayedInputStagingRing;
 
     std::function<void(const FRelayedInputRing&)> m_onRelayedInputReceivedCallback;
+    std::function<void(const FRelayedInputRing&)> m_onRingFlushedCallback;
 
     uint32 m_unroutedOnRepCount = 0;
     bool   m_loggedUnroutedOnRep = false;

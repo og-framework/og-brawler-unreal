@@ -25,8 +25,8 @@ public static class OGBrawlerUnrealTargetCommon
 
 		Rules.ExtraModuleNames.Add("OGBrawlerUnreal");
 		Rules.ExtraModuleNames.Add("OGSimulationUnreal");
+		Rules.ExtraModuleNames.Add("OGSimulationJoltUnreal");
 		Rules.ExtraModuleNames.Add("DVolumeModule");
-		Rules.ExtraModuleNames.Add("JoltPhysicsModule");
 		Rules.ExtraModuleNames.Add("ProceduralMountainSide");
 
 		// [movement-sim T90] Chaos::IsInPhysicsThreadContext() is compiled out of Shipping and Test

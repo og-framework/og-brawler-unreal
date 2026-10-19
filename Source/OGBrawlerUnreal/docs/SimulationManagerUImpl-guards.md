@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 <!-- lint-external-ref: writesThisFrame -- a term in the stated ceiling formula (G-17), not a declared identifier -->
+<!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
 # `SimulationManagerUImpl.h` and `.cpp` — guards
 
 Every prohibition that survived the triage of the header (task 11, ids G-01..G-49) and of the
@@ -43,6 +44,14 @@ tags. The prohibitions in it went five ways. Only the first row is in this file.
 below this line with the task that added it; it is not folded into the table above.
 
 * **G-75** — og-netcode-v2-field-defects task 9, 2026-09-23: the systems executor's detection adapters.
+* **G-18** — retired by og-simulationscheduler-withjolt task 81, 2026-10-15, when the alias chain moved to
+  `BrawlerCompositionUImpl.h`; its successor is that file's G-01. See §R.
+* **G-02, G-51 to G-55, G-71, G-76, G-77** — retired by og-simulationscheduler-withjolt task 82, 2026-10-15,
+  when the Chaos host moved to `ChaosTickBackendUImpl`; their successors are that file's G-01 to G-09. See §R.
+* **G-80 to G-84** — retired by og-simulationscheduler-withjolt task 83, 2026-10-15, when the Jolt
+  host moved to `TickDriverBackendUImpl`; their successors are that file's G-01 to G-05. See §R.
+* **G-85** — og-simulationscheduler-withjolt task 83 (rework 1), 2026-10-15: `EndPlay`'s first statement, the
+  backend's `onEndPlayBegin`; the half of the old G-80 that is typed in this class.
 
 ---
 
@@ -62,19 +71,7 @@ below this line with the task that added it; it is not folded into the table abo
 
 ---
 
-## G-02 — `bodyName` stores a pointer to a STRING LITERAL, and only a string literal
-
-**Tag site:** `SimulationManagerUImpl.h`, directly above `FRewindPushProbeStashedBody::bodyName`.
-
-**The fence, verbatim — the bytes it occupied in the header before task 11:**
-
-<!-- header lines 272-273 at b9f6d81 -->
-```
-// ⛔ `bodyName` IS A STRING LITERAL (a declaration's `D::name`), never owned and
-// never freed. Storing a `const char*` is safe only for that reason.
-```
-
-**What breaks if the edit is made.** The stash outlives the hook that fills it: it is written in `FirstPreResimStep_Internal` and read one hook later, at the top of `OnPreSimulate_Internal` on the resetting frame, or printed as `verdict=UNREAD` by the discard path. Every value stored today is a physics declaration's `static constexpr const char* name` (`CharacterCapsule`, `WeaponAxis`, `GuardAxis`, and the projectile slots' literal-returning `constexpr` initializer), whose storage is static. A pointer into anything with a lifetime — an `FString`'s buffer, a `std::string::c_str()`, a stack array — dangles across that gap and is printed as `body=` out of freed memory, on the physics thread.
+*G-02 moved to `ChaosTickBackendUImpl-guards.md` as G-01 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -369,36 +366,13 @@ The second fence block is the orientation banner's statement of the same rule (l
 
 ---
 
-## G-18 — The simulatable-pack aliases are CLASS-scoped
-
-**Tag site:** `SimulationManagerUImpl.h`, directly above `using BrawlerSimulatables = SimulatableList<SimulatableBrawler>;`, first of the alias chain.
-
-**The fence, verbatim — the bytes it occupied in the header before task 11:**
-
-<!-- header lines 1032-1035 at b9f6d81 -->
-```
-// ---- SIMULATABLE-PACK ALIAS CHAIN -------------------------------------
-//
-// Single source of truth: widen this one alias and every type below inherits it.
-// ⛔ CLASS-scoped so these names cannot leak to global scope from an adapter header. §2
-```
-
-**What breaks if the edit is made.** `SimulationManagerUImpl.h` is included by most of this module, and the OGSim core lives in the global namespace. Hoist the chain to file scope and five generic names (`BrawlerStorage`, `BrawlerNetSync`, ...) land in the global namespace of every includer. Inside the class they are the one source of truth for the pack: widen `BrawlerSimulatables` and every storage and executor type below it follows.
-
----
-
 ## Entries G-50 and up — `SimulationManagerUImpl.cpp`
 
 <!-- ================= DECLARED LINT ESCAPES — entries G-50 and up ==========
      Every token below is CORRECT and cannot resolve. ========================= -->
-<!-- lint-external-ref: FRewindData::RewindToFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FRewindData::SetTargetStateAtFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FPBDRigidsSolver::ConditionalApplyRewind_Internal -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FRewindData::ApplyTargets -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FPBDRigidsEvolutionGBF::Integrate -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: SetXR -- Chaos engine particle-handle method, outside every scan root -->
 <!-- lint-external-ref: OutBytes -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: OutPackets -- Unreal Engine connection stat, outside every scan root -->
+<!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this file stopped binding it in og-simulationscheduler-withjolt task 51 -->
 <!-- lint-external-ref: ResimCooldownTicks -- ABSENCE FENCE (G-58): the ini key that was built and removed on a ruling. It must NOT resolve -->
 
 Ids **G-50 onward** belong to the implementation file; the header's are below G-50. Each quote
@@ -438,165 +412,14 @@ its `field=` tail. A latched bool loses the console switch mid-session.
 **What breaks if the tag moves.** The other half of this pair is the `DivergenceProbe` row of
 `kOGLogRoutes`. That row is now checked by a `static_assert`, but only for ORDER; nothing
 checks that the row and this predicate name the same category. This tag is the only thing
-that says so at the predicate.
+that says so at the predicate. Since og-tickdriver task 12 the row is og-simulation's (its
+`kSimulationLogRoutes`, route `SimulationLogRoute::DivergenceProbe`), and the category is chosen
+here by `ogLogRouteOf`'s `DivergenceProbe` case in `SimulationManagerUImpl.h`, then by
+`RouteOGMessage`'s `OGLogRoute::DivergenceProbe` arm. A re-route is typed at either of those two.
 
 ---
 
-## G-51 — the push-probe verdict read stays at the top of `OnPreSimulate_Internal`, and its `else` stays
-
-**Site:** the `if (m_pushProbeStashFrame != INDEX_NONE)` block at the top of
-`FSimulationManagerAsyncCallback::OnPreSimulate_Internal`.
-
-**The prohibition, as it stood in the source:**
-
-> ⛔ IT MUST STAY ABOVE `onGameSimulation`. The radial's setIdlePose /
-> setInitialConditions write the live body during the replayed step; a read taken after
-> them would be measuring OG's own writes and would report a mismatch that says nothing
-> about whether the engine read the target.
->
-> ⛔ THE `else` IS NOT DEFENSIVE PADDING. A stash that is still pending on a frame that
-> is NOT resetting was never read at its verdict point, and a silently dropped stash is
-> indistinguishable from a rewind that never happened - so it is printed as
-> `verdict=UNREAD`. That branch firing at all is an engine-ordering finding.
-
-The same reasoning covers the `discardPushProbeStash(TEXT("newPushBeforeRead"))` call at the top
-of `FirstPreResimStep_Internal`. That call carries no tag of its own, because one entry cannot
-have two sites.
-
-**The consequence.** A read taken below `onGameSimulation` reports a mismatch on every rewind,
-because it is measuring OG's own writes. Without the `else`, an unread stash disappears silently,
-and a rewind that never happened reads the same as a clean refutation.
-
-**What breaks if the tag moves.** Nothing mechanical checks the position of this block. The
-tag is the only record that its line position is what the probe measures.
-
----
-
-## G-52 — the push probe reads X/R, never P/Q
-
-**Site:** the `particle->GetX()` / `GetR()` reads in `readLiveBodyForPushProbe`.
-
-**The prohibition, as it stood in the source:**
-
-> ⛔ X/R, NOT P/Q - AND THAT IS THE DIFFERENCE BETWEEN A PROBE AND A CONFIRMATION
-> MACHINE. `ChaosPhysicsBodyAdapter::captureBodyState` reads `GetP()`/`GetQ()`
-> because it runs from PostSolve, where P/Q are the solved pose and X/R still hold
-> the start-of-step pose. Here the phase is the opposite one:
-> `FRewindData::RewindToFrame` restores the pose with `SetXR`,
-> `FRewindData::ApplyTargets` applies a target with `SetXR` - neither writes P/Q -
-> and `FPBDRigidsEvolutionGBF::Integrate` starts the replayed step from
-> `XCom()`/`RCom()`. X/R IS therefore the state the replay starts from, and
-> reading P/Q here would report a stale pre-rewind pose and print a mismatch every
-> single time. `dXP=` carries the X-to-P distance so that skew stays visible.
-
-and, beside the struct the read fills:
-
-> The live particle, read the way the replayed step is going to read it. `solvedP`
-> is NOT part of that answer and is never compared — it exists only so that `dXP=`
-> can show how far the uncommitted P has drifted from the rewound X.
-
-**The consequence.** Matching `captureBodyState` looks like a harmless consistency fix, but it
-turns the probe into one that reports `MISMATCH` on every body on every rewind. That confirms
-the hypothesis whether or not it is true.
-
-**What breaks if the tag moves.** Nothing else points at these two lines.
-
----
-
-## G-53 — the push probe compares with the production predicate, over the fields the body's wire shape carries
-
-**Site:** `pushProbeFieldsSimilar`.
-
-**The prohibition, as it stood in the source:**
-
-> ⛔ THE MATCH PREDICATE IS THE PRODUCTION ONE, never a re-derivation:
-> `isSimilarToField` (`SimulationComparisonGlm.h`) at `kDefaultSimilarityEpsilon`
-> (`SimulationTypes.h`), the same test `isSimilarTo` applies to a correction. Its
-> quaternion arm is |abs(dot) - 1|, so an antipodal-but-identical rotation reads as
-> a match where a component compare would have shouted mismatch. `inert=` runs the
-> SAME predicate over the SAME field set, so "inert but mismatched" can never be an
-> artefact of the two questions looking at different fields.
->
-> ⛔ ONLY THE FIELDS THE BODY'S WIRE SHAPE ACTUALLY CARRIES ARE COMPARED. A
-> declaration whose `bodyStateOf` yields `LinearBodyState` - the character capsule,
-> `BrawlerMovementSimulation.h` - fabricates an identity rotation and a zero
-> angular velocity on the way to `PhysicsBodyState`, so comparing those two would
-> report a mismatch that means nothing. `cmp=` names the set compared; anything
-> that is not exactly `PhysicsBodyState` takes the conservative
-> position-plus-linear-velocity set. `moved=` is the one deliberate exception: it
-> compares two LIVE reads of the same particle, so the wire shape is irrelevant
-> there and all four fields count.
-
-The helpers beside it said the same thing about the numbers they print:
-
-> REPORTED MAGNITUDES, each the quantity its own `isSimilarToField` overload tests:
-> worst component for a vec3, |abs(dot) - 1| for a quat. A number that measured
-> something other than what the verdict tested would be worse than no number.
-
-> The deciding magnitude for `pushProbeFieldsSimilar`, over the SAME field set: every
-> arm is tested against the same `kDefaultSimilarityEpsilon`, so the worst arm is
-> exactly the number whose comparison to eps produces the bool. Reporting anything
-> else would be reporting a quantity the verdict did not use.
-
-**The consequence.** A hand-written component compare reports a match as a large mismatch when
-the two quaternions are antipodal. Comparing rotation on the capsule reports a mismatch on a
-value no wire ever carried. The task-10 standalone run found that both of these wrong rules
-lean toward `MISMATCH`, which means both would confirm the hypothesis for free.
-
-**What breaks if the tag moves.** `pushProbeWorstDelta` must follow any change to this
-function, and it has no tag of its own.
-
----
-
-## G-54 — the push-probe verdict's denominator is `nonInert`, and `VACUOUS` is a third verdict
-
-**Site:** `pushProbeVerdictText`.
-
-**The prohibition, as it stood in the source:**
-
-> ⛔ `compared` IS NOT THE DENOMINATOR OF THE VERDICT - `nonInert` IS. An inert
-> comparison (the pushed value already equalled the live pre-push state) tests nothing
-> whatever the replay then does, so counting it as a match would let a session in which
-> the shape never reproduced read as a refutation.
-
-> ⛔ VACUOUS IS A THIRD VERDICT, not a rounding of ALL_MATCH, and rework 1 widened
-> what reaches it. `compared == 0` was never the only way to test nothing: a rewind
-> whose every push was inert compares six bodies, matches six and tests nothing at all.
-> Both now read VACUOUS, because this task's whole value is that a refutation be
-> trustworthy.
-
-**The consequence.** If the verdict is taken over `compared`, a session where the shape never
-reproduced prints `ALL_MATCH`, and that closes a real defect as "not a defect".
-
-**What breaks if the tag moves.** The counters live in `PushProbeTally`, and a change there is
-where the denominator would drift. The tag stays on the function that turns those counters into
-a word.
-
----
-
-## G-55 — `noteResimGrant` is recorded before `prepareResimulation`
-
-**Site:** the `m_manager->noteResimGrant(PhysicsStep);` line in `FirstPreResimStep_Internal`.
-
-**The prohibition, as it stood in the source:**
-
-> THE GRANT. Chaos starts at `PhysicsStep`, which can differ from ours only by being DEEPER. §8
->
-> ⛔ A SHALLOW CLAMP IS STRUCTURALLY IMPOSSIBLE here: validation walks DOWN and the merge
-> can only deepen, so `clampedGrants` reads 0 and a nonzero is an engine-change alarm.
->
-> ⛔ BEFORE prepareResimulation, so a grant is recorded even if anything below returns
-> early: `grants` and `prepares` straddle this boundary and their agreement is the check.
-
-**The consequence.** If the grant moves below an early return, `grants` and `prepares` count the
-same side of the boundary. They then always agree, and the wiring check they form becomes
-vacuous.
-
-**What breaks if the tag moves.** Nothing mechanical relates the two calls.
-
-**Not re-verified.** The engine claims in the middle paragraph (validation walks down, the merge
-only deepens) were not re-read from engine source in this conversion. They are carried as they
-stood.
+*G-51, G-52, G-53, G-54, G-55 moved to `ChaosTickBackendUImpl-guards.md` as G-02, G-03, G-04, G-05, G-06 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -786,7 +609,9 @@ it is unconditional, still holds. See §13.10, correction C13-1.
 
 ## G-64 — `EndPlay` resets the coordinator and the tier cache while `m_manager` still exists
 
-**Site:** the first two statements of `EndPlay`.
+**Site:** `m_delayedInputComponentsById.clear();` in `EndPlay`, the first statement after
+`m_backend.onEndPlayBegin();` (`⛔G-85`); the tag covers it, and the coordinator's and the tier cache's resets
+follow it.
 
 **The prohibition, as it stood in the source:**
 
@@ -907,64 +732,38 @@ in storage. A notify moved after the `return` breaks the score push's no-rehash 
 
 ---
 
-## G-70 — the coordinator's early return guards the drain only, never PROBE A
+## G-70 — the frame function's coordinator test guards PROBE 6 only, never PROBE A
 
-**Site:** `if (!m_receptionCoordinator.has_value()) return;` in `releaseDelayedInputsForStep`.
+**Site:** `if (!m_receptionCoordinator.has_value()) return;` in `onFrameStepsDue_GameThread`, between
+PROBE A and PROBE 6.
 
-**The prohibition, as it stood in the source:**
+**The prohibition, as it stood in the source** (in `releaseDelayedInputsForStep`, before
+og-simulationscheduler-withjolt task 51):
 
 > ⛔ The coordinator early-return guards ONLY the drain, never PROBE A, which runs on both. §8
 
-**The consequence.** If the return is hoisted to the top of the function, the frame-health probe
-stops running on every client, because a pure client never has a coordinator. PROBE 6 below the
-return is server-only and is correctly behind it.
+**Rewritten and re-sited, id kept (task 51).** Task 51 split `releaseDelayedInputsForStep`: PROBE A,
+PROBE 6 and `[PacketBudget]` moved, in that order, into `onFrameStepsDue_GameThread`, and the drain
+kept the old name with a coordinator test of its own (rationale §7). The return this tag marks now
+stands between PROBE A and PROBE 6. ⛔ Do not hoist it above PROBE A. PROBE 6 and `[PacketBudget]`
+below it are server-only and correctly behind it.
+
+**The consequence.** Hoisted to the top of the function, the return stops the frame-health probe on
+every client, because a pure client never has a coordinator. The drain and the reap no longer depend
+on it: `releaseDelayedInputsForStep` tests the coordinator itself, and the Chaos configuration's
+`InjectInputs_External` tests it before the drain and the reap.
 
 ---
 
-## G-71 — the upcoming sim tick comes from the mapper, and the `+ 1` is derived
-
-**Site:** `const int32 firstUpcomingSimTick =` in `releaseDelayedInputsForStep`.
-
-**The prohibition, as it stood in the source:**
-
-> TICK ALIGNMENT. ⛔ An off-by-one here shifts EVERY player's input, silently and uniformly. §9
->
-> `physicsStep` is the UPCOMING solver step; the frame counter increments at a tick's END,
-> so step N's OnPreSimulate_Internal sees frame N and writes the mapper offset there,
-> BEFORE onGameSimulation, whose first action on the authority is to advance the clock:
->
->     offset = K - S(K-1)     where S(K) is the sim tick simulated at step K
->     S(K)   = S(K-1) + 1     authority advance is unconditional - no Stall, Skip or
->                             resim exists on the server
->  => offset = (K - S(K)) + 1
->  => toSimulationTick(X) = X - offset = S(X) - 1
->
-> ⛔ So toSimulationTick(physicsStep) names the tick BEFORE that step's: hence the `+ 1`.
->
-> ⛔ WHY NOT CROSS-CHECK AGAINST THE SERVER CLOCK: reading it here IS the unsynchronized
-> cross-thread read this design exists to avoid. The mapper's offset is the safe source. §1
-
-and, at the reap and in PROBE A:
-
-> ⛔ The tick comes from the game-thread-safe mapper, NOT the server clock. §9
-
-> ⛔ WHY REUSING `firstUpcomingSimTick` IS SAFE ON THE CLIENT although its `+1` derivation
-> assumes authority: the probe consumes only DELTAS, so a constant skew cancels, and a
-> departure is counted as a `kFrameHealthDiscontinuityTicks` discontinuity. ⛔ A DIFFERENT
-> tick source would not be safe. §9
-
-**Why a guard and not a derivation tag.** This line has two readings: the derivation of the
-`+ 1` (§9) and the prohibition on any other tick source. The rule gives a coinciding G and D one
-tag and merges the entries, so §9 is this entry's derivation.
-
-**The consequence.** Dropping the `+ 1` shifts every player's input by one tick. Swapping in the
-server clock adds an unsynchronized read of a physics-thread-written value on the game thread.
+*G-71 moved to `ChaosTickBackendUImpl-guards.md` as G-07 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
 ## G-72 — the send-budget probe feeds the engine's cumulative counters, not `OutBytes` / `OutPackets`
 
-**Site:** the `m_connectionBudgetProbe.noteSample(` call in `releaseDelayedInputsForStep`.
+**Site:** the `m_connectionBudgetProbe.noteSample(` call in `onFrameStepsDue_GameThread` (moved there
+with PROBE 6 from `releaseDelayedInputsForStep` by og-simulationscheduler-withjolt task 51; the call
+is unchanged).
 
 **The prohibition, as it stood in the source:**
 
@@ -1010,18 +809,24 @@ never finished registering.
 
 ---
 
-## G-75 — the systems executor is emplaced beside the adapters, and hands detection the PHYSICS-THREAD body adapter
+## G-75 — the systems executor is emplaced beside the adapters, and hands detection the same body adapter the integration layer uses
 
 **Tag site:** `SimulationManagerUImpl.h`, directly above `std::optional<BrawlerSystemsExec> m_systemsExec;`.
 The two emplace sites it governs are in `SimulationManagerUImpl.cpp`, one per role branch, each between
 `m_integrationLayer.emplace(...)` and `m_manager.emplace(...)`.
 
-**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<ChaosPhysicsBodyAdapter,
-ChaosSpatialQueryAdapter>`) is constructed from `*m_physAdapter` and `*m_queryAdapter` — the SAME two
-objects `m_integrationLayer` integrates with. ⛔ Never from `m_physReaderAdapter`, and never before the
+**The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<EngineTraits::BodyAdapter,
+EngineTraits::QueryAdapter>`, the backend's types from `PhysicsBackendUImpl.h`) is constructed
+from `*m_physAdapter` and `*m_queryAdapter`, the SAME two objects `m_integrationLayer` integrates with.
+⛔ Never from `m_physReaderAdapter` (an `EngineTraits::ReaderAdapter`), and never before the
 adapters are emplaced or after `m_manager` is.
 
-**Verified 2026-09-23.** `ChaosPhysicsBodyAdapter::getBodyTransform` reads
+**Rewritten for the traits types (og-simulationscheduler-withjolt task 51).** The text named the Chaos
+types until the backend switch (rationale §18). The prohibition is the same in every configuration:
+detection reads the body state the step itself reads, never the reader. Only the Chaos configuration
+builds today, and the verification below is that configuration's.
+
+**Verified 2026-09-23 (Chaos configuration).** `ChaosPhysicsBodyAdapter::getBodyTransform` reads
 `proxy->GetPhysicsThreadAPI()`; `ChaosPhysicsBodyReaderAdapter::getBodyTransform` reads
 `proxy->GetGameThreadAPI()` (its own banner: "Reads GT-interpolated state"). Both satisfy
 `PhysicsBodyReaderAdapter`, so the wrong one compiles. The detector runs on the physics thread, in
@@ -1042,65 +847,7 @@ particle, as the physics step left it.
 
 ---
 
-## G-76 — the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target
-
-**Site:** the `writeRestoredBodyState(*ptApi, bs, wireCarriesRotationAndSpin);` call inside
-`pushBodyState`, in `FSimulationManagerAsyncCallback::FirstPreResimStep_Internal`.
-
-**The prohibition.** Written by og-netcode-v2-field-defects task 10's fix (2026-09-25). No shipped
-comment preceded it.
-
-* ⛔ **Do not turn this back into `FRewindData::SetTargetStateAtFrame`**, or any other rewind-target write
-  for the frame being replayed. In public UE 5.6, `FPBDRigidsSolver::ConditionalApplyRewind_Internal`
-  calls `FRewindData::ApplyTargets` for a step **before** it calls `PreResimStep_Internal`, and this
-  hook runs from there. `FRewindData::ApplyTargets` is repeated on later steps only when
-  `np2.Resim.ApplyTargetsWhileResimulating` is set, and that setting defaults to false. So a target
-  written from this hook arrives after the only read of it. Task 10's probe measured this on the
-  running binary: **185 of 185 rewinds `verdict=MISMATCH`, `nonInertMatched=0`.**
-* ⛔ **Do not move it above `m_manager->prepareResimulation(...)`.** That call restores the synced
-  composite from the correction cache, and the composite is where `bs` comes from. Above it, the write
-  carries the pre-restore state.
-* ⛔ **Do not move it into `OnPreSimulate_Internal` or below `onGameSimulation`.** There it would run
-  after the probe's verdict read (`⛔G-51`), or after the sub-sims' own writes for the replayed step.
-* ⛔ **Keep it between the probe's two reads in this lambda.** `beforePush` is read before the write and
-  gives `inert=`. The read after the write gives `moved=`, which shows the write took effect.
-
-**Why a direct write is sound here.** The four calls are the physics-thread API's `SetX` / `SetV` /
-`SetR` / `SetW`. `ChaosPhysicsBodyAdapter` makes the same calls every tick (`setBodyTransform`,
-`setBodyLinearVelocity`, `setBodyAngularVelocity`). The sub-sims make them during replayed steps too.
-They land in the same phase as `FRewindData::ApplyTargets`: after `FRewindData::RewindToFrame` and before the replayed step
-integrates. They also do what an applied target would have done: set X/R (and P/Q), set V/W, and wake a
-sleeping body, matching the old target, which always requested an awake body.
-
-**The consequence.** Every rewind replays the client's own recorded body history instead of the
-restored state. In the knockback-revert capture this left the weapon's swing spin alive across a correction
-that had already adopted idle. Each correction re-stated the same disagreement (the `DivergenceProbe`'s
-constant 0.0359505 rotation component), and the storm ended only at the next swing edge.
-
-**What breaks if the tag moves.** Nothing mechanical. `SimulationManagerUImpl.cpp` is a UE module file
-that neither LLT target compiles, so this tag and the probe's PIE run are the only checks.
-
----
-
-## G-77 — the restored-state write sets only the fields the body's wire shape carries
-
-**Site:** the `if (wireCarriesRotationAndSpin)` branch in `writeRestoredBodyState`.
-
-**The prohibition.** ⛔ **Never write rotation or angular velocity for a body whose `bodyStateOf` is not
-exactly `PhysicsBodyState`.** A `LinearBodyState` (the character capsule) reaches `pushBodyState` through
-its widening conversion. That conversion **fabricates** an identity rotation and a zero angular velocity,
-and no wire ever carried either. Writing them would replace the rewound rotation and spin with
-constants. Without the write, those two fields keep the client's own recorded history, which is the
-only value available for them.
-
-⛔ **The flag is shared with the probe on purpose.** `wireCarriesRotationAndSpin` also picks the probe's
-`cmp=` field set (`⛔G-53`). So the probe compares exactly the fields this function writes. Give the
-write its own rule and the two sets drift. The probe then either compares a field that was never written,
-which reads `match=0` on every rewind, or ignores a field that was.
-
-**What breaks if the tag moves.** Nothing mechanical checks the branch. The flag is computed from the
-declaration with `std::is_same_v` at the `forEach` call site. An edit that drops the branch, or passes
-`true`, still compiles, and no LLT target builds this file.
+*G-76, G-77 moved to `ChaosTickBackendUImpl-guards.md` as G-08, G-09 (og-simulationscheduler-withjolt task 82), with the Chaos host's code. See §R.*
 
 ---
 
@@ -1140,8 +887,8 @@ orphans this entry.
 **The prohibition** (og-brawler-uploadtosteam task 12, 2026-09-29). ⛔ Do not call `GetWorld()`,
 `GetPhysicsScene()` or any other method that reaches the actor's outer, its world or another
 `UObject` from the destructor. Unbinding from engine objects belongs in `EndPlay`, which runs for
-every world teardown while the world still exists. The physics-scene pre-tick and step bindings are
-removed there, next to the post-tick handle.
+every world teardown while the world still exists. The Chaos configuration removes its post-tick
+handle and its two solver callbacks there.
 
 **The consequence of getting it wrong.** The destructor runs inside the garbage collector's purge,
 after the actor's outer level may already have been destroyed. The destructor used to call
@@ -1158,7 +905,143 @@ crash depends on the collector's purge order.
 
 ---
 
+*G-80, G-81, G-82, G-83, G-84 moved to `TickDriverBackendUImpl-guards.md` as G-01, G-02, G-03, G-04, G-05 (og-simulationscheduler-withjolt task 83), with the Jolt host's code. See §R.*
+
+## G-85 — `m_backend.onEndPlayBegin()` stays the first statement of `EndPlay`: nothing moves above it
+
+**Site:** `m_backend.onEndPlayBegin();`, the first statement of `EndPlay`.
+
+**The prohibition** (og-simulationscheduler-withjolt task 83; the half of the old G-80 that is typed in this
+class since the Jolt host left it). ⛔ Do not move any `EndPlay` statement above `m_backend.onEndPlayBegin()`, do
+not add one above it, and do not drop the call. Everything else in `EndPlay` (G-64's resets, the static instance
+table and listener unregistration, the post-tick-flush unbind, the backend's `onEndPlayWorld`) runs after it. The
+rule is the same in both configurations:
+- on Jolt, `onEndPlayBegin` unregisters the frame host's two tick functions and waits for every outstanding step
+  task (`TickDriverBackendUImpl-guards.md` G-01);
+- on Chaos it is an empty inline body today; a Chaos teardown that must run first belongs inside it, not above it.
+
+**The consequence of getting it wrong.** On a worker client the frame's step task runs on another thread through
+the rest of the frame and reads the coordinator, the tier cache and the manager's state. A statement above the call
+tears that state down while the step still runs: a use-after-reset on a worker thread, which nothing reports.
+
+**What breaks if the tag moves.** The tag marks the call. A statement typed above it is typed directly under the
+tag. Nothing mechanical checks the order: the race needs a step in flight at `EndPlay`. Deleting the call takes the
+tag with it and orphans this entry.
+
+---
+
 ## §R — Retired ids
 
-*(None. No id has been retired. The compile-time conversions above never held an id — the header
-had none before task 11 — so they are recorded in the census, not here.)*
+*(The compile-time conversions in the census never held an id — the header had none before task 11 —
+so they are recorded there, not here.)*
+
+### G-18 — RETIRED by og-simulationscheduler-withjolt task 81 (2026-10-15): the alias chain moved to `BrawlerCompositionUImpl.h`
+
+**Was:** *"The simulatable-pack aliases are CLASS-scoped"*. Its tag sat in `SimulationManagerUImpl.h`, directly
+above the first alias of the chain, `using BrawlerSimulatables = SimulatableList<SimulatableBrawler>;`. The fence,
+verbatim — the bytes it occupied in the header before task 11:
+
+<!-- header lines 1032-1035 at b9f6d81 -->
+```
+// ---- SIMULATABLE-PACK ALIAS CHAIN -------------------------------------
+//
+// Single source of truth: widen this one alias and every type below inherits it.
+// ⛔ CLASS-scoped so these names cannot leak to global scope from an adapter header. §2
+```
+
+Its last text said: *"`SimulationManagerUImpl.h` is included by most of this module, and the OGSim core lives in
+the global namespace. Hoist the chain to file scope and five generic names (`BrawlerStorage`, `BrawlerNetSync`,
+...) land in the global namespace of every includer. Inside the class they are the one source of truth for the
+pack: widen `BrawlerSimulatables` and every storage and executor type below it follows."* ⚠ *"most of this
+module"* was not true at retirement: 12 of the module's 29 `.cpp` files include the header directly.
+
+**Why it retired.** Its subject moved. Task 81 moved the chain into `struct BrawlerCompositionUImpl` in
+`BrawlerCompositionUImpl.h`, so a backend host declared outside this class (task 83) can name the manager type.
+The class now holds only one-line re-exports of the struct's members. **Successor:**
+`BrawlerCompositionUImpl-guards.md` G-01 — the aliases live inside the struct, never at file scope, and
+`Simulatables` is the single source of truth.
+
+### G-02 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-01
+
+**Was:** *"`bodyName` stores a pointer to a STRING LITERAL, and only a string literal"*. Its tag sat in `SimulationManagerUImpl.h`, above `FRewindPushProbeStashedBody::bodyName`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-01.
+
+### G-51 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-02
+
+**Was:** *"the push-probe verdict read stays at the top of `OnPreSimulate_Internal`, and its `else` stays"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the push-probe verdict read at the top of `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-02.
+
+### G-52 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-03
+
+**Was:** *"the push probe reads X/R, never P/Q"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the X/R reads in `readLiveBodyForPushProbe`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-03.
+
+### G-53 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-04
+
+**Was:** *"the push probe compares with the production predicate, over the fields the body's wire shape carries"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `pushProbeFieldsSimilar`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-04.
+
+### G-54 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-05
+
+**Was:** *"the push-probe verdict's denominator is `nonInert`, and `VACUOUS` is a third verdict"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `pushProbeVerdictText`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-05.
+
+### G-55 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-06
+
+**Was:** *"`noteResimGrant` is recorded before `prepareResimulation`"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `noteResimGrant` call in `FirstPreResimStep_Internal`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-06.
+
+### G-71 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-07
+
+**Was:** *"the upcoming sim tick comes from the mapper, and the `+ 1` is derived"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `firstUpcomingSimTick` in the Chaos configuration's input hook.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-07.
+
+### G-76 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-08
+
+**Was:** *"the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `writeRestoredBodyState` call in `FirstPreResimStep_Internal`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-08.
+
+### G-77 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-09
+
+**Was:** *"the restored-state write sets only the fields the body's wire shape carries"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `wireCarriesRotationAndSpin` branch of `writeRestoredBodyState`.
+
+**Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-09.
+
+
+### G-80 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-01
+
+**Was:** *"`EndPlay` waits for every outstanding step task before any teardown"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the second statement of `EndPlay`, the frame host's wait for outstanding steps.
+
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-01.
+
+### G-81 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-02
+
+**Was:** *"the Jolt bind runs under the world mutex, and the game thread never applies occupancy"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the world-mutex scope line (JoltWorldLockScopeUImpl, since deleted) of `tryRegister`'s first-call bind.
+
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-02.
+
+### G-82 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-03
+
+**Was:** *"the shadow world is built by the step world's calls, and every bind and release is mirrored into it"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the shadow world's construction in `buildShadowWorld`.
+
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-03.
+
+### G-83 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-04
+
+**Was:** *"the render apply teleports the capsule: no sweep"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the actor move (the engine's SetActorLocationAndRotation) in the render apply (applyRenderSnapshot_GameThread, since deleted).
+
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-04.
+
+### G-84 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-05
+
+**Was:** *"a client never picks a Jolt slot itself: it binds the slot the authority chose, or waits"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the `decideBodySlot` call in the slot acquire (tryAcquireJoltSlot, since deleted).
+
+**Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-05.

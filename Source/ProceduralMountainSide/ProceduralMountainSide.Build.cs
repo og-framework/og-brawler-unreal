@@ -16,8 +16,7 @@ public class ProceduralMountainSide : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"GeometryCore",
-			"GeometryFramework",
-			"JoltPhysicsModule"
+			"GeometryFramework"
 		});
 	}
 }

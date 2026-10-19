@@ -35,10 +35,21 @@ entry replaced.
 > ⛔⛔ 42 / 96 IS A CONTRACT, NOT A TUNING VALUE. […] A different size in the constructor is an
 > immediate assert at the first character registration. Change both together or neither.
 
-**Consequence.** A size that disagrees fails `ChaosPhysicsFactory::createPhysicalObject`'s
-adopt-root `checkf` (radius and half-height compared with `FMath::IsNearlyEqual`) at the first
-registration. ⚠ That `checkf` compiles out when `DO_CHECK == 0`, and a Shipping build would then
-run with a body whose size disagrees with the simulation's.
+**Consequence.** A size that disagrees fails a `checkf` at the first registration, one per physics
+backend (radius and half-height compared with `FMath::IsNearlyEqual`):
+
+* **Chaos configuration:** `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root branch, which
+  adopts this capsule as the root body.
+* **Jolt configuration** (og-simulationscheduler-withjolt task 53, design D14): the check in
+  `ASimulationManagerUImpl::tryRegister`'s first-call bind, which is
+  `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's `createBodies_GameThread`, since
+  og-tickdriver task 15a. Jolt builds the character body from the
+  descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
+  camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
+
+⚠ Both `checkf`s compile out when `DO_CHECK == 0`, and a Shipping build would then run with a
+capsule whose size disagrees with the simulation's. Task 21 drops the Chaos bullet with the Chaos
+configuration.
 
 **What breaks if the tag moves.** The mirror is also quoted by line in `SimulatableBrawlerTypes.h`
 and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
@@ -54,9 +65,12 @@ and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
 > §GATE 1 onwards) records `CollisionCylinder`. Keeping it makes "PIE parity with task 15"
 > a line-for-line comparison instead of a judgement call.
 
-**Consequence.** A rename compiles and runs; it breaks the line-for-line comparison of
-`[PhysicsFactory.AdoptRoot]` lines against the recorded transcripts, and it renames a default
-subobject that serialized instances refer to by name.
+**Consequence.** A rename compiles and runs. In both physics configurations it renames a default
+subobject that serialized instances refer to by name. In the Chaos configuration it also breaks the
+line-for-line comparison of `[PhysicsFactory.AdoptRoot]` lines against the recorded transcripts:
+`ChaosPhysicsFactory`'s adopt-root branch logs the adopted component's name. The Jolt configuration
+adopts nothing, so it prints no such line (og-simulationscheduler-withjolt task 19); task 21 drops
+this half with the Chaos configuration.
 
 ---
 
@@ -69,9 +83,25 @@ where a movement component would be created.
 > CLASS. Locomotion is `brawlerMovementSimulation`; do not re-introduce a second authority
 > over this capsule.
 
-**Consequence.** The capsule is simulated by the physics factory and written every tick by the
-movement sub-simulation (`drivesBody`). A second writer (a movement component, or re-basing the
-class on the engine's walking-pawn base) fights the simulation and the correction path.
+**Consequence.** The capsule has exactly one writer in each physics configuration, and a second
+writer (a movement component, or re-basing the class on the engine's walking-pawn base) fights it:
+
+* **Chaos configuration:** the physics factory adopts and simulates the capsule, the movement
+  sub-simulation writes it every tick (`drivesBody`), and the engine's end-of-physics sync moves the
+  component to the interpolated result. A second writer fights the simulation and the correction
+  path.
+* **Jolt configuration** (og-simulationscheduler-withjolt task 19): the character's body is a Jolt
+  slot body built from the movement descriptor, and this capsule does not simulate
+  (`tryRegister`'s Ready path, `TickDriverBackendUImpl::onRegistered_GameThread`, switches its physics simulation
+  off). The render sync, og-simulation's presenter through `UERenderTargetTable::applyRootPose`, is the only
+  writer: once per frame at the
+  end of physics it teleports the capsule to the interpolated render pose. A second writer moves the
+  capsule between two applies, and the capsule is the mouse-aim plane point and the camera anchor, so
+  the aim fed into the next simulated tick is measured from the wrong point. In a development build
+  the render apply's held check logs a `[SimHost.RenderApply]` MOVED Warning the first time it
+  happens.
+
+Task 21 drops the Chaos bullet with the Chaos configuration.
 
 ---
 
@@ -318,6 +348,27 @@ New guard (og-attackstatetransition-cleanup task 9, 2026-10-04). It replaced no 
 **What breaks if the tag moves.** Nothing checks it. `DAttackOrbitCamera.SignPins` pins the og-brawler
 side of both conventions, but the `OGBrawlerTests` target does not compile this module, so only PIE sees
 this statement.
+
+---
+
+## G-20 — `PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`
+
+**Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);`.
+
+**Prohibition (og-simulationscheduler-withjolt task 66, new).** Keep the plain form, for the same two
+reasons as G-10.
+* `COND_OwnerOnly`: a client binds every character's Jolt bodies, remote proxies included, and binds each
+  one in the slot the authority chose for it, so it needs every character's slot, not just its own. Under
+  `COND_OwnerOnly` a proxy's slot never arrives, and the client's acquire waits
+  (`[SimHost.Slot] wait=WaitForReplication`) until the component's 600-attempt `checkf` fires.
+* `COND_InitialOnly`: the authority writes the slot in `USimmableUpdateComponent::tryInitializeWithManager`
+  (through `ASimulationManagerUImpl::registerVizVolume`), one or more frames after the component's
+  `BeginPlay`. That can be after the pawn's first bunch, so the initial-only send would carry 0 and the
+  slot would never be sent.
+
+**What breaks if the tag moves.** Nothing mechanical checks the condition, and the LLT targets cannot
+reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot. The
+Chaos configuration never reads the property, so there the failure is silent.
 
 ---
 

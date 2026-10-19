@@ -177,7 +177,10 @@ param(
     [string[]]$DefaultDocDirs = @(
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/docs',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/docs',
-        'Source/OGBrawlerUnreal/docs'
+        'Source/OGBrawlerUnreal/docs',
+        'Source/OGSimulationUnreal/docs',
+        'Plugins/OGSimulation/Source/OGSimulationJolt/og-simulation-jolt/OGSimulationJolt/docs',
+        'Source/OGSimulationJoltUnreal/docs'
     ),
     [string[]]$ScanRoots = @(
         'Plugins',

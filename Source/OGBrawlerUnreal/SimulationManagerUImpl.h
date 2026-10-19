@@ -12,20 +12,20 @@
 #include <unordered_map>
 #include <functional>
 #include <optional>
+#include <memory>
 #include <set>
+#include <iterator>
+#include <array>
+#include <cstddef>
 #include "Engine/World.h"
-#include "PhysicsPublic.h"
-#include "Runtime/PhysicsCore/Public/PhysicsInterfaceDeclaresCore.h"
-#include "Runtime/Engine/Public/Physics/Experimental/PhysScene_Chaos.h"
-#include "Chaos/ChaosEngineInterface.h"
-#include "Runtime/Experimental/Chaos/Public/Chaos/SimCallbackInput.h"
-#include "Runtime/Experimental/Chaos/Public/Chaos/SimCallbackObject.h"
 #include "Runtime/CoreUObject/Public/UObject/Object.h"
 
 #include "OGSimulation/SimulationManager.h"
+#include "OGSimulation/SimulationLogRoutes.h"
+#include "OGSimulation/RenderSnapshot.h"
 #include "OGSimulation/SimulatableList.h"
 #include "OGSimulation/SystemsExecutor.h"
-#include "OGSimulationUnreal/PCTimeManagement/ChaosTickMapper.h"
+#include "OGBrawlerUnreal/PhysicsBackendHostUImpl.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
 #include "OGSimulation/SimulationManagerConcept.h"
@@ -40,6 +40,7 @@
 #include "OGSimulation/Network/ServerReceptionCoordinator.h"
 #include "OGSimulation/Network/RelayWritePathProbe.h"
 #include "OGSimulation/Network/ReplicatedTierConsumer.h"
+#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
@@ -49,10 +50,10 @@
 #include "OGBrawler/BrawlerRingoutSimulation.h"
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
 
+#include "OGSimulationUnreal/OGSimulationUnreal.h"
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
-#include "OGSimulationUnreal/ChaosPhysicsBodyAdapter.h"
-#include "OGSimulationUnreal/ChaosPhysicsBodyReaderAdapter.h"
-#include "OGSimulationUnreal/ChaosSpatialQueryAdapter.h"
+#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
+#include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 
@@ -67,6 +68,245 @@ DECLARE_LOG_CATEGORY_EXTERN(LogOGRelayProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGDivergenceProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGResimProbe, Log, All);
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
+
+enum class OGLogRoute : uint8
+{
+	SimTick, ResimProbe, Sim, Net, RelayProbe, DivergenceProbe, Mgmt
+};
+
+struct OGLogRouteEntry
+{
+	const TCHAR*        prefix;
+	OGLogRoute          route;
+	ELogVerbosity::Type plainLevel;
+};
+
+inline constexpr OGLogRouteEntry kOGGameLogRoutes[] = {
+	{ TEXT("[ResimProbe"),                       OGLogRoute::ResimProbe,      ELogVerbosity::Log },
+	{ TEXT("[ResimCheck.TriggerRewind]"),        OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ClientPrediction]"),                OGLogRoute::SimTick,         ELogVerbosity::Verbose },
+	{ TEXT("[ServerReceive]"),                   OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[SendRemoteInputToClients]"),        OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[ReceiveCorrectionState]"),          OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[ReceiveCorrectionInput]"),          OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[InjectCorrectionInput]"),           OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[DrainOutOfOrder]"),                 OGLogRoute::Net,             ELogVerbosity::Log },
+	{ TEXT("[ReleaseBatch]"),                    OGLogRoute::Net,             ELogVerbosity::Verbose },
+	{ TEXT("[RelayProbe"),                       OGLogRoute::RelayProbe,      ELogVerbosity::Log },
+	{ TEXT("SimulationManager:"),                OGLogRoute::Mgmt,            ELogVerbosity::Log },
+	{ TEXT("tryRegister:"),                      OGLogRoute::Mgmt,            ELogVerbosity::Log },
+	{ TEXT("NewFramework:"),                     OGLogRoute::Mgmt,            ELogVerbosity::Log }
+};
+
+inline constexpr OGLogRoute kOGLogRouteUnmapped = static_cast<OGLogRoute>(0xFF);
+
+constexpr OGLogRoute ogLogRouteOf(SimulationLogRoute route)
+{
+	switch (route)
+	{
+	case SimulationLogRoute::SimTick:         return OGLogRoute::SimTick;
+	case SimulationLogRoute::Sim:             return OGLogRoute::Sim;
+	case SimulationLogRoute::Net:             return OGLogRoute::Net;
+	case SimulationLogRoute::DivergenceProbe: return OGLogRoute::DivergenceProbe;
+	}
+	return kOGLogRouteUnmapped;
+}
+
+constexpr ELogVerbosity::Type ogLogVerbosityOf(HostLogLevel level)
+{
+	switch (level)
+	{
+	case HostLogLevel::Verbose: return ELogVerbosity::Verbose;
+	case HostLogLevel::Log:     return ELogVerbosity::Log;
+	case HostLogLevel::Warning: return ELogVerbosity::Warning;
+	}
+	return ELogVerbosity::NoLogging;
+}
+
+constexpr std::size_t ogSimulationLogRoutePrefixLength(const char* prefix)
+{
+	std::size_t length = 0;
+	while (prefix[length] != 0)
+		++length;
+	return length;
+}
+
+constexpr std::size_t ogLongestSimulationLogRoutePrefix()
+{
+	std::size_t longest = 0;
+	for (const SimulationLogRouteEntry& entry : kSimulationLogRoutes)
+	{
+		if (ogSimulationLogRoutePrefixLength(entry.prefix) > longest)
+			longest = ogSimulationLogRoutePrefixLength(entry.prefix);
+	}
+	return longest;
+}
+
+constexpr bool ogSimulationLogRoutePrefixesArePrintableAscii()
+{
+	for (const SimulationLogRouteEntry& entry : kSimulationLogRoutes)
+	{
+		for (const char* c = entry.prefix; *c != 0; ++c)
+		{
+			if (*c < 0x20 || *c > 0x7E)
+				return false;
+		}
+	}
+	return true;
+}
+
+static_assert(ogSimulationLogRoutePrefixesArePrintableAscii(),
+	"kSimulationLogRoutes: a prefix holds a character outside printable ASCII. Each prefix is widened "
+	"to TCHAR one char at a time, which is exact for ASCII only.");
+
+struct OGSimulationLogRouteWidePrefix
+{
+	TCHAR text[ogLongestSimulationLogRoutePrefix() + 1];
+};
+
+constexpr std::array<OGSimulationLogRouteWidePrefix, std::size(kSimulationLogRoutes)> ogWidenSimulationLogRoutePrefixes()
+{
+	std::array<OGSimulationLogRouteWidePrefix, std::size(kSimulationLogRoutes)> wide{};
+	for (std::size_t row = 0; row < std::size(kSimulationLogRoutes); ++row)
+	{
+		const char* prefix = kSimulationLogRoutes[row].prefix;
+		for (std::size_t i = 0; prefix[i] != 0; ++i)
+			wide[row].text[i] = static_cast<TCHAR>(prefix[i]);
+	}
+	return wide;
+}
+
+inline constexpr std::array<OGSimulationLogRouteWidePrefix, std::size(kSimulationLogRoutes)> kOGSimulationLogRoutePrefixes =
+	ogWidenSimulationLogRoutePrefixes();
+
+inline constexpr std::size_t kOGSimulationLogRouteCount = std::size(kSimulationLogRoutes);
+
+constexpr std::array<OGLogRouteEntry, kOGSimulationLogRouteCount + std::size(kOGGameLogRoutes)> ogConcatenateLogRoutes()
+{
+	std::array<OGLogRouteEntry, kOGSimulationLogRouteCount + std::size(kOGGameLogRoutes)> routes{};
+	for (std::size_t row = 0; row < kOGSimulationLogRouteCount; ++row)
+	{
+		routes[row] = { kOGSimulationLogRoutePrefixes[row].text,
+			ogLogRouteOf(kSimulationLogRoutes[row].route),
+			ogLogVerbosityOf(kSimulationLogRoutes[row].plainLevel) };
+	}
+	for (std::size_t row = 0; row < std::size(kOGGameLogRoutes); ++row)
+		routes[kOGSimulationLogRouteCount + row] = kOGGameLogRoutes[row];
+	return routes;
+}
+
+inline constexpr std::array<OGLogRouteEntry, kOGSimulationLogRouteCount + std::size(kOGGameLogRoutes)> kOGLogRoutes =
+	ogConcatenateLogRoutes();
+
+constexpr bool ogLogRoutesAreAllMapped()
+{
+	for (const OGLogRouteEntry& entry : kOGLogRoutes)
+	{
+		if (entry.route == kOGLogRouteUnmapped)
+			return false;
+	}
+	return true;
+}
+
+static_assert(ogLogRoutesAreAllMapped(),
+	"kOGLogRoutes: an og-simulation row's SimulationLogRoute has no OGLogRoute in ogLogRouteOf, so "
+	"RouteOGMessage would drop its lines. Map the new route to a LogOG* category.");
+
+constexpr TCHAR ogLogRouteFoldCase(TCHAR c)
+{
+	return (c >= TEXT('A') && c <= TEXT('Z')) ? static_cast<TCHAR>(c - TEXT('A') + TEXT('a')) : c;
+}
+
+constexpr bool ogLogRouteStartsWith(const TCHAR* text, const TCHAR* prefix)
+{
+	for (; *prefix != 0; ++text, ++prefix)
+	{
+		if (*text == 0 || ogLogRouteFoldCase(*text) != ogLogRouteFoldCase(*prefix))
+			return false;
+	}
+	return true;
+}
+
+constexpr bool ogLogRouteBlocksAreDisjoint()
+{
+	for (std::size_t simRow = 0; simRow < kOGSimulationLogRouteCount; ++simRow)
+	{
+		for (std::size_t gameRow = kOGSimulationLogRouteCount; gameRow < std::size(kOGLogRoutes); ++gameRow)
+		{
+			if (ogLogRouteStartsWith(kOGLogRoutes[simRow].prefix, kOGLogRoutes[gameRow].prefix)
+				|| ogLogRouteStartsWith(kOGLogRoutes[gameRow].prefix, kOGLogRoutes[simRow].prefix))
+				return false;
+		}
+	}
+	return true;
+}
+
+static_assert(ogLogRouteBlocksAreDisjoint(),
+	"kOGLogRoutes: a prefix in the og-simulation block and a prefix in this module's block BEGIN WITH "
+	"one another (compared ignoring case, as FString::StartsWith compares), so one line can match a "
+	"row in each block and the block order decides its route. The og-simulation block comes first only "
+	"because no line can match both; give the new row a tag no prefix in the other block begins with.");
+
+constexpr bool ogLogRoutesAreAllReachable()
+{
+	for (std::size_t later = 0; later < std::size(kOGLogRoutes); ++later)
+	{
+		for (std::size_t earlier = 0; earlier < later; ++earlier)
+		{
+			if (ogLogRouteStartsWith(kOGLogRoutes[later].prefix, kOGLogRoutes[earlier].prefix))
+				return false;
+		}
+	}
+	return true;
+}
+static_assert(ogLogRoutesAreAllReachable(),
+	"RouteOGMessage: a route's prefix BEGINS WITH an earlier route's prefix, so the earlier "
+	"route always wins and the later one can never be taken. FString::StartsWith ignores "
+	"case and so does this check. Was the ORDER IS LOAD-BEARING fence: [Resim.Input] must be "
+	"matched ahead of the [Resim. catch-all, and widening that catch-all to [Resim would "
+	"swallow every [ResimCheck. line.");
+
+constexpr bool ogLogRoutePlainLevelsAreLogOrVerbose()
+{
+	for (const OGLogRouteEntry& entry : kOGLogRoutes)
+	{
+		if (entry.plainLevel != ELogVerbosity::Log && entry.plainLevel != ELogVerbosity::Verbose)
+			return false;
+	}
+	return true;
+}
+
+static_assert(ogLogRoutePlainLevelsAreLogOrVerbose(),
+	"kOGLogRoutes: a row's plainLevel is the level of a line that carries no [Verbose] or "
+	"[Warning] token, and it may only be Log (rare events) or Verbose (per tick, per packet, "
+	"per relay). A line that must reach Warning says so with its own [Warning] token.");
+
+constexpr const OGLogRouteEntry* ogLogRouteFor(const TCHAR* line)
+{
+	for (const OGLogRouteEntry& entry : kOGLogRoutes)
+	{
+		if (ogLogRouteStartsWith(line, entry.prefix))
+			return &entry;
+	}
+	return nullptr;
+}
+
+#define OG_LOG_ROUTED(Category, Format, ...) \
+	do \
+	{ \
+		constexpr const OGLogRouteEntry* ogLogRouteEntryForSite = ogLogRouteFor(Format); \
+		static_assert(ogLogRouteEntryForSite != nullptr, \
+			"OG_LOG_ROUTED: the format's leading tag has no kOGLogRoutes row, so it has no level. " \
+			"Add a row (prefix, route, plainLevel) or log this line with UE_LOG at a fixed level."); \
+		if constexpr (ogLogRouteEntryForSite->plainLevel == ELogVerbosity::Verbose) \
+		{ \
+			UE_LOG(Category, Verbose, Format, ##__VA_ARGS__); \
+		} \
+		else \
+		{ \
+			UE_LOG(Category, Log, Format, ##__VA_ARGS__); \
+		} \
+	} while (0)
 
 struct FMovementStaticDataCVars
 {
@@ -88,175 +328,7 @@ class USimmableUpdateComponent;
 class ASimulationManagerUImpl;
 class ASimulationTimingRelay;
 class ASimulationConnectionRelay;
-
-struct FSimulationState2 : public Chaos::FSimCallbackOutput
-{
-	FSimulationState2()
-		: FSimCallbackOutput()
-		, bIsValid(false)
-	{
-	}
-
-	virtual ~FSimulationState2() {}
-
-public:
-	void Reset() { bIsValid = false; }
-	void Copy(const FSimulationState2& Value);
-	bool IsValid() const { return bIsValid; }
-	bool bIsValid;
-	float DeltaTime;
-};
-
-struct FSimulationInput2 : public Chaos::FSimCallbackInput
-{
-	virtual ~FSimulationInput2() {}
-
-	void Reset()
-	{
-		bInitialized = false;
-		m_world = nullptr;
-		m_manager = nullptr;
-	}
-
-	bool bInitialized = false;
-	UWorld* m_world;
-	ASimulationManagerUImpl* m_manager = nullptr;
-
-private:
-};
-
-class ASimulationManagerUImpl;
-
-struct FRewindPushProbeStashedBody
-{
-	PhysicsBodyState pushed;
-	PhysicsBodyState beforePush;
-	BodyId           bodyId{};
-	unsigned int     simulatableId = 0;
-	// ⛔G-02  docs/SimulationManagerUImpl-guards.md
-	const char*      bodyName = nullptr;
-	bool             wireCarriesRotationAndSpin = false;
-	bool             movedAtPush = false;
-};
-
-class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<
-	FSimulationInput2,
-	FSimulationState2,
-	Chaos::ESimCallbackOptions::Presimulate |
-	Chaos::ESimCallbackOptions::Rewind |
-	Chaos::ESimCallbackOptions::PostSolve>
-{
-public:
-	virtual FName GetFNameForStatId() const override;
-
-	void setManager(ASimulationManagerUImpl* manager)
-	{
-		m_manager = manager;
-	}
-
-private:
-	virtual void OnPreSimulate_Internal() override;
-	virtual void OnPostSolve_Internal() override;
-	virtual void ProcessInputs_Internal(int32 PhysicsStep);
-	virtual void ProcessInputs_External(int32 PhysicsStep);
-
-	virtual int32 TriggerRewindIfNeeded_Internal(int32 LastCompletedStep);
-
-	virtual void ApplyCorrections_Internal(int32 PhysicsStep, Chaos::FSimCallbackInput* Input) override;
-
-	virtual void FirstPreResimStep_Internal(int32 PhysicsStep);
-
-	ASimulationManagerUImpl* m_manager = nullptr;
-
-	TArray<FRewindPushProbeStashedBody> m_pushProbeStash;
-	int32    m_pushProbeStashFrame      = INDEX_NONE;
-	uint32_t m_pushProbeStashSimTick    = 0;
-	int32    m_pushProbeStashBodies     = 0;
-	int32    m_pushProbeStashUnresolved = 0;
-
-	void readPushProbeVerdict_Internal();
-	void discardPushProbeStash(const TCHAR* reason);
-
-	template <typename InputT, typename OutputT, Chaos::ESimCallbackOptions OptionsT>
-	static constexpr Chaos::ESimCallbackOptions registeredOptionsOf(
-		const Chaos::TSimCallbackObject<InputT, OutputT, OptionsT>*) { return OptionsT; }
-
-	template <typename Self>
-	static constexpr bool everyRegisteredHookIsOverridden()
-	{
-		using Opt = Chaos::ESimCallbackOptions;
-		constexpr Opt options = registeredOptionsOf(static_cast<const Self*>(nullptr));
-		static_assert(!EnumHasAnyFlags(options, Opt::Presimulate)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPreSimulate_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::Presimulate but does not "
-			"override OnPreSimulate_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PreIntegrate)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPreIntegrate_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreIntegrate but does not "
-			"override OnPreIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PostIntegrate)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPostIntegrate_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostIntegrate but does not "
-			"override OnPostIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::MidPhaseModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnMidPhaseModification_Internal), void (Self::*)(Chaos::FMidPhaseModifierAccessor&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::MidPhaseModification but does not "
-			"override OnMidPhaseModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::CCDModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnCCDModification_Internal), void (Self::*)(Chaos::FCCDModifierAccessor&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::CCDModification but does not "
-			"override OnCCDModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::StrainModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnStrainModification_Internal), void (Self::*)(Chaos::FStrainModifierAccessor&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::StrainModification but does not "
-			"override OnStrainModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::ContactModification)
-			|| requires { requires std::is_same_v<decltype(&Self::OnContactModification_Internal), void (Self::*)(Chaos::FCollisionContactModifier&)>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::ContactModification but does not "
-			"override OnContactModification_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PreSolve)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPreSolve_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreSolve but does not "
-			"override OnPreSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		static_assert(!EnumHasAnyFlags(options, Opt::PostSolve)
-			|| requires { requires std::is_same_v<decltype(&Self::OnPostSolve_Internal), void (Self::*)()>; },
-			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostSolve but does not "
-			"override OnPostSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
-			"list, and the base hook is check(false): the first time that list runs, the process "
-			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
-		return true;
-	}
-
-	void assertEveryRegisteredHookIsOverridden()
-	{
-		static_assert(everyRegisteredHookIsOverridden<FSimulationManagerAsyncCallback>());
-	}
-};
+class AOGBrawlerUECharacter;
 
 UCLASS()
 class ASimulationManagerUImpl : public AActor,
@@ -288,28 +360,6 @@ public:
 
         m_manager->editClientClock().requestInputDelayIncreaseStall(deltaDelayTicks);
     }
-    void onGameSimulation(const SimulationUpdateInfo& info)
-    {
-        m_manager->onGameSimulation(info);
-    }
-    void onPostGameSimulation(const SimulationUpdateInfo& info) { m_manager->onPostGameSimulation(info); }
-    unsigned int onCheckIsSimilar() { return m_manager->onCheckIsSimilar(); }
-    void prepareResimulation(int32_t chaosStep, uint32_t simTick) { m_manager->prepareResimulation(chaosStep, simTick); }
-
-    void noteResimRequest(unsigned int anchorTick, int32 lastCompletedStep, int32 requestedChaosFrame)
-    {
-        if (!m_manager.has_value() || !m_manager->runsPrediction())
-            return;
-        m_manager->editResimGateProbe().noteRequest(
-            static_cast<std::uint32_t>(anchorTick), lastCompletedStep, requestedChaosFrame);
-    }
-
-    void noteResimGrant(int32 grantedChaosFrame)
-    {
-        if (!m_manager.has_value() || !m_manager->runsPrediction())
-            return;
-        m_manager->editResimGateProbe().noteGrant(grantedChaosFrame);
-    }
     void onPostSimulationGameThread();
 
     virtual void BeginPlay() override;
@@ -323,6 +373,7 @@ public:
 
     virtual void onTimingInfoReceived(uint32_t authorityTick, double roundTripTime) override
     {
+        editLatencyBudgetDiagnostics().noteWireSample(roundTripTime);
         if (m_onTimingInfoReceivedCallback)
         {
             m_onTimingInfoReceivedCallback(authorityTick, roundTripTime);
@@ -334,9 +385,9 @@ public:
         m_manager->editNetworkEstimator().recordAuthorityTick(authorityTick);
     }
 
-    void OnPhysicsPreTick(FPhysScene* Scene, float DeltaTime);
-    void OnPhysicsStep(FPhysScene* Scene, float DeltaTime);
-    void OnPostPhysicsStep(FChaosScene* Scene);
+    const LatencyBudgetDiagnosticsUImpl& getLatencyBudgetDiagnostics() const { return m_latencyBudgetDiagnostics; }
+    LatencyBudgetDiagnosticsUImpl&       editLatencyBudgetDiagnostics()       { return m_latencyBudgetDiagnostics; }
+    void OnPostPhysicsStep();
 
     SimCharacterId allocateSimCharacterId();
 
@@ -349,15 +400,10 @@ public:
 
     void unregisterFromNewFramework(SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority);
 
-    void InjectInputs_External(int32 PhysicsStep, int32 NumSteps);
+    EngineTraits::VizQuery&        editVizQuery();
+    const EngineTraits::VizReader& getVizReader() const;
+    std::optional<QueryVolumeId> registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
-    ChaosTickMapper& editChaosTickMapper() { return m_chaosTickMapper; }
-    const ChaosTickMapper& getChaosTickMapper() const { return m_chaosTickMapper; }
-
-    ChaosPhysicsBodyAdapter&  editPhysicsBodyAdapter() { return m_physAdapter.value(); }
-    ChaosSpatialQueryAdapter& editQueryAdapter()       { return m_queryAdapter.value(); }
-
-    const ChaosPhysicsBodyReaderAdapter& getPhysicsBodyReaderAdapter() const { return m_physReaderAdapter.value(); }
     SimulationObjectStorage<SimulatableBrawler>& editStorage() { return m_storage; }
 
     SimulationReconciliation<SimulatableBrawler>&       editReconciliation()       { return m_reconciliation; }
@@ -623,6 +669,10 @@ public:
         "brawlerRingout::kMaxSpawnPoints' prose fence of SimulationManagerUImpl.h (task 11).");
 
 private:
+    friend physicsBackendUImpl::Backend;
+    template <typename SessionT> friend class BrawlerTickDriverGameUImpl;
+    friend class LatencyBudgetDiagnosticsUImpl;
+
     std::set<unsigned int> m_authorityRegisteredIds;
 
     brawlerRingout::SpawnSlotAllocator m_spawnSlots;
@@ -634,7 +684,9 @@ private:
 
     bool m_ringoutSpawnPointsSeeded = false;
 
-    void releaseDelayedInputsForStep(int32 physicsStep, int32 numSteps);
+    void onFrameStepsDue_GameThread(int32 firstUpcomingSimTick, int32 numSteps);
+
+    void releaseDelayedInputsForStep(int32 firstTick, int32 numSteps);
 
     void applyReplicatedConnectionTier(uint8 tier);
 
@@ -666,28 +718,27 @@ private:
 
     inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
 
-    FSimulationManagerAsyncCallback* m_asyncCallback;
+    LatencyBudgetDiagnosticsUImpl m_latencyBudgetDiagnostics{ std::as_const(*this) };
 
-    FDelegateHandle m_injectInputsExternalCallbackHandle;
-    FDelegateHandle m_hysScenePostTickCallbackHandle;
+    physicsBackendUImpl::BackendWorlds m_backendWorlds;
 
     std::function<void(uint32_t, double)> m_onTimingInfoReceivedCallback;
 
     ASimulationTimingRelay* m_timingRelay = nullptr;
     ASimulationTimingRelay* findTimingRelay();
 
-    std::optional<ChaosPhysicsBodyAdapter>   m_physAdapter;
-    std::optional<ChaosPhysicsBodyReaderAdapter> m_physReaderAdapter;
-    std::optional<ChaosSpatialQueryAdapter>  m_queryAdapter;
+    std::optional<EngineTraits::BodyAdapter>   m_physAdapter;
+    std::optional<EngineTraits::ReaderAdapter> m_physReaderAdapter;
+    std::optional<EngineTraits::QueryAdapter>  m_queryAdapter;
 
     static FMovementStaticDataCVars readMovementStaticDataCVars();
 
-    // ⛔G-18  docs/SimulationManagerUImpl-guards.md
-    using BrawlerSimulatables    = SimulatableList<SimulatableBrawler>;
-    using BrawlerStorage         = apply_t<SimulationObjectStorage,     BrawlerSimulatables>;
-    using BrawlerNetSync         = apply_t<SimulationNetSync,           BrawlerSimulatables>;
-    using BrawlerInputResolution = apply_t<SimulationInputResolution,   BrawlerSimulatables>;
-    using BrawlerReconciliation  = apply_t<SimulationReconciliation,    BrawlerSimulatables>;
+    using BrawlerSimulatables    = BrawlerCompositionUImpl::Simulatables;
+    using BrawlerStorage         = BrawlerCompositionUImpl::Storage;
+    using BrawlerNetSync         = BrawlerCompositionUImpl::NetSync;
+    using BrawlerInputResolution = BrawlerCompositionUImpl::InputResolution;
+    using BrawlerReconciliation  = BrawlerCompositionUImpl::Reconciliation;
+    using RenderSnapshot         = BrawlerCompositionUImpl::RenderSnapshot;
 
     BrawlerStorage m_storage;
 
@@ -704,28 +755,12 @@ private:
     BrawlerInputResolution m_inputResolution{ m_storage, m_reconciliation };
     BrawlerNetSync         m_netSync{ m_storage, m_reconciliation, m_inputResolution };
 
-    template <typename... SimulatableTs>
-    using BrawlerIntegrationExecFor_UE = SimulationIntegrationExecutor<
-        simulatableBrawler::StaticData, ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter, SimulatableTs...>;
-    using BrawlerIntegrationExec = apply_t<BrawlerIntegrationExecFor_UE, BrawlerSimulatables>;
+    template <typename... SimulatableTs> using BrawlerIntegrationExecFor_UE = BrawlerCompositionUImpl::IntegrationExecFor<SimulatableTs...>;
+    using BrawlerIntegrationExec = BrawlerCompositionUImpl::IntegrationExec;
 
-    using BrawlerHitDetectionSystem =
-        brawlerHitDetection::System<ChaosPhysicsBodyAdapter, ChaosSpatialQueryAdapter>;
+    using BrawlerHitDetectionSystem = BrawlerCompositionUImpl::HitDetectionSystem;
 
-    using BrawlerSystemsExec = SimulationSystemsExecutor<
-        BrawlerSimulatables,
-        simulatableBrawler::StaticData,
-        BrawlerHitDetectionSystem,
-        brawlerHitRouting::System,
-        brawlerRingout::ScoreSystem>;
-    static_assert(brawlerHitDetection::firesBefore<BrawlerSystemsExec,
-                      BrawlerHitDetectionSystem, brawlerHitRouting::System>,
-        "BrawlerSystemsExec must fire brawlerHitDetection::System BEFORE brawlerHitRouting::System "
-        "(firing order is template order): both run in preIntegrate, and routing branch 2 reads "
-        "the hitsThisTick the detector writes earlier in the SAME pass, branch 5 the guard block. "
-        "Reversed, routing reads them after the radial's integrate cleared them and before the "
-        "detector refilled them, so NO melee hit and NO guard block is ever routed - "
-        "og-netcode-v2-field-defects tasks 9 and 20.");
+    using BrawlerSystemsExec = BrawlerCompositionUImpl::SystemsExec;
 
     // ⛔G-75  docs/SimulationManagerUImpl-guards.md
     std::optional<BrawlerSystemsExec> m_systemsExec;
@@ -733,14 +768,11 @@ private:
     using IntegrationLayerType = BrawlerIntegrationExec;
     std::optional<IntegrationLayerType> m_integrationLayer;
 
-    using ManagerType = SimulationManager<
-        BrawlerIntegrationExec, BrawlerNetSync, BrawlerInputResolution, BrawlerReconciliation,
-        BrawlerSystemsExec, BrawlerStorage, simulatableBrawler::StaticData>;
+    using ManagerType = BrawlerCompositionUImpl::Manager;
     std::optional<ManagerType> m_manager;
+    physicsBackendUImpl::Backend m_backend{ *this, m_backendWorlds };
 
     static ASimulationManagerUImpl* s_instances[2];
-
-    ChaosTickMapper m_chaosTickMapper;
 
     struct PendingRegistration
     {
@@ -777,6 +809,43 @@ private:
             "component ending play - one abandoned mid-Pending included - so a counter drifts downward and "
             "disarms the cap. Was the 'A SET, not a counter' prose fence of SimulationManagerUImpl.h "
             "(task 11).");
+        static_assert(std::is_same_v<ManagerType, BrawlerCompositionUImpl::Manager>,
+            "ASimulationManagerUImpl::ManagerType must BE BrawlerCompositionUImpl::Manager. ManagerType is private, so "
+            "a backend host declared outside this class (TickDriverBackendUImpl, task 83's Jolt host, whose tick driver's step driver is "
+            "SimulationStepDriver<Manager, JoltWorld, TickDriverStepHooks<...>>) names the manager "
+            "through BrawlerCompositionUImpl; a ManagerType that drifts from it hands that host a different "
+            "SimulationManager instantiation than m_manager. Added by task 81.");
+        static_assert(std::is_same_v<BrawlerInputProviderFn, LatencyBudgetDiagnosticsUImpl::InputProvider>,
+            "tryRegister hands a client's BrawlerInputProviderFn to LatencyBudgetDiagnosticsUImpl::wrapInputProvider and "
+            "registers what it returns. The two spellings must name ONE std::function type: a different one would "
+            "convert, wrapping the provider in a second heap-allocated callable on every registration. Added by "
+            "og-tickdriver task 18.");
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_backendWorlds)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_physReaderAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_physAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_queryAdapter)
+                   && __builtin_offsetof(ASimulationManagerUImpl, m_queryAdapter)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_integrationLayer),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The backend's worlds must outlive "
+            "every adapter bound to them (the Jolt step world; the reader holds the body adapter's bind table, the "
+            "integration layer holds the adapters), so m_backendWorlds sits above the adapters in both configurations "
+            "(it is empty on Chaos). Keep m_backendWorlds < m_physAdapter < {m_physReaderAdapter, m_queryAdapter} < "
+            "m_integrationLayer. Was design D's compile-time row 'runtime < world < adapters' (task 18); its "
+            "runtime < world half is og-simulation-jolt's JoltTickWorlds' own row (runtime < contactCounter < stepWorld) "
+            "since og-tickdriver task 10, and was the Jolt host's worlds struct's from task 83.");
+        static_assert(__builtin_offsetof(ASimulationManagerUImpl, m_manager)
+                          < __builtin_offsetof(ASimulationManagerUImpl, m_backend),
+            "ASimulationManagerUImpl members destruct in REVERSE declaration order. The backend holds the Jolt step "
+            "driver, which unregisters its resync callback from the manager's client clock in its destructor, so the "
+            "backend must go before the manager. Keep m_manager < m_backend. Was design D's compile-time row "
+            "'manager < hooks < driver' (task 18); its hooks < driver half is og-simulation's SimulationTickDriver's "
+            "own row, and the tick driver last is TickDriverBackendUImpl's, since og-tickdriver task 8.");
+        static_assert(physicsBackendUImpl::PhysicsBackendHost<physicsBackendUImpl::Backend>,
+            "physicsBackendUImpl::Backend must provide every entry point of the seam (the PhysicsBackendHost concept, "
+            "PhysicsBackendHostUImpl.h): this class calls each one from exactly one site, unconditionally, in both "
+            "configurations. Added by task 83.");
         return true;
     }
 

@@ -4,6 +4,7 @@
 #include "OGBrawlerUECharacter.h"
 #include "OGBrawlerUEHUD.h"
 #include "OGBrawlerPlayerController.h"
+#include "OGBuildIdentityUImpl.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameViewportClient.h"
@@ -52,6 +53,14 @@ void AOGBrawlerUEGameMode::BeginPlay()
         // Spawn the second player at the second PlayerStart
         //GetWorld()->SpawnActor<APawn>(DefaultPawnClass, PlayerStarts[1]->GetActorLocation(), PlayerStarts[0]->GetActorRotation());
     }
+}
+
+void AOGBrawlerUEGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId,
+    FString& ErrorMessage)
+{
+    Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+    if (ErrorMessage.IsEmpty())
+        buildIdentityUImpl::refuseMismatchedBackendLogin(Options, ErrorMessage);
 }
 
 void AOGBrawlerUEGameMode::PostLogin(APlayerController* newPlayer)

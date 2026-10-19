@@ -17,8 +17,25 @@ collide.
   What those sections did not carry is quoted in §13, with the compile-time checks that replaced
   six of its prose fences (§13.9) and the claims it made that were not true (§13.10)
   (og-netcode-v2-field-defects task 12).
-* **§14** records a later code change: how the first replayed step hands the restored body state to
-  the engine (og-netcode-v2-field-defects task 10's fix).
+* **§14** recorded a later code change: how the first replayed step hands the restored body state to
+  the engine (og-netcode-v2-field-defects task 10's fix). It moved to `ChaosTickBackendUImpl-rationale.md` §5
+  with the Chaos host (og-simulationscheduler-withjolt task 82), as did §8's rewind-push probe and §9's
+  derivation of the `+ 1`.
+* **§16**, the latency-budget probe's host side (og-simulationscheduler-withjolt task 1), moved to
+  `LatencyBudgetDiagnosticsUImpl-rationale.md` §6 with the code (og-tickdriver task 18).
+* **§17**, the map of the Jolt host, moved to `TickDriverBackendUImpl-rationale.md` §2 with the Jolt host
+  (og-simulationscheduler-withjolt task 83). The frame host and the game's tick-driver binding have their own
+  documents, OGSimulationUnreal's `UETickDriverHost-rationale.md` (since og-tickdriver task 11; a game-module
+  document before) and `BrawlerTickDriverGameUImpl-rationale.md`; since
+  og-tickdriver task 8 the frame pipeline and the step hooks are og-simulation's `SimulationTickDriver` and
+  `TickDriverStepHooks`.
+* **§18** is the backend switch: the compile-time choice between the Chaos host and the Jolt host
+  (og-simulationscheduler-withjolt task 51) and the flip of the default to Jolt (task 18). Since task 82 it
+  holds the seam, the fixed set of entry points through which this class calls its backend host; since
+  task 83 both hosts are classes of their own and this class has no arm. Its subsections on the Jolt
+  configuration's world (task 53), stepping (task 54), render publish and apply (task 55), game-thread shadow
+  world (task 56), render interpolation, correction smoothing and contact counts moved to
+  `TickDriverBackendUImpl-rationale.md` §3–§9 (task 83).
 
 <!-- ================= DECLARED LINT ESCAPES =================================
      Every token below is CORRECT and cannot resolve. None is here to silence a
@@ -28,6 +45,8 @@ collide.
 <!-- lint-external-ref: AActor::Owner -- Unreal Engine type, outside every scan root; the engine is not vendored into this repository -->
 <!-- lint-external-ref: bUseLoggingInShipping -- Unreal Engine target-rules flag (Shipping logging); this project does not set it -->
 <!-- lint-external-ref: FNoLoggingCategory -- Unreal Engine type (LogMacros.h), outside every scan root -->
+<!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
+<!-- lint-external-ref: pushBodyState -- retired name: the Chaos rollback-push lambda deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
 <!-- lint-external-ref: UNetConnection::Tick -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: UDataStreamChannel::Tick -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: UDataStreamChannel::WriteData -- Unreal Engine method, outside every scan root -->
@@ -35,21 +54,19 @@ collide.
 <!-- lint-external-ref: FRewindData::FindValidResimFrame -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FPBDRigidsSolver::ConditionalApplyRewind_Internal -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FRewindData::SetTargetStateAtFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FRewindData::RewindToFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FRewindData::ApplyTargets -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FPBDRigidsEvolutionGBF::Integrate -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: SetXR -- Chaos engine particle-handle method, outside every scan root -->
-<!-- lint-external-ref: PushStateAtFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: ApplyCallbacks_Internal -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: TickFlush -- Unreal Engine method, outside every scan root -->
+<!-- lint-external-ref: FChaosScene -- Unreal Engine type, outside every scan root -->
+<!-- lint-external-ref: OnPhysScenePreTick -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in task 51 (§13.1 quotes the old source) -->
+<!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in task 51 (§13.1 quotes the old source) -->
+<!-- lint-external-ref: editQueryAdapter -- RETIRED in task 51 (§18): the public query-adapter accessor, replaced by editVizQuery. It must NOT resolve -->
+<!-- lint-external-ref: getPhysicsBodyReaderAdapter -- RETIRED in task 51 (§18): the public reader accessor, replaced by getVizReader; §12 quotes its old declaration verbatim. It must NOT resolve -->
+<!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root -->
 <!-- lint-external-ref: OutBytes -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: OutPackets -- Unreal Engine connection stat, outside every scan root -->
 <!-- lint-external-ref: StatPeriod -- Unreal Engine stat window, outside every scan root -->
 <!-- lint-external-ref: DesiredTickRate -- Unreal Engine net-driver field, outside every scan root -->
 <!-- lint-external-ref: MaxNetTickRate -- Unreal Engine net-driver setting, outside every scan root -->
 <!-- lint-external-ref: BaseEngine.ini -- Unreal Engine's own config file, outside every scan root -->
-<!-- lint-external-ref: ChaosMarshallingManager.h -- Chaos engine header, outside every scan root -->
-<!-- lint-external-ref: PBDRigidsSolver.cpp -- Chaos engine source, outside every scan root -->
 <!-- lint-external-ref: NoLogging -- an Unreal log-verbosity enumerator, written as an ini value -->
 <!-- lint-external-ref: notReady -- a field NAME inside one probe's log format string, not a declared identifier -->
 <!-- lint-external-ref: writesThisFrame -- a term in the stated ceiling formula, not a declared identifier -->
@@ -204,6 +221,23 @@ are annotations, not edits to the carried text.*
   **`LogOGSim=Log`** (§11 C17). The argument — a family filed under `[Resim.` cannot be switched
   independently of `LogOGSim` — does not depend on the level and stands.
 
+**Jolt-configuration annotations (og-simulationscheduler-withjolt task 18).** The block describes the
+Chaos host. Since task 18 the default build is the Jolt configuration (§18; `TickDriverBackendUImpl-rationale.md` §2), and there:
+
+* *"binds them to Chaos"* — the manager binds every character to a Jolt world it owns; Chaos is the
+  gameplay physics only in the Chaos configuration, until task 21.
+* THREADS, the GAME row's *"InjectInputs_External -> releaseDelayedInputsForStep"* — that is the Chaos
+  configuration's per-frame entry. In the Jolt configuration the frame host's `TG_StartPhysics` tick
+  function, through the tick driver, runs the per-frame half (`onFrameStepsDue_GameThread`, then, on the authority, the reap after
+  the inline steps), and the drain runs once per step from the authority's `beforeTick` (§7; `TickDriverBackendUImpl-rationale.md` §2).
+* THREADS, the PHYSICS row's *"FSimulationManagerAsyncCallback's five _Internal hooks"* — the Chaos
+  configuration's. In the Jolt configuration the physics side is the step: one worker task per frame on
+  a client, inline on the game thread on the authority, each step running the step driver and the four
+  step hooks under the world mutex (`TickDriverBackendUImpl-rationale.md` §2).
+* CROSSING — the count of three is unchanged in both configurations. The Jolt host adds its own
+  game-thread-to-step mechanisms (J1–J6 and the shadow hand-over), which are the Jolt host's boundary and
+  not og-simulation crossings (§1).
+
 ⛔ **The rules this block states are enforced where they are typed, not here.** *"⛔ DO NOT WIDEN
 ONE INTO AN ACCESSOR"*, *"⛔ ONE CATEGORY PER PROBE FAMILY"* and *"⛔ NOTHING ELSE CROSSES"* have
 no single site in the header — the wrong edit could be a new member anywhere in the class, or a
@@ -221,8 +255,11 @@ have a site, and it is `⛔G-16` on `recomputeAndPublishEffectiveInputDelay`.
 | `BeginPlay` / `EndPlay` | GAME | the composition root |
 | `onConnectionTierReceived` / `Replayed`, `onRelayDelayFloorReceived` / `Replayed`, `onInputRelayHostReady` | GAME | the four replication listeners |
 | `deliverRemoteInput`, `relayRemoteInput`, `noteDelayedInputComponent` | GAME | the transport sinks, driven from the RPC receipt path |
-| `InjectInputs_External` → `releaseDelayedInputsForStep` | GAME | the drain, the reap and PROBE A |
-| `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
+| `InjectInputs_External` → `onFrameStepsDue_GameThread`, `releaseDelayedInputsForStep`, `reapConnections` (Chaos configuration, §18; a `ChaosTickBackendUImpl` member since task 82) | GAME | PROBE A and PROBE 6 once per physics frame, then the drain and the reap (§7) |
+| `OnPostPhysicsStep` | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, `TickDriverBackendUImpl-rationale.md` §6), the render interpolation and apply and the shadow overwrite (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §5, §7), visualization snapshot (with the rendered poses in the Jolt configuration), timing buffer, score push, latency probe; bound to the scene's post-tick delegate in the Chaos configuration, called by the frame host's `TG_EndPhysics` tick function in the Jolt configuration |
+| the frame host's two tick functions → the tick driver → `onFrameStepsDue_GameThread`, the reap (authority), `OnPostPhysicsStep`, through `BrawlerTickDriverGameUImpl` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | GAME | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`UETickDriverHost-rationale.md`; `SimulationTickDriver-rationale.md` §3) |
+| the tick driver's per-step body (`SimulationTickDriver`) → `SimulationStepDriver::runTick` and the four step hooks (`TickDriverStepHooks`), including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | PHYSICS: a worker task on a client, the game thread inline on the authority | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
+| `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides (Chaos configuration, §18; in `ChaosTickBackendUImpl.cpp` since task 82) — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
 | `pollInputHistory`, `pollInputHistoryLanes` | GAME | the input-history display's render-rate feed, driven from `USimmableUpdateComponent::TickComponent` |
 
 **There are three crossings, and they are not alike.** One is a write of one scalar; the other
@@ -239,6 +276,24 @@ The worst a race can do is apply a new delay one tick late.
 `m_receptionCoordinator`, `m_frameHealthProbe`, `m_relayWriteProbe`, `m_connectionBudgetProbe`,
 `m_inputHistory` and `m_delayedInputComponentsById`. `m_manager->editResimGateProbe()` is the mirror case on the
 other side: physics-thread-only, and its correctness rests on nothing else touching it.
+
+### The Jolt host's mechanisms J1–J6 and the shadow hand-over (og-simulationscheduler-withjolt tasks 54–56 and 52)
+
+The Jolt configuration replaces Chaos's implicit marshalling (its game-thread body API, its
+scene-query copy, the tick mapper's atomic, its marshalled input struct, its end-of-physics body
+sync) with five host mechanisms
+(design D §2.4), and Chaos's game-thread copy of the physics scene with a shadow world on a worker client (design D §2.5, "(e) in detail"). A sixth, J6, replaces nothing: it carries the step's measured cost to the game thread for `[SimHost.Window]` (§8). A seventh, J7, replaces Chaos's hand-over of a resimulation's error with its results (task 57). Until og-tickdriver task 8 none was a crossing between og-simulation structures; since task 8, J1, J3 and J6 are mailboxes of og-simulation's `SimulationTickDriver` and are listed in og-simulation's `ThreadingCrossings.md` ("The tick driver's mailboxes"); since og-tickdriver task 9, J5 and J7 are og-simulation's render presenter's (`TickDriverPresenter`) and are listed there too; and since og-tickdriver task 10, J2 and the shadow hand-over are og-simulation-jolt's world host's (`JoltTickWorldHost`, which the Jolt host `TickDriverBackendUImpl` holds in `m_backendWorlds`), and J2 is listed there too.
+
+| | what | direction | mechanism | why it is safe |
+|---|---|---|---|---|
+| **J1** | occupancy commands `{slot, occupied}` | GT → step | the tick driver's `SpscRing<BodySlotOccupancyCommand, 64>` (the frame host's until og-tickdriver task 8), through its `pushBodySlotOccupancy`: Occupy pushed on `tryRegister`'s Ready path after `notifyCharacterRegistered`, Vacate pushed by the world host's `release` (`JoltTickWorldHost`, since og-tickdriver task 10) through the door `onUnregistered_GameThread` passes; drained first in `beforeTick` into the driver's `noteBodySlotOccupancy` | one producer (the game thread) and one consumer (the step, serialized by the task chain); occupancy is applied only by the driver, on its thread, so the occupancy timeline records what the world stepped with (`JoltTickWorldHost-guards.md` G-02, which succeeds `TickDriverBackendUImpl-guards.md` G-02). A full ring is a `checkf` |
+| **J2** | the world mutex, the world host's `UEFMutexLockableUImpl` (`JoltTickWorldHost`; the Jolt host's own member until og-tickdriver task 10) | GT ↔ step | a UE::FMutex held for each whole step (by the tick driver's per-step lock through the world host's `lockForStep`; task 8's interim world host until og-tickdriver task 10) and by the game thread around `tryRegister`'s bind pass, the world build and the driver's construction; the bind's wait for it is timed into `[SimHost.Window]` (§8) | the bind needs synchronous ids, so it locks instead of queuing (design D7); the game thread never waits for a step task while holding it (`SimulationTickDriver-guards.md` G-05, which succeeds frame-host G-05); the query adapter's access predicate checks it (`TickDriverBackendUImpl-rationale.md` §3; `ThreadingCrossings.md` J2) |
+| **J3** | the published tick offset | step → GT | the tick driver's `std::atomic<int64_t>` (the frame host's until og-tickdriver task 8), stored relaxed in `afterTick` as `tick − physicsStep`, loaded relaxed at `TG_StartPhysics` and added to the dispatch counter | the mapper's own semantics (a lone relaxed offset, read on the game thread); no `+ 1` (§9, `SimulationTickDriver-guards.md` G-03, which succeeds frame-host G-03) |
+| **J4** | the frame's step batch | GT → task | first step, count and deadlines copied into the task by value | the step code never touches the game-thread-owned scheduler |
+| **J5** | the render snapshot | step → GT | og-simulation's presenter's `SnapshotChannel<Snapshot, 4>` (`TickDriverPresenter`; the Jolt host's own channel until og-tickdriver task 9): `afterTick` calls the presenter's `publish_Step`, which fills a pooled slot with `fillRenderSnapshot` and commits it once per step; the presenter's `present_GameThread`, called from `OnPostPhysicsStep` through the backend's `beforePresent_GameThread`, peeks back from the newest, moves every registered actor to the bracketed pose through its render sink and releases the pair (`TickDriverBackendUImpl-rationale.md` §5; `ThreadingCrossings.md` J5) | one writer (the step) and one reader (the game thread) on a lock-free channel that hands the reader only committed slots and never recycles a held one; since task 19 the reader holds at most the two snapshots that bracket the render time, and four slots still always leave the writer a free one (a full channel fails the presenter's check in `publish_Step`) |
+| **J7** | a resimulation's render correction (client only) | step → GT | og-simulation's presenter's `SpscRing<Correction, 16>` (`TickDriverPresenter`; the Jolt host's own ring until og-tickdriver task 9): `beforeSimulate` calls the presenter's `captureCorrection_Step`, which pushes one correction after a resimulation, before the same step's `afterTick` commits the snapshot it rides; the presenter's pose build in `present_GameThread` drains it through `correctPoses` after the bracket is chosen (`TickDriverBackendUImpl-rationale.md` §8; `ThreadingCrossings.md` J7) | one producer (the step) and one consumer (the game thread) on the same lock-free ring as J1. The push precedes the carrier snapshot's commit, so a game thread that sees the carrier step sees its correction. A full ring drops the correction and counts it (`ringDrops`); the four capture counters beside it are relaxed atomics, read only for the window line |
+| **J6** | step-cost samples | step → GT | the tick driver's `SpscRing<StepCostSample, 256>` (the frame host's until og-tickdriver task 8): `afterTick` pushes one sample per step (the time before the normal step, the normal step, the replay depth, whether a resimulation was refused); the tick driver drains it on the game thread after every `OnPostPhysicsStep` into `[SimHost.Window]` (§8) | one producer (the step) and one consumer (the game thread) on the same lock-free ring as J1; a full ring drops the sample and counts it. Diagnostic only: nothing decides on it |
+| **shadow hand-over** | the newest saved state slot (worker client only) | step → GT | the world host's `m_shadowSlots` (`JoltTickWorldHost`; the Jolt host's own until og-tickdriver task 10), a `SnapshotChannel<ShadowStateSlot, 3>` whose three slots are pre-reserved to the ring's slot size when the manager is built: `afterTick` calls the world host's `afterTick_Step`, which copies the step world's ring slot for the step's tick into a pooled slot and commits it, only when the step saved one (`stepAllocatesFrontierSlot`; a Stall step saves none); the world host's `restore_GameThread` peeks the newest at the top of `OnPostPhysicsStep` and, when it is newer than the last one restored, restores the shadow world from it (`TickDriverBackendUImpl-rationale.md` §6) | the same channel argument as J5: one writer, one reader holding one slot, so three slots always leave the writer a free one (a full channel is an `OG_CHECK`). The copy is a byte copy into reserved storage and the body-id list fits its reserved capacity, so nothing allocates after construction. The shadow world itself is game-thread-only: built at `BeginPlay`, bound and released by `tryRegister` and the slot release, restored and queried on the game thread; the step never touches it, and the visualizations never touch the step world |
 
 ### The read crossing — `pollInputHistory`, and why its tear is accepted
 
@@ -390,6 +445,13 @@ reading aid. Replacing the list outright with that sentence would end the drift,
 the ten anchors `doc_anchor_lint.ps1` currently resolves through it — a trade worth making only
 if the lead wants the anchors spent elsewhere.
 
+**In the Chaos configuration only (§18):** `noteResimRequest` and `noteResimGrant` have no callers
+but the Chaos hooks, and neither have the four plain forwards beside them (`onGameSimulation`,
+`onPostGameSimulation`, `onCheckIsSimilar`, `prepareResimulation`), so all six sat in the Chaos arm.
+Since task 82 they are members of `ChaosTickBackendUImpl`, the Chaos host, which reaches the manager through its
+owner (`ChaosTickBackendUImpl-rationale.md` §1). They are still one-purpose forwards, and the rule above binds them
+there. The Jolt host feeds the resim-gate probe from the step driver instead (task 18).
+
 `getInputHistoryRows` and `getInputHistoryLanes` both return a pointer to `const` for the same
 reason: the panel that draws the rows, and the bars that draw the cells, must not write one.
 
@@ -465,6 +527,14 @@ moved the marker a column while its printed offset held, and the accessor is gon
 tolerated. ⛔ Do not reintroduce a clock accessor for a display: give the display the poll's
   reading.
 
+### The latency-budget probe adds no crossing (og-simulationscheduler-withjolt task 1)
+
+The probe is game-thread-owned. Its physics-thread stamps reach it through a single-producer
+mailbox (synchronized), the one game-to-physics value it needs is an atomic, and every other read
+its stamp sites make is same-thread with its writer. The CROSSING count is unchanged; the full
+argument, read by read, is the *Threads* table of `LatencyBudgetDiagnosticsUImpl-rationale.md` §6
+(this document's §16 until og-tickdriver task 18 moved the probe into that class).
+
 ### One acknowledged wart
 
 `getServerReceptionTick()` reads `m_serverClock` through `getServerClock()`, which is written on the physics thread, from
@@ -497,6 +567,35 @@ m_physAdapter / m_physReaderAdapter / m_queryAdapter → m_integrationLayer → 
 
 `EndPlay` unwinds the last two **before** `m_manager`, because both hold `const TimeConfig&`
 into it.
+
+### The backend's two members and the destruction order (og-simulationscheduler-withjolt task 83)
+
+This class holds its physics backend in two members, chosen by `PhysicsBackendHostUImpl.h`:
+`physicsBackendUImpl::BackendWorlds m_backendWorlds` and
+`physicsBackendUImpl::Backend m_backend{ *this, m_backendWorlds }`. In the Jolt configuration they are
+`TickDriverBackendWorldsUImpl` over the host's world host (since og-tickdriver task 10 an engine port and og-simulation-jolt's world host
+`JoltTickWorldHost`, which holds the runtime lease, the contact counter, the step and shadow worlds, the shadow
+world's adapters, the slot table, the world mutex and the thread context) and `TickDriverBackendUImpl` (the frame host,
+the game binding, the render-target table and, since og-tickdriver task 15d, og-simulation's `SimulationTickBackend`,
+which holds the render source, the presenter and the tick driver, which owns the hooks and the step driver),
+instantiated as `TickDriverBackendUImpl<JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>`
+since og-tickdriver task 15b (as `TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl,
+BrawlerJoltBindingUImpl>`, OGSimulationUnreal's header template, since og-tickdriver task 15e); in the Chaos configuration an
+empty `ChaosTickBackendWorldsUImpl` and `ChaosTickBackendUImpl`. Members are destroyed in reverse declaration order,
+and the two positions are what that order needs. Declared, top to bottom:
+
+```
+m_backendWorlds → m_physAdapter → m_physReaderAdapter, m_queryAdapter → … → m_integrationLayer → m_manager → m_backend
+```
+
+So `m_backend` is destroyed first (on Jolt the tick backend, which destroys the tick driver, with its step driver and
+hooks, then the presenter and the render source; then the render-target table, the game binding and the frame host,
+while the manager still lives), then the manager, the integration layer and the adapters, and last the
+worlds (on Jolt the world host, with the shadow world's adapters, the two worlds, the contact counter and then the
+runtime lease, and then its engine). `compositionContractsHold()` asserts `m_backendWorlds < m_physAdapter < {m_physReaderAdapter,
+m_queryAdapter} < m_integrationLayer` and `m_manager < m_backend`, the same in both configurations. The
+rows inside the two Jolt objects are their own assertions (`TickDriverBackendUImpl-rationale.md` §1); together
+they are the rows this class asserted before task 83.
 
 ### The reorder hazard, stated exactly
 
@@ -535,16 +634,16 @@ path anywhere in the tree.** This invariant was migrated here from the now-delet
 
 ### The alias chain
 
-`BrawlerSimulatables` is the single source of truth for the game's simulatable pack: widen that
-one alias and every storage and executor type below it inherits the widening. The aliases are
-**class-scoped**, not file-scoped, so these names cannot leak into the global namespace from a
-widely-included adapter header. OGSim primitives are named unqualified because the whole OGSim
-core lives in the global namespace.
-
-`SimulationIntegrationExecutor`'s leading three parameters are engine- and game-specific, so
-`apply_t` cannot unpack the pack marker into them; `BrawlerIntegrationExecFor_UE` fixes those
-three slots first and `apply_t` then applies the pack, preserving the single-source-of-truth
-property.
+Since task 81 the chain is defined in `struct BrawlerCompositionUImpl`
+(`BrawlerCompositionUImpl.h`; why it exists, the member table, the single source of truth and the
+bind wrapper are in `BrawlerCompositionUImpl-rationale.md`). This class keeps every old name
+(`BrawlerSimulatables`, `BrawlerStorage`, ..., `ManagerType`) as a one-line, class-scoped
+re-export of the struct's member, so its member declarations are typed exactly as before.
+`compositionContractsHold()` asserts that `ManagerType` is `BrawlerCompositionUImpl::Manager`: a
+backend host outside this class (task 83) names the manager through the struct, because
+`ManagerType` is private. `IntegrationLayerType` is still this class's own alias; the Jolt-only
+step-driver alias moved to `TickDriverBackendUImpl` with the step driver (task 83), where it named the struct's
+members; since og-tickdriver task 8 the game binding `BrawlerTickDriverGameUImpl` names them for the tick driver.
 
 `getTimeConfigPtr()` returns a **pointer, not a reference**, precisely so that the
 pre-construction state is representable rather than undefined behaviour. Callers emplace lazily
@@ -717,10 +816,14 @@ whatever `LogOGSim` is set to — the probe could not be switched on its own. *(
 under it could not be switched on or off as one thing — which is why `[ResimCheck.IsSimilar]`
 has zero occurrences in every log on disk.
 
-`[ResimProbe` sits ahead of the `[Resim.` catch-all **defensively**. It does not strictly need
-to: `[Resim.` requires the dot and `[ResimProbe` has a `P` there, so the two cannot collide
-today. It sits there because the one thing that would make them collide is somebody widening the
-catch-all to `[Resim`, and the consequence would be silent.
+`[ResimProbe` is the first row of this module's block, so it sits after the `[Resim.` catch-all,
+which is in og-simulation's block (*Two blocks*, below). The two cannot collide: `[Resim.` requires
+the dot and `[ResimProbe` has a `P` there. The one edit that would make them collide, widening the
+catch-all to `[Resim`, is now a compile error, not a silent reroute: in og-simulation it fails
+`allReachable` (the `[ResimCheck.` rows after it begin with `[Resim`) and
+`ogLogRouteBlocksAreDisjoint` (`[ResimProbe` begins with it), and a `[Resim` row in this module's
+block fails `ogLogRouteBlocksAreDisjoint`. *(Until og-tickdriver task 12 the single table put
+`[ResimProbe` ahead of `[Resim.`, defensively, against that edit.)*
 
 **One `StartsWith` covers each family** — the router tests `body.StartsWith("[ResimProbe")` and
 its two siblings — so a future sub-tag needs no router edit.
@@ -799,6 +902,8 @@ The source names each family by its prefix; the members are:
 | `LogOGRelayProbe` | `[RelayProbe.Read]`, `[RelayProbe.Arrival]`, `[RelayProbe.Stale]`, `[RelayProbe.Miss]`, `[RelayProbe.Delta]`, `[RelayProbe.Frame]`, `[RelayProbe.Write]`, `[RelayProbe.Budget]` |
 | `LogOGResimProbe` | `[ResimProbe.Gate]`, `[ResimProbe.Chaos]`, `[ResimProbe.Apply]`, `[ResimProbe.Landing]`, `[ResimProbe.Request]`, `[ResimProbe.Stranded]`, `[ResimProbe.Session]`, `[ResimProbe.Frame]`, `[ResimProbe.PushTarget]`, `[ResimProbe.PushVerdict]`, `[ResimProbe.SlotMap]` |
 | `LogOGDivergenceProbe` | `[DivergenceProbe.Correction]`, `[DivergenceProbe.Window]` |
+| `LogOGLatencyBudget` | `[LatencyBudget]`, `[LatencyBudget.Window]` (logged with `UE_LOG` directly, not routed; declared in `LatencyBudgetDiagnosticsUImpl.h` since og-tickdriver task 18, which compiles it out of Shipping; that class's rationale §6) |
+| `LogOGChaosDilation` | `[ChaosDilation]` (logged with `UE_LOG` directly, not routed; declared and gated with `LogOGLatencyBudget`) |
 
 `[RelayProbe.Miss]` says *why* each miss missed — an in-span coverage hole, asking above the
 newest arrival, or below the oldest; `[RelayProbe.Delta]` is the signed probe-tick-to-newest
@@ -806,6 +911,243 @@ distribution; `[RelayProbe.Stale]` is the longest consecutive fallback run. `[Re
 is the request/grant/refusal ledger and the requested-vs-granted pin; `[ResimProbe.Apply]` is the
 apply edge and the replay span; `[ResimProbe.Landing]` is the frontier-landing split;
 `[ResimProbe.Stranded]` is the per-event Verbose companion to it.
+
+### Levels — the `plainLevel` column (og-simulationscheduler-withjolt task 80)
+
+**Every row of `kOGLogRoutes` carries a third field, `plainLevel`: the level of a routed line that
+carries no `[Verbose]` or `[Warning]` token.** `RouteOGMessage` starts every line at `Log`, sets
+`Verbose` or `Warning` from a leading token, and only then, on the matching row, replaces a
+remaining `Log` with the row's `plainLevel`. A token therefore always wins: the per-window
+`[Warning]` summaries and the per-event `[Verbose]` probe detail are logged exactly as their
+emitters mark them, whatever the row says. That is also why G-50's predicate is untouched: every
+`[DivergenceProbe` line carries a token, so the row's `plainLevel` never applies to one.
+
+The table lives in `SimulationManagerUImpl.h`, not in this `.cpp`, so that log sites in other files
+can read a row at compile time (below). `RouteOGMessage` itself stays in this file. Since og-tickdriver
+task 12 the rows og-simulation alone emits come from og-simulation and the header concatenates them with
+its own (*Two blocks*, below); the levels and the order within each block are the ones listed here.
+
+**Why.** With a visible `-log` console, every log line costs a synchronous console write on the
+thread that logs it (the research note on the gate-22 dedicated-server frame rate: about 1.4 ms per
+line at gate 22, 12–20 ms step outliers, and a 3.2 s join hitch when one unbounded receive loop logged
+761 packets). At `LogOGNet=Log` and `LogOGSimTick=Log` every tick and every received packet wrote a
+line. Now `Log` carries only rare events, and the per-tick lines need `Verbose`.
+
+**The rule.** A row whose token-less lines arrive per tick, per packet or per relay (about 10 lines
+per second per peer or more in normal play) is `Verbose`. A row for rare events (gaps, drops, delay
+shifts, stats windows, resyncs, resim prepare and finish, join and leave) is `Log`. A `static_assert`
+(`ogLogRoutePlainLevelsAreLogOrVerbose`) admits only those two values: a line that must reach
+`Warning` says so with its own token.
+
+**The table, with the rates that classified it.** Rates are token-less lines per second in the
+gate-22 Jolt packaged final run (`LogOGNet=Log`, `LogOGSimTick=Log`; server 234 s with up to three
+clients, client 1 191 s, client 3 76 s). "token" means every line of that row carries `[Verbose]`
+or `[Warning]`, so `plainLevel` does not apply to it. Before this task every row behaved as `Log`.
+
+| row | category | rate (server / client) | `plainLevel` |
+|---|---|---|---|
+| `[Resim.Input]` | `LogOGSimTick` | token (`[Verbose]`) | `Verbose` |
+| `[ResimProbe` | `LogOGResimProbe` | token | `Log` |
+| `[TimeResync.` | `LogOGSim` | – / ≤ 0.7 (join) | `Log` |
+| `[Resim.` | `LogOGSim` | – / ≤ 5.0 (`[Resim.Post]`) | `Log` |
+| `[ResimCheck.Divergence]` | `LogOGSim` | – / ≤ 1.0 | `Log` |
+| `[ResimCheck.PrepareRestore]` | `LogOGSim` | – / ≤ 2.8 | `Log` |
+| `[ResimCheck.Check]` | `LogOGSimTick` | – / 142–172 | `Verbose` |
+| `[ResimCheck.IsSimilar]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
+| `[ResimCheck.TriggerRewind]` | `LogOGSimTick` | Chaos only: one per physics step | `Verbose` |
+| `[AuthoritySimulation]` | `LogOGSimTick` | 60 / – | `Verbose` |
+| `[ClientPrediction]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
+| `[PredictionSimulation]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
+| `[PostPrediction]` | `LogOGSimTick` | – / 142–172 | `Verbose` |
+| `[CollectInput]` | `LogOGSimTick` | 116 / 142–172 | `Verbose` |
+| `[ServerReceive]` | `LogOGNet` | 573 / – | `Verbose` |
+| `[ReceiveLocalInput] DISCARD` | `LogOGNet` | 0 (rare: a too-far-future input) | `Log` |
+| `[ReceiveLocalInput]` | `LogOGNet` | 116 / – | `Verbose` |
+| `[SendCorrectionStateToClients]` | `LogOGNet` | 49 / – | `Verbose` |
+| `[SendRemoteInputToClients]` | `LogOGNet` | no emitter | `Log` |
+| `[SendLocalInputToServer]` | `LogOGNet` | – / 94–99 | `Verbose` |
+| `[ReceiveCorrectionState]` | `LogOGNet` | – / 57–59 | `Verbose` |
+| `[ReceiveCorrectionInput]` | `LogOGNet` | no emitter | `Log` |
+| `[InjectCorrectionState]` | `LogOGNet` | – / 57–59 | `Verbose` |
+| `[InjectCorrectionInput]` | `LogOGNet` | no emitter | `Log` |
+| `[DrainOutOfOrder]` | `LogOGNet` | no emitter | `Log` |
+| `[InputGap]`, `[InputDrop]`, `[DelayShift]`, `[InputStats]`, `[InputDomain]` | `LogOGNet` | token (`[Warning]`) | `Log` |
+| `[Park]` | `LogOGNet` | 116 / – | `Verbose` |
+| `[Release]` | `LogOGNet` | 116 / – | `Verbose` |
+| `[ReleaseBatch]` | `LogOGNet` | 60 / – | `Verbose` |
+| `[RelaySkip]` | `LogOGNet` | token | `Log` |
+| `[RelayProbe` | `LogOGRelayProbe` | token | `Log` |
+| `[DivergenceProbe` | `LogOGDivergenceProbe` | token | `Log` |
+| `SimulationManager:`, `tryRegister:`, `NewFramework:` | `LogOGMgmt` | ≤ 0.04 | `Log` |
+
+Notes on the rows:
+
+* **`[ReceiveLocalInput] DISCARD` is its own row, ahead of `[ReceiveLocalInput]`.** The core emits
+  both from one callback (`SimulationNetSync.h`); the first is per input, the second is a rare
+  anomaly with no token. The more specific row keeps the anomaly at `Log`. The reachability
+  `static_assert` keeps it ahead: below `[ReceiveLocalInput]` it could never be taken.
+* **`[ReleaseBatch]` is a row although `RouteOGMessage` never sees it.** It is logged directly, by
+  `releaseDelayedInputsForStep`, and its row exists so that site reads its level from the table.
+* **`[Resim.Input]` and the token rows.** Their `plainLevel` has no effect today. `[Resim.Input]` is
+  `Verbose` because it is a per-replayed-tick line; the token rows are `Log` so a future token-less
+  line there is not hidden by accident.
+* **Four rows have no emitter in the tree:** `[SendRemoteInputToClients]` (its write is retired in
+  `SimulationNetSync.h`), `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]` and
+  `[DrainOutOfOrder]`. With no rate to classify them they stay `Log`. They are candidates for
+  deletion; this task did not delete them.
+* **The `LogOGSim` rows stay `Log`**, and the committed `Config/DefaultEngine.ini` sets
+  `LogOGSim=Log`, so the committed output is unchanged. Resim lifecycle lines are at most about 5 per
+  second on a client.
+
+**Direct log sites read the same table: `OG_LOG_ROUTED`.** Six per-tick or per-packet lines in this
+module are logged with `UE_LOG` directly rather than through `RouteOGMessage`. They now use
+`OG_LOG_ROUTED(Category, Format, ...)` (`SimulationManagerUImpl.h`), which looks up the row whose
+prefix begins `Format` at compile time, fails the build if there is none, and expands to
+`UE_LOG(Category, Verbose, ...)` or `UE_LOG(Category, Log, ...)` from that row's `plainLevel`. So the
+level is set in one place for routed and direct lines alike. The sites:
+
+| row | site | file |
+|---|---|---|
+| `[ReleaseBatch]` | `releaseDelayedInputsForStep` | `SimulationManagerUImpl.cpp` |
+| `[ResimCheck.TriggerRewind]` | `TriggerRewindIfNeeded_Internal`, the two `rewind=0` lines (Chaos only) | `ChaosTickBackendUImpl.cpp` |
+| `[ServerReceive]` | `ServerReceiveRemoteMove_Implementation`, the no-coordinator path | `SimmableUpdateComponent.cpp` |
+| `[ReceiveCorrectionState]` | `OnRep_CorrectionState` | `SimmableUpdateComponent.cpp` |
+| `[ClientPrediction]` | `buildPlayerInput` | `OGBrawlerInputCollectionComponent.cpp` |
+
+The category stays at the site. Nothing checks that it is the row's category; all six agree today.
+
+**Direct sites that stay at a fixed `Log`:**
+
+* the `rewind=1` line of `TriggerRewindIfNeeded_Internal` (Chaos only). It is a resim request, a
+  rare event, but it shares the `[ResimCheck.TriggerRewind]` tag with the per-step `rewind=0` lines,
+  and the text that tells them apart is at the end of the line, where no prefix row can reach it.
+* `[RelayDelayFloor]` and `[ConnectionTier]` (session and tier events, at most about 0.1 per second;
+  `[ConnectionTier]` also in `SimmableUpdateComponent.cpp`). They have no row and need none.
+
+**What an operator types now.** Per-tick and per-packet diagnostics need
+`LogOGNet=Verbose` and `LogOGSimTick=Verbose` (on the command line,
+`-ini:Engine:[Core.Log]:LogOGNet=Verbose`). At `Log` those categories carry only the rare lines. At
+the committed `Warning` nothing changed. Lines read at `Verbose` are prefixed `Verbose: ` after the
+category, and the capture extractors match on the tag anywhere in the line.
+
+**What the compiler checks.** Each arm below was compiled out of tree: a copy of the header with the
+same line count, a scratch translation unit that includes it, and UBT's own compiler response file
+for `SimmableUpdateComponent.cpp` (same flags, same shared PCH). The tree was not modified.
+
+| check | poison | result |
+|---|---|---|
+| `ogLogRoutesAreAllReachable` (unchanged, now in the header) | `[ReceiveLocalInput] DISCARD` row moved below `[ReceiveLocalInput]` | `C2338`, "a route's prefix BEGINS WITH an earlier route's prefix" |
+| `ogLogRoutePlainLevelsAreLogOrVerbose` | the `[Park]` row's `plainLevel` set to `Warning` | `C2338`, "a row's plainLevel is the level of a line that carries no [Verbose] or [Warning] token" |
+| `OG_LOG_ROUTED`'s row lookup | `OG_LOG_ROUTED(LogOGNet, TEXT("[NoSuchTag] x=%d"), x)` | `C2338`, "the format's leading tag has no kOGLogRoutes row" |
+| control | the unpoisoned header, ten `static_assert`s on `ogLogRouteFor` (for example `[ServerReceive]` is `Verbose`, `[ReceiveLocalInput] DISCARD` is `Log`, `[RelayDelayFloor]` has no row) and two `OG_LOG_ROUTED` uses | compiles, 0 errors |
+
+**Measured.** Headless sessions on the editor binary (Jolt, Development): a `-game -server` with the
+committed ini plus the level under test, and two idle `-nullrhi` clients on loopback, about 95 s
+each. `[SimHost.Window]` p99 in µs, the range over the steady 10 s windows after both clients joined:
+
+| run | `preUs` p99 | `stepUs` p99 | `postPhysicsUs` p99 | lost steps |
+|---|---|---|---|---|
+| before, `Log`, visible console | 2895–3835 | 379–2915 | 1529–3702 | 0 |
+| after, `Log`, visible console | 19–23 | 134–160 | 139–176 | 0 |
+| after, `Log`, no console | 17–26 | 149–228 | 141–185 | 0 |
+| before, `Warning`, visible console | 13–14 | 106–118 | 88–108 | 0 |
+| after, `Verbose`, no console | 137–157 | 197–215 | 190–215 | 0 |
+
+`LogOGNet` / `LogOGSimTick` lines at `Log` and `Verbose` in the same sessions:
+
+| run | server | client 1 |
+|---|---|---|
+| before, `Log` | 91 513 at `Log`: the 8 per-tick tags plus `[RelayDelayFloor]` ×2 and `[ConnectionTier]` ×1 | 54 006 at `Log`: the 9 per-tick tags plus `[ConnectionTier]` ×2 and `[RelayDelayFloor]` ×1 |
+| after, `Log` | 3 at `Log`: `[RelayDelayFloor]` ×2, `[ConnectionTier]` ×1 | 3 at `Log`: `[ConnectionTier]` ×2, `[RelayDelayFloor]` ×1 |
+| after, `Verbose` | the same 3 at `Log`, plus 91 453 at `Verbose` (the 8 per-tick tags) | the same 3 at `Log`, plus 53 725 at `Verbose` (the 9 per-tick tags and `[Resim.Input]`) |
+
+The server's per-tick tags are `[ServerReceive]`, `[CollectInput]`, `[Park]`, `[ReceiveLocalInput]`,
+`[Release]`, `[ReleaseBatch]`, `[AuthoritySimulation]` and `[SendCorrectionStateToClients]`; the
+client's are `[ResimCheck.Check]`, `[CollectInput]`, `[PostPrediction]`, `[SendLocalInputToServer]`,
+`[PredictionSimulation]`, `[ResimCheck.IsSimilar]`, `[ClientPrediction]`, `[ReceiveCorrectionState]`
+and `[InjectCorrectionState]`. The `LogOGSim` lines (resim lifecycle, resyncs) are at `Log` in all
+three runs.
+
+At the committed `Warning`, the set of category, level and tag triples in the before and after
+sessions is identical on the server; on the clients it differs by one run-dependent
+`[InputRelay]` warning that one client hit in each run.
+
+### Two blocks: og-simulation's rows first, then this module's (og-tickdriver task 12)
+
+**`kOGLogRoutes` is now the concatenation of two tables.** The rows whose tags only og-simulation emits
+moved into og-simulation as engine-free data: `kSimulationLogRoutes` in its `SimulationLogRoutes.h`, with
+plain `char` prefixes, a `SimulationLogRoute` and a `HostLogLevel`. The rest stay in this header, in
+`kOGGameLogRoutes`. `ogConcatenateLogRoutes` builds `kOGLogRoutes` at compile time: og-simulation's 25 rows
+first, then this module's 14, each block in the order the single table had. `RouteOGMessage`,
+`OG_LOG_ROUTED` and `ogLogRouteFor` read `kOGLogRoutes` as before; none of them changed, and nor did the
+`.cpp`.
+
+**Which rows are og-simulation's** was decided by the emitters: every string literal in a non-comment line
+under `Plugins/` and `Source/`, with a leading `[Verbose]` or `[Warning]` token removed as `RouteOGMessage`
+removes it, assigned to the row that routed it.
+- og-simulation only (25 rows, now in `kSimulationLogRoutes`): every row not listed below. Their emitting
+  files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
+- Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp` and
+  this module's `.cpp`), `[ServerReceive]` (also `SimmableUpdateComponent.cpp`) and `[RelayProbe` (also this
+  module's `.cpp`, the PROBE 5 and 6 lines).
+- Emitted by this module only (kept here): `[ResimCheck.TriggerRewind]` (`ChaosTickBackendUImpl.cpp`),
+  `[ClientPrediction]` (`OGBrawlerInputCollectionComponent.cpp`), `[ReceiveCorrectionState]`
+  (`SimmableUpdateComponent.cpp`), `[ReleaseBatch]` (this module's `.cpp`), `SimulationManager:` (this
+  module's `.cpp`), `tryRegister:` (`BrawlerJoltBindingUImpl.cpp`'s capsule `checkf`, the Jolt host's `.cpp` until og-tickdriver task
+  15a, and this module's `.cpp`) and `NewFramework:`
+  (`SimmableUpdateComponent.cpp` and this module's `.cpp`).
+- No emitter (kept here; deleting them was out of scope): `[SendRemoteInputToClients]`,
+  `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]`, `[DrainOutOfOrder]`.
+
+**Why the reorder changes no route.** The single table interleaved the two kinds of row, so the
+concatenation cannot equal it element for element. It is equal as a router instead. A line can match two
+rows only if one row's prefix begins with the other's, because both begin the line. So if no prefix in one
+block begins with a prefix in the other, a line matches rows of one block at most, and its first match is
+the same whichever block comes first; within each block the order is the old one. The header checks that
+at compile time:
+- `ogLogRouteBlocksAreDisjoint`: no og-simulation prefix and no prefix of this module begin with one
+  another, compared ignoring case as `FString::StartsWith` compares. New, and permanent: a later row added
+  to either block is held to it.
+- `ogLogRoutesAreAllReachable` and `ogLogRoutePlainLevelsAreLogOrVerbose`, unchanged, now run over the
+  concatenation. og-simulation asserts its own block the same way.
+- `ogLogRoutesAreAllMapped`: every og-simulation row's route has an `OGLogRoute` through `ogLogRouteOf`; an
+  unmapped one would be `kOGLogRouteUnmapped`, which `RouteOGMessage`'s switch has no case for.
+- `ogSimulationLogRoutePrefixesArePrintableAscii`: each og-simulation prefix is widened to `TCHAR` one `char`
+  at a time (`kOGSimulationLogRoutePrefixes`, sized by `ogLongestSimulationLogRoutePrefix`), which is exact for
+  ASCII only.
+
+The two mappings live in one place each: `ogLogRouteOf` (`SimulationLogRoute` to `OGLogRoute`) and
+`ogLogVerbosityOf` (`HostLogLevel` to `ELogVerbosity`).
+
+**The one-time proof, not shipped.** A scratch translation unit froze the 39 rows of the single table
+verbatim from the pre-task header, included the new header, and asserted that each frozen row's prefix
+resolves through `ogLogRouteFor` (the new table's first match) to a row with the same prefix, route and
+`plainLevel`, and that each frozen row appears in the new table exactly once. It compiled with 0 errors. The
+same TU with the frozen `[Park]` row's level flipped failed (`C2338`, "a frozen row resolves to a different
+(route, plainLevel) in the new table"), so the check is not vacuous. It also compiled two `OG_LOG_ROUTED`
+uses, one of an og-simulation row (`[Park]`) and one of this module's (`[ReleaseBatch]`).
+
+**What the compiler checks, seen failing.** As before, each arm compiled a copy of the header with the
+same line count from a scratch translation unit, with UBT's own compiler response file for
+`SimmableUpdateComponent.cpp`; the tree was not modified. The unpoisoned copy compiled with 0 errors.
+
+| check | poison | result |
+|---|---|---|
+| `ogLogRouteBlocksAreDisjoint` | this module's `[ReleaseBatch]` row's prefix changed to `[Resim` (og-simulation's `[Resim.Input]` and `[Resim.` begin with it) | `C2338`, "a prefix in the og-simulation block and a prefix in this module's block BEGIN WITH one another"; no other assert fired |
+| `ogLogRouteBlocksAreDisjoint`, ignoring case | `NewFramework:` changed to `[time` (og-simulation's `[TimeResync.` begins with it, ignoring case) | the same `C2338` |
+| `ogLogRoutesAreAllReachable`, this module's block | `NewFramework:` changed to `tryRegister: x` | `C2338`, "a route's prefix BEGINS WITH an earlier route's prefix" |
+| `ogLogRoutePlainLevelsAreLogOrVerbose` | `[ReleaseBatch]` at `Warning` | `C2338`, "a row's plainLevel is the level of a line that carries no [Verbose] or [Warning] token" |
+| `ogLogRoutesAreAllMapped` | the `SimulationLogRoute::Net` case of `ogLogRouteOf` deleted | `C2338`, "an og-simulation row's SimulationLogRoute has no OGLogRoute in ogLogRouteOf" |
+
+The first arm is the case the new check exists for: the reachability check alone would accept it, because
+`[Resim` sits after the rows it overlaps.
+
+**Measured.** Headless harness sessions (90 s, a server and two clients, one leaving and a new one joining)
+on the Jolt and the Chaos Editor, before and after, with every routed category at `Log`, then at `Verbose`
+(`-LogCmds`). In all 16 process pairs, no tag present on both sides changed its category or its level. The
+per-tick tags agree within 3 % at the same steps per window (up to +3.0 % on Jolt at `Verbose`, a uniform
++1 % of it from the after run's processes living longer); the low-rate resim tags vary as they do
+between two runs of one binary.
 
 ---
 
@@ -1049,15 +1391,59 @@ itself returns `void` per the concept.
 
 ### The drain and the reap
 
-`releaseDelayedInputsForStep` supplies only the game-thread-safe upcoming sim tick (§9) and the
-per-id callback, then calls `ServerReceptionCoordinator::releaseDelayedInputs` and `reapConnections`. The reap was relocated
-here off the former arrival-gated RTT sample path: it now runs once per physics frame regardless
-of traffic — a documented benign cadence change, since an idle server now reaps — and the
+The frame's game-thread work is three pieces (split by og-simulationscheduler-withjolt task 51, §18):
+
+* `onFrameStepsDue_GameThread(firstUpcomingSimTick, numSteps)` holds PROBE A, then the coordinator
+  test (`⛔G-70`), then PROBE 6 and `[PacketBudget]` (§8). Nothing in it releases input.
+* `releaseDelayedInputsForStep(firstTick, numSteps)` is the drain only. It tests the coordinator
+  itself, prints one `[ReleaseBatch] first=<tick> numSteps=<n>` line on `LogOGNet` at `Verbose` (the
+  category and level of the coordinator's `[Release]` lines; its `kOGLogRoutes` row, §4), and calls
+  `ServerReceptionCoordinator::releaseDelayedInputs` with the per-id callback.
+* The reap, `ServerReceptionCoordinator::reapConnections`, is called by the host.
+
+**The Chaos configuration's call order is the order of the code before the split.**
+`InjectInputs_External` (a `ChaosTickBackendUImpl` member since task 82) runs on the game thread once per
+physics frame, before the frame's steps are handed to the solver, and calls: the mapper's
+`firstUpcomingSimTick` (`ChaosTickBackendUImpl-rationale.md` §4, `ChaosTickBackendUImpl-guards.md` G-07); then
+`onFrameStepsDue_GameThread(first, NumSteps)`; then, when a coordinator exists, the drain with
+`(first, NumSteps)` and `reapConnections(first)`. So this configuration releases the frame's whole
+batch up front, before its first step: one `[ReleaseBatch]` per frame, with `numSteps` equal to the
+frame's step count. Every `[Release]` line that follows lies in `[first, first + numSteps)` of the
+nearest `[ReleaseBatch]` before it. That containment is the within-run check of the pattern (§18).
+
+The drain hands over only the game-thread-safe upcoming sim tick (`ChaosTickBackendUImpl-rationale.md` §4) and the per-id callback. The
+reap was relocated here off the former arrival-gated RTT sample path: it runs once per physics frame
+regardless of traffic — a documented benign cadence change, since an idle server now reaps — and the
 coordinator gates it on the dwell boundary internally. Its tick comes from the mapper, **not** the
 physics-thread-written server clock.
 
-The coordinator's early return guards **only** the drain, not PROBE A below it, because that probe
-runs on both roles and a pure client never has a coordinator.
+PROBE A runs on both roles and a pure client never has a coordinator, so every coordinator test sits
+below it.
+
+**The Jolt configuration's call pattern (og-simulationscheduler-withjolt task 54).** The same three
+pieces, at the three places design D3 puts them (`SimulationTickDriver-rationale.md` §3 since og-tickdriver
+task 8; `BrawlerTickDriverGameUImpl-rationale.md` §2):
+
+* `onFrameStepsDue_GameThread(first + offset, n)` once per frame at `TG_StartPhysics`, only when the
+  scheduler made `n ≥ 1` steps due: the condition and the arguments under which Chaos called
+  `InjectInputs_External`.
+* The drain **per simulation tick**, from the authority step's `beforeTick`, as
+  `releaseDelayedInputsForStep(authorityTick, 1)`: one `[ReleaseBatch]` with `numSteps=1` per step,
+  for the tick that step will simulate (`TickDriverStepHooks-guards.md` G-01 and `BrawlerTickDriverGameUImpl-guards.md`
+  G-01, the successors of the retired G-01 of the brawler's former step hooks).
+* `reapConnections(first + offset)` **once per frame, after the frame's inline steps**, with the value
+  the probe call received. It stays per frame because it is the only feed of the coordinator's
+  `noteServerTick`, the receipt gate's reference: per step, the reference would sit at the frame's last
+  tick, not its first, when the next frame's receipts are judged, and the gate's window would shift by
+  the frame's step count (`SimulationTickDriver-guards.md` G-06, which succeeds frame-host G-06). On the authority the value is exactly the server clock plus
+  one, because every earlier step has completed inline and published its offset.
+
+No receipt can land between inline steps (receipts happen in the engine's receive dispatch, before the
+tick groups), so the queue a step drains holds what the batch would have held. The two patterns
+release the same `(id, captureTick, releaseTick)` set and differ only in which step pops an input in a
+multi-step frame with a per-character gap (design D4): the batch hands the next input to the gap tick;
+per step, the gap tick underruns and the rest apply on time. The comparison is therefore by
+distribution, never line by line (§18).
 
 ---
 
@@ -1090,16 +1476,24 @@ resolution peer's `InputResolutionTelemetry`, `RelayArrivalProbe` in `NetSyncTel
 `ResimGateProbe` in `SimulationManager` (this said *"in `SimulationNetSync` with the other three
 probes"* until task 11 — §11 C13): it is
 measured on this actor's game thread, from the Chaos pre-step hook, and the only tick source legal
-to read there is the `ChaosTickMapper`'s atomic offset — which this actor owns and
-`SimulationNetSync` has no access to.
+to read there is the `ChaosTickMapper`'s atomic offset — which this actor's Chaos host owns (a
+`ChaosTickBackendUImpl` member since task 82) and
+`SimulationNetSync` has no access to. Since task 51 the probe sits in `onFrameStepsDue_GameThread`,
+which the Chaos configuration's `InjectInputs_External` calls with the mapper's tick (§7, §18). In the
+Jolt configuration the tick driver calls it at `TG_StartPhysics` with its dispatch counter plus the
+published offset J3 (§1), which is the mapper's value except that a client Skip or Stall's ±1 reaches
+the probe one frame earlier (`BrawlerTickDriverGameUImpl-rationale.md` §4; the frame host until og-tickdriver
+task 8); the line formats are
+unchanged (og-simulationscheduler-withjolt task 54).
 
 **Why this hook and not `OnPostPhysicsStep`, on either role:** that hook is game-thread on both
-roles too, but it is handed only an `FChaosScene`. It has no physics step number and therefore no
-route to a sim tick through the only source safe on that thread. Sampling there would have
+roles too, but it receives no physics step number (it was handed only an `FChaosScene` until task 51,
+and now takes no argument), and therefore has no route to a sim tick through the only source safe on
+that thread. Sampling there would have
 required either reading the physics-thread-written clock or inventing a second counter, both ruled
 out. This hook already has both numbers: the step, and Chaos's own sub-step count.
 
-**Why reusing `firstUpcomingSimTick` is safe on the client** even though the `+1` derivation in §9
+**Why reusing `firstUpcomingSimTick` is safe on the client** even though the `+1` derivation (`ChaosTickBackendUImpl-rationale.md` §4)
 is proved under an authority-only assumption: the probe never consumes the value directly, only
 **deltas** between consecutive samples, and a constant additive skew cancels under subtraction. A
 client-side departure from unconditional advance — a resim replay, a stall — surfaces either as an
@@ -1176,6 +1570,8 @@ emitted at any verbosity, deliberately — a per-write line is a per-tick line.
 
 ### PROBE 6 — per-connection send budget (`m_connectionBudgetProbe`), server only
 
+*Site: `onFrameStepsDue_GameThread`, below its coordinator test, once per physics frame (§7).*
+
 **Why arithmetic was not enough.** The budget model is
 `allowance = CurrentNetSpeed / DesiredTickRate` bytes per tick, with up to two ticks of bankable
 credit. Both halves are read from engine source, but **every term in it is derived**:
@@ -1217,6 +1613,13 @@ per session, on the first connection, at `Warning` — the value is a property o
 handler stack, not of the connection.
 
 ### The resim-gate feeds (`noteResimRequest` / `noteResimGrant`), client only
+
+*Chaos configuration only (§18): both feeds are called from the Chaos hooks, and since task 82 both are
+`ChaosTickBackendUImpl` members. In the Jolt configuration
+the step driver feeds the same probe (`SimulationStepDriver::resimulateIfRequested`: a request when the
+gate names an anchor, a grant when the world still holds that tick), so `[ResimProbe.Gate]`,
+`[ResimProbe.Chaos]` and `[ResimProbe.Apply]` keep their formats with a sim-tick frame domain: a
+refusal is a ring miss, a clamp cannot happen (task 54).*
 
 **Why our own counters at all.** `FRewindData::FindValidResimFrame` and
 `FPBDRigidsSolver::ConditionalApplyRewind_Internal` log every refusal and every silent frame-skip
@@ -1275,181 +1678,40 @@ predicate still reads the category live (guard G-50).
 
 ### The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only
 
-**What it exists to decide, and that a REFUTATION is the point.** og-netcode-v2-field-defects
-task 10 asks whether the body-state push `FirstPreResimStep_Internal` makes is ever read.
-That initiative's bug report infers that it is not; AC 1 makes that inference
-falsifiable. **A mismatch on an adoption-terminated swing confirms; a match REFUTES and closes
-the task as "not a defect".** The probe is therefore built so the refuting reading is exactly as
-easy to quote as the confirming one: `verdict=ALL_MATCH` on one line, no re-derivation.
+Moved to `ChaosTickBackendUImpl-rationale.md` §3 (og-simulationscheduler-withjolt task 82), with the code it describes.
 
-⛔⛔ **CORRECTED, rework cycle 1.** The paragraph that stood here said: *"The AFTER read is
-the verdict value. Taking it after the push is what keeps the refutation reachable."* **It does
-not, and the claim was wrong in the one way that mattered.** `FRewindData::SetTargetStateAtFrame`
-delegates to `PushStateAtFrame`, which writes the target history buffers and touches no particle.
-So the after-read equals the before-read BY CONSTRUCTION, on every body, on every rewind — which
-means `match=1` could only ever mean *the pushed value already equalled the live one*, i.e. the
-push was inert, and the one shape that could REFUTE the hypothesis, a **non-inert match**, was
-unreachable. Worse, a binary whose target consumer runs after the push and before integrate would
-have printed exactly the same line as a binary that reads the target never. The reading moved; the
-sentence is kept here rather than deleted because a reader who saw the old revision is entitled to
-know which claim was withdrawn and why.
+### `[SimHost.Window]` — the Jolt host's window line, both roles (og-simulationscheduler-withjolt task 52)
 
-**Where the reading is taken, since rework cycle 1 — TWO HOOKS, THREE READS.**
+Not a probe of this class: og-simulation's tick driver owns the line and its layout since og-tickdriver task 8
+(`SimulationTickDriver-rationale.md` §7, `TickDriverWindow-rationale.md`; the frame host before). It belongs to this section's convention all the same:
+one `Warning` summary per 10-second window per role on `LogOGSimHost`, which the ini pins at `Warning`,
+so it prints in normal play, and nothing per tick. Jolt configuration only. It reports the game
+thread's frame time and the host's slices of it, the steps run, the scheduler's lost steps and lost
+time, the J1 and J6 drops, the game thread's waits for the world mutex, the step's measured cost from
+J6 (the normal step, and the replay or the input release before it), and the shadow world's restore
+cost. It is the line gate 22's "lost steps per role" and the hitch check read.
 
-| read | where | what it yields |
-|---|---|---|
-| 1 | `FirstPreResimStep_Internal`, immediately BEFORE the push (`writeRestoredBodyState` since task 10's fix; `FRewindData::SetTargetStateAtFrame` before it) | `beforePush`, stashed. Feeds `inert=` and `dBefore=` |
-| 2 | the same hook, immediately AFTER that call | `moved=` only, never the verdict. Before the fix it was an EAGER-APPLY discriminator. Since the fix it shows the direct write took effect (§14) |
-| 3 | `OnPreSimulate_Internal`, on the frame where `IsResetting()` holds, at the TOP of the hook | `match=`, the verdict |
-
-⭐ **Since task 10's fix (§14), `moved=1` is the expected reading on every non-inert push.** The push is
-now a direct write onto the particle, so the read after it differs from the read before it. The
-verdict is unchanged: read 3 still asks whether the replayed step starts from the pushed value, and it
-still reports `MISMATCH` when the answer is no. That is what the pre-fix binary printed on 185 of 185
-rewinds.
-
-The pushed value and read 1 wait in `m_pushProbeStash` (`FRewindPushProbeStashedBody`, physics
-thread only) between hook one and hook two. By the time read 3 is taken,
-`FPBDRigidsSolver::ConditionalApplyRewind_Internal` has run `FRewindData::ApplyTargets` and
-everything else it runs for this step, and the solver task has reached
-`ApplyCallbacks_Internal` — so a target consumer anywhere in that window IS visible here.
-
-⛔ **Read 3 must stay above `onGameSimulation`.** The radial's own `setIdlePose` /
-`setInitialConditions` write the live body during the replayed step. A reading taken after them
-measures OG's writes, not the engine's, and would report a mismatch that says nothing about
-whether the target was read.
-
-⚠ **The residual blind spot, stated rather than hidden.** A consumer that runs INSIDE the
-evolution after `ApplyCallbacks_Internal` — between read 3 and `FPBDRigidsEvolutionGBF::Integrate`
-— is still invisible. The rework narrows the window; it does not close it. A `verdict=ALL_MATCH`
-refutation is a statement about consumers up to that point, and the runbook says so.
-
-⛔⛔ **`inert=` IS WHAT MAKES A REFUTATION MEAN ANYTHING, and it is why the verdict rule
-changed.** A push whose value already equals the state the body is in cannot distinguish "the
-engine read the target" from "the engine read nothing" — whatever the replay then does, the
-comparison matches. A rewind in which every push was inert therefore used to read
-`compared=6 matched=6 verdict=ALL_MATCH`: a session in which the shape never reproduced,
-presenting itself as a clean refutation. So `inert=` is printed per body, over the same `cmp=`
-field set and through the same production predicate as `match=`, and **the verdict is computed
-over NON-INERT comparisons only**:
-
-| | verdict |
-|---|---|
-| `nonInert=0` (nothing resolved, or every push inert) | `VACUOUS` — the rewind tested nothing, and NEITHER reading may be taken from it |
-| every non-inert comparison matched | `ALL_MATCH` — refutes |
-| any non-inert comparison mismatched | `MISMATCH` — confirms |
-
-⭐ A refutation therefore needs at least one `body=WeaponAxis inert=0 match=1` line. "No
-mismatches in the log" is **not** a refutation on its own.
-
-⛔ **A stash that never reaches read 3 is PRINTED, not dropped** — `verdict=UNREAD` with
-`readFrame=-1` and `reason=newPushBeforeRead` or `reason=notResetting`, under the same tag so the
-runbook's single `grep -v verdict=ALL_MATCH` surfaces it. An absent line is indistinguishable from
-a rewind that never happened, and a reader who cannot tell those apart cannot trust a refutation.
-That branch firing at all is an engine-ordering finding in its own right.
-
-⚠ **One mismatch source the probe does NOT exclude: mapper skew.** `toChaosTick(Tc)` uses the
-CURRENT offset, so a Stall or Skip between frame S(Tc) and the rewind moves F by ±1 and
-`RewindToFrame(F)` restores a different instant than `slot[Tc]` — at which point EVERY body
-mismatches for a reason that has nothing to do with ordering (§9's hazard). The per-body rows are
-the control: on a genuinely confirming rewind, `CharacterCapsule` and `GuardAxis` must **not** all
-read `match=0`. If they do, read `[ResimProbe.Request] mapperOffset=` before concluding anything.
-
-⛔ **It reads X/R, and `ChaosPhysicsBodyAdapter::captureBodyState` reads P/Q, and both are
-right.** That adapter runs from PostSolve, where P/Q hold the solved pose and X/R still hold the
-start-of-step pose. This probe runs at the opposite phase: on UE 5.6's public source
-`FRewindData::RewindToFrame` restores the pose with `SetXR`, `FRewindData::ApplyTargets` applies a
-target with `SetXR`, neither writes P/Q, and `FPBDRigidsEvolutionGBF::Integrate` begins the
-replayed step from `XCom()`/`RCom()`. X/R is therefore the state the replay starts from. A P/Q
-read here would report a stale pre-rewind pose and print a mismatch on every body on every
-rewind — a probe that cannot fail is worth nothing, and this one was one line away from being
-that. `dXP=` carries the X-to-P distance so the skew stays visible rather than assumed.
-
-⛔ **The match predicate is the production one.** `isSimilarToField`
-(`SimulationComparisonGlm.h`) at `kDefaultSimilarityEpsilon` (`SimulationTypes.h`) — the same
-test `isSimilarTo` applies to a correction, so "the probe disagrees but the cache does not" is
-not a state this can reach. Its quaternion arm is `|abs(dot) - 1|`, which matters: an
-antipodal-but-identical rotation is a match, and a hand-rolled component compare would have
-called it a large mismatch. **Measured, not argued** — the task-10 notes carry a standalone run
-in which two plausible wrong rules (component-wise quaternion; ignore the wire shape) are scored
-against the same cases, and **both err toward MISMATCH**, i.e. both would have confirmed the
-hypothesis for free.
-
-⛔ **Only the fields the body's wire shape carries are compared.** A declaration whose
-`bodyStateOf` yields `LinearBodyState` — the character capsule — fabricates an identity rotation
-and a zero angular velocity on the way to `PhysicsBodyState`. Comparing those two would report a
-mismatch about a value no wire ever carried. `cmp=` names the set that was compared, and
-anything that is not exactly `PhysicsBodyState` takes the conservative position-plus-linear-
-velocity set.
-
-⛔ **`verdict=VACUOUS` is a third answer, not a rounding of `ALL_MATCH`.** With `compared=0` the
-counters read all-zero, which is indistinguishable from a clean refutation. An unresolved proxy or
-handle is counted in `unresolved=`, never silently skipped. ⛔ **Rework cycle 1 widened what
-reaches this verdict**: `compared=0` was never the only way to test nothing — see the `nonInert`
-table above, which is now the rule.
-
-**Volume and cost.** Per-body detail and the per-rewind summary, both at `Verbose`, and every
-read and format sits behind one `UE_LOG_ACTIVE(LogOGResimProbe, Verbose)`, so at the shipped
-`LogOGResimProbe=Warning` the whole probe is one predicate per body. It is deliberately NOT a
-per-window summary: the question is per-rewind and an aggregate would hide which body disagreed.
-
-⚠ **The engine facts are about the API, not about the running binary.** `ApplyTargets(Step,
-bFirst)` before `PreResimStep_Internal(Step, bFirst)`, and the repeat gated on
-`np2.Resim.ApplyTargetsWhileResimulating` (default `false`), are read off public
-`EpicGames/UnrealEngine@5.6`. This project builds against a local source engine, and the two can
-differ. **That gap is precisely what the probe measures**, so nothing here may be quoted as the
-answer AC 1 asks for.
-
-~~⚠ **Not yet run.** Confirming or refuting needs a PIE session with an adoption-terminated swing
-and task 2's fix off, which only the user can produce. The runbook is in that task's
-implementation notes.~~ **Superseded 2026-09-25.** The probe ran on 2026-09-22 (floor-3 PIE session)
-and **confirmed**: 185 of 185 rewinds read `verdict=MISMATCH` with `nonInertMatched=0`, on every body.
-At the phantom tick the weapon's line read `pushedAng=(0,0,0) liveAng=(0,0,6.1088) moved=0
-resimType=FullResim objState=Dynamic`. The fix is §14. The probe stays as its regression check, and
-the post-fix PIE run has not happened yet.
+The Jolt host (`TickDriverBackendUImpl` since task 83) feeds it two game-thread samples:
+* **The world mutex wait.** `tryRegister`'s bind takes the time just before its J2 scope and hands the
+  wait to the tick driver's `noteWorldLockWait` once it holds the mutex. That bind is the game thread's only
+  J2 scope while the host steps (the shadow-world ruling, `TickDriverBackendUImpl-rationale.md` §2); the `BeginPlay` scopes run before the
+  first step and are not timed. On a worker client a wait therefore shows only in a window with a
+  join; on the authority the step is inline and the wait is never contended.
+* **The shadow restore.** The world host's `restore_GameThread` hands each restore's duration and whether it
+  was refused, through the presenter's restore note, to the tick driver's `noteShadowRestore`, on a worker client.
 
 ---
 
 ## §9 Tick alignment — the `+ 1`
 
-**An off-by-one here shifts every player's input by one tick, silently and uniformly.**
+The Chaos configuration's derivation of the `+ 1` moved to `ChaosTickBackendUImpl-rationale.md` §4 (og-simulationscheduler-withjolt task 82).
 
-`physicsStep` is the **upcoming** solver step: Chaos passes
-`MarshallingManager.GetInternalStep_External()`, documented in `ChaosMarshallingManager.h` as *"the internal step that the current PushData will
-be associated with once it is marshalled over"*, and the solver's frame counter is
-only incremented at the **end** of a tick (`GetCurrentFrame()++`, `PBDRigidsSolver.cpp`), so step `N`'s `OnPreSimulate_Internal` observes
-`GetCurrentFrame() == N`.
-
-`ChaosTickMapper`'s offset is written in `OnPreSimulate_Internal` as `chaosTick - simulationTick`.
-Crucially it is written **before** `onGameSimulation()` runs, and `onGameSimulationAuthority()`
-advances the server clock as its first action. So the `simulationTick` captured at step `K` is the
-tick simulated at step `K−1`:
-
-```
-offset = K - S(K-1)          where S(K) is the sim tick simulated at step K
-S(K) = S(K-1) + 1            authority advanceTick() is unconditional -
-                             no Stall, Skip or resim exists on the server
-=>  offset = K - (S(K) - 1) = (K - S(K)) + 1
-=>  toSimulationTick(X) = X - offset = S(X) - 1
-```
-
-`toSimulationTick(physicsStep)` therefore names the tick **before** the one that step will
-simulate, and the upcoming tick is that value **plus one**. The `+ 1` in
-`releaseDelayedInputsForStep` is a derived correction, not a fudge factor.
-
-**Why not cross-check against the server clock at runtime:** the clock is written on the physics
-thread, and reading it from the game thread is exactly the unsynchronized cross-thread read this
-whole design exists to avoid. The mapper's offset is a `std::atomic` and is the only tick source
-safe to read from the game thread, which is why the resolution specifies it.
-
-**Sub-stepping:** with `NumSteps > 1` the physics frame runs several sim ticks back to back, so the
-drain releases input for each of them. The normal fixed-tick case is `NumSteps == 1` and collapses
-to a single drain.
-
-The Chaos hook `OnPhysicsPreTick` → `InjectInputs_External` → `releaseDelayedInputsForStep` is
-game-thread and immediately precedes the step. The drain is a no-op on a client and on a server
-with nothing parked; the frame-health probe inside the same function is **not** a no-op on either
-role.
+**That derivation is the Chaos configuration's** and retires with it (task 21). The Jolt configuration
+has no mapper and no `+ 1`: the step driver hands each authority step `serverTick + 1` and checks after
+the step that it simulated exactly that tick (`SimulationStepDriver-rationale.md` §7), and the per-frame
+tick is the tick driver's dispatch counter plus the offset `afterTick` publishes, `tick − physicsStep`,
+in which the `+ 1` is already contained (`SimulationTickDriver-rationale.md` §5;
+og-simulationscheduler-withjolt task 54).
 
 ---
 
@@ -1846,6 +2108,16 @@ definition are what hold it. Task 11's C12 said the sentence's *substance* was t
 
 *Found by task 12's review of task 11's text.*
 
+### C20 — §9 named an empty hook as the drain's caller
+
+§9 said the drain was reached through the pre-tick hook, then `InjectInputs_External`. The pre-tick
+hook this class bound to the scene's pre-tick delegate had an empty body and called nothing.
+`InjectInputs_External` is bound to the rewind callback's `InjectInputsExternal` delegate, which
+Chaos broadcasts from the solver when it pushes the frame's steps. Task 51 deleted the empty hook
+and its binding, and §9 then named the real caller. That text is `ChaosTickBackendUImpl-rationale.md` §4 since task 82.
+
+*Found by og-simulationscheduler-withjolt task 51.*
+
 ### Routed, not fixed — an observation about a neighbouring file
 
 A wave-6 sweep of the engine-free core retired the token `TestYo` "to 0" on the finding that *"the
@@ -2032,7 +2304,7 @@ The R0 annotations point at §11.*
 // Rationale, the token table and the residual blind spot: docs/SimulationManagerUImpl-rationale.md §8
 ```
 
-**Where it went:** Lines 272-273 → **`⛔G-02`**. The rest is rationale — §8, *The rewind-push probe*.
+**Where it went:** Lines 272-273 → **`⛔G-02`**. The rest is rationale — §8, *The rewind-push probe*. Task 82 moved both with the Chaos host: they are `ChaosTickBackendUImpl-guards.md` G-01 and `ChaosTickBackendUImpl-rationale.md` §3.
 
 #### Header lines 287-300 — above `class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<`
 
@@ -2913,7 +3185,7 @@ The R0 annotations point at §11.*
 // ⛔ CLASS-scoped so these names cannot leak to global scope from an adapter header. §2
 ```
 
-**Where it went:** **`⛔G-18`**.
+**Where it went:** G-18, a tag on the alias chain. Task 81 moved the chain to `BrawlerCompositionUImpl.h` and retired G-18; its successor is `BrawlerCompositionUImpl-guards.md` G-01.
 
 #### Header lines 1039-1039 — above `using BrawlerInputResolution = apply_t<SimulationInputResolution` …
 
@@ -3192,7 +3464,7 @@ message says most of this, and it is code.
 
 ### 13.3 The collision-category table
 
-*Now one file-local function, `emplaceBrawlerQueryAdapter`, called from both role branches.*
+*Now one table per configuration, in the brawler's engine bindings: `BrawlerChaosBindingUImpl::categoryChannels`, which the Chaos host's `buildWorld` hands the query adapter, and `BrawlerJoltBindingUImpl::categoryChannels`, which the Jolt host's `buildWorld` hands the static importer (og-tickdriver task 15a). Before that it was one file-local function, emplaceBrawlerQueryAdapter, called from both role branches; og-simulationscheduler-withjolt task 82 moved it into `ChaosTickBackendUImpl.cpp`, called once from `buildWorld`, and task 83 gave the Jolt configuration its own table, brawlerCategoryChannels in the Jolt host's `.cpp` (TickDriverBackendUImpl.cpp, a historical name: og-tickdriver task 15e deleted it).*
 
 ⭐ **The duplication is gone, and with it the fence.** The source carried the table twice, once
 per role branch, under "KEEP IN SYNC … adding to one silently diverges client from server". It
@@ -3311,8 +3583,9 @@ The client branch's copy said only that it matched, and why the client needs it 
 > exactly that cost for `world` and `character`. Generic creation, hand-written collision —
 > state both halves.
 
-Since this conversion there is **one** table, `emplaceBrawlerQueryAdapter` (§13.3), so a new
-category needs one row, not two.
+Since this conversion there is **one** table per configuration (§13.3; since og-tickdriver task 15a
+`BrawlerChaosBindingUImpl::categoryChannels` and `BrawlerJoltBindingUImpl::categoryChannels`), so a new
+category needs one row in each, not one per role branch.
 
 > Stamp the authoritative capsule body id into the brawler's CharacterBindings. §10
 >
@@ -3436,6 +3709,12 @@ Verified: `respawnDelayTicks` defaults to `120u`. The caller computes `isAuthori
 *`pushRingoutScoresToCharacters`, and its call in `OnPostPhysicsStep`. The cross-thread
 argument is in §1, the second read crossing. What follows is the rest.*
 
+*Call site by configuration: `OnPostPhysicsStep` is called by the scene's post-tick delegate in the
+Chaos configuration and by the frame host's `TG_EndPhysics` tick function, through the tick driver, in the Jolt one, at the same
+point of the frame (after the wait for earlier frames' steps) and every frame. On the authority every
+step has run inline before it, so the push reads a score table no step is writing; the argument below
+is unchanged (task 54).*
+
 > [ringout task 5] ⭐ THE AUTHORITY-SIDE SCORE PUSH
 >
 > WHAT IT IS. One game-thread pass that copies each character's authority-side ring-out
@@ -3554,8 +3833,9 @@ has ten and omits `[ResimProbe.SlotMap]`, which `CorrectionCache.h` emits. Also,
 
 ### 13.7 The rewind-push probe — the source's own wording, beyond §8
 
-*§8 carries this probe's design. These are the passages from its source that §8 did not already
-state.*
+*`ChaosTickBackendUImpl-rationale.md` §3 carries this probe's design (§8's text, moved there by task 82). These are the
+passages from its source that it did not already state. Chaos configuration only: the probe and its helpers are
+the Chaos host's (`ChaosTickBackendUImpl.cpp` since task 82) and retire with it in task 21 (§18).*
 
 > TWO QUESTIONS, ONE FIELD SET, ONE PRODUCTION COMPARATOR. `match` asks whether the
 > replay's starting state equals the pushed value; `inert` asks whether the push could
@@ -3584,7 +3864,7 @@ state.*
 > are LIVE reads of the same particle.
 
 ⚠ **Outdated by task 10's fix (2026-09-25), not wrong when written.** The push is now a direct write
-onto the particle (§14), so the after-push read differs from `beforePush` on every non-inert push, and
+onto the particle (`ChaosTickBackendUImpl-rationale.md` §5), so the after-push read differs from `beforePush` on every non-inert push, and
 `moved=1` is the expected reading. The verdict still comes from read 3, one hook later.
 
 > BodyId lookup goes through the m_physics composite bindings (local-only).
@@ -3605,7 +3885,7 @@ tree's bodies. On UE 5.6 `RewindToFrame` re-stamps every dynamic body's resim ty
 rewind, so none is `ResimAsFollower` during a replay. The push it justifies was also measured
 never read (task 10's capture: 185 of 185 rewinds `MISMATCH`, `nonInertMatched=0`). ~~The call
 stays, because task 10's fix will decide what replaces it.~~ Task 10's fix (2026-09-25) removed the
-call and writes the particle directly (§14, `⛔G-76`). The sentence has no guard, because it no
+call and writes the particle directly (`ChaosTickBackendUImpl-rationale.md` §5, `ChaosTickBackendUImpl-guards.md` G-08). The sentence has no guard, because it no
 longer describes a reason.
 
 At `b9f6d81` `Config/DefaultEngine.ini` sets `LogOGResimProbe=Verbose`, so the "shipped
@@ -3614,7 +3894,8 @@ describe the committed ini (C13-1).
 
 ### 13.8 The capacity pin's word rounding — `(usableBits / 32) * 4` ∴D-50
 
-*The `[PacketBudget]` line in `releaseDelayedInputsForStep`.*
+*The `[PacketBudget]` line in `onFrameStepsDue_GameThread` (in `releaseDelayedInputsForStep` until
+task 51's split, §7).*
 
 The first argument of that line turns `UNetConnection::GetMaxSingleBunchSizeBits()` into
 usable **bytes**. It does not divide by 8: it rounds **down to whole 32-bit words** first,
@@ -3643,7 +3924,7 @@ observed. The file was then restored and its hash checked.
 | was | now | seen to fail |
 |---|---|---|
 | "ORDER IS LOAD-BEARING: this MUST precede the `[Resim.` catch-all" and the defensive `[ResimProbe` placement | `static_assert(ogLogRoutesAreAllReachable())` over `kOGLogRoutes`: no prefix may begin with an earlier one, compared case-insensitively as `FString::StartsWith` does | `[Resim.` moved above `[Resim.Input]` ⇒ `C2338`; `[Resim.` widened to `[Resim` ⇒ `C2338`; a lower-case duplicate `[resim.input]` appended ⇒ `C2338` |
-| the two collision tables and their "KEEP IN SYNC" | one table, `emplaceBrawlerQueryAdapter`, called from both branches | nothing left to poison: the two copies no longer exist |
+| the two collision tables and their "KEEP IN SYNC" | one table, emplaceBrawlerQueryAdapter, called from both branches (since og-tickdriver task 15a the Chaos binding's `BrawlerChaosBindingUImpl::categoryChannels`) | nothing left to poison: the two copies no longer exist |
 | "NOT `HasAuthority()`" at four sites | `#define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction` after the includes, `#undef` at the end of the file (it must not leak into the next file of a unity blob) | `HasAuthority()` typed in `BeginPlay` ⇒ `C3861` naming that identifier |
 | PROBE A's "COMPARABLE WITH ResimGateProbe … same 120 samples" | `static_assert(kFrameHealthProbeWindowSamples == kResimGateProbeWindowSamples)` | a local shadow of 121 ⇒ `C2338` |
 | "NOT ROLE-GATED" at the spawn-point seed | `checkf(m_ringoutSpawnPointsSeeded)` after both role branches | compiled only. A runtime check in the UE layer cannot be exercised from a low-level test |
@@ -3743,95 +4024,7 @@ and on four early returns: `// pre-BeginPlay ordering; the relay latches and rep
 
 ## §14 The first replayed step — the restored body state is written, not targeted
 
-*og-netcode-v2-field-defects task 10's fix, 2026-09-25. The prohibitions are `⛔G-76` (where and how
-the write happens) and `⛔G-77` (which fields it writes).*
-
-**What the hook does.** A granted rewind makes `FirstPreResimStep_Internal` do three things, in this
-order:
-
-1. It records the grant.
-2. It calls `prepareResimulation`, which restores the synced composite from the correction cache.
-3. It walks every composite body and hands its restored state to the engine.
-
-Before the fix, step 3 was `FRewindData::SetTargetStateAtFrame` at the replayed frame. Since the fix,
-step 3 is `writeRestoredBodyState`: the physics-thread API's `SetX` and `SetV`, plus `SetR` and `SetW`
-when the body's wire shape carries them.
-
-**Why the target was never read.** This is public UE 5.6's order for the first replayed step:
-
-1. `FRewindData::RewindToFrame` restores X/R/V/W from the client's own recorded history. It recomputes
-   each dirty particle's follower-ness from its object state and overwrites its resim type.
-2. `FRewindData::ApplyTargets` reads the targets stored at that frame.
-3. `PreResimStep_Internal` runs, and this hook runs inside it.
-4. The solver task runs. On the way to the evolution it passes `ApplyCallbacks_Internal`, which is
-   where `OnPreSimulate_Internal` fires.
-5. The evolution integrates, starting from X/R.
-
-On later replayed steps `FRewindData::ApplyTargets` runs only if `np2.Resim.ApplyTargetsWhileResimulating` is set,
-and it defaults to false. So a target written from this hook for the frame being replayed is read by
-nothing in that cycle. Task 10's probe measured that on the running binary before the fix.
-
-**Why the fix is a direct write.** `FRewindData::ApplyTargets` itself does no more than this. For a non-follower
-particle it calls `SetXR`, then `SetV`/`SetW`, and it sets the object state from the target. The fix
-makes the same kind of write, from the same phase: after `FRewindData::ApplyTargets`, before the step integrates. It
-uses the physics-thread handle API that `ChaosPhysicsBodyAdapter` and the sub-sims use on every tick,
-replayed steps included. Two consequences:
-
-* **P/Q.** That API's `SetX`/`SetR` also set P/Q. So after the write the body's X and P agree, and
-  the probe's `dXP=` reads 0 for it.
-* **Sleep.** It wakes a sleeping body, which is what the old target asked for: every push requested an awake body.
-
-Nothing in og-simulation changed. The restore still happens in `prepareResimulation`, before the
-write, where it always happened.
-
-**Candidates that were not taken.**
-
-* **Pushing from `TriggerRewindIfNeeded_Internal`, before `RewindToFrame`.** `FRewindData::ApplyTargets` would read
-  such a target. But this callback's frame is only a request. The engine takes the minimum over every
-  rewindable callback and the replication frame. It then runs `FRewindData::FindValidResimFrame`,
-  which can move the frame or refuse it. A target written at the requested frame can therefore land
-  on a frame that is not replayed. It then stays in the target history and is applied by some later
-  rewind to that frame.
-
-  This path also needs the restored state before `prepareResimulation` has produced it. That means
-  either reading the correction cache from the adapter, or moving og-simulation's restore earlier.
-* **Pushing at injection time.** It has the same frame problem, and a worse one. A correction is
-  injected before `onCheckIsSimilar` decides whether it triggers a rewind at all, and to which tick.
-* **The `np2.Resim.ApplyTargetsWhileResimulating` cvar.** It re-applies targets on later steps, but
-  the target for the first replayed step is still written after that step's `FRewindData::ApplyTargets`.
-
-**What the removed call also did.** `FRewindData::SetTargetStateAtFrame` had three side effects the fix drops:
-
-* **Lerped targets.** It fills gaps: a push to frame F whose previous target sat up to five frames
-  earlier also writes interpolated targets for the frames in between.
-* **The rewind-frame search.** It gives each body a target history, and `FRewindData::FindValidResimFrame` consults
-  that history when it picks a rewind frame.
-* **Object state.** Every target carries "dynamic, enabled", and `FRewindData::ApplyTargets` applies that state
-  whenever it does read a target.
-
-This file no longer writes any rewind target, so none of the three happens on its account.
-
-**The wire shape decides the fields (`⛔G-77`).** A `LinearBodyState` body writes position and linear
-velocity only. Its rotation and spin keep the rewound history, the only value available for fields
-no wire carried. This could be made a compile-time rule, with typed overloads and a deleted fallback
-template. It deliberately is not: that would make every new body-state type edit this call site. The
-push's generic `const PhysicsBodyState&` call site is the zero-edit property `LinearBodyState`'s
-widening conversion exists for.
-
-**What the probe says after the fix (§8).** Non-inert pushes read `moved=1` at read 2 and `match=1`
-at read 3, so the verdict can read `ALL_MATCH`. It can still read `MISMATCH`. That happens when
-something between this hook and `OnPreSimulate_Internal` overwrites the body, or when the write is
-skipped or writes the wrong field set. The pre-fix binary is that case, and it printed `MISMATCH` on
-every rewind.
-
-⚠ **The probe does not prove convergence.** The residual blind spot in §8 still stands: a writer
-inside the evolution after `ApplyCallbacks_Internal` is invisible to read 3. Convergence is proved only
-by the corrections stopping.
-
-**The authored resim policy stays inert.** `ChaosPhysicsFactory` stamps `ResimAsFollower` on the
-weapon through the game-thread API, and `RewindToFrame` overwrites it to `FullResim` on every rewind
-of a dynamic body. The direct write does not consult resim type, so that stamp has no bearing on this
-fix. It was left unchanged.
+Moved to `ChaosTickBackendUImpl-rationale.md` §5 (og-simulationscheduler-withjolt task 82), with the code it describes.
 
 ---
 
@@ -3873,6 +4066,274 @@ input paths keyed by ROOT connection are unaffected.
 
 **A rejoin** is a new pawn, so it gets a new component with id 0, a new allocation and a new id.
 The departed pawn's id was unregistered at its EndPlay and is never handed out again.
+
+## §16 The latency-budget probe — stamp sites, threads and errors (og-simulationscheduler-withjolt task 1)
+
+Moved to `LatencyBudgetDiagnosticsUImpl-rationale.md` §6 (og-tickdriver task 18), with the code it describes: the
+probe, its mailboxes, its stamp functions and its window logging left this class for `LatencyBudgetDiagnosticsUImpl`, a
+class that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1 (every build but Shipping). This class holds one
+member, `m_latencyBudgetDiagnostics`, and the `get`/`edit` pair `getLatencyBudgetDiagnostics()` /
+`editLatencyBudgetDiagnostics()`; every former call site is now an `editLatencyBudgetDiagnostics()` call at the same
+point, on the same thread, in the same order: `onTimingInfoReceived` (the `WIRE` sample, first), `BeginPlay` (`begin`,
+where the probe was created and the post-tick flush bound), `EndPlay` (`end`, inside the world test, before
+`onEndPlayWorld`), `tryRegister` (`wrapInputProvider`, on the client branch), `unregisterFromNewFramework`
+(`forgetCharacter`) and the last statement of `OnPostPhysicsStep` (`tick_GameThread`). The old-to-new name map is
+`LatencyBudgetDiagnosticsUImpl-rationale.md` §5.
+
+---
+
+## §17 The Jolt host — overview (og-simulationscheduler-withjolt tasks 53–56 and 18)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §2 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+## §18 The backend switch — `OG_PHYSICS_BACKEND_CHAOS` (og-simulationscheduler-withjolt task 51)
+
+The initiative replaces Chaos with Jolt as the gameplay physics engine. Until gate 22 compares the
+two, both hosts stay selectable at compile time, and task 21 removes the switch after the gate (the
+user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos is retired soon).
+
+### The macro and the traits header
+
+* **One macro**, `OG_PHYSICS_BACKEND_CHAOS`: `1` builds the Chaos host, `0` the Jolt host. It comes
+  from one constant, `PhysicsBackendChaos` in `OGBrawlerUnreal.Build.cs`, added as a
+  **`PublicDefinitions`** entry, so every module that includes this header sees the same value. A
+  private definition would let a future includer compile the other arm, an ODR violation. It is not
+  an environment variable, because nothing established that UBT re-reads a changed environment
+  variable before it reuses its makefile; an edited `OGBrawlerUnreal.Build.cs` is always re-read. Task 51 saw both: a
+  flipped constant, and a deleted definition, each recompiled the module and stopped at the traits
+  header's matching error. A switch changes a definition every file of the module compiles with, so
+  make it with the editor closed rather than through Live Coding.
+* **The constant is `0`, the Jolt configuration, since task 18.** Task 51 built the switch with the
+  constant at `1` and a Jolt branch that was only an `#error`; tasks 53 to 56 built the Jolt host in
+  that branch (below) with the constant still `1`, and task 18 flipped it. Set it to `1` to build the
+  Chaos configuration, for the comparison playtests until task 21.
+* **`PhysicsBackendUImpl.h`** stops the build when the macro is undefined. Since og-tickdriver task 15a it is
+  seam A of the backend (`PhysicsBackendUImpl-rationale.md`): the concepts `PhysicsEngineTraits` and
+  `BrawlerEngineBinding`, and one selector that names the configuration's engine traits and the brawler's binding
+  for that engine. Since og-tickdriver task 15e `PhysicsEngineTraits` is not defined there: the header includes it,
+  OGSimulationUnreal's in task 15e and og-simulation's `PhysicsEngineTraits.h` since task 15f, and asserts it on the
+  selected traits:
+
+| alias | Chaos configuration | Jolt configuration |
+|---|---|---|
+| `EngineTraits` | `ChaosEngineTraitsUImpl` | `JoltEngineTraitsUImpl` |
+| `EngineBinding` | `BrawlerChaosBindingUImpl` | `BrawlerJoltBindingUImpl` |
+
+  The engine traits hold the six adapter types (`BodyAdapter`, `ReaderAdapter`, `QueryAdapter`, `Factory`,
+  `VizQuery`, `VizReader`), the backend name `kName` (`chaos` or `jolt`) and `computeDeterminismFingerprint`, which
+  runs og-simulation-jolt's determinism fingerprint in the Jolt configuration and returns none in the Chaos one.
+  This class's adapter members (`m_physAdapter`, `m_physReaderAdapter`, `m_queryAdapter`), its two visualization
+  doors and its `[SimHost.Backend]` line name them through `EngineTraits`. Until task 15a the header held the
+  adapter aliases, the name and the fingerprint itself, per configuration, in namespace `physicsBackendUImpl`; task 15a
+  kept six of those names for the files outside it, and task 15b switched those files (`BrawlerCompositionUImpl`'s
+  `IntegrationExecFor` and `HitDetectionSystem`, `SimulationManagerUImplConceptTest.cpp`, the build identity and
+  `PhysicsBackendHostUImpl.h`) to `EngineTraits` and deleted the names (`PhysicsBackendUImpl-rationale.md` §5).
+
+### What the arms hold (tasks 82 and 83)
+
+Since og-simulationscheduler-withjolt task 82 the Chaos host is a class of its own, `ChaosTickBackendUImpl`
+(`ChaosTickBackendUImpl.h` and `.cpp`; its reasoning is `ChaosTickBackendUImpl-rationale.md`). Since task 83 the Jolt
+host is too, `TickDriverBackendUImpl` with its state struct `TickDriverBackendWorldsUImpl` (`TickDriverBackendUImpl.h` and,
+until og-tickdriver task 15e moved the host to OGSimulationUnreal as a header template, a `.cpp`;
+`TickDriverBackendUImpl-rationale.md`). Until og-tickdriver task 15b the two had historical names:
+ChaosBackendUImpl with ChaosBackendWorldsUImpl (historical names), and
+JoltBackendUImpl with JoltBackendWorldsUImpl (historical names). Task 15b named them by who schedules the steps and
+made the Jolt one a template over the engine traits and the binding. This class's two files have no arm left:
+
+* **Header:** the include of `PhysicsBackendHostUImpl.h`, which includes the configuration's backend header and
+  names its two types (`PhysicsBackendHostUImpl-rationale.md`); the members `m_backendWorlds`, above the adapters,
+  and `m_backend`, directly after `m_manager` (§2); and `friend physicsBackendUImpl::Backend;`, which befriends the
+  configuration's one host (since og-tickdriver task 15b; it replaced one `friend class` line per host), and the
+  class-template friend `BrawlerTickDriverGameUImpl` (which replaced the frame host's friend line in og-tickdriver
+  task 8), in both configurations.
+* **`.cpp`:** at each seam call site (the table below), one unconditional `m_backend.` call.
+
+`ChaosTickBackendUImpl` holds what the Chaos arm held before task 82: the Chaos engine includes; `FSimulationState2`,
+`FSimulationInput2`, `FRewindPushProbeStashedBody` and `FSimulationManagerAsyncCallback`, whose definitions moved
+with them; the six passthroughs from `onGameSimulation` to `noteResimGrant` (§1); `InjectInputs_External` with
+`editChaosTickMapper` / `getChaosTickMapper`; `m_asyncCallback`, the two delegate handles and `m_chaosTickMapper`;
+the `[ChaosDilation]` window; the category-table helper (emplaceBrawlerQueryAdapter, whose rows moved into the
+Chaos binding's `BrawlerChaosBindingUImpl::categoryChannels` in og-tickdriver task 15a), `writeRestoredBodyState` and
+the push-probe helpers.
+Since task 53 the arm had also held three pieces that task 51 left shared: the role branches' adapter
+construction in `BeginPlay` (with the solver lookup above the branches), `tryRegister`'s first-call bind
+(`ChaosPhysicsFactory` and the volume registration), and `registerVizVolume`'s query parameters. They moved too.
+The callback and its input hold a `ChaosTickBackendUImpl*` instead of this class. One member stayed here,
+the clock counts at the window start (m_latencyClockAtWindowStart, historical name), for a reason
+`ChaosTickBackendUImpl-rationale.md` §2 gives, until og-tickdriver task 18 moved it into `LatencyBudgetDiagnosticsUImpl`
+(`m_clockAtWindowStart`).
+
+The guards on that code moved with it. This class's G-02, G-51 to G-55, G-71, G-76 and G-77 are retired
+(`SimulationManagerUImpl-guards.md` §R) and are `ChaosTickBackendUImpl-guards.md` G-01 to G-09.
+
+`TickDriverBackendUImpl` holds what the Jolt arms held before task 83: the Jolt includes, console variables and
+anonymous helpers; the stepping mode, the world build, the slot table, the bind and the release; the frame host,
+the hooks and the step driver (since og-tickdriver task 8 the frame host, the game binding and the tick driver); the render publish, interpolation, correction smoothing and apply; the shadow
+world's hand-over, restore and overwrite; and the contact counts. Its world state is `TickDriverBackendWorldsUImpl`,
+which this class holds as `m_backendWorlds`. The guards moved too: this class's G-80 to G-84 are retired
+(`SimulationManagerUImpl-guards.md` §R) and are `TickDriverBackendUImpl-guards.md` G-01 to G-05. Since og-tickdriver tasks 9
+and 10 the render half is og-simulation's presenter, and the stepping mode, the world build, the slots, the bind, the
+release, the shadow world and the contact counts are og-simulation-jolt's world host `JoltTickWorldHost`, held in
+`TickDriverBackendWorldsUImpl`; of those guards only G-01 is live (`TickDriverBackendUImpl-guards.md` §R names the successors).
+
+### The seam (task 82)
+
+This class calls its backend through one fixed set of entry points. Each is called from exactly one place, the
+site where the arm sat, with no `#if`. Task 82 implemented the entry points that have a Chaos body; task 83 moved
+the Jolt column into its own host and gave every entry point a body on both hosts: an empty inline body where the
+column says "empty". The set is checked at compile time: the concept `PhysicsBackendHost`
+(`PhysicsBackendHostUImpl.h`) lists every entry point with its signature, and `compositionContractsHold()`
+asserts `PhysicsBackendHost<physicsBackendUImpl::Backend>`, as the selector does after it picks the host (since
+og-tickdriver task 15b).
+
+| entry point | call site in this class | Chaos body (`ChaosTickBackendUImpl`) | Jolt body (`TickDriverBackendUImpl`) |
+|---|---|---|---|
+| `buildWorld` | `BeginPlay`, after the ini reads, before the role branches | the solver checks, then the adapter emplacement (both moved, `ChaosTickBackendUImpl-rationale.md` §2) | the static import, then the world host's `build` |
+| `startStepping` | the end of `BeginPlay` | the post-tick delegate, the async callback, the `InjectInputsExternal` delegate | `startDriverStepping` |
+| `onEndPlayBegin` | the first statement of `EndPlay`, and it stays first (`⛔G-85`) | empty | unregister the tick functions and wait for outstanding steps (`TickDriverBackendUImpl-guards.md` G-01) |
+| `onEndPlayWorld` | `EndPlay`, inside the world test, after the latency diagnostics' `end` | remove both delegates, free the callback | empty |
+| `beforePresent_GameThread` | `OnPostPhysicsStep`, before the post-simulation pass | empty | the presenter's `present_GameThread` (og-simulation's `TickDriverPresenter`) |
+| `updateVisualization_GameThread` | `OnPostPhysicsStep`, after the timing buffer | `updateVisualizationAll` | the presenter's `updateVisualization_GameThread` |
+| `editVizQuery`, `getVizReader`, `registerVizVolume` | the three public doors of the same names, which keep their signatures and forward | the query adapter, the reader, the volume with the owner ignored | the step world or the shadow world, by stepping mode |
+| `createBodies_GameThread` | `tryRegister`'s first pass; `false` returns `TryRegisterStatus::Pending` | the `ChaosPhysicsFactory` bind; returns `true` | the slot acquire and the Jolt bind; `false` where it waits for a slot |
+| `onRegistered_GameThread` | `tryRegister`'s Ready path | empty | the occupancy push and the render target |
+| `onUnregistered_GameThread` | `unregisterFromNewFramework` | empty | the render target and the slot release |
+| `editDiagnostics().sampleLatencyWindow_GameThread` | `LatencyBudgetDiagnosticsUImpl::tick_GameThread`, before the window closes (since og-tickdriver task 18; this class's own latency tick before) | the dilation scale and the tick-offset poll | empty |
+| `editDiagnostics().logLatencyWindow_GameThread` | `LatencyBudgetDiagnosticsUImpl::tick_GameThread`, after `[LatencyBudget.Window]` | the `[ChaosDilation]` line and its reset | empty |
+
+The root-capsule check after `tryRegister`'s bind reads the movement declaration's stamped
+`bindings.parentBodyId`, because `createBodies_GameThread` returns only whether the bind happened
+(`ChaosTickBackendUImpl-rationale.md` §2). The Jolt bind stamps the slot's root body there on every declaration, so
+the value is the one the check compared before (`TickDriverBackendUImpl-rationale.md` §1).
+
+### The rules
+
+1. **Nothing reflected sits inside an arm.** UHT rejects `UPROPERTY`, `UFUNCTION` and the other
+   reflection markers inside a preprocessor block it does not know ("must not be inside preprocessor
+   blocks"; the UHT header parser, lines 631-636 of UhtHeaderFileParser.cs, UE 5.6), and
+   `OG_PHYSICS_BACKEND_CHAOS` is such a block. Plain C++ inside it is fine. This header's only
+   reflected declarations are the `UCLASS` and its `GENERATED_BODY`, both outside every arm; since task 83
+   this header has no arm at all. A reflected declaration that one backend needs is declared in both
+   configurations.
+2. **Arms live only in `OGBrawlerUnreal.Build.cs` (the constant), the seam-A selector `PhysicsBackendUImpl.h`,
+   the host selector `PhysicsBackendHostUImpl.h`, `ChaosTickBackendUImpl.cpp` and, since og-tickdriver task 15a,
+   `BrawlerJoltBindingUImpl.cpp` and `BrawlerChaosBindingUImpl.cpp`.** The last three are whole-file arms; the
+   engine-traits and binding headers have no `#if` (`PhysicsBackendUImpl-rationale.md` §4). The Jolt host's `.cpp`
+   and the Jolt traits' `.cpp` were two more arms until og-tickdriver task 15e, which made the host a header template
+   in OGSimulationUnreal (its instantiation is in `BrawlerJoltBindingUImpl.cpp`) and moved the traits to
+   OGSimulationJoltUnreal, which has no arm. The frame host's `.cpp` was a third until og-tickdriver task 11 moved it to OGSimulationUnreal,
+   where it has no arm (`UETickDriverHost-rationale.md` §7). The two backend headers have no `#if`, and only the
+   selector includes them, each in its own configuration (task 83, which replaced task 82's list; this class's
+   two files had arms until then). `USimmableUpdateComponent` and
+   `AOGBrawlerUECharacter` have none. The component reaches the visualization adapters through three members
+   that exist in both configurations (below).
+3. **Both adapter sets compile in both configurations** once the Jolt arm exists (task 18). The
+   switch selects wiring, never whether an adapter compiles.
+4. **The Chaos arm holds the code as it was,** with only the edits the shared changes below force. No
+   new feature lands in it. Task 82 moved it into `ChaosTickBackendUImpl` with the owner prefix and the pointer
+   types changed, the call order inside each piece kept, and two pieces of `BeginPlay` moved into one
+   `buildWorld` call (`ChaosTickBackendUImpl-rationale.md` §2).
+5. **No comment marks an arm.** This section is the description.
+
+### The shared changes
+
+* `OnPostPhysicsStep` takes no argument. The Chaos configuration binds the scene's post-tick delegate
+  to a weak lambda that drops the scene and calls it. The `[ChaosDilation]` block reads the scene
+  from `GetWorld()` instead (`LatencyBudgetDiagnosticsUImpl-rationale.md` §6). The two empty physics-scene hooks (pre-tick and step) and their
+  bindings are deleted (§11 C20).
+* **The split** of the frame's game-thread work into `onFrameStepsDue_GameThread`, the drain and the
+  reap (§7).
+* **`[ReleaseBatch] first=<tick> numSteps=<n>`**, one line per drain call, on `LogOGNet` at `Verbose`
+  (its `kOGLogRoutes` row, §4), after the drain's coordinator test and before it drains. The committed
+  `LogOGNet=Warning` hides it, and so does `LogOGNet=Log`. In the Chaos configuration there is one per physics frame, with `n` equal to the frame's step
+  count; the Jolt host will print one per step with `n = 1`. Every `[Release]` line's `releaseTick`
+  lies in `[first, first + n)` of the nearest `[ReleaseBatch]` before it. `[Release]` prints
+  absolute ticks, which differ between runs, so the two backends are compared by distributions,
+  never by lines (gate 22).
+* **`og.Sim.TestGameThreadHitchMs`** (not in Shipping): when it is above 0, the next
+  `OnPostPhysicsStep` sleeps the game thread that many milliseconds, once, and sets the variable back
+  to 0 at console priority (`ECVF_SetByConsole`), so a value set from the console or `-ExecCmds` is
+  reset. It forces a catch-up frame: on an inline-stepping server, 250 ms gives a frame of about 15
+  steps, which shows the release pattern in one `[ReleaseBatch]` line. The sleep sits at the top of
+  the shared `OnPostPhysicsStep`, the one hitch site for both hosts.
+* **`editVizQuery()`, `getVizReader()` and `registerVizVolume(descriptor, owner)`** replace
+  `editQueryAdapter()` and `getPhysicsBodyReaderAdapter()`, and the unused body-adapter accessor is
+  deleted, so no code outside this class can name a body adapter. The first two return references to
+  a world every peer's game thread may query (`SimmableUpdateComponent-rationale.md` §10; task 53 made
+  them pointers, null on a worker client, until task 56 gave that client its shadow world). In the Chaos configuration
+  they always return the Chaos query adapter and reader; `registerVizVolume` builds the query
+  parameters the component used to build itself (simple collision, the owner ignored) and registers
+  the volume on the query adapter. It returns an optional volume id: always set in the Chaos
+  configuration, empty in the Jolt configuration while the owner's slot acquire waits (task 66, the slot
+  table, `TickDriverBackendUImpl-rationale.md` §3). They are handles, an exception to §1's narrow-passthrough rule that
+  they inherit from the accessors they replace: the two visualizers are templates over the adapter
+  types and call them directly, on the game thread. The Jolt configuration's answers are in
+  `TickDriverBackendUImpl-rationale.md` §3.
+* **The backend token.** The build identity builds its token from `EngineTraits::kName` (kBackendName until og-tickdriver task 15b) and the fingerprint:
+  `chaos`, or `jolt:<fingerprint>`. The server refuses a login whose backend differs from its own, with a
+  reason that names both, and admits a different Jolt fingerprint with a Warning (`OGBuildIdentity-rationale.md` §7).
+* **`LogOGSimHost`** and its one-shot `Warning` line at `BeginPlay`:
+  `[SimHost.Backend] backend=chaos fingerprint=none` in the Chaos configuration, and
+  `[SimHost.Backend] backend=jolt fingerprint=<16 hex digits>` in the Jolt one, so every log names the
+  configuration it came from. The fingerprint is the build identity's (`backendFingerprint`), computed
+  once per process. `Config/DefaultEngine.ini` pins the category at `Warning`, beside
+  `LogOGLatencyBudget`. Since og-tickdriver task 11 the category is declared, exported, in OGSimulationUnreal's
+  `OGSimulationUnreal.h` and defined in its `.cpp`, under the same name, so that ini row still governs it; this
+  class's header includes that header where its own declaration of the category was, so every file that saw the
+  category through it still does, in both configurations. In the Chaos configuration it is the category's only `Warning` line; the Jolt
+  host adds the lines `TickDriverBackendUImpl-rationale.md` §2 lists, its window line `[SimHost.Window]` among them (§8).
+* **`dt`** is the engine physics setting AsyncFixedTimeStepSize in both configurations, `checkf`-ed at
+  `BeginPlay` to be one tick of `UEBrawlerNetConfig::tickFrequencyHz`. It is the number Chaos steps
+  with, and the Chaos arm `checkf`s that its solver's async dt is the same value, which it was before
+  the manager stopped asking the solver (design D13).
+
+### The Jolt arm's world (task 53)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §3 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The Jolt arm's stepping (task 54)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §4 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The Jolt arm's render publish and apply (task 55)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §5 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The Jolt arm's game-thread shadow world (task 56)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §6 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The Jolt arm's render interpolation (task 19)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §7 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The Jolt arm's render correction smoothing (task 57)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §8 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The Jolt arm's contact counts (task 78)
+
+Moved to `TickDriverBackendUImpl-rationale.md` §9 (og-simulationscheduler-withjolt task 83), with the code it describes.
+
+### The build rule until task 21
+
+Every task that edits a file with an arm (the traits header, the selector, `ChaosTickBackendUImpl.cpp` and
+`BrawlerJoltBindingUImpl.cpp`, which instantiates the Jolt host since og-tickdriver task 15e; the host's own `.cpp`
+until then), or a file the selector includes or that includes it (this class's
+two files, both backend headers), builds both configurations: the Jolt configuration on the task's full target matrix, and the Chaos configuration
+on the editor, the targets gate 22 runs it on (the packaged dedicated server and the Android client)
+and both test targets. To build the Chaos configuration, set the constant to `1`, build, set it back to
+`0`, and make sure the restored `OGBrawlerUnreal.Build.cs` has a new modification time: a restore that
+keeps the old time (a copy that preserves it) lets UBT reuse the other configuration's makefile, and the
+module silently keeps the other arm.
+
+### Task 21
+
+After gate 22, task 21 deletes the Chaos arms, the macro, the constant and the traits header's Chaos
+branch, and retires the guards listed above. Since task 83 that is deleting `ChaosTickBackendUImpl.h` and `.cpp` with
+their two documents, the Chaos branches of the traits header and the selector, and the config flip.
+
+---
 
 ## Provenance
 

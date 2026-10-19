@@ -129,8 +129,9 @@ is `TG_DuringPhysics`, and nothing in this file depends on a prerequisite.
 it is not (§11, F-25-1). Long enough for scene startup on a slow load, short enough that a genuine
 wiring bug fails loudly rather than hanging forever. Both loops count against it independently
 (`m_initializationAttempts`, `m_registrationAttempts`), and both end in a `checkf` rather than a silent
-give-up. Within loop two, the manager wait, the task-25 id wait (§13) and the bodies-resolvable wait
-all share the one `m_registrationAttempts` count.
+give-up. Within loop one, the manager wait and the physics-slot wait (§3) share the one
+`m_initializationAttempts` count; within loop two, the manager wait, the task-25 id wait (§13) and the
+bodies-resolvable wait all share the one `m_registrationAttempts` count.
 
 **Deleted commented-out code (task 25).** Two commented-out overrides stood under the constructor in
 the header, `ShouldCreatePhysicsState() const override { return true; }` and `OnCreatePhysicsState()`.
@@ -151,12 +152,22 @@ pair at the end changed no scope (there was no code after that point either); it
 `tryInitializeWithManager` for the next tick and returns.
 
 **Loop one — `tryInitializeWithManager`.** Waits for the manager to exist. Once it does: cache the
-owner's input-collection component, register the target-visualization query volume with the
-manager's query adapter, construct the three visualization states, and schedule loop two.
+owner's input-collection component, register the target-visualization query volume through the
+manager's `registerVizVolume` (§10), construct the three visualization states, and schedule loop two.
+
+In the Jolt configuration the volume hangs off the character's Jolt slot, so `registerVizVolume` first
+acquires the slot, and it can answer "not yet" (og-simulationscheduler-withjolt task 66): on a client the
+slot is the one the authority chose, read from the pawn's replicated `PhysicsSlotValue`, and the client
+waits until that value has arrived, and until no departed character still holds that slot on this client.
+The manager then returns an empty volume id, and loop one reschedules itself for the next frame
+(`scheduleNextInitializationAttempt`) **before** it builds the visualization states, so the states are
+only ever built over a registered volume. The wait counts against `kMaxRegistrationAttempts` like the
+manager wait, and its `checkf` names the owner. The Chaos configuration never waits here.
 
 **Loop two — `tryRegisterWithNewFramework`.** Waits for the manager, then for the pawn's
 `SimCharacterId` (§13), then for the character's physics bodies to become resolvable — `tryRegister`
-answers `Pending` until they are — and on success does four things in a deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
+answers `Pending` until they are, and in the Jolt configuration also while the character holds no slot,
+which loop one normally rules out — and on success does four things in a deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
 host (§6), and, on the authority only, register the id → component delivery route (§7).
 
 Every step of both loops can legitimately answer "not yet", repeatedly, and "not yet" is never an
@@ -506,12 +517,27 @@ lifetime arithmetic lines up with the simulation's own pruning.
 *Moved from `TickComponent` (task 25).*
 
 **The movement draw reads a sim-tick snapshot on the render clock.** `attackSimAllState` is
-`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes once per completed sim tick in
-`ASimulationManagerUImpl::OnPostPhysicsStep`. So every drawn `State` / `DerivedState` value is stale by
-up to one 60 Hz tick, and a render frame above 60 Hz redraws the same snapshot; `StaticData` is authored
-once per session. The State and DerivedState halves come from the **same** copy, so the probe reading
+`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes in
+`ASimulationManagerUImpl::OnPostPhysicsStep`, once per game frame at the end of physics, in both
+physics backends. So every drawn `State` / `DerivedState` value is the newest tick the copy saw: a
+frame that ran several ticks shows only the last, a client that steps on a worker can lag the frame,
+and a render frame above 60 Hz redraws the same tick's values; `StaticData` is authored once per
+session. (Until og-simulationscheduler-withjolt task 18 this paragraph said "once per completed sim
+tick" and "stale by up to one 60 Hz tick"; neither held.) The State and DerivedState halves come from the **same** copy, so the probe reading
 and the body pose describe one tick and can be combined — which the servo-error arithmetic in
 `BrawlerMovementVisualization.h` rests on. The call is a pure reader: every argument is a `const&`.
+
+**In the Jolt configuration the copy's attached bodies carry the rendered pose** (og-simulationscheduler-withjolt
+task 19). Right after the copy, the presenter's `updateVisualization_GameThread` (og-simulation's `TickDriverPresenter`,
+called through the manager's Jolt backend) writes the
+render interpolation's pose (two steps behind the host time, the pose the capsule is moved to) into the
+copy's body states of every declaration except the root: the radial weapon axis, the guard and the
+projectile pool. So the weapon, guard and projectile passes draw where the rendered character is, not
+one or two steps ahead of it. The root (movement) body is left at the newest tick on purpose: the visible
+character is the capsule and its mesh, which the render sync already moved, and this movement draw's
+outline is documented as the simulation's belief, built from a body pose and a probe reading of the same
+tick. Every other `State` and `DerivedState` value in the copy stays the newest tick's. In the Chaos
+configuration the copy is unchanged (`TickDriverBackendUImpl-rationale.md` §7).
 
 **The movement cvar is read per frame, deliberately (guard G-26).** Task 16 made `StaticData` cvars
 read once, at construction, so a tunable cannot move under a running session and put two peers on
@@ -539,6 +565,29 @@ pass is the primary view and the arcs remain for A/B comparison.
 
 **`selectVisualizationInput`'s echo carries continuous fields only** (§10); **no tier consult** is wired
 here — muting on a degraded tier is a separate, optional change.
+
+### The visualization adapters come from the manager, through three backend-neutral members
+
+The target and block-prediction passes query the world through `ASimulationManagerUImpl::editVizQuery`
+and read bodies through `ASimulationManagerUImpl::getVizReader`; loop one registers the target
+volume with `ASimulationManagerUImpl::registerVizVolume`, handing it the descriptor and the owner
+(og-simulationscheduler-withjolt task 51). The manager owns the choice of physics backend
+(`SimulationManagerUImpl-rationale.md` §18), and these members exist in both configurations, so this
+component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
+instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
+query adapter and the game-thread reader, and `registerVizVolume` builds the query parameters this
+file used to build itself (simple collision, the owner ignored), so the volume and the two passes
+behave as before. `registerVizVolume` returns an optional volume id, which is empty only in the Jolt
+configuration while the slot acquire waits (§3). The visualizers are templates over the adapter types, so the calls compile against
+whichever pair the manager selects.
+
+In the Jolt configuration the two accessors return the step world's adapters on the authority and on
+a client stepping inline (`og.Sim.RunInline`), and the game-thread shadow world's on a client that
+steps on a worker, where the step's own world may be queried only by the step or under the world
+mutex (`TickDriverBackendUImpl-rationale.md` §6). Either
+way the component gets a world it may query on the game thread, so both passes run on every peer, as
+in the Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
+and the component skipped the two passes there; task 56 removed that skip.)
 
 ---
 
@@ -625,6 +674,7 @@ PARAMETER" (§6). Everything else is here.
 | header: `m_inputRelayHost`, detached rings, `m_hasLocalInputProvider` | §6; G-12; F-25-5 |
 | header: `UObject` constructor doc, `//Physics`, `//Visualization`, "To add mapping context" | deleted as labels |
 | header: two commented-out physics-state overrides | deleted; recorded in §2 |
+| header: the two attack-axis body setters, the attack-axis body pointer and async-physics handle (no caller in either physics configuration), the Chaos tick-mapper forward declaration, and the `.cpp`'s Chaos includes | deleted by og-simulationscheduler-withjolt task 19 (design D §3.4); the component names no physics backend (§10, "The visualization adapters come from the manager") |
 
 ### Carried header prose (verified before the move)
 
@@ -702,3 +752,60 @@ Every id this component hands the core — `tryRegister`, `noteDelayedInputCompo
 
 The id is replicated with the pawn, not on the correction wire, so no wire format changes. The
 `sendConnectionTierToOwningClient` `check` compares its `id` argument with the same storage key.
+
+---
+
+## §14 Latency-budget stamps (og-simulationscheduler-withjolt task 1)
+
+Five sites in this file stamp the latency-budget probe. Each is a timestamp and nothing
+else: it reads values the code beside it already has, writes only the probe, and changes no input,
+no wire byte and no ordering of the netcode it sits next to. The hop table, the threads and every
+site's measurement error are `LatencyBudgetDiagnosticsUImpl-rationale.md` §6; this list only says what
+each site does here.
+
+| site | stamp | thread |
+|---|---|---|
+| `sendLocalInputToAuthority`, after the send | `Handed` for every capture tick in the bundle (client) | GAME |
+| `ServerReceiveRemoteMove_Implementation`, after the version fence | `ServerReceived` for every capture tick in the bundle, and one `WIRE` sample from `readRoundTripMs` per bundle (authority) | GAME |
+| `OnRep_CorrectionState`, beside the `[ReceiveCorrectionState]` line | `ClientReceived` for the correction's tick (client) | GAME |
+| `onRelayedInputRingArrived`, before the core callback | `ClientReceived` for every capture tick in the ring (client) | GAME |
+| `attachInputRelayHost`, authority only | binds the relay host's flush callback, which stamps `Handed` for every capture tick a flush published | GAME |
+
+Every stamp goes through `LatencyBudgetDiagnosticsUImpl::stamp`, which `checkf`s the game thread, and
+every site reaches it through `LatencyBudgetDiagnosticsUImpl::withInstance`, which runs the site's stamps
+on the role's instance (the manager's `editLatencyBudgetDiagnostics()`) when there is one. Since
+og-tickdriver task 18 that is a no-op in Shipping, so the role's manager lookup each site made only to
+stamp (`ASimulationManagerUImpl::instanceFor`) is not made there either
+(`LatencyBudgetDiagnosticsUImpl-rationale.md` §2). The relay host's flush callback is still bound on the
+authority; its body is the one `withInstance` call.
+Repeated capture ticks (redundant bundle slots, repeated relay entries) are expected: the probe keeps
+the first stamp and counts the rest.
+
+**The provider lambda is unchanged, and G-05 still holds.** The capture stamp needs the manager, which
+that lambda may not capture, so it is a wrapper the manager applies in `tryRegister`
+(`LatencyBudgetDiagnosticsUImpl-rationale.md` §6). The only addition to the header for the stamps was
+`getOwnerInputCollection`, a `const` read the wrapper uses to reach the input-sample time. og-tickdriver task 18 added a
+second, a `const` overload of `getSyncedCorrectionStateBuffer`, so that the latency diagnostics read the correction
+buffer's tick through a const path only (`LatencyBudgetDiagnosticsUImpl-rationale.md` §3); production callers still
+get the mutable overload.
+
+**G-19's order is unchanged.** The `ServerReceived` loop and the `WIRE` sample sit after the fence
+and before the tier's RTT sample and the core per-slot loop. They are measurement, not netcode policy:
+neither feeds the tier, the delay or the queue, and the `WIRE` sample goes to the probe only (G-22's
+one-sample-per-bundle rule is about the tier's sample, and this is a separate one, also once per
+bundle).
+
+## §15 The two per-packet log lines (og-simulationscheduler-withjolt task 80)
+
+Two lines in this file are logged with `OG_LOG_ROUTED`, not with `UE_LOG` at a fixed level:
+
+* `[ReceiveCorrectionState]` in `OnRep_CorrectionState` (client, one per correction: 57–59 per
+  second per client in the gate-22 Jolt packaged final run);
+* `[ServerReceive]` on the path of `ServerReceiveRemoteMove_Implementation` taken when there is no
+  reception coordinator or no root connection (authority, one per bundle slot).
+
+Their level is their row's `plainLevel` in `kOGLogRoutes` (`SimulationManagerUImpl.h`), `Verbose`
+for both, so `LogOGNet=Log` does not print them and `LogOGNet=Verbose` does. The rule, the table
+and the rates that set it are `SimulationManagerUImpl-rationale.md` §4. `[ConnectionTier]` in
+`sendConnectionTierToOwningClient` is a tier event, not a per-packet line, and stays a `UE_LOG` at
+`Log`.

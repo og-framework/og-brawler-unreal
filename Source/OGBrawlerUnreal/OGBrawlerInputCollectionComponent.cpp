@@ -99,6 +99,9 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 	if (ch == nullptr)
 		return;
 
+	// Latency-budget hop H1 start: this frame's input sample (docs/LatencyBudgetDiagnosticsUImpl-rationale.md §6).
+	noteInputSampled();
+
 	// Resolve camera forward: PCM with FollowCamera fallback.
 	// Single home for the resolution previously duplicated in OGBrawlerUECharacter::Tick
 	// and OGBrawlerUECharacter::Move (pain point F).
@@ -504,9 +507,10 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	// (holding guard with no movement input raises the holdGuard bit; since
 	// og-brawler-3rdControllerMode task 5, holding it while moving does not) answerable from a
 	// shipped log line with no temporary instrumentation to add and remove. ⚠ LogOGSimTick defaults to Warning in
-	// Config/DefaultEngine.ini — this line is per-tick chatter and is silent until someone
-	// runs `Log LogOGSimTick Log` in the console.
-	UE_LOG(LogOGSimTick, Log,
+	// Config/DefaultEngine.ini — this line is per-tick chatter: it logs at the Verbose level its
+	// `[ClientPrediction]` row in kOGLogRoutes (SimulationManagerUImpl.h) gives it, so it is silent
+	// until someone runs `Log LogOGSimTick Verbose` in the console.
+	OG_LOG_ROUTED(LogOGSimTick,
 		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u movementFlags=0x%02X"),
 		componentId, step.getTick(), leftAttack ? 1 : 0, triggeredActionId,
 		static_cast<uint32>(packed.flags));

@@ -11,7 +11,6 @@
 #include "DVolume/DVolumeAsset.h"
 #include "OGBrawler/DAttackCircle.h"
 #include "OGBrawler/DAttackCamera.h"
-#include "PhysicsEngine/PhysicsConstraintComponent.h"
 
 #include "Runtime/Engine/Classes/Components/SplineComponent.h"
 #include "ProceduralMeshComponent/Public/ProceduralMeshComponent.h"
@@ -90,6 +89,9 @@ class AOGBrawlerUECharacter : public APawn
 	UPROPERTY(Replicated)
 	uint8 SimCharacterIdValue = 0;
 
+	UPROPERTY(Replicated)
+	uint8 PhysicsSlotValue = 0;
+
 	UPROPERTY(Transient)
 	UMaterialInstanceDynamic* HumanoidColorMID = nullptr;
 
@@ -104,9 +106,6 @@ class AOGBrawlerUECharacter : public APawn
 	std::vector<DVolumeAsset> m_volumeAssets;
 
 public:
-	UPROPERTY(Category = "Weapon", VisibleAnywhere, BlueprintReadWrite)
-	UPhysicsConstraintComponent* m_weaponConstraint;
-
 	UPROPERTY(Category = "Weapon", VisibleAnywhere, BlueprintReadWrite)
 	USphereComponent* m_cameraAxis;
 	
@@ -132,13 +131,6 @@ public:
 
 	float m_currentAttackAngle;
 	float m_attackTimer;
-
-	UFUNCTION(BlueprintNativeEvent)
-	void PhysicsTick(float SubstepDeltaTime);
-	virtual void PhysicsTick_Implementation(float SubstepDeltaTime);
-
-	FCalculateCustomPhysics OnCalculateCustomPhysics;
-	void CustomPhysics(float DeltaTime, FBodyInstance* BodyInstance);
 
 	AOGBrawlerUECharacter();
 
@@ -181,6 +173,10 @@ public:
 	SimCharacterId GetSimCharacterId() const;
 
 	void SetAuthoritativeSimCharacterId(SimCharacterId NewId);
+
+	std::optional<uint32> GetPhysicsSlot() const;
+
+	void SetAuthoritativePhysicsSlot(uint32 Slot);
 
 	void SetAuthoritativeRingoutScore(int32 NewScore);
 };

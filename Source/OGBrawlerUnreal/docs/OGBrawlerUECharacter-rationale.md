@@ -8,6 +8,10 @@
 <!-- lint-external-ref: SkeletalMeshComponent -- quoted verbatim as an ABSENCE claim: no such component exists in this module -->
 <!-- lint-external-ref: AnimInstance -- quoted verbatim as an ABSENCE claim: no such class is used in this module -->
 <!-- lint-external-ref: m_weaponVis -- deleted commented-out code, recorded as history; it must NOT resolve -->
+<!-- lint-external-ref: PhysicsTick -- removed by og-simulationscheduler-withjolt task 19 (a dead physics member), recorded as history; it must NOT resolve -->
+<!-- lint-external-ref: OnCalculateCustomPhysics -- removed by og-simulationscheduler-withjolt task 19 (a dead physics member), recorded as history; it must NOT resolve -->
+<!-- lint-external-ref: CustomPhysics -- removed by og-simulationscheduler-withjolt task 19 (a dead physics member), recorded as history; it must NOT resolve -->
+<!-- lint-external-ref: m_weaponConstraint -- removed by og-simulationscheduler-withjolt task 19 (a dead physics member), recorded as history; it must NOT resolve -->
 <!-- lint-external-ref: AddCustomPhysics -- Unreal Engine body-instance method; named because this module never calls it -->
 <!-- lint-external-ref: UpdatePhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: UpdateMassProperties -- Unreal Engine body-instance method, outside every scan root -->
@@ -105,6 +109,35 @@ converted, and the `simulatePhysics` half of the pair is now a `static_assert` o
 `kCharacterCapsuleBody` whose message names both halves. `StaticData::drivesBody` defaults to
 `true` at its declaration.
 
+### 1.2 The capsule in the two physics configurations (og-simulationscheduler-withjolt task 19)
+
+Everything above describes the **Chaos configuration**, where `ChaosPhysicsFactory`'s adopt-root
+branch takes this capsule as the character's root body, simulates it, and the engine's end-of-physics
+sync moves it to the physics result, interpolated two steps behind.
+
+In the **Jolt configuration** (the default since task 18; the switch is described once, in
+`SimulationManagerUImpl-rationale.md` §18) the capsule is **render-only**:
+
+* **The simulated body is not this component.** It is a Jolt slot body that `JoltWorld` builds from
+  the movement descriptor (`kCharacterCapsuleBody`, 42 / 96, `isRoot`); the descriptor's
+  `simulatePhysics` makes that slot body dynamic. Nothing adopts this capsule, and `applyDescriptor`
+  never runs on it, so it keeps the Pawn collision profile from the constructor for its whole life.
+* **It does not simulate.** `ASimulationManagerUImpl::tryRegister`, on the registration's Ready path
+  (`TickDriverBackendUImpl::onRegistered_GameThread`),
+  switches its physics simulation off and logs one `[SimHost.RenderTarget]` line per character with
+  `capsuleSimulatesPhysics=0` and the names of the character's components that still simulate. Only
+  `CameraAxis` is expected there (§3).
+* **One writer.** The render sync is the only thing that moves it: once per frame, at the end of
+  physics, og-simulation's presenter, through `UERenderTargetTable::applyRootPose`, teleports the actor to the
+  simulated root body's pose interpolated two steps behind the host time (`og.Render.InterpolationDelaySteps`),
+  as Chaos's sync did. Guard G-03 names the writer per configuration.
+* **It stays input.** The capsule is still the mouse-aim plane point
+  (`UOGBrawlerInputCollectionComponent::updateGameThreadCache`) and the camera boom's anchor, so the
+  rendered pose feeds the aim the next simulated tick reads, as it did under Chaos.
+* **The size contract holds in both.** G-01's `checkf` moves to `tryRegister` in the Jolt
+  configuration: the slot body is built from the descriptor, so a capsule of a different size would
+  put the aim plane and the camera off the simulated body.
+
 ## 2. The capsule's physical material
 
 > [movement-sim task 15] Friction 0 / restitution 0, assigned to the capsule as a
@@ -125,6 +158,13 @@ converted, and the `simulatePhysics` half of the pair is now a `static_assert` o
 > the movement path).
 
 The restitution prohibition is guard G-04.
+
+**In the Jolt configuration the material is inert for gameplay** (og-simulationscheduler-withjolt
+task 19): the capsule is not simulated (§1.2), and the Jolt slot body's friction and restitution come
+from `JoltBodyDefaults.h`, whose `kAdoptedRootMaterial` gives the character's root body friction 0 and
+restitution 0, the values this material carries. The
+override call stays in `PostInitializeComponents` (G-17), and G-04 stays until task 21 removes the
+Chaos configuration, where the material is still live.
 
 ### 2.1 Where the override is applied: `PostInitializeComponents`, not the constructor (shrink-install task 9)
 
@@ -206,6 +246,14 @@ Trailing and one-line comments removed from the constructor, with their status:
 Verified: `Config/DefaultEngine.ini` sets `AsyncFixedTimeStepSize=0.016667`. Since task 25 this
 frequency also bounds how soon a client learns its pawn's `SimCharacterIdValue` after the
 authority assigns it (§9).
+
+**In the Jolt configuration** the step rate is the simulation scheduler's, not Chaos's async tick:
+the frame host steps at the same 60 Hz, from the same fixed step size, so the frequency still matches
+the rate at which the simulation produces new states (og-simulationscheduler-withjolt task 19).
+
+`m_cameraAxis` is a simulating Chaos sphere in **both** configurations. It is cosmetic: it feeds no
+simulation, and the narrow-world ruling of og-simulationscheduler-withjolt keeps cosmetic physics on
+Chaos. It is the one component the `[SimHost.RenderTarget]` line (§1.2) lists as still simulating.
 
 > [movement-sim task 15] ⛔ ACTOR MOVEMENT REPLICATION OFF (R6). The capsule's pose is
 > carried by the simulation's own state wire and reproduced on every peer by
@@ -337,8 +385,9 @@ across PIE sessions in one editor process, which only moves which colour comes f
 
 ## 6. Replicated state on this class
 
-Three properties replicate: `BrawlerColor`, `RingoutScore` and, since task 25,
-`SimCharacterIdValue`. All three use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10).
+Four properties replicate: `BrawlerColor`, `RingoutScore`, since task 25
+`SimCharacterIdValue`, and since og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1).
+All four use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10, G-20).
 
 > ⛔ REPLICATED. Purely cosmetic: it never reaches the engine-free simulation
 > core, so it cannot affect determinism or the correction path.
@@ -350,7 +399,8 @@ cosmetic: `SimCharacterIdValue` is the simulation character id. It never enters 
 the correction wire (it rides pawn replication only, so it costs the correction wire 0 B), but
 it is the value every peer registers the character under, so a wrong or missing value
 changes which storage entry the peer simulates. The "safe because cosmetic" argument applies to
-`BrawlerColor` and `RingoutScore` only.
+`BrawlerColor` and `RingoutScore` only. `PhysicsSlotValue` (task 66, §9.1) is not cosmetic either: it
+picks the Jolt bodies a character is simulated with, and it too stays off the correction wire.
 
 ### 6.1 `RingoutScore` never reaches the simulation core
 
@@ -432,6 +482,11 @@ writes (§7).
   and that schedules `tryRegisterWithNewFramework` for the tick after). Assignment therefore
   normally lands after the pawn's first replication bunch has gone out. `COND_InitialOnly` would never send the id, and the
   client would wait until the 600-attempt `checkf`.
+
+**`PhysicsSlotValue`** (og-simulationscheduler-withjolt task 66) uses the plain form for the same two
+reasons, guard G-20: every client binds every character, proxies included, in the slot the authority chose,
+so it needs every character's slot; and the authority writes the slot one frame after the component's
+`BeginPlay` at the earliest (in `tryInitializeWithManager`), which can be after the first bunch.
 
 ## 7. The score's two doors — one in, one out
 
@@ -614,6 +669,32 @@ true today:
 * `GetSimCharacterId()`'s `static_assert` pins `SimCharacterIdValue` to exactly the underlying
   byte of `SimCharacterId`.
 
+### 9.1 The Jolt physics slot (og-simulationscheduler-withjolt task 66)
+
+`PhysicsSlotValue` is a replicated `uint8` carrying the Jolt world slot the authority chose for this
+character: 0 means "no slot yet", any other value is the slot plus one. `GetPhysicsSlot()` returns it as
+an optional slot, empty for 0, and `SetAuthoritativePhysicsSlot()` is its one write site.
+
+* **Why it exists.** The Jolt world keeps a fixed set of bodies per slot, created once with fixed body ids,
+  so a character's body ids are its slot's. Jolt orders contact solving by body id, so two peers that put
+  the same character in different slots can solve a contact between characters in a different order and
+  drift apart by rounding. The simulation id cannot double as the slot: ids are never reused, so an id
+  taken modulo the slot count collides after joins and leaves. So the authority chooses the slot and
+  replicates it here, and every client binds the character in that slot (`TickDriverBackendUImpl-rationale.md`
+  §3, the slot table).
+* **Who writes it.** The Jolt host's slot acquire on the authority (og-simulation-jolt's `JoltTickWorldHost` calls
+  the publish `TickDriverBackendUImpl::callWithSlotRequest` passes, since og-tickdriver task 10), the first time the
+  character asks for a slot (from `registerVizVolume`, called by the component's
+  `tryInitializeWithManager`). Its three `checkf`s enforce authority-only, an in-range slot and
+  set-once: a character keeps its slot until it leaves, and a pawn that leaves is destroyed, so a
+  second write would be a bug. A `static_assert` pins that slot + 1 fits the byte.
+* **Who reads it.** Only the Jolt configuration's acquire, on a client, where it is the only input to
+  the slot choice. The property exists in both configurations, because a reflected member cannot sit
+  inside a custom preprocessor block (task 51's arm rule) and the pawn carries no backend arm; the Chaos
+  configuration never writes or reads it, so there it replicates as 0.
+* **Cost.** One byte per character, sent when it changes, which is once. It never enters a composite or
+  the correction wire, so the correction wire format does not change.
+
 ## 10. Input mapping context — four add sites
 
 > Client-side mirror of PossessedBy's IMC-add. Fires when the server-
@@ -678,6 +759,11 @@ G-16.
 > it, and the spawned pawn is this C++ class rather than a Blueprint that could override it
 > — so its world translation WAS the capsule's. Same sphere, same place, one fewer component.
 
+`Tick` runs in the pre-physics group, before this frame's end of physics, so the capsule it reads is
+the pose the previous frame's sync set: the engine's sync in the Chaos configuration, the render sync
+in the Jolt configuration (§1.2). The input component's `updateGameThreadCache`, called from here,
+reads the aim plane from the same pose (og-simulationscheduler-withjolt task 19).
+
 ## 12. History — removed code and orientation comments
 
 * **Commented-out code, deleted by the task-25 conversion.** In the header's public section:
@@ -690,11 +776,16 @@ G-16.
   `Camera boom positioning the camera behind the character`, `Follow camera`,
   `Returns CameraBoom subobject`, `Returns FollowCamera subobject`,
   `Returns InputCollection subobject`.
-* **`PhysicsTick`.** Its declaration carried `Event called every physics tick and sub-step.` and
-  `OnCalculateCustomPhysics` carried `Custom physics Delegate`. **Correction (R0):**
-  `OnCalculateCustomPhysics` is bound in the constructor but never handed to a body
-  (`AddCustomPhysics` is not called anywhere in the module), so `CustomPhysics`, and through it
-  `PhysicsTick`, is never called. The pair is dormant.
+* **The custom-physics members, removed** (og-simulationscheduler-withjolt task 19, design D §3.5).
+  The `PhysicsTick` native event and its `_Implementation`, the `OnCalculateCustomPhysics` delegate,
+  `CustomPhysics` and the never-created `m_weaponConstraint` weapon-constraint property (with its
+  physics-constraint include) were deleted in both physics configurations. The `PhysicsTick`
+  declaration had carried `Event called every physics tick and sub-step.` and the delegate
+  `Custom physics Delegate`. **Correction (R0), kept as the reason for the removal:** the delegate was
+  bound in the constructor but never handed to a body (`AddCustomPhysics` is not called anywhere in the
+  module), so `CustomPhysics`, and through it `PhysicsTick`, was never called. No Blueprint overrode the
+  native event: the project's one Blueprint subclass, `Content/MyOGBrawlerUECharacter.uasset`, has only
+  the default event-graph nodes (its strings, read 2026-10-09).
 * **The flinch-freeze predicate.**
   > [movement-sim task 15] The flinch-freeze predicate is DELETED. Its only caller was `Move()`,
   > the legacy CMC path, and the flinch freeze it implemented now lives in the simulation
@@ -726,7 +817,7 @@ G-16.
 | C-6 | the pusher "warns about it twice and … uses the world-level `GetNetMode()` test"; the score is overwritten "by the next correction" | gated on `!runsPrediction()`; one compile-time poison; overwritten by replication, not correction (§7) |
 | C-7 | `LogOGBrawler` ships at `=Warning`, so bare `[Ringout.*]` lines are invisible | the ini ships `Verbose` (§8) |
 | C-8 | "See the paired comments on `StaticData::drivesBody` and `PhysicsSetup::body`" | comments converted to a `static_assert` (§1.1) |
-| C-9 | `PhysicsTick`: "Event called every physics tick and sub-step" | never called: the custom-physics delegate is never registered (§12) |
+| C-9 | `PhysicsTick`: "Event called every physics tick and sub-step" | never called: the custom-physics delegate is never registered; removed in og-simulationscheduler-withjolt task 19 (§12) |
 | C-10 | `// Create a PhysicsComponent` | nothing is created (§3) |
 | C-11 | `bUsePawnControlRotation = false; // Rotate the arm based on the controller` | the value says the opposite (§3) |
 | C-12 | palette: "10 entries for a 6-brawler target" | every other figure is 4 (§5) |

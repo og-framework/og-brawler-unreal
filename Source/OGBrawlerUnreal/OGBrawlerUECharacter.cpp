@@ -32,6 +32,7 @@
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGBrawler/BrawlerScoreboardVisualization.h"
 #include "OGSimulation/DMathUtil.h"
+#include "OGSimulation/BodySlotOccupancy.h"
 #include "glm/mat4x4.hpp"
 #include "glm/ext/matrix_transform.hpp"
 #include <glm/gtc/quaternion.hpp>
@@ -160,8 +161,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	SimmableUpdateComponent = CreateDefaultSubobject<USimmableUpdateComponent>(TEXT("USimmableUpdateComponent"));
 	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
-	OnCalculateCustomPhysics.BindUObject(this, &AOGBrawlerUECharacter::CustomPhysics);
-
 	this->NetUpdateFrequency = 60.0f;
 	this->MinNetUpdateFrequency = 60.0f;
 
@@ -285,6 +284,9 @@ void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	// ⛔G-10  docs/OGBrawlerUECharacter-guards.md
 	DOREPLIFETIME(AOGBrawlerUECharacter, SimCharacterIdValue);
+
+	// ⛔G-20  docs/OGBrawlerUECharacter-guards.md
+	DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);
 }
 
 void AOGBrawlerUECharacter::OnRep_BrawlerColor()
@@ -321,6 +323,32 @@ void AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId(SimCharacterId NewId)
 		TEXT("A character's simulation id is assigned once and never changes (SimCharacterId G-01)."),
 		static_cast<unsigned int>(SimCharacterIdValue), toStorageKey(NewId));
 	SimCharacterIdValue = static_cast<uint8>(NewId);
+}
+
+std::optional<uint32> AOGBrawlerUECharacter::GetPhysicsSlot() const
+{
+	if (PhysicsSlotValue == 0u)
+		return std::nullopt;
+	return static_cast<uint32>(PhysicsSlotValue) - 1u;
+}
+
+void AOGBrawlerUECharacter::SetAuthoritativePhysicsSlot(uint32 Slot)
+{
+	static_assert(kMaxSimulatableSlots < 255u,
+		"PhysicsSlotValue carries slot + 1 in one byte, with 0 meaning 'no slot yet'; a slot count of 255 or more "
+		"does not fit.");
+	checkf(HasAuthority(),
+		TEXT("SetAuthoritativePhysicsSlot called on a non-authority peer. Only the authority chooses a Jolt slot ")
+		TEXT("(og-simulation-jolt's JoltTickWorldHost::acquire, through TickDriverBackendUImpl::callWithSlotRequest); a client ")
+		TEXT("binds the slot it receives through replication of PhysicsSlotValue."));
+	checkf(Slot < kMaxSimulatableSlots,
+		TEXT("SetAuthoritativePhysicsSlot: slot %u is not a slot of the Jolt world (kMaxSimulatableSlots = %u)."),
+		Slot, kMaxSimulatableSlots);
+	checkf(PhysicsSlotValue == 0u,
+		TEXT("SetAuthoritativePhysicsSlot: this character already holds slot %u and was handed slot %u. A ")
+		TEXT("character's physics slot is chosen once and never changes while it lives."),
+		static_cast<unsigned int>(PhysicsSlotValue) - 1u, Slot);
+	PhysicsSlotValue = static_cast<uint8>(Slot + 1u);
 }
 
 void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)
@@ -402,15 +430,6 @@ void AOGBrawlerUECharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 	{
 		UE_LOG(LogTemplateCharacter, Error, TEXT("'%s' Failed to find an Enhanced Input component! This template is built to use the Enhanced Input system. If you intend to use the legacy system, then you will need to update this C++ file."), *GetNameSafe(this));
 	}
-}
-
-void AOGBrawlerUECharacter::PhysicsTick_Implementation(float SubstepDeltaTime)
-{
-}
-
-void AOGBrawlerUECharacter::CustomPhysics(float DeltaTime, FBodyInstance* BodyInstance)
-{
-	PhysicsTick(DeltaTime);
 }
 
 void AOGBrawlerUECharacter::seedCameraBoomAtIsoRotation()
