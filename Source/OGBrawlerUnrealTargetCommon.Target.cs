@@ -24,8 +24,6 @@ public static class OGBrawlerUnrealTargetCommon
 		Rules.IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_3;
 
 		Rules.ExtraModuleNames.Add("OGBrawlerUnreal");
-		Rules.ExtraModuleNames.Add("OGSimulationUnreal");
-		Rules.ExtraModuleNames.Add("OGSimulationJoltUnreal");
 		Rules.ExtraModuleNames.Add("DVolumeModule");
 		Rules.ExtraModuleNames.Add("ProceduralMountainSide");
 

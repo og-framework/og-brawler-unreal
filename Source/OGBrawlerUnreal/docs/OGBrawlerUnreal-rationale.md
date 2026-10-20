@@ -13,7 +13,9 @@ server, in every configuration — and does two things, in this order:
 
 The startup timer-resolution honour (`[Startup.Timer]`, `-OGNoTimerHonour`) used to be this module's first
 statement. og-tickdriver task 13 moved it, unchanged, into the `OGSimulationUnreal` module, whose own `StartupModule`
-runs right after this one: see `OGSimulationUnreal-rationale.md` §2 and §3.
+ran right after this one until og-tickdriver task 16 moved that module into the og-simulation-ue plugin; since then it
+runs later in the same phase, after this module, `DVolumeModule` and the plugin modules that load before it: see
+`OGSimulationUnreal-rationale.md` §2 and §3.
 
 ---
 

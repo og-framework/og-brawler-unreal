@@ -111,11 +111,11 @@ See [`docs/low-level-tests.md`](docs/low-level-tests.md) for full LLT details an
 
 ```
 Plugins/
-  OGSimulation/        Submodule — og-framework/og-simulation-ue
+  OGSimulation/        Submodule — og-framework/og-simulation-ue (modules OGSimulation, OGSimulationJolt,
+                       OGSimulationUnreal, OGSimulationJoltUnreal)  [MPL-2.0]
   OGBrawler/           Submodule — og-framework/og-brawler-ue
 Source/
   OGBrawlerUnreal/     Main game module                  [BUSL-1.1]
-  OGSimulationUnreal/  UE simulation adapters module     [MPL-2.0]
   dVolume/             Volume simulation module           [MPL-2.0]
   ProceduralMountainSide/  Procedural terrain module     [MPL-2.0 → BUSL-1.1 pending C8]
   OGSimulationTests/   LLT target (extern/og-simulation-tests submodule)  [MPL-2.0]

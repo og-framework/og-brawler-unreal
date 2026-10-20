@@ -11,7 +11,7 @@ defaults apply:
 | Subtree | Default license |
 |---|---|
 | `Source/OGBrawlerUnreal/`<br>`Source/OGBrawlerTests/`<br>`Source/ProceduralMountainSide/`<br>`Source/*.Target.cs` (root brawler-game targets) | **BUSL-1.1** — see `LICENSE` |
-| `Source/OGSimulationUnreal/`<br>`Source/dVolume/`<br>`Source/OGSimulationTests/` | **MPL-2.0** — see `LICENSES/MPL-2.0.txt` |
+| `Plugins/OGSimulation/Source/OGSimulationUnreal/`<br>`Source/dVolume/`<br>`Source/OGSimulationTests/` | **MPL-2.0** — see `LICENSES/MPL-2.0.txt` |
 
 See [`LICENSING.md`](LICENSING.md) for the full explanation of the split,
 what BUSL-1.1 permits, and commercial licensing contact information.
