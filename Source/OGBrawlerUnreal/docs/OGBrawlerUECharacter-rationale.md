@@ -389,6 +389,10 @@ Four properties replicate: `BrawlerColor`, `RingoutScore`, since task 25
 `SimCharacterIdValue`, and since og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1).
 All four use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10, G-20).
 
+One of the character's components replicates as well: `USimulatableNetSyncComponent`, the
+`SimulatableNetSync` subobject, which carries the correction state and the input RPC (§15). Before
+og-ue-simulationcomponentandmanagersplit task 20a that was `USimmableUpdateComponent`.
+
 > ⛔ REPLICATED. Purely cosmetic: it never reaches the engine-free simulation
 > core, so it cannot affect determinism or the correction path.
 > ⚠ [ringout task 5] IT IS NO LONGER THE ONLY REPLICATED STATE ON THIS CLASS —
@@ -963,3 +967,27 @@ the pitch to a literal 0.8 rad (about 46°). Task 7 seeded the boom at the iso r
 actor, with a mirrored length of 900, G-18) and made the PID target the iso pitch. Task 8 replaced the PID
 camera with the orbit camera in og-brawler (the PID was unstable above about 98.5 fps), which broke this
 file's build on purpose. Task 9 wired it in, as described above.
+
+## 15. The NetSync sibling: `SimulatableNetSync`, and the bind (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21)
+
+The constructor creates a second simulation component, **before** `SimmableUpdateComponent`:
+`SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"))`, held by a
+`UPROPERTY(VisibleAnywhere)` pointer (ruling Q12 named both). `USimulatableNetSyncComponent` lives in OGSimulationUnreal
+and carries the character's reflected wire surface — the replicated correction-state buffer, its notification and the
+client→server input RPC — which `USimmableUpdateComponent` carried until this task (`SimulatableNetSyncComponent-rationale.md`;
+`SimmableUpdateComponent-rationale.md` §16). The brawler component no longer replicates, so the sibling is the
+character's one replicated component; the automation test `OGBrawler.Replication.CharacterReplicatedComponents`
+(`BrawlerReplicatedComponentsTest.cpp`) lists the default object's replicated components and expects exactly it. The
+type reaches this file through `SimmableUpdateComponent.h`, which includes the sibling's header for its forwarders.
+
+**The bind is the last statement of `PostInitializeComponents`**: `SimmableUpdateComponent->bindNetSync(*SimulatableNetSync)`
+attaches the brawler component to the sibling as its `ISimulatableOwnerBinding`. It sits after the capsule's
+phys-material override and the mesh rebuild, so the override stays the first statement after `Super` (G-17); none of
+the three touches replication, and all of them run before any notification can arrive. **It must not move into a
+`BeginPlay`** (G-21): on an Iris client the initial state's notifications fire between `PostInitializeComponents` and
+`BeginPlay` (`SimulatableNetSyncComponent-rationale.md` §3). The unbind is the brawler component's, in its `EndPlay`.
+
+**The subobject name is part of the wire.** Clients and server match the replicated default subobject by its stable name,
+so `SimulatableNetSync` is no more free to change than a property name; a build with a different name does not
+interoperate. Builds from before this task do not interoperate with builds after it either
+(`SimulatableNetSyncComponent-rationale.md` §6).

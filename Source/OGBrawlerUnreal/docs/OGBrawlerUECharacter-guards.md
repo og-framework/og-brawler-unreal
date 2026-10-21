@@ -372,6 +372,25 @@ Chaos configuration never reads the property, so there the failure is silent.
 
 ---
 
+## G-21 — the NetSync bind stays in `PostInitializeComponents`, never in a `BeginPlay`
+
+**Site:** `SimmableUpdateComponent->bindNetSync(*SimulatableNetSync);`, the last statement of `PostInitializeComponents`.
+
+New guard (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21). It replaced no comment, so it has no `>`
+block.
+
+⛔ **DO NOT MOVE THE BIND INTO `BeginPlay`** — the character's or either component's — and do not defer it to a timer.
+On an Iris client a replicated character is spawned with `PostInitializeComponents` run and `BeginPlay` held back, and
+the initial state's notifications fire in between, so a character that arrives with a written correction buffer — every
+existing character, for a client that joins or rejoins a running session — gets its first `OnRep_CorrectionState`
+before any `BeginPlay`. Unbound, `USimulatableNetSyncComponent` stops on its `checkf` ("no binding attached").
+
+**Seen failing (task 20a).** With the bind moved into `USimmableUpdateComponent::BeginPlay`, a harness session's first
+client hit that `checkf` at its first join; with the move applied to the rejoining process only, the rejoining client hit
+it on an existing character, 5 s after it started. Rationale §15.
+
+---
+
 ## §R — Retired ids
 
 ⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.

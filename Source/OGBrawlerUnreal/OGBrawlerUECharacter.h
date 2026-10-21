@@ -59,6 +59,9 @@ class AOGBrawlerUECharacter : public APawn
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
 		
+	UPROPERTY(VisibleAnywhere)
+	USimulatableNetSyncComponent* SimulatableNetSync;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	USimmableUpdateComponent* SimmableUpdateComponent;
 

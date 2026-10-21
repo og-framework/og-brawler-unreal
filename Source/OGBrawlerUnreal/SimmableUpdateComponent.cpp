@@ -155,8 +155,6 @@ constexpr int32 kMaxRegistrationAttempts = 600;
 USimmableUpdateComponent::USimmableUpdateComponent(const FObjectInitializer& ObjectInitializer)
 	: UActorComponent(ObjectInitializer)
 {
-	SetIsReplicatedByDefault(true);
-
 	m_staticData.emplace();
 
 
@@ -339,7 +337,7 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 		return;
 	}
 
-	m_hasLocalInputProvider = isLocallyPredicted;
+	netSync().setHasLocalInputProvider(isLocallyPredicted);
 
 	// ⛔G-06  docs/SimmableUpdateComponent-guards.md
 	if (isAuthority)
@@ -375,326 +373,22 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework(simCharacterId(), *this, isAuthority);
 
-	if (ASimulationInputRelay* host = m_inputRelayHost.Get())
-	{
-		// ⛔G-08  docs/SimmableUpdateComponent-guards.md
-		if (isAuthority)
-			host->detachFromParentAndDestroy();
-		else
-			host->clearOnRelayedInputReceivedCallback();
-	}
-	m_inputRelayHost = nullptr;
+	// ⛔G-38  docs/SimmableUpdateComponent-guards.md
+	if (isNetSyncBound())
+		netSync().detachInputRelayHost(isAuthority);
+
+	unbindNetSync();
 
 	UActorComponent::EndPlay(EndPlayReason);
 }
 
 
-void USimmableUpdateComponent::OnRep_CorrectionState()
+unsigned int USimmableUpdateComponent::storageKeyOfOwner() const
 {
-	// ⛔G-09  docs/SimmableUpdateComponent-guards.md
-	if (m_wireFormatMismatchDetected)
-		return;
-
-	const uint8 expectedVersion = FSimulationStateSyncBuffer::kWireFormatVersion;
-	const uint8 wireVersion = m_simulationStateCorrectionSyncedBuffer.getReceivedWireFormatVersion();
-	if (wireVersion != expectedVersion)
-	{
-		UE_LOG(LogOGNet, Error,
-			TEXT("Wire-format mismatch on OnRep_CorrectionState: server version=%u, client expects=%u. Get matching builds from Saved/Archive/ — see PLAYTEST_PORTABLE_README.md."),
-			(unsigned int)wireVersion, (unsigned int)expectedVersion);
-
-		if (GEngine != nullptr)
-		{
-			GEngine->AddOnScreenDebugMessage(
-				kWireFormatMismatchToastKey, /*TimeToDisplay*/ 15.f, FColor::Red,
-				TEXT("Build mismatch — please get the latest archive (see PLAYTEST_PORTABLE_README.md)"));
-		}
-
-		m_wireFormatMismatchDetected = true;
-		return;
-	}
-
-	{
-		simulatableBrawler::State peeked;
-		const uint32 tick = m_simulationStateCorrectionSyncedBuffer.readInto(peeked);
-		OG_LOG_ROUTED(LogOGNet,
-			TEXT("[ReceiveCorrectionState] id=%u tick=%u"),
-			toStorageKey(simCharacterId()), tick);
-		LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
-			[this, tick](LatencyBudgetDiagnosticsUImpl& diagnostics)
-			{
-				diagnostics.stamp(latencyBudget::Stream::State, toStorageKey(simCharacterId()),
-					tick, latencyBudget::Point::ClientReceived);
-			});
-	}
-	if (m_onCorrectionStateReceivedCallback)
-		m_onCorrectionStateReceivedCallback(m_simulationStateCorrectionSyncedBuffer);
+	return toStorageKey(simCharacterId());
 }
 
-// ⛔G-10  docs/SimmableUpdateComponent-guards.md
-
-// ⛔G-11  docs/SimmableUpdateComponent-guards.md
-
-
-FRelayedInputRing& USimmableUpdateComponent::getRelayedInputRing()
-{
-	if (ASimulationInputRelay* host = m_inputRelayHost.Get())
-		return host->editRelayedInputRing();
-	return m_detachedRelayRing;
-}
-
-const FRelayedInputRing& USimmableUpdateComponent::getRelayedInputRing() const
-{
-	if (const ASimulationInputRelay* host = m_inputRelayHost.Get())
-		return host->getRelayedInputRing();
-	return m_detachedRelayRing;
-}
-
-relayedInputRing::StageArrivalOutcome USimmableUpdateComponent::stageRelayedInput(
-	uint32 captureTick, uint8 dA, const simulatableBrawler::PlayerInput& input)
-{
-	ASimulationInputRelay* host = m_inputRelayHost.Get();
-	// ⛔G-12  docs/SimmableUpdateComponent-guards.md
-	FRelayedInputRing& stage = (host != nullptr)
-		? host->editRelayedInputStagingRing()
-		: m_detachedRelayStagingRing;
-
-	const relayedInputRing::StageArrivalOutcome outcome =
-		stage.stageArrival<simulatableBrawler::PlayerInput>(captureTick, dA, input);
-
-	// ⛔G-13  docs/SimmableUpdateComponent-guards.md
-	if (outcome.droppedOldest && host != nullptr)
-		host->noteStageOverflowDrop();
-
-	return outcome;
-}
-
-
-static_assert(std::is_same_v<decltype(&USimmableUpdateComponent::stageRelayedInput),
-		relayedInputRing::StageArrivalOutcome (USimmableUpdateComponent::*)(
-			uint32, uint8, const simulatableBrawler::PlayerInput&)>,
-	"USimmableUpdateComponent::stageRelayedInput takes NO depth parameter. The stage's capacity is "
-	"relayedInputRing::kMaxDepth, fixed inside the codec; a depth passed down here would cap every "
-	"round at one entry and silently restore the replace-latest behaviour the staging removed. "
-	"Was the 'NO DEPTH PARAMETER, and that is the fence' prose fence of SimmableUpdateComponent.h "
-	"and its .cpp one-liner (task 25 conversion).");
-
-void USimmableUpdateComponent::setOnRelayedInputReceivedCallback(
-	std::function<void(const FRelayedInputRing&)> fn)
-{
-	m_onRelayedInputReceivedCallback = std::move(fn);
-
-	if (const ASimulationInputRelay* host = m_inputRelayHost.Get())
-	{
-		if (m_onRelayedInputReceivedCallback)
-			m_onRelayedInputReceivedCallback(host->getRelayedInputRing());
-	}
-}
-
-void USimmableUpdateComponent::clearOnRelayedInputReceivedCallback()
-{
-	m_onRelayedInputReceivedCallback = nullptr;
-}
-
-void USimmableUpdateComponent::attachInputRelayHost(ASimulationInputRelay* host)
-{
-	if (host == nullptr || m_inputRelayHost.Get() == host)
-		return;
-
-	m_inputRelayHost = host;
-
-	TWeakObjectPtr<USimmableUpdateComponent> weakSelf(this);
-	// ⛔G-14  docs/SimmableUpdateComponent-guards.md
-	host->setOnRelayedInputReceivedCallback(
-		[weakSelf](const FRelayedInputRing& ring)
-		{
-			if (USimmableUpdateComponent* self = weakSelf.Get())
-				self->onRelayedInputRingArrived(ring);
-		});
-
-	if (GetNetMode() != NM_Client)
-	{
-		host->setOnRingFlushedCallback(
-			[weakSelf](const FRelayedInputRing& ring)
-			{
-				LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/true,
-					[&weakSelf, &ring](LatencyBudgetDiagnosticsUImpl& diagnostics)
-					{
-						USimmableUpdateComponent* self = weakSelf.Get();
-						if (self == nullptr)
-							return;
-						const unsigned int id = toStorageKey(self->simCharacterId());
-						ring.forEachEntry<simulatableBrawler::PlayerInput>(
-							[&diagnostics, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
-							{
-								if (captureTick != kNoInputCaptureTick)
-								{
-									diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
-										latencyBudget::Point::Handed);
-								}
-							});
-					});
-			});
-	}
-
-	if (m_onRelayedInputReceivedCallback)
-		m_onRelayedInputReceivedCallback(host->getRelayedInputRing());
-}
-
-void USimmableUpdateComponent::onRelayedInputRingArrived(const FRelayedInputRing& ring)
-{
-	// ⛔G-15  docs/SimmableUpdateComponent-guards.md
-	if (m_hasLocalInputProvider && ring.num() > 0 && !m_loggedOwnerSkipDivergence)
-	{
-		m_loggedOwnerSkipDivergence = true;
-		UE_LOG(LogOGNet, Error,
-			TEXT("[InputRelay] OWNER-SKIP DIVERGENCE id=%u — a relay ring with %u entries "
-			     "arrived for a character that HAS a local input provider. COND_SkipOwner and "
-			     "provider-presence disagree; check the relay host's Owner."),
-			toStorageKey(simCharacterId()), (unsigned int)ring.num());
-		// ⛔G-16  docs/SimmableUpdateComponent-guards.md
-		ensureMsgf(false,
-			TEXT("[InputRelay] relay ring arrived for a provider-present character (id=%u)"),
-			toStorageKey(simCharacterId()));
-	}
-
-	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
-		[this, &ring](LatencyBudgetDiagnosticsUImpl& diagnostics)
-		{
-			const unsigned int id = toStorageKey(simCharacterId());
-			ring.forEachEntry<simulatableBrawler::PlayerInput>(
-				[&diagnostics, id](uint32 captureTick, uint8, const simulatableBrawler::PlayerInput&)
-				{
-					if (captureTick != kNoInputCaptureTick)
-					{
-						diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
-							latencyBudget::Point::ClientReceived);
-					}
-				});
-		});
-
-	if (m_onRelayedInputReceivedCallback)
-		m_onRelayedInputReceivedCallback(ring);
-}
-
-void USimmableUpdateComponent::sendLocalInputToAuthority(
-	const PendingInputQueue<simulatableBrawler::PlayerInput>& queue,
-	uint32 currentTick,
-	uint32 redundancyDepth)
-{
-	FInputRedundancyBundle bundle;
-	buildRedundancyBundle<simulatableBrawler::PlayerInput>(
-		queue, currentTick, static_cast<uint8>(redundancyDepth), bundle);
-	ServerReceiveRemoteMove(bundle);
-
-	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/false,
-		[this, &bundle](LatencyBudgetDiagnosticsUImpl& diagnostics)
-		{
-			const unsigned int id = toStorageKey(simCharacterId());
-			bundle.forEachSlot<simulatableBrawler::PlayerInput>(
-				[&diagnostics, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
-				{
-					diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
-						latencyBudget::Point::Handed);
-				});
-		});
-}
-
-void USimmableUpdateComponent::ServerReceiveRemoteMove_Implementation(const FInputRedundancyBundle& bundle)
-{
-	// ⛔G-17  docs/SimmableUpdateComponent-guards.md
-	if (bundle.wireBytes.Num() == 0)
-		return;
-
-	const uint8 clientVersion = bundle.getWireFormatVersion();
-	if (clientVersion != FInputRedundancyBundle::kWireFormatVersion)
-	{
-		UE_LOG(LogOGNet, Error,
-			TEXT("Wire-format mismatch on ServerReceiveRemoteMove: client version=%u, server expects=%u. Get matching builds from Saved/Archive/ — see PLAYTEST_PORTABLE_README.md."),
-			(unsigned int)clientVersion, (unsigned int)FInputRedundancyBundle::kWireFormatVersion);
-		// ⛔G-18  docs/SimmableUpdateComponent-guards.md
-		return;
-	}
-
-	// ⛔G-19  docs/SimmableUpdateComponent-guards.md
-	ASimulationManagerUImpl* authorityManager =
-		ASimulationManagerUImpl::instanceFor(/*isAuthority=*/true);
-	ASimulationManagerUImpl::BrawlerReceptionCoordinator* coordinator =
-		(authorityManager != nullptr) ? authorityManager->getReceptionCoordinator() : nullptr;
-
-	// ⛔G-20  docs/SimmableUpdateComponent-guards.md
-	UNetConnection* rootConn =
-		(coordinator != nullptr) ? GetRootNetConnection(GetOwner()) : nullptr;
-
-	const unsigned int id = toStorageKey(simCharacterId());
-
-	LatencyBudgetDiagnosticsUImpl::withInstance(/*isAuthority=*/true,
-		[&bundle, id, rootConn](LatencyBudgetDiagnosticsUImpl& diagnostics)
-		{
-			bundle.forEachSlot<simulatableBrawler::PlayerInput>(
-				[&diagnostics, id](uint32 captureTick, const simulatableBrawler::PlayerInput&)
-				{
-					diagnostics.stamp(latencyBudget::Stream::Input, id, captureTick,
-						latencyBudget::Point::ServerReceived);
-				});
-			if (rootConn != nullptr)
-				diagnostics.noteWireSample(readRoundTripMs(rootConn) / 1000.0);
-		});
-
-	// ⛔G-21  docs/SimmableUpdateComponent-guards.md
-	if (coordinator == nullptr || rootConn == nullptr)
-	{
-		bundle.forEachSlot<simulatableBrawler::PlayerInput>(
-			[this, id](uint32 captureTick, const simulatableBrawler::PlayerInput& input)
-			{
-				OG_LOG_ROUTED(LogOGNet, TEXT("[ServerReceive] id=%u tick=%u"), id, captureTick);
-				if (m_onRemoteMoveReceivedCallback)
-					m_onRemoteMoveReceivedCallback(captureTick, input);
-			});
-		return;
-	}
-
-	const FUEConnectionHandle handle(rootConn);
-
-	// ⛔G-22  docs/SimmableUpdateComponent-guards.md
-	coordinator->noteRttSample(
-		handle, id, authorityManager->getServerReceptionTick(),
-		readRoundTripMs(rootConn), *this);
-
-	const uint8 playerSlot = GetPlayerSlotForActor(GetOwner());
-
-	// ⛔G-23  docs/SimmableUpdateComponent-guards.md
-	coordinator->receiveInputBundle<SimulatableBrawler>(
-		id, handle, playerSlot, bundle, *authorityManager, *authorityManager);
-}
-
-static_assert(ConnectionTierSink<USimmableUpdateComponent>,
-	"USimmableUpdateComponent must satisfy ConnectionTierSink so ServerReceptionCoordinator "
-	"can drive the tier send through it");
-
-void USimmableUpdateComponent::sendConnectionTierToOwningClient(unsigned int id, uint8_t tier)
-{
-	check(id == toStorageKey(simCharacterId()));
-
-	UNetConnection* rootConnection = GetRootNetConnection(GetOwner());
-	if (rootConnection == nullptr)
-	{
-		return;
-	}
-
-	ASimulationConnectionRelay* relay =
-		ASimulationConnectionRelay::findOrSpawnForConnection(GetWorld(), rootConnection);
-	if (relay == nullptr)
-		return;
-
-	UE_LOG(LogOGNet, Log,
-		TEXT("[ConnectionTier] id=%u server tier %u -> %u (relay %s)"),
-		toStorageKey(simCharacterId()),
-		(unsigned int)relay->getConnectionTier(), (unsigned int)tier,
-		*relay->GetName());
-
-	relay->setConnectionTier(tier);
-}
+template class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;
 
 void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
@@ -894,20 +588,6 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 
 
-
-}
-
-void USimmableUpdateComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	DOREPLIFETIME(USimmableUpdateComponent, m_simulationStateCorrectionSyncedBuffer);
-
-	// ⛔G-32  docs/SimmableUpdateComponent-guards.md
-
-	// ⛔G-33  docs/SimmableUpdateComponent-guards.md
-
-	// ⛔G-34  docs/SimmableUpdateComponent-guards.md
 
 }
 

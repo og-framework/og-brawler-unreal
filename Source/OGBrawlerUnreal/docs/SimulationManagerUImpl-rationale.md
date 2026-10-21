@@ -21,8 +21,10 @@ collide.
   the engine (og-netcode-v2-field-defects task 10's fix). It moved to `ChaosTickBackendUImpl-rationale.md` §5
   with the Chaos host (og-simulationscheduler-withjolt task 82), as did §8's rewind-push probe and §9's
   derivation of the `+ 1`.
-* **§16**, the latency-budget probe's host side (og-simulationscheduler-withjolt task 1), moved to
-  `LatencyBudgetDiagnosticsUImpl-rationale.md` §6 with the code (og-tickdriver task 18).
+* **§16**, the latency-budget probe's host side (og-simulationscheduler-withjolt task 1), moved into the latency
+  class's rationale with the code (og-tickdriver task 18). Since og-ue-simulationcomponentandmanagersplit task 19a
+  the code is OGSimulationUnreal's `UELatencyBudgetDiagnostics` and its game-neutral part is that template's
+  rationale; §16 holds the brawler's wiring again.
 * **§17**, the map of the Jolt host, moved to `TickDriverBackendUImpl-rationale.md` §2 with the Jolt host
   (og-simulationscheduler-withjolt task 83). The frame host and the game's tick-driver binding have their own
   documents, OGSimulationUnreal's `UETickDriverHost-rationale.md` (since og-tickdriver task 11; a game-module
@@ -66,6 +68,11 @@ collide.
 <!-- lint-external-ref: StatPeriod -- Unreal Engine stat window, outside every scan root -->
 <!-- lint-external-ref: DesiredTickRate -- Unreal Engine net-driver field, outside every scan root -->
 <!-- lint-external-ref: MaxNetTickRate -- Unreal Engine net-driver setting, outside every scan root -->
+<!-- lint-external-ref: UWorld::OnPostTickFlush -- Unreal Engine method, outside every scan root -->
+<!-- lint-external-ref: AddWeakLambda -- Unreal Engine delegate method, outside every scan root -->
+<!-- lint-external-ref: AddUObject -- Unreal Engine delegate method, outside every scan root -->
+<!-- lint-external-ref: FChaosScene::GetNetworkDeltaTimeScale -- Unreal Engine method, outside every scan root -->
+<!-- lint-external-ref: FPlatformTime::Seconds -- Unreal Engine function, outside every scan root -->
 <!-- lint-external-ref: BaseEngine.ini -- Unreal Engine's own config file, outside every scan root -->
 <!-- lint-external-ref: NoLogging -- an Unreal log-verbosity enumerator, written as an ini value -->
 <!-- lint-external-ref: notReady -- a field NAME inside one probe's log format string, not a declared identifier -->
@@ -532,8 +539,8 @@ tolerated. ⛔ Do not reintroduce a clock accessor for a display: give the displ
 The probe is game-thread-owned. Its physics-thread stamps reach it through a single-producer
 mailbox (synchronized), the one game-to-physics value it needs is an atomic, and every other read
 its stamp sites make is same-thread with its writer. The CROSSING count is unchanged; the full
-argument, read by read, is the *Threads* table of `LatencyBudgetDiagnosticsUImpl-rationale.md` §6
-(this document's §16 until og-tickdriver task 18 moved the probe into that class).
+argument, read by read, is the *Threads* table of `UELatencyBudgetDiagnostics-rationale.md` §6 (OGSimulationUnreal)
+for the template's reads and §16's *Threads* paragraph for the brawler's.
 
 ### One acknowledged wart
 
@@ -775,74 +782,25 @@ about occurs nowhere in this tree, so there is no symbol to grep and the guard i
 
 ## §4 Log categories and `RouteOGMessage`
 
-`RouteOGMessage` routes one SIMLOG string to one `LogOG*` category by its leading `[Tag]`.
+**Code moved to `UESimulationLogRoutes.h` (og-ue-simulationcomponentandmanagersplit task 19).** The eight routed
+`LogOG*` categories, the route table `kOGLogRoutes` with this module's 14 rows (now `kOGAdapterLogRoutes`), its five
+`static_assert`s, `ogLogRouteFor`, `OG_LOG_ROUTED` and the router `RouteOGMessage` moved to the og-simulation-ue
+plugin's `OGSimulationUnreal` module (`UESimulationLogRoutes.h` and `.cpp`, MPL-2.0). Their maintained text moved with
+them, to `UESimulationLogRoutes-rationale.md`: the router (§2), the categories and the three probe families (§3), the
+order (§4), the tag families (§5), the levels and the rates that set them (§6), `OG_LOG_ROUTED` (§7), the two blocks
+(§8), the checks (§9), and the router's per-line notes (§10; this document's §13.6 until task 19). R0 corrections made
+in that move are listed in its sections, marked "until task 19".
 
-**Tag-matching runs against `body`** — `fmsg` minus a leading `[Verbose]` or `[Warning]` token,
-both nine characters — while the **full** `fmsg`, severity token included, is what is logged. So
-one message can carry both a severity escalation and a routable tag.
+What stays in this module, and in this section:
 
-### Order is load-bearing
-
-`[Resim.Input]` must be matched **ahead of** the `[Resim.` catch-all, because the catch-all is a
-prefix of it. `[Resim.Input]` is a per-character-per-resim-tick line — the same volume class as
-`[CollectInput]` — and it landed in the rare-lifecycle bucket purely by inheriting the `[Resim.`
-prefix from `[Resim.Pre]` / `[Resim.Post]`, which really are rare, while `LogOGSim` shipped at
-Verbose. So the highest-frequency line in the system was filed as a lifecycle event and printed
-by default.
-
-It was **re-routed rather than renamed.** Both were available, and renaming would have silenced
-it just as well — but `[Resim.Input]` is the name the impl notes, the PIE scripts and the
-spectrum design all use when they tell an operator what to grep for. A rename invalidates every
-one of those instructions for a cosmetic gain. Re-routing keeps the string an operator already
-knows and changes only which knob controls it: `LogOGSimTick=Verbose` now shows the resim
-table, exactly as it shows `[CollectInput]`, which is routed there under the comment
-*"dominates log volume"*.
-
-### Three probe families, three categories
-
-`LogOGRelayProbe`, `LogOGDivergenceProbe` and `LogOGResimProbe` each own a category, and the
-reason is the same all three times: **both severities ride one tag family** — per-window
-summaries at `Warning`, per-event detail at `Verbose` — so its own category is the only thing
-that lets `LogOGRelayProbe=Warning` (the shipped default) keep the summaries while dropping the
-detail, and `LogOGRelayProbe=NoLogging` drop both, without disturbing any other channel. The
-same holds for `LogOGResimProbe=Warning` and `LogOGDivergenceProbe=Warning`. Routed to `LogOGNet` instead, a family would be
-inseparable from the whole replication bucket; left unrouted, its Verbose half would fall to
-`LogOG=Warning` and be unreachable with no way to turn it on.
-
-**No probe family may be filed under `[Resim.` or `[ResimCheck.`.** The first inherits
-whatever `LogOGSim` is set to — the probe could not be switched on its own. *(This said "inherits
-`LogOGSim=Verbose`" until task 11; `LogOGSim` shipped at `Verbose` when T19 measured it, and is
-`Log` at `b9f6d81` — §11 C17.)* The second is split across `LogOGSim` and `LogOGSimTick`, so a family filed
-under it could not be switched on or off as one thing — which is why `[ResimCheck.IsSimilar]`
-has zero occurrences in every log on disk.
-
-`[ResimProbe` is the first row of this module's block, so it sits after the `[Resim.` catch-all,
-which is in og-simulation's block (*Two blocks*, below). The two cannot collide: `[Resim.` requires
-the dot and `[ResimProbe` has a `P` there. The one edit that would make them collide, widening the
-catch-all to `[Resim`, is now a compile error, not a silent reroute: in og-simulation it fails
-`allReachable` (the `[ResimCheck.` rows after it begin with `[Resim`) and
-`ogLogRouteBlocksAreDisjoint` (`[ResimProbe` begins with it), and a `[Resim` row in this module's
-block fails `ogLogRouteBlocksAreDisjoint`. *(Until og-tickdriver task 12 the single table put
-`[ResimProbe` ahead of `[Resim.`, defensively, against that edit.)*
-
-**One `StartsWith` covers each family** — the router tests `body.StartsWith("[ResimProbe")` and
-its two siblings — so a future sub-tag needs no router edit.
-
-⭐ **Since task 12 the order is checked by the compiler, not by this paragraph.** The router is a
-`constexpr` table, `kOGLogRoutes`, walked in order. A `static_assert` fails the build if any
-prefix begins with an earlier one, compared case-insensitively as `FString::StartsWith` compares.
-It was seen to fire for `[Resim.` moved above `[Resim.Input]` and for `[Resim.` widened to
-`[Resim` (§13.9).
-
-`[RelayProbe.Frame]` is the relay family's original **server-side** member. `[RelayProbe.Write]`
-(PROBE 5) and `[RelayProbe.Budget]` (PROBE 6) are server-side too (§13.10, C13-3). It shares that
-category deliberately: it measures the *cause* of the cadence `[RelayProbe.Arrival]` measures the
-*effect* of, and the two are only interpretable together, so one knob should turn both on.
-
-`[DivergenceProbe.*]`'s signal is not new — `StateCorrectionCache::tryInsertingCorrectState` has
-computed the verdict on every correction for as long as that method has existed. What was missing
-was a **route**: the cache's own line carries no tag, so it lands on the `LogOG` fallback at
-`Log` severity and `LogOG=Warning` suppresses it. The router branch is the whole of that fix.
+* `LogOGBrawler`, declared in `SimulationManagerUImpl.h` and defined in its `.cpp`. It is the game-rule category: the
+  `ogblog` sinks this module installs on both role branches log to it, and so does `MovementSchemeCVar.cpp`. The router
+  never logs to it.
+* The router's callers here: both role branches hand `RouteOGMessage` to the core's components (`setLogger`) and to
+  `simlog::setGlobal`, and the frame probes (PROBE 5, PROBE 6 and `[RelayProbe.Frame]`, §8) log through it.
+* `bindCorrectionFieldDiffGate` and its guard G-50 (below).
+* Which rows this module emits, its direct log sites, the two latency categories, and the record of what
+  og-simulationscheduler-withjolt task 80 and og-tickdriver task 12 checked and measured (below).
 
 ### The field-diff cost gate — this adapter's half
 
@@ -893,115 +851,40 @@ stand-in predicate; that the live `UE_LOG_ACTIVE` answers as expected under PIE 
 so the first `Verbose` run should check that `field=` actually appears before any conclusion
 is drawn from its absence.
 
-### The tag families, in full
-
-The source names each family by its prefix; the members are:
+### The two latency categories
 
 | category | tags |
 |---|---|
-| `LogOGRelayProbe` | `[RelayProbe.Read]`, `[RelayProbe.Arrival]`, `[RelayProbe.Stale]`, `[RelayProbe.Miss]`, `[RelayProbe.Delta]`, `[RelayProbe.Frame]`, `[RelayProbe.Write]`, `[RelayProbe.Budget]` |
-| `LogOGResimProbe` | `[ResimProbe.Gate]`, `[ResimProbe.Chaos]`, `[ResimProbe.Apply]`, `[ResimProbe.Landing]`, `[ResimProbe.Request]`, `[ResimProbe.Stranded]`, `[ResimProbe.Session]`, `[ResimProbe.Frame]`, `[ResimProbe.PushTarget]`, `[ResimProbe.PushVerdict]`, `[ResimProbe.SlotMap]` |
-| `LogOGDivergenceProbe` | `[DivergenceProbe.Correction]`, `[DivergenceProbe.Window]` |
-| `LogOGLatencyBudget` | `[LatencyBudget]`, `[LatencyBudget.Window]` (logged with `UE_LOG` directly, not routed; declared in `LatencyBudgetDiagnosticsUImpl.h` since og-tickdriver task 18, which compiles it out of Shipping; that class's rationale §6) |
-| `LogOGChaosDilation` | `[ChaosDilation]` (logged with `UE_LOG` directly, not routed; declared and gated with `LogOGLatencyBudget`) |
+| `LogOGLatencyBudget` | `[LatencyBudget]`, `[LatencyBudget.Window]` (logged with `UE_LOG` directly, not routed; since task 19a declared, exported, in OGSimulationUnreal's `UELatencyBudgetDiagnostics.h` and defined in its `.cpp`, both under `!UE_BUILD_SHIPPING`; that template's rationale §3 and §7) |
+| `LogOGChaosDilation` | `[ChaosDilation]` (logged with `UE_LOG` directly, not routed; since task 19a declared in `ChaosTickBackendUImpl.h` and defined in its `.cpp`, gated by `OG_LATENCY_BUDGET_DIAGNOSTICS`, so it exists only in the Chaos configuration; §16) |
 
-`[RelayProbe.Miss]` says *why* each miss missed — an in-span coverage hole, asking above the
-newest arrival, or below the oldest; `[RelayProbe.Delta]` is the signed probe-tick-to-newest
-distribution; `[RelayProbe.Stale]` is the longest consecutive fallback run. `[ResimProbe.Chaos]`
-is the request/grant/refusal ledger and the requested-vs-granted pin; `[ResimProbe.Apply]` is the
-apply edge and the replay span; `[ResimProbe.Landing]` is the frontier-landing split;
-`[ResimProbe.Stranded]` is the per-event Verbose companion to it.
+They are not routed and have no row; the rule that gives each probe family its own category is
+`UESimulationLogRoutes-rationale.md` §3.
 
-### Levels — the `plainLevel` column (og-simulationscheduler-withjolt task 80)
+### This module's rows, by emitter (og-tickdriver task 12)
 
-**Every row of `kOGLogRoutes` carries a third field, `plainLevel`: the level of a routed line that
-carries no `[Verbose]` or `[Warning]` token.** `RouteOGMessage` starts every line at `Log`, sets
-`Verbose` or `Warning` from a leading token, and only then, on the matching row, replaces a
-remaining `Log` with the row's `plainLevel`. A token therefore always wins: the per-window
-`[Warning]` summaries and the per-event `[Verbose]` probe detail are logged exactly as their
-emitters mark them, whatever the row says. That is also why G-50's predicate is untouched: every
-`[DivergenceProbe` line carries a token, so the row's `plainLevel` never applies to one.
+**Which rows are og-simulation's** was decided by the emitters: every string literal in a non-comment line
+under `Plugins/` and `Source/`, with a leading `[Verbose]` or `[Warning]` token removed as `RouteOGMessage`
+removes it, assigned to the row that routed it.
+- og-simulation only (25 rows, now in `kSimulationLogRoutes`): every row not listed below. Their emitting
+  files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
+- Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp` and
+  this module's `.cpp`), `[ServerReceive]` (also `SimmableUpdateComponent.cpp`) and `[RelayProbe` (also this
+  module's `.cpp`, the PROBE 5 and 6 lines).
+- Emitted by this module only (kept here): `[ResimCheck.TriggerRewind]` (`ChaosTickBackendUImpl.cpp`),
+  `[ClientPrediction]` (`OGBrawlerInputCollectionComponent.cpp`), `[ReceiveCorrectionState]`
+  (`SimmableUpdateComponent.cpp`), `[ReleaseBatch]` (this module's `.cpp`), `SimulationManager:` (this
+  module's `.cpp`), `tryRegister:` (`BrawlerJoltBindingUImpl.cpp`'s capsule `checkf`, the Jolt host's `.cpp` until og-tickdriver task
+  15a, and this module's `.cpp`) and `NewFramework:`
+  (`SimmableUpdateComponent.cpp` and this module's `.cpp`).
+- No emitter (kept here; deleting them was out of scope): `[SendRemoteInputToClients]`,
+  `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]`, `[DrainOutOfOrder]`.
 
-The table lives in `SimulationManagerUImpl.h`, not in this `.cpp`, so that log sites in other files
-can read a row at compile time (below). `RouteOGMessage` itself stays in this file. Since og-tickdriver
-task 12 the rows og-simulation alone emits come from og-simulation and the header concatenates them with
-its own (*Two blocks*, below); the levels and the order within each block are the ones listed here.
-
-**Why.** With a visible `-log` console, every log line costs a synchronous console write on the
-thread that logs it (the research note on the gate-22 dedicated-server frame rate: about 1.4 ms per
-line at gate 22, 12–20 ms step outliers, and a 3.2 s join hitch when one unbounded receive loop logged
-761 packets). At `LogOGNet=Log` and `LogOGSimTick=Log` every tick and every received packet wrote a
-line. Now `Log` carries only rare events, and the per-tick lines need `Verbose`.
-
-**The rule.** A row whose token-less lines arrive per tick, per packet or per relay (about 10 lines
-per second per peer or more in normal play) is `Verbose`. A row for rare events (gaps, drops, delay
-shifts, stats windows, resyncs, resim prepare and finish, join and leave) is `Log`. A `static_assert`
-(`ogLogRoutePlainLevelsAreLogOrVerbose`) admits only those two values: a line that must reach
-`Warning` says so with its own token.
-
-**The table, with the rates that classified it.** Rates are token-less lines per second in the
-gate-22 Jolt packaged final run (`LogOGNet=Log`, `LogOGSimTick=Log`; server 234 s with up to three
-clients, client 1 191 s, client 3 76 s). "token" means every line of that row carries `[Verbose]`
-or `[Warning]`, so `plainLevel` does not apply to it. Before this task every row behaved as `Log`.
-
-| row | category | rate (server / client) | `plainLevel` |
-|---|---|---|---|
-| `[Resim.Input]` | `LogOGSimTick` | token (`[Verbose]`) | `Verbose` |
-| `[ResimProbe` | `LogOGResimProbe` | token | `Log` |
-| `[TimeResync.` | `LogOGSim` | – / ≤ 0.7 (join) | `Log` |
-| `[Resim.` | `LogOGSim` | – / ≤ 5.0 (`[Resim.Post]`) | `Log` |
-| `[ResimCheck.Divergence]` | `LogOGSim` | – / ≤ 1.0 | `Log` |
-| `[ResimCheck.PrepareRestore]` | `LogOGSim` | – / ≤ 2.8 | `Log` |
-| `[ResimCheck.Check]` | `LogOGSimTick` | – / 142–172 | `Verbose` |
-| `[ResimCheck.IsSimilar]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
-| `[ResimCheck.TriggerRewind]` | `LogOGSimTick` | Chaos only: one per physics step | `Verbose` |
-| `[AuthoritySimulation]` | `LogOGSimTick` | 60 / – | `Verbose` |
-| `[ClientPrediction]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
-| `[PredictionSimulation]` | `LogOGSimTick` | – / 57–59 | `Verbose` |
-| `[PostPrediction]` | `LogOGSimTick` | – / 142–172 | `Verbose` |
-| `[CollectInput]` | `LogOGSimTick` | 116 / 142–172 | `Verbose` |
-| `[ServerReceive]` | `LogOGNet` | 573 / – | `Verbose` |
-| `[ReceiveLocalInput] DISCARD` | `LogOGNet` | 0 (rare: a too-far-future input) | `Log` |
-| `[ReceiveLocalInput]` | `LogOGNet` | 116 / – | `Verbose` |
-| `[SendCorrectionStateToClients]` | `LogOGNet` | 49 / – | `Verbose` |
-| `[SendRemoteInputToClients]` | `LogOGNet` | no emitter | `Log` |
-| `[SendLocalInputToServer]` | `LogOGNet` | – / 94–99 | `Verbose` |
-| `[ReceiveCorrectionState]` | `LogOGNet` | – / 57–59 | `Verbose` |
-| `[ReceiveCorrectionInput]` | `LogOGNet` | no emitter | `Log` |
-| `[InjectCorrectionState]` | `LogOGNet` | – / 57–59 | `Verbose` |
-| `[InjectCorrectionInput]` | `LogOGNet` | no emitter | `Log` |
-| `[DrainOutOfOrder]` | `LogOGNet` | no emitter | `Log` |
-| `[InputGap]`, `[InputDrop]`, `[DelayShift]`, `[InputStats]`, `[InputDomain]` | `LogOGNet` | token (`[Warning]`) | `Log` |
-| `[Park]` | `LogOGNet` | 116 / – | `Verbose` |
-| `[Release]` | `LogOGNet` | 116 / – | `Verbose` |
-| `[ReleaseBatch]` | `LogOGNet` | 60 / – | `Verbose` |
-| `[RelaySkip]` | `LogOGNet` | token | `Log` |
-| `[RelayProbe` | `LogOGRelayProbe` | token | `Log` |
-| `[DivergenceProbe` | `LogOGDivergenceProbe` | token | `Log` |
-| `SimulationManager:`, `tryRegister:`, `NewFramework:` | `LogOGMgmt` | ≤ 0.04 | `Log` |
-
-Notes on the rows:
-
-* **`[ReceiveLocalInput] DISCARD` is its own row, ahead of `[ReceiveLocalInput]`.** The core emits
-  both from one callback (`SimulationNetSync.h`); the first is per input, the second is a rare
-  anomaly with no token. The more specific row keeps the anomaly at `Log`. The reachability
-  `static_assert` keeps it ahead: below `[ReceiveLocalInput]` it could never be taken.
-* **`[ReleaseBatch]` is a row although `RouteOGMessage` never sees it.** It is logged directly, by
-  `releaseDelayedInputsForStep`, and its row exists so that site reads its level from the table.
-* **`[Resim.Input]` and the token rows.** Their `plainLevel` has no effect today. `[Resim.Input]` is
-  `Verbose` because it is a per-replayed-tick line; the token rows are `Log` so a future token-less
-  line there is not hidden by accident.
-* **Four rows have no emitter in the tree:** `[SendRemoteInputToClients]` (its write is retired in
-  `SimulationNetSync.h`), `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]` and
-  `[DrainOutOfOrder]`. With no rate to classify them they stay `Log`. They are candidates for
-  deletion; this task did not delete them.
-* **The `LogOGSim` rows stay `Log`**, and the committed `Config/DefaultEngine.ini` sets
-  `LogOGSim=Log`, so the committed output is unchanged. Resim lifecycle lines are at most about 5 per
-  second on a client.
+### This module's direct log sites (og-simulationscheduler-withjolt task 80)
 
 **Direct log sites read the same table: `OG_LOG_ROUTED`.** Six per-tick or per-packet lines in this
 module are logged with `UE_LOG` directly rather than through `RouteOGMessage`. They now use
-`OG_LOG_ROUTED(Category, Format, ...)` (`SimulationManagerUImpl.h`), which looks up the row whose
+`OG_LOG_ROUTED(Category, Format, ...)` (`UESimulationLogRoutes.h` since task 19), which looks up the row whose
 prefix begins `Format` at compile time, fails the build if there is none, and expands to
 `UE_LOG(Category, Verbose, ...)` or `UE_LOG(Category, Log, ...)` from that row's `plainLevel`. So the
 level is set in one place for routed and direct lines alike. The sites:
@@ -1010,8 +893,8 @@ level is set in one place for routed and direct lines alike. The sites:
 |---|---|---|
 | `[ReleaseBatch]` | `releaseDelayedInputsForStep` | `SimulationManagerUImpl.cpp` |
 | `[ResimCheck.TriggerRewind]` | `TriggerRewindIfNeeded_Internal`, the two `rewind=0` lines (Chaos only) | `ChaosTickBackendUImpl.cpp` |
-| `[ServerReceive]` | `ServerReceiveRemoteMove_Implementation`, the no-coordinator path | `SimmableUpdateComponent.cpp` |
-| `[ReceiveCorrectionState]` | `OnRep_CorrectionState` | `SimmableUpdateComponent.cpp` |
+| `[ServerReceive]` | `receiveRemoteMoveBundle` (the RPC tail since og-ue-simulationcomponentandmanagersplit task 20a), the no-coordinator path | `UESimulatableOwnerBinding.h` (since task 21; was `SimmableUpdateComponent.cpp`) |
+| `[ReceiveCorrectionState]` | `onCorrectionStateAccepted`, called from `USimulatableNetSyncComponent::OnRep_CorrectionState` since task 20a | `UESimulatableOwnerBinding.h` (since task 21; was `SimmableUpdateComponent.cpp`) |
 | `[ClientPrediction]` | `buildPlayerInput` | `OGBrawlerInputCollectionComponent.cpp` |
 
 The category stays at the site. Nothing checks that it is the row's category; all six agree today.
@@ -1024,11 +907,13 @@ The category stays at the site. Nothing checks that it is the row's category; al
 * `[RelayDelayFloor]` and `[ConnectionTier]` (session and tier events, at most about 0.1 per second;
   `[ConnectionTier]` also in `SimmableUpdateComponent.cpp`). They have no row and need none.
 
-**What an operator types now.** Per-tick and per-packet diagnostics need
-`LogOGNet=Verbose` and `LogOGSimTick=Verbose` (on the command line,
-`-ini:Engine:[Core.Log]:LogOGNet=Verbose`). At `Log` those categories carry only the rare lines. At
-the committed `Warning` nothing changed. Lines read at `Verbose` are prefixed `Verbose: ` after the
-category, and the capture extractors match on the tag anywhere in the line.
+### History: what tasks 80 and 12 checked and measured
+
+*Code moved to `UESimulationLogRoutes.h` (task 19). The records below are those tasks', kept here as they were: "the
+header" is `SimulationManagerUImpl.h` of that time, and "this module's block" is today's `kOGAdapterLogRoutes`. Task 19
+did not re-run them; its own checks are in `UESimulationLogRoutes-rationale.md` §9.*
+
+#### og-simulationscheduler-withjolt task 80
 
 **What the compiler checks.** Each arm below was compiled out of tree: a copy of the header with the
 same line count, a scratch translation unit that includes it, and UBT's own compiler response file
@@ -1072,52 +957,7 @@ At the committed `Warning`, the set of category, level and tag triples in the be
 sessions is identical on the server; on the clients it differs by one run-dependent
 `[InputRelay]` warning that one client hit in each run.
 
-### Two blocks: og-simulation's rows first, then this module's (og-tickdriver task 12)
-
-**`kOGLogRoutes` is now the concatenation of two tables.** The rows whose tags only og-simulation emits
-moved into og-simulation as engine-free data: `kSimulationLogRoutes` in its `SimulationLogRoutes.h`, with
-plain `char` prefixes, a `SimulationLogRoute` and a `HostLogLevel`. The rest stay in this header, in
-`kOGGameLogRoutes`. `ogConcatenateLogRoutes` builds `kOGLogRoutes` at compile time: og-simulation's 25 rows
-first, then this module's 14, each block in the order the single table had. `RouteOGMessage`,
-`OG_LOG_ROUTED` and `ogLogRouteFor` read `kOGLogRoutes` as before; none of them changed, and nor did the
-`.cpp`.
-
-**Which rows are og-simulation's** was decided by the emitters: every string literal in a non-comment line
-under `Plugins/` and `Source/`, with a leading `[Verbose]` or `[Warning]` token removed as `RouteOGMessage`
-removes it, assigned to the row that routed it.
-- og-simulation only (25 rows, now in `kSimulationLogRoutes`): every row not listed below. Their emitting
-  files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
-- Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp` and
-  this module's `.cpp`), `[ServerReceive]` (also `SimmableUpdateComponent.cpp`) and `[RelayProbe` (also this
-  module's `.cpp`, the PROBE 5 and 6 lines).
-- Emitted by this module only (kept here): `[ResimCheck.TriggerRewind]` (`ChaosTickBackendUImpl.cpp`),
-  `[ClientPrediction]` (`OGBrawlerInputCollectionComponent.cpp`), `[ReceiveCorrectionState]`
-  (`SimmableUpdateComponent.cpp`), `[ReleaseBatch]` (this module's `.cpp`), `SimulationManager:` (this
-  module's `.cpp`), `tryRegister:` (`BrawlerJoltBindingUImpl.cpp`'s capsule `checkf`, the Jolt host's `.cpp` until og-tickdriver task
-  15a, and this module's `.cpp`) and `NewFramework:`
-  (`SimmableUpdateComponent.cpp` and this module's `.cpp`).
-- No emitter (kept here; deleting them was out of scope): `[SendRemoteInputToClients]`,
-  `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]`, `[DrainOutOfOrder]`.
-
-**Why the reorder changes no route.** The single table interleaved the two kinds of row, so the
-concatenation cannot equal it element for element. It is equal as a router instead. A line can match two
-rows only if one row's prefix begins with the other's, because both begin the line. So if no prefix in one
-block begins with a prefix in the other, a line matches rows of one block at most, and its first match is
-the same whichever block comes first; within each block the order is the old one. The header checks that
-at compile time:
-- `ogLogRouteBlocksAreDisjoint`: no og-simulation prefix and no prefix of this module begin with one
-  another, compared ignoring case as `FString::StartsWith` compares. New, and permanent: a later row added
-  to either block is held to it.
-- `ogLogRoutesAreAllReachable` and `ogLogRoutePlainLevelsAreLogOrVerbose`, unchanged, now run over the
-  concatenation. og-simulation asserts its own block the same way.
-- `ogLogRoutesAreAllMapped`: every og-simulation row's route has an `OGLogRoute` through `ogLogRouteOf`; an
-  unmapped one would be `kOGLogRouteUnmapped`, which `RouteOGMessage`'s switch has no case for.
-- `ogSimulationLogRoutePrefixesArePrintableAscii`: each og-simulation prefix is widened to `TCHAR` one `char`
-  at a time (`kOGSimulationLogRoutePrefixes`, sized by `ogLongestSimulationLogRoutePrefix`), which is exact for
-  ASCII only.
-
-The two mappings live in one place each: `ogLogRouteOf` (`SimulationLogRoute` to `OGLogRoute`) and
-`ogLogVerbosityOf` (`HostLogLevel` to `ELogVerbosity`).
+#### og-tickdriver task 12
 
 **The one-time proof, not shipped.** A scratch translation unit froze the 39 rows of the single table
 verbatim from the pre-task header, included the new header, and asserted that each frozen row's prefix
@@ -1335,7 +1175,8 @@ cold-source skip did not have to be re-specified.
 
 > ⚠ **Which ring.** The replicated ring is `ASimulationInputRelay::m_relayedInputRing`, registered
 > `DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing, COND_SkipOwner)`. It is
-> **not** `USimmableUpdateComponent::m_detachedRelayRing`, which is the no-host fallback whose
+> **not** `USimulatableNetSyncComponent::m_detachedRelayRing` (on the brawler component until
+> og-ue-simulationcomponentandmanagersplit task 20b), which is the no-host fallback whose
 > writes nothing replicates. See §11 — the header said otherwise until this pass.
 
 ---
@@ -1350,7 +1191,8 @@ role only** — `std::nullopt` on a pure client, because the coordinator borrows
 from `m_manager`'s owned config.
 
 **Reception *policy* is in the core; primitive *acquisition* is at the RPC boundary**
-(`USimmableUpdateComponent::ServerReceiveRemoteMove`), where the bundle and the owning actor
+(`USimulatableNetSyncComponent::ServerReceiveRemoteMove` since og-ue-simulationcomponentandmanagersplit task
+20a, and its typed tail `receiveRemoteMoveBundle`, a member of the component's binding base `UESimulatableOwnerBinding` since task 21), where the bundle and the owning actor
 naturally live. Three accessors are all this manager still supplies — the coordinator instance,
 the server sim tick, and the id→component delivery-routing registration — and **none carries
 netcode policy.**
@@ -1397,7 +1239,7 @@ The frame's game-thread work is three pieces (split by og-simulationscheduler-wi
   test (`⛔G-70`), then PROBE 6 and `[PacketBudget]` (§8). Nothing in it releases input.
 * `releaseDelayedInputsForStep(firstTick, numSteps)` is the drain only. It tests the coordinator
   itself, prints one `[ReleaseBatch] first=<tick> numSteps=<n>` line on `LogOGNet` at `Verbose` (the
-  category and level of the coordinator's `[Release]` lines; its `kOGLogRoutes` row, §4), and calls
+  category and level of the coordinator's `[Release]` lines; its `kOGLogRoutes` row, `UESimulationLogRoutes-rationale.md` §6), and calls
   `ServerReceptionCoordinator::releaseDelayedInputs` with the per-id callback.
 * The reap, `ServerReceptionCoordinator::reapConnections`, is called by the host.
 
@@ -1917,17 +1759,21 @@ use (`SimulationManagerUImpl.h` initialises `m_relayWriteProbe` with it), and st
 Both halves are false in the current tree:
 
 - the replicated ring is **`ASimulationInputRelay::m_relayedInputRing`**. `USimmableUpdateComponent`
-  holds `m_detachedRelayRing`, the *no-host read fallback*. A server write with no host lands in
-  `m_detachedRelayStagingRing` instead (`SimmableUpdateComponent-rationale.md` §6 and §12; the
+  held `m_detachedRelayRing`, the *no-host read fallback* (since og-ue-simulationcomponentandmanagersplit
+  task 20b the sibling `USimulatableNetSyncComponent` holds it). A server write with no host lands in
+  `m_detachedRelayStagingRing` instead (`SimulatableNetSyncComponent-rationale.md` §10,
+  `UESimulatableOwnerBinding-rationale.md` §6 since og-ue-simulationcomponentandmanagersplit task 21,
+  `SimmableUpdateComponent-rationale.md` §12; the
   header comment this line used to quote was removed in task 25's conversion and was itself false,
   F-25-5);
 - the registration is **`DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing,
   COND_SkipOwner)`**. The old `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` stood
-  on the component and was replaced; its absence is fenced by G-33 of
-  `SimmableUpdateComponent-guards.md`.
+  on the component and was replaced; its absence is fenced by G-09 of
+  `SimulatableNetSyncComponent-guards.md` (G-33 of `SimmableUpdateComponent-guards.md` until
+  og-ue-simulationcomponentandmanagersplit task 20a moved the registrations to that component).
 
 A third clause was stale in a third way: it said this *writes* the ring, where the write path has
-since become **staging** (`SimmableUpdateComponent-rationale.md` §6, "Staging, not writing").
+since become **staging** (`UESimulatableOwnerBinding-rationale.md` §6, the staging write).
 
 ⛔ This is the fourth site of a relay-ring mis-attribution class that two earlier reviews of this
 initiative found and routed as unowned. **Grep every symbol before carrying it into a comment**:
@@ -1995,6 +1841,9 @@ The `DECLARE_LOG_CATEGORY_EXTERN` comments said:
 
 **Fix:** the one-liners are gone from the header (§12 carries them); §4's tables are the maintained
 statement.
+
+*Code moved to `UESimulationLogRoutes.h` (task 19); the maintained tables are `UESimulationLogRoutes-rationale.md` §3
+and §5.*
 
 ### C9 — "cast before the subtraction" protected nothing
 
@@ -2157,6 +2006,10 @@ The R0 annotations point at §11.*
 ```
 
 **Where it went:** Orientation — §8, PROBE 5.
+
+*The next eight blocks: code moved to `UESimulationLogRoutes.h` (task 19); the declarations are exported there,
+and their maintained text is `UESimulationLogRoutes-rationale.md` §3. `LogOGBrawler`'s, the ninth, stays in this
+module.*
 
 #### Header lines 164-164 — above `DECLARE_LOG_CATEGORY_EXTERN(LogOGSim, Log, All);`
 
@@ -3798,38 +3651,11 @@ above, not twelve. A distance is not a fence, and the conversion removes it.
 The pawn replicates, so on the pawn that test discriminates. A client that reached the push
 would fire it in Development.
 
-### 13.6 The router — per-line notes the router's table no longer carries
+### 13.6 The router — moved to `UESimulationLogRoutes-rationale.md` §10 (task 19)
 
-*`RouteOGMessage` is now a `constexpr` table, `kOGLogRoutes`, with a `static_assert` that no
-prefix begins with an earlier one (§13.9). The notes that stood beside its lines:*
-
-> [InputGap]/[InputDrop]/[DelayShift]/[InputStats] carry [Warning]; [Park]/[Release] do not.
-
-> The out-of-domain gate: one [InputDomain] per burst, naming a client outside our domain.
-
-> The relay tap: Verbose per skipped capture tick, Warning per [InputStats] window.
-
-> The relay family: [RelayProbe.Read], .Arrival (in CAPTURE ticks), .Stale, .Miss, .Delta, .Frame. §8
->
-> ⚠ .Frame IS THE ONE SERVER-SIDE MEMBER: it measures the CAUSE of .Arrival's EFFECT.
->
-> ⛔ Under LogOGNet it would be inseparable; unrouted its Verbose half is unreachable. §4
-
-⚠ **Correction C13-3.** The relay family has **eight** members in the tree, not six:
-`[RelayProbe.Write]` (PROBE 5) and `[RelayProbe.Budget]` (PROBE 6) are also emitted, both from
-this file and both **server-side**. So `.Frame` is not the one server-side member. §4's table and
-its sentence about `.Frame` carry the same omission.
-
-> The RESIM-GATE family: [ResimProbe.Gate], .Chaos, .Apply, .Landing, .Request, .Stranded. §8
->
-> ⛔ AHEAD OF `[Resim.`, DEFENSIVELY: widening it drops this family into LogOGSim=Verbose.
->
-> ONE StartsWith COVERS THE FAMILY: a future sub-tag needs no router edit.
-
-⚠ **Correction C13-2.** The resim-gate family has **eleven** members in the tree:
-`.Session`, `.Frame`, `.PushTarget`, `.PushVerdict` and `.SlotMap` are also emitted. §4's table
-has ten and omits `[ResimProbe.SlotMap]`, which `CorrectionCache.h` emits. Also, at
-`b9f6d81` `Config/DefaultEngine.ini` sets `LogOGSim=Log`, not `Verbose` (C13-1).
+*Code moved to `UESimulationLogRoutes.h` (og-ue-simulationcomponentandmanagersplit task 19). The per-line notes that
+stood beside the router's old branches, and corrections C13-2 and C13-3 restated against the tree of task 19, are
+`UESimulationLogRoutes-rationale.md` §10 (ruling Q-B: §13.6 moves with task 19).*
 
 ### 13.7 The rewind-push probe — the source's own wording, beyond §8
 
@@ -3970,6 +3796,9 @@ Numbered `C13-n` so they cannot collide with §11's.
 | C13-16 | the file banner: "EVERY SESSION KNOB TAKES THE SAME FOUR STEPS … 4 PROVE an UNCONDITIONAL Warning line" | the relay-delay floor has no unconditional `Warning` proof line in `BeginPlay`: only a `Log` line when the ini overrides it, and a `Warning` when the relay is missing. §3's table makes the same claim |
 | C13-17 | the include comment "resimGate:: - the policy kernel. Explicit, not leaned on through SimulationManager.h" | the translation unit names nothing in `resimGate::`; the include has no user here (the same class as §11 C2) |
 
+*C13-2 and C13-3 are restated, re-verified at task 19, in `UESimulationLogRoutes-rationale.md` §10, with the code
+they describe (task 19).*
+
 Two more claims were **true as written but described something that cannot happen**. They are
 annotated at their quotes in §13.4 (re-seeding a released slot) and §13.7 (the `ResimAsFollower`
 premise, which is also C13-15).
@@ -4067,18 +3896,196 @@ input paths keyed by ROOT connection are unaffected.
 **A rejoin** is a new pawn, so it gets a new component with id 0, a new allocation and a new id.
 The departed pawn's id was unregistered at its EndPlay and is never handed out again.
 
-## §16 The latency-budget probe — stamp sites, threads and errors (og-simulationscheduler-withjolt task 1)
+## §16 The latency-budget probe — the brawler's wiring (og-simulationscheduler-withjolt task 1)
 
-Moved to `LatencyBudgetDiagnosticsUImpl-rationale.md` §6 (og-tickdriver task 18), with the code it describes: the
-probe, its mailboxes, its stamp functions and its window logging left this class for `LatencyBudgetDiagnosticsUImpl`, a
-class that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1 (every build but Shipping). This class holds one
-member, `m_latencyBudgetDiagnostics`, and the `get`/`edit` pair `getLatencyBudgetDiagnostics()` /
-`editLatencyBudgetDiagnostics()`; every former call site is now an `editLatencyBudgetDiagnostics()` call at the same
-point, on the same thread, in the same order: `onTimingInfoReceived` (the `WIRE` sample, first), `BeginPlay` (`begin`,
-where the probe was created and the post-tick flush bound), `EndPlay` (`end`, inside the world test, before
-`onEndPlayWorld`), `tryRegister` (`wrapInputProvider`, on the client branch), `unregisterFromNewFramework`
-(`forgetCharacter`) and the last statement of `OnPostPhysicsStep` (`tick_GameThread`). The old-to-new name map is
-`LatencyBudgetDiagnosticsUImpl-rationale.md` §5.
+The probe's host is OGSimulationUnreal's template `UELatencyBudgetDiagnostics` (`UELatencyBudgetDiagnostics.h`, since
+og-ue-simulationcomponentandmanagersplit task 19a). Its rationale, `UELatencyBudgetDiagnostics-rationale.md` in
+OGSimulationUnreal's docs, is the class, its gate, its const access, the fence test, the template's own stamp points and
+threads, the `H3` hook and the `[LatencyBudget]` lines. This section is the brawler's side: this class's member and call
+sites, the brawler's other stamp sites, their threads and errors, and the Chaos host's `[ChaosDilation]` line. The
+probe is a measurement of the Chaos build, per hop, that the scheduler migration was compared against. **It changes no
+gameplay behaviour, timing or netcode: every addition is a timestamp and a counter.**
+
+### Ownership and call sites
+
+This class holds one member, `m_latencyBudgetDiagnostics`, of type
+`UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>` (the traits are `BrawlerSessionTraitsUImpl-rationale.md`),
+initialized with `{ std::as_const(*this) }` (the template's rationale §4 says why: with `{ *this }`, MSVC compiled this
+class's later initializers `m_reconciliation{ m_storage }`, `m_inputResolution`, `m_netSync` and `m_backend` as though
+`this` were const, C2665), and the `get`/`edit` pair
+`getLatencyBudgetDiagnostics()` / `editLatencyBudgetDiagnostics()`. It befriends the template
+(`template <typename TraitsT> friend class UELatencyBudgetDiagnostics;`), which reads `m_manager`, `m_storage`,
+`m_inputResolution` and `m_delayedInputComponentsById` through a const reference. Its call sites, each at the point the
+probe's code had before og-tickdriver task 18 moved it out of this class:
+
+* `onTimingInfoReceived`: `noteWireSample`, the first statement (the client's `WIRE` sample);
+* `BeginPlay`: `begin`, which creates the probe with the role's hop mask (`kServerHops` on the authority world,
+  `kClientHops` on a client world) and its two mailboxes, and binds the post-tick flush. That is before the backend starts
+  stepping (`startStepping`, at the end of `BeginPlay`), and nothing resets them before the actor is destroyed, so a step
+  can never reach a null or freed mailbox;
+* `EndPlay`: `end`, inside the world test, before `onEndPlayWorld`;
+* `tryRegister`: `wrapInputProvider`, on the client branch;
+* `unregisterFromNewFramework`: `forgetCharacter`;
+* the last statement of `OnPostPhysicsStep`: `tick_GameThread`, with the backend's `editDiagnostics()` view.
+
+No production local, decision or replicated value moved into the template. The two neighbours that feed it have their
+own fenced blocks: the Chaos host's `[ChaosDilation]` window (`ChaosTickBackendUImpl-guards.md` G-11) and the input
+collection component's input-sample time (an old-style fence comment; that file is unconverted).
+
+PIE in one process has two manager instances and two probes; the `role=` field tells their lines apart. The component's
+game-thread sites reach the role's instance through `UELatencyBudgetDiagnostics::withInstance`
+(`UESimulatableOwnerBinding-rationale.md` §4 since task 21), which finds this member through `instanceFor`.
+
+### Threads — the brawler's reads add no crossing
+
+The template's own reads are same-thread with their writers (its rationale §6). The brawler's: the correction buffer's
+tick (written by `sendCorrectionAll` inside `onPostSimulationGameThread`), `m_delayedInputComponentsById`, the scene's
+network delta-time scale (written by the engine's time-dilation client RPC) and the local player controller's physics
+tick offset (written by the engine's timestamp-setup client RPC) are all read on the game thread, where they are written.
+The one value that crosses from the game thread to the step thread, the input-sample time, is a `std::atomic<double>` on
+the input collection component (`BrawlerSessionGameUImpl-rationale.md` §2). **This class's CROSSING count stays three**
+(§1), and this paragraph is the argument for it, made rather than assumed.
+
+On a dedicated server the step thread *is* the game thread (Chaos steps inline; the Jolt configuration steps the
+authority inline too).
+
+### Why the capture stamp is a wrapper in `tryRegister`, not a line in the provider lambda
+
+`USimmableUpdateComponent`'s provider lambda may not capture the manager (its guard G-05). The capture stamp therefore
+lives in the wrapper `wrapInputProvider` returns, which `tryRegister` applies to a client's provider before handing it to
+the core. The wrapper calls the component's lambda, then posts `InputSampled` and `Captured` for `step.getTick()`. It
+captures `this`, the diagnostics object, a member of this class, which owns the core container the callable is stored in,
+so it adds no lifetime edge to another actor, and the input sample source `BrawlerSessionGameUImpl::inputSampleSource`
+returned at registration: the same input-collection pointer the inner lambda already holds. **An empty provider is
+returned unchanged**: provider presence is the core's local-versus-remote identity test, and a `checkf` states that the
+wrapper never changes it (the template's rationale §3).
+
+### What the brawler has at 0 (Shipping, and the fence build)
+
+The template's members are no-ops (its rationale §3). On the brawler's side: the Chaos host's `[ChaosDilation]` window
+members and `LogOGChaosDilation` do not exist and its view's four members are inline no-ops; the input collection
+component's input-sample time and its view do not exist, so `BrawlerSessionGameUImpl::inputSampledSeconds` is not
+declared either. **What still runs at 0, deliberately:** the Chaos async callback still reads `FPlatformTime::Seconds`
+before `onGameSimulation`, because the step-start time must be taken before the step and it is a production local beside
+production statements; and the authority's relay-host flush callback is still bound (the sibling's `attachInputRelayHost`
+binds `makeRingFlushedCallback`'s result), with a body that is a single `withInstance` call, a no-op at 0.
+
+**The fence test** (the template's rationale §5) forces the macro in this module's `OGBrawlerUnreal.Build.cs` through a
+`PublicDefinitions` entry. The harness's two Chaos client checks for the latency lines (`[ChaosDilation]` present with
+`samples>0`, `[LatencyBudget.Window]` present) fail there by design and are judged as expected-absent (og-tickdriver
+task 18's lead ruling).
+
+### The hop table: stamp sites and known measurement error
+
+Times are `FPlatformTime::Seconds` (one monotonic clock per process). "GT" is the game thread and "PT" the step's
+thread (a task-graph worker on a client, the game thread on a dedicated server).
+
+| hop | start: file · function (thread) | end: file · function (thread) | known error |
+|---|---|---|---|
+| `H1` | `OGBrawlerInputCollectionComponent.cpp` · `updateGameThreadCache`, first statement after the owner check (GT) | `UELatencyBudgetDiagnostics.h` · the wrapper from `wrapInputProvider`, after the provider returns (PT) | Starts at the frame's input refresh, not at the device event (`BrawlerSessionGameUImpl-rationale.md` §2): the true input age is **under**-stated by up to one game frame. The sample time is a relaxed atomic, unordered with the caches the capture reads, so a capture racing a refresh can pair a new time with the previous frame's values: an error of at most one frame, rare. |
+| `H2` | the same wrapper, `Captured` (PT) | `UESimulatableOwnerBinding.h` · `sendLocalInputToAuthority` (the component's binding base since task 21), after the bundle's send (`sendInputBundleToAuthority`, the RPC since task 20a), once per capture tick in the bundle, first send wins (GT) | Microseconds. Redundant re-sends of the same capture are duplicates and do not move the hop. |
+| `H3` (client) | `sendLocalInputToAuthority` (GT) | `UELatencyBudgetDiagnostics.h` · `onPostTickFlush`, bound to `UWorld::OnPostTickFlush` (GT) | See the template's *`H3` hook*. |
+| `H3` (server) | `UESimulatableOwnerBinding.h` · the relay host's flush callback from `makeRingFlushedCallback`, which the sibling's `attachInputRelayHost` binds (task 20b), fired from `ASimulationInputRelay::PreReplication` after a flush published entries (GT, inside the net driver's flush) | `onPostTickFlush` (GT) | Measures the rest of that flush after this relay's pre-update. The same send caveats as the client row. |
+| `H3c` | `UELatencyBudgetDiagnostics.h` · `tick_GameThread`, when a character's correction-buffer tick changed since the last frame (GT, end of `OnPostPhysicsStep`) | `onPostTickFlush` (GT) | A property leaves only when the replication system polls and sends it; a correction written but not sent at this flush still reads as left. A **lower** bound. The start is late by the frame's visualization work (the backend's `updateVisualization_GameThread`). |
+| `H4` | `UESimulatableOwnerBinding.h` · `receiveRemoteMoveBundle`, which the sibling's RPC calls after its version fence (task 20a), once per capture tick in the bundle, first arrival wins (GT, inside the net driver's receive dispatch) | `UELatencyBudgetDiagnostics.h` · `stampAfterStep_Internal`, for the capture tick `getLastUsedCaptureTick` reports after the step, stamped with that step's start time (PT) | The datagram reached the socket before the frame's receive dispatch: up to one server frame **under**-stated. An underrun step reports the sentinel and stamps nothing. |
+| `H4r` | as `H4` | the relay flush callback (as `H3` server) | The hand-off is the flush into the replicated ring, not the staging write at receipt: staging is synchronous with receipt and would read zero. |
+| `H5` | `stampStepEnd_Internal`, at each step's end (below), per character, for `currentIntegratedTick` (PT; inline on a dedicated server) | as `H3c` start | `noEnd` counts the ticks a character's state was not written: the correction rotation (`CorrectionRotationK`) skips a character on purpose, so on a rotation of 2 about half the ticks have no end. |
+| `H6` | `UESimulatableOwnerBinding.h` · `noteRelayedRingArrived`, which the sibling's `onRelayedInputRingArrived` calls after its owner-skip check (task 20b), once per capture tick in the ring, first arrival wins (GT, from the ring's OnRep) | `stampAfterStep_Internal`: the relayed-read observation for the step's tick names the applied capture tick, stamped with the step's start time (PT) | The bytes arrived up to one client frame before the OnRep. Only reads that applied a relayed capture stamp an end; a miss stamps nothing and the capture finalizes as `noEnd`. |
+| `H6c` | `UESimulatableOwnerBinding.h` · `onCorrectionStateAccepted`, called from the sibling's `OnRep_CorrectionState` (task 20a), for the peeked tick (GT) | `stampAfterStep_Internal`: a pending stamp at the start of the first client step after receipt (PT) | Measures when the correction is available to the next step, not when a resimulation applies it. |
+| `H7` | `stampStepEnd_Internal` (PT) | `tick_GameThread`, after the visualization pass: the newest pending tick per character only (GT) | Not the photon. The engine interpolates the render poses behind the simulation on the game thread, and the render thread and GPU add one or two frames more. A step that ends between the mailbox drain and this stamp is stamped one frame late. On a dedicated server it measures the per-frame visualization pass, which draws nothing. |
+| `WIRE` | client: `onTimingInfoReceived`, the raw round trip the timing relay hands `NetworkTimeEstimator::updateRTT`, halved (GT) | — | Half of a round trip assumes symmetric paths. Server: `receiveRemoteMoveBundle`, `readRoundTripMs` of the root connection, halved, once per bundle (GT). The two roles' values come from different estimators. |
+
+**H1 and H2 are measured for a remote client's own characters only.** A listen host's local players have no client
+provider, so the host role has no capture path to stamp.
+
+### The step-side stamp sites per configuration (og-simulationscheduler-withjolt task 54)
+
+In the Jolt configuration "PT" is the step's thread (the tick driver's task on a client, the game thread inline on the
+authority), every game-thread site is unchanged, and the step-side sites are the game binding's step hooks
+(`BrawlerTickDriverGameUImpl-rationale.md`):
+
+| stamp | Chaos configuration (`ChaosTickBackendUImpl.cpp`, through the host's `editDiagnostics()`) | Jolt configuration (`BrawlerTickDriverGameUImpl.h`) |
+|---|---|---|
+| step-start time for `H4`, `H6`, `H6c` and the clock counts | `OnPreSimulate_Internal`, immediately before `onGameSimulation` | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03); on a client early only by the Jolt scratch save |
+| `stampAfterStep_Internal(start)` | `OnPreSimulate_Internal`, after `onGameSimulation`, when not resimulating | `onStepStarted`, from `beforePhysics`, after `onGameSimulation`, before the physics step |
+| `stampStepEnd_Internal` (`H5`, `H7` starts) | `OnPostSolve_Internal`, when not resimulating | `onStepEnded`, from `afterTick`, after the post-step pass and the ring save: microseconds later |
+
+Both configurations take the start time at the same instant, so gate 22 compared them like for like. `[ChaosDilation]` is
+the Chaos configuration's only.
+
+### The `[ChaosDilation]` line (client only)
+
+Per window, from `tick_GameThread`, in the Chaos configuration only. The Chaos host samples and logs it, through its
+`editDiagnostics()` view's `sampleLatencyWindow_GameThread` and `logLatencyWindow_GameThread`
+(`ChaosTickBackendUImpl-rationale.md` §2), under its own category `LogOGChaosDilation`, which `ChaosTickBackendUImpl.h`
+declares and its `.cpp` defines (both gated with the probe; since task 19a, before that beside the probe's category):
+
+* `min` / `mean` / `max` / `samples`: the physics scene's network delta-time scale, sampled once per game frame from
+  the world's physics scene (`GetPhysicsScene`, an `FChaosScene`; `FChaosScene::GetNetworkDeltaTimeScale`, beside the
+  setter the engine's time-dilation client RPC calls). It is the engine's physics time dilation.
+* `resets` / `offset`: how many times the first local player controller's network physics tick offset changed in the
+  window, and its current value. The engine's timestamp-setup client RPC writes that offset. ⚠ A reset to the **same**
+  value is invisible to this poll, and only the first local player controller is read.
+* `skips` / `stalls` / `hardResyncs`: the window's increase in `ClientPredictionClock`'s Skip, Stall and HardResync
+  counts, read on the step thread and carried by the template's clock mailbox (`clockCountsInWindow`). A client that
+  joins mid-session shows one hard resync in its first window.
+
+```
+[ChaosDilation] role=Client min=0.9762 mean=0.9998 max=1.0237 samples=1000 resets=0 offset=537 skips=0 stalls=0 hardResyncs=0
+```
+
+All three latency lines are `Warning`. `Config/DefaultEngine.ini` pins `LogOGLatencyBudget=Warning`; `LogOGChaosDilation`
+has no ini line and runs at its declared default (`Log`), which prints its `Warning` line.
+
+### Verified, and what was not
+
+A headless run (one `-server` process and two `-game -nullrhi` clients on the ThirdPerson map, 2026-10-06) printed every
+enabled hop on both roles, with `stale=0` and `mailboxDropped=0`. Representative p50s: client `H6` 90 ms and server `H4`
+149 ms (the relay-delay floor and the input delay, as expected), `H5`'s `noEnd` about half its ticks (the rotation), and
+the dilation scale moving between 0.976 and 1.024. A headless client is smoother than a rendering one, so these numbers
+are wiring evidence, not a baseline.
+
+### History
+
+* **og-simulationscheduler-withjolt task 1** wrote the probe's host side in this class and this section.
+* **og-tickdriver task 18** moved the probe, its mailboxes, its stamp functions and its window logging out of this class
+  into a game-module class, LatencyBudgetDiagnosticsUImpl (historical name), compiled out of Shipping, and moved this
+  section into that class's rationale (§6 there). It applied three user rulings: diagnostics are grouped, fenced and
+  fence-tested (2026-08-29); the grouped class ("Group it", 2026-10-19); and "gate it behind `#if !UE_BUILD_SHIPPING`"
+  (2026-10-19), named once as the macro so the fence build can force it. Its POISON (a non-const owner reference) was seen
+  failing, and the provider-presence `checkf`, which before it covered the wrapping path only, moved above the gate. The
+  names it changed:
+
+  | before task 18 (historical names) | since task 19a |
+  |---|---|
+  | stampLatency | `stamp` |
+  | noteLatencyWireSample | `noteWireSample` |
+  | postLatencyEvent_Internal | `post_Internal` |
+  | stampLatencyAfterStep_Internal | `stampAfterStep_Internal` |
+  | stampLatencyStepEnd_Internal | `stampStepEnd_Internal` |
+  | createLatencyBudget, and the post-tick-flush registration beside it in `BeginPlay` | `begin` |
+  | the post-tick-flush removal in `EndPlay` | `end` |
+  | the two latency statements of `unregisterFromNewFramework` | `forgetCharacter` |
+  | wrapInputProviderWithLatencyStamp | `wrapInputProvider` |
+  | onLatencyPostTickFlush | `onPostTickFlush` |
+  | tickLatencyBudget_GameThread | `tick_GameThread` |
+  | LatencyMailbox, LatencyClockMailbox, LatencyClockCounts | `Mailbox`, `ClockMailbox`, `ClockCounts` |
+  | m_latencyProbe, m_latencyMailbox, m_latencyClockMailbox | `m_probe`, `m_mailbox`, `m_clockMailbox` |
+  | m_latencyClockPosted_Physics, m_latencyClockLatest, m_latencyClockAtWindowStart | `m_clockPosted_Physics`, `m_clockLatest`, `m_clockAtWindowStart` |
+  | m_latencyMailboxDropped, m_latencyLastHandedCorrectionTick, m_latencyPostTickFlushHandle | `m_mailboxDropped`, `m_lastHandedCorrectionTick`, `m_postTickFlushHandle` |
+  | the backend hosts' sampleLatencyWindow_GameThread and logLatencyWindow_GameThread | the same names on each host's `editDiagnostics()` view |
+  | the Chaos host's stampLatencyAfterStep_Internal and stampLatencyStepEnd_Internal forwarders | the same names on `ChaosTickBackendUImpl::Diagnostics` |
+  | the input collection component's getInputSampledSeconds | `inputSampledSeconds`, on the view `UOGBrawlerInputCollectionComponent::getDiagnostics` returns |
+
+  Two mechanical differences, both equivalent: the post-tick-flush binding was an `AddUObject` binding of this class's
+  own handler and became an `AddWeakLambda` binding on this class that calls `onPostTickFlush` (the same multicast
+  delegate, bound at the same point of `BeginPlay`, weakly bound to the same object); the `[ChaosDilation]` clock fields
+  were the Chaos host's direct subtraction of this class's two members and became `clockCountsInWindow()` and
+  `restartClockWindow()`.
+* **og-ue-simulationcomponentandmanagersplit task 19a**: code moved to `UELatencyBudgetDiagnostics.h` (OGSimulationUnreal,
+  MPL-2.0), a template over `BrawlerSessionTraitsUImpl`, with the input-sample read through the two hooks of
+  `BrawlerSessionGameUImpl`. Its game-neutral narrative moved to the template's rationale; this brawler part came back to
+  this section, and the old class's docs pair was retired (its one guard id's successor is the template's G-01).
 
 ---
 
@@ -4160,8 +4167,8 @@ construction in `BeginPlay` (with the solver lookup above the branches), `tryReg
 (`ChaosPhysicsFactory` and the volume registration), and `registerVizVolume`'s query parameters. They moved too.
 The callback and its input hold a `ChaosTickBackendUImpl*` instead of this class. One member stayed here,
 the clock counts at the window start (m_latencyClockAtWindowStart, historical name), for a reason
-`ChaosTickBackendUImpl-rationale.md` §2 gives, until og-tickdriver task 18 moved it into `LatencyBudgetDiagnosticsUImpl`
-(`m_clockAtWindowStart`).
+`ChaosTickBackendUImpl-rationale.md` §2 gives, until og-tickdriver task 18 moved it into the latency class
+(`m_clockAtWindowStart`; the class is `UELatencyBudgetDiagnostics` since task 19a).
 
 The guards on that code moved with it. This class's G-02, G-51 to G-55, G-71, G-76 and G-77 are retired
 (`SimulationManagerUImpl-guards.md` §R) and are `ChaosTickBackendUImpl-guards.md` G-01 to G-09.
@@ -4198,8 +4205,8 @@ og-tickdriver task 15b).
 | `createBodies_GameThread` | `tryRegister`'s first pass; `false` returns `TryRegisterStatus::Pending` | the `ChaosPhysicsFactory` bind; returns `true` | the slot acquire and the Jolt bind; `false` where it waits for a slot |
 | `onRegistered_GameThread` | `tryRegister`'s Ready path | empty | the occupancy push and the render target |
 | `onUnregistered_GameThread` | `unregisterFromNewFramework` | empty | the render target and the slot release |
-| `editDiagnostics().sampleLatencyWindow_GameThread` | `LatencyBudgetDiagnosticsUImpl::tick_GameThread`, before the window closes (since og-tickdriver task 18; this class's own latency tick before) | the dilation scale and the tick-offset poll | empty |
-| `editDiagnostics().logLatencyWindow_GameThread` | `LatencyBudgetDiagnosticsUImpl::tick_GameThread`, after `[LatencyBudget.Window]` | the `[ChaosDilation]` line and its reset | empty |
+| `editDiagnostics().sampleLatencyWindow_GameThread` | `UELatencyBudgetDiagnostics::tick_GameThread`, before the window closes (since og-tickdriver task 18; this class's own latency tick before) | the dilation scale and the tick-offset poll | empty |
+| `editDiagnostics().logLatencyWindow_GameThread` | `UELatencyBudgetDiagnostics::tick_GameThread`, after `[LatencyBudget.Window]` | the `[ChaosDilation]` line and its reset | empty |
 
 The root-capsule check after `tryRegister`'s bind reads the movement declaration's stamped
 `bindings.parentBodyId`, because `createBodies_GameThread` returns only whether the bind happened
@@ -4239,12 +4246,12 @@ the value is the one the check compared before (`TickDriverBackendUImpl-rational
 
 * `OnPostPhysicsStep` takes no argument. The Chaos configuration binds the scene's post-tick delegate
   to a weak lambda that drops the scene and calls it. The `[ChaosDilation]` block reads the scene
-  from `GetWorld()` instead (`LatencyBudgetDiagnosticsUImpl-rationale.md` §6). The two empty physics-scene hooks (pre-tick and step) and their
+  from `GetWorld()` instead (§16, "The `[ChaosDilation]` line"). The two empty physics-scene hooks (pre-tick and step) and their
   bindings are deleted (§11 C20).
 * **The split** of the frame's game-thread work into `onFrameStepsDue_GameThread`, the drain and the
   reap (§7).
 * **`[ReleaseBatch] first=<tick> numSteps=<n>`**, one line per drain call, on `LogOGNet` at `Verbose`
-  (its `kOGLogRoutes` row, §4), after the drain's coordinator test and before it drains. The committed
+  (its `kOGLogRoutes` row, `UESimulationLogRoutes-rationale.md` §6), after the drain's coordinator test and before it drains. The committed
   `LogOGNet=Warning` hides it, and so does `LogOGNet=Log`. In the Chaos configuration there is one per physics frame, with `n` equal to the frame's step
   count; the Jolt host will print one per step with `n = 1`. Every `[Release]` line's `releaseTick`
   lies in `[first, first + n)` of the nearest `[ReleaseBatch]` before it. `[Release]` prints

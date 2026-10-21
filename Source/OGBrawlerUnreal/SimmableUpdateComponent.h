@@ -28,6 +28,9 @@
 
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
+#include "OGSimulationUnreal/SimulatableNetSyncComponent.h"
+#include "OGSimulationUnreal/UESimulatableOwnerBinding.h"
+#include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
 #include "OGSimulationUnreal/RelayedInputRing.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
@@ -42,8 +45,10 @@ class USimmableUpdateComponent;
 class UOGBrawlerInputCollectionComponent;
 class ASimulationInputRelay;
 
+extern template class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;
+
 UCLASS(ClassGroup = DPhysics, BlueprintType, Blueprintable, EditInlineNew, meta = (BlueprintSpawnableComponent))
-class USimmableUpdateComponent : public UActorComponent
+class USimmableUpdateComponent : public UActorComponent, public UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>
 {
 	GENERATED_BODY()
 public:
@@ -53,66 +58,7 @@ public:
 
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override final;
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
-
-	using SyncedCorrectionBufferType  = FSimulationStateSyncBuffer;
-	using RelayedInputRingType        = FRelayedInputRing;
-
-	void setOnCorrectionStateReceivedCallback(
-		std::function<void(const FSimulationStateSyncBuffer&)> fn)
-	{
-		m_onCorrectionStateReceivedCallback = std::move(fn);
-	}
-
-	void clearOnCorrectionStateReceivedCallback()
-	{
-		m_onCorrectionStateReceivedCallback = nullptr;
-	}
-
-	void sendLocalInputToAuthority(
-		const PendingInputQueue<simulatableBrawler::PlayerInput>& queue,
-		uint32 currentTick,
-		uint32 redundancyDepth);
-
-	void setOnRemoteMoveReceivedCallback(
-		std::function<void(uint32, const simulatableBrawler::PlayerInput&)> fn)
-	{
-		m_onRemoteMoveReceivedCallback = std::move(fn);
-	}
-
-	void clearOnRemoteMoveReceivedCallback()
-	{
-		m_onRemoteMoveReceivedCallback = nullptr;
-	}
-
-	void deliverDelayedRemoteInput(uint32 captureTick,
-	                               const simulatableBrawler::PlayerInput& input)
-	{
-		if (m_onRemoteMoveReceivedCallback)
-			m_onRemoteMoveReceivedCallback(captureTick, input);
-	}
-
-	void sendConnectionTierToOwningClient(unsigned int id, uint8_t tier);
-
-	FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() { return m_simulationStateCorrectionSyncedBuffer; }
-	const FSimulationStateSyncBuffer& getSyncedCorrectionStateBuffer() const { return m_simulationStateCorrectionSyncedBuffer; }
-
-	FRelayedInputRing&       getRelayedInputRing();
-	const FRelayedInputRing& getRelayedInputRing() const;
-
-	relayedInputRing::StageArrivalOutcome stageRelayedInput(
-		uint32 captureTick, uint8 dA, const simulatableBrawler::PlayerInput& input);
-
-	void setOnRelayedInputReceivedCallback(
-		std::function<void(const FRelayedInputRing&)> fn);
-
-	void clearOnRelayedInputReceivedCallback();
-
-	void attachInputRelayHost(ASimulationInputRelay* host);
-
-	void onRelayedInputRingArrived(const FRelayedInputRing& ring);
 
 	const UOGBrawlerInputCollectionComponent* getOwnerInputCollection() const { return m_ownerInputCollection; }
 
@@ -122,6 +68,8 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	friend class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;
+
 	void tryInitializeWithManager();
 	void tryRegisterWithNewFramework();
 	void scheduleNextInitializationAttempt();
@@ -129,32 +77,8 @@ private:
 	SimCharacterId simCharacterId() const;
 	int32 m_initializationAttempts = 0;
 	int32 m_registrationAttempts = 0;
-	UPROPERTY(ReplicatedUsing = OnRep_CorrectionState)
-	FSimulationStateSyncBuffer m_simulationStateCorrectionSyncedBuffer;
-	UFUNCTION()
-	void OnRep_CorrectionState();
 
-	bool m_wireFormatMismatchDetected = false;
-	static constexpr uint64 kWireFormatMismatchToastKey = 0x4F47574DF0000001ull;
-
-	UFUNCTION(Server, Unreliable)
-	void ServerReceiveRemoteMove(const FInputRedundancyBundle& bundle);
-
-	// ⛔G-36  docs/SimmableUpdateComponent-guards.md
-
-	// ⛔G-37  docs/SimmableUpdateComponent-guards.md
-
-	TWeakObjectPtr<ASimulationInputRelay> m_inputRelayHost;
-
-	UPROPERTY(Transient)
-	FRelayedInputRing m_detachedRelayRing;
-
-	UPROPERTY(Transient)
-	FRelayedInputRing m_detachedRelayStagingRing;
-
-	bool m_hasLocalInputProvider = false;
-	bool m_loggedOwnerSkipDivergence = false;
-
+	unsigned int storageKeyOfOwner() const;
 
 	UOGBrawlerInputCollectionComponent* m_ownerInputCollection = nullptr;
 
@@ -170,9 +94,5 @@ private:
 	std::optional<dAttackBlockPredictionVisualization::State> m_attackBlockPredictionVisualizationState;
 
 	std::optional<simulatableBrawler::StaticData> m_staticData;
-
-	std::function<void(const FSimulationStateSyncBuffer&)> m_onCorrectionStateReceivedCallback;
-	std::function<void(uint32, const simulatableBrawler::PlayerInput&)> m_onRemoteMoveReceivedCallback;
-	std::function<void(const FRelayedInputRing&)> m_onRelayedInputReceivedCallback;
 
 };

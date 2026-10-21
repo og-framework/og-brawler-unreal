@@ -20,6 +20,10 @@
 #include "Runtime/Experimental/Chaos/Public/RewindData.h"
 #include "Runtime/Experimental/Chaos/Public/PhysicsProxy/SingleParticlePhysicsProxy.h"
 
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+DEFINE_LOG_CATEGORY(LogOGChaosDilation);
+#endif
+
 namespace
 {
 	const TCHAR* pushProbeResimTypeText(Chaos::EResimType type)
@@ -731,7 +735,7 @@ void ChaosTickBackendUImpl::Diagnostics::logLatencyWindow_GameThread(bool isClie
 {
 	if (isClient)
 	{
-		const LatencyBudgetDiagnosticsUImpl::ClockCounts clock =
+		const UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>::ClockCounts clock =
 			m_host.m_owner.getLatencyBudgetDiagnostics().clockCountsInWindow();
 		UE_LOG(LogOGChaosDilation, Warning,
 			TEXT("[ChaosDilation] role=Client min=%.4f mean=%.4f max=%.4f samples=%u resets=%u ")

@@ -41,7 +41,7 @@ friendship any more and lost its line.
 | `onFrameStepsDue(first, n)` | once per frame with steps, game thread, before the steps (`SimulationTickDriver-guards.md` G-02) | `onFrameStepsDue_GameThread(first, n)`: PROBE A on both roles, and on the authority PROBE 6 and the one-shot `[PacketBudget]` line (`SimulationManagerUImpl-rationale.md` §8) |
 | `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06) | the reception coordinator's `reapConnections(first)`, when the session has a coordinator: only the authority does, so an inline client reaps nothing |
 | `releaseInputsForAuthorityTick(tick)` | each authority step's `beforeTick`, on the game thread (`TickDriverStepHooks-guards.md` G-01) | `releaseDelayedInputsForStep(tick, 1)` (`⛔G-01`): one `[ReleaseBatch]` with `numSteps=1` per step |
-| `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `LatencyBudgetDiagnosticsUImpl-rationale.md` §2) |
+| `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `UELatencyBudgetDiagnostics-rationale.md` §3, OGSimulationUnreal) |
 | `onStepEnded()` | each step's `afterTick`, before the render and shadow publishes | `editLatencyBudgetDiagnostics().stampStepEnd_Internal()` |
 | `onPostPhysics()` | every frame at `TG_EndPhysics`, after the wait | `OnPostPhysicsStep()` |
 
@@ -62,7 +62,7 @@ friendship any more and lost its line.
   `beforeSimulate` takes `t1` at that instant on both roles (`TickDriverStepHooks-guards.md` G-03); on a client it is
   early only by the Jolt scratch save, microseconds. The stamps read what `onGameSimulation` produced, so they are
   posted from `beforePhysics`; the step-end stamps go in `afterTick`, after the post-step pass and the ring save
-  (`LatencyBudgetDiagnosticsUImpl-rationale.md` §6, "The step-side stamp sites per configuration").
+  (`SimulationManagerUImpl-rationale.md` §16, "The step-side stamp sites per configuration").
 * **`onPostPhysics` every frame.** `OnPostPhysicsStep` runs with or without steps, as the scene's post-tick delegate
   did, so the correction rotation still advances once per game frame. Its first backend call is the Jolt host's
   `beforePresent_GameThread` (`TickDriverBackendUImpl-rationale.md` §5, §6).

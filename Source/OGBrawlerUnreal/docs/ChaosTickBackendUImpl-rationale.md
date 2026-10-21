@@ -128,7 +128,7 @@ calls is unchanged.
   line reads them, but their type was the owner's private one (LatencyClockCounts, historical name). This header is
   included by the owner's header before the owner's class is complete, so a backend member could not name that type,
   and the backend read and wrote the owner's member, as the code always did. Since og-tickdriver task 18 the member is
-  `m_clockAtWindowStart` of `LatencyBudgetDiagnosticsUImpl`, and the host reads the window's counts through
+  `m_clockAtWindowStart` of the latency class (`UELatencyBudgetDiagnostics` since task 19a), and the host reads the window's counts through
   `clockCountsInWindow` (on `getLatencyBudgetDiagnostics()`) and restarts them through `restartClockWindow` (on
   `editLatencyBudgetDiagnostics()`), at the same two points.
 * **The root-capsule check in `tryRegister`.** It compared the movement declaration's own body with a local
@@ -143,7 +143,9 @@ two stamp forwarders the async callback calls (`stampLatencyAfterStep_Internal`,
 the latency diagnostics' `tick_GameThread` calls the pair where the owner's latency tick did. The window's three members
 are a fenced block (`⛔G-11`) that, like the view's bodies, exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1: at 0
 (Shipping) the view's four members are inline no-ops and the `[ChaosDilation]` line is compiled out. What the line means
-is in `LatencyBudgetDiagnosticsUImpl-rationale.md` §6.
+is in `SimulationManagerUImpl-rationale.md` §16. The line's category, `LogOGChaosDilation`, is declared in this
+header and defined in its `.cpp`, gated with the view (since og-ue-simulationcomponentandmanagersplit task 19a; the
+latency class declared it before), so it exists only in the Chaos configuration.
 ---
 
 ## §3 The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only

@@ -16,7 +16,7 @@
 #include "OGSimulation/PhysicsBodyState.h"
 #include "OGSimulation/QueryGeometry.h"
 #include "OGSimulation/LatencyBudgetProbe.h"
-#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
+#include "OGSimulationUnreal/UELatencyBudgetDiagnostics.h"
 #include "OGSimulation/SimulationManager.h"
 #include "OGSimulation/SimulationObjectStorage.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
@@ -28,6 +28,10 @@
 #include <cstdint>
 #include <optional>
 #include <type_traits>
+
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
+#endif
 
 class ASimulationManagerUImpl;
 class ChaosTickBackendUImpl;

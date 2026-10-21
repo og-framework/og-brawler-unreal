@@ -158,6 +158,7 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	m_cameraAxis->SetVisibility(true);
 	m_cameraAxis->SetEnableGravity(false);
 
+	SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"));
 	SimmableUpdateComponent = CreateDefaultSubobject<USimmableUpdateComponent>(TEXT("USimmableUpdateComponent"));
 	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
@@ -195,6 +196,8 @@ void AOGBrawlerUECharacter::PostInitializeComponents()
 	Super::PostInitializeComponents();
 	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
 	RebuildHumanoidMesh();
+	// ⛔G-21  docs/OGBrawlerUECharacter-guards.md
+	SimmableUpdateComponent->bindNetSync(*SimulatableNetSync);
 }
 
 void AOGBrawlerUECharacter::RebuildHumanoidMesh()

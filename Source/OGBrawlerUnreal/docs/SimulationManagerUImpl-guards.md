@@ -414,8 +414,9 @@ its `field=` tail. A latched bool loses the console switch mid-session.
 checks that the row and this predicate name the same category. This tag is the only thing
 that says so at the predicate. Since og-tickdriver task 12 the row is og-simulation's (its
 `kSimulationLogRoutes`, route `SimulationLogRoute::DivergenceProbe`), and the category is chosen
-here by `ogLogRouteOf`'s `DivergenceProbe` case in `SimulationManagerUImpl.h`, then by
-`RouteOGMessage`'s `OGLogRoute::DivergenceProbe` arm. A re-route is typed at either of those two.
+by `ogLogRouteOf`'s `DivergenceProbe` case, then by `RouteOGMessage`'s `OGLogRoute::DivergenceProbe`
+arm, both in the og-simulation-ue plugin's `UESimulationLogRoutes.h` since og-ue-simulationcomponentandmanagersplit
+task 19 (`SimulationManagerUImpl.h` and its `.cpp` before). A re-route is typed at either of those two.
 
 ---
 

@@ -377,7 +377,7 @@ do not move a production value into this block: the engine's network delta-time 
 physics tick offset are observed here, never acted on.
 
 **The consequence.** The block is compiled out of Shipping and out of the fence build
-(`LatencyBudgetDiagnosticsUImpl-rationale.md` §2, §4). A production reader either fails to compile there or, if it is
+(`UELatencyBudgetDiagnostics-rationale.md` §3, §5, in OGSimulationUnreal's docs). A production reader either fails to compile there or, if it is
 itself gated to compile, makes Shipping behave differently from Development.
 
 **What breaks if the tag moves.** Nothing mechanical: the gate makes an ungated reader fail to compile in a Shipping or

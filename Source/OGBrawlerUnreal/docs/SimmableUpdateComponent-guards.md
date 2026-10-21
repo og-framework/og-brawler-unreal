@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-<!-- lint-external-ref: m_replicatedInputSyncedBuffer -- ABSENCE FENCE (G-32, G-36): the retired replicated correction-input property. It must NOT resolve -->
-<!-- lint-external-ref: OnRep_CorrectionInput -- ABSENCE FENCE (G-10, G-36): the retired notification of that property. It must NOT resolve -->
-<!-- lint-external-ref: m_clientToServerInputSyncedBuffer -- RETIRED at og-syncedInput-rework task 9 (2026-10-03): the client->server input buffer member, quoted verbatim in G-36 and named in its dated Site history. It must NOT resolve -->
 # `SimmableUpdateComponent.h` and `.cpp` — guards
 
-Every prohibition that survived the task-25 conversion of both files. Each entry has an **opaque,
+Every prohibition that survived the task-25 conversion of both files, except the fifteen that moved to
+`SimulatableNetSyncComponent-guards.md` in og-ue-simulationcomponentandmanagersplit tasks 20a (the component's
+reflected wire surface, ten) and 20b (the relay-host link, five), and the six that moved to
+`UESimulatableOwnerBinding-guards.md` in task 21 (the stage and the RPC tail); §R names each successor. G-38 is new in
+task 20b. Each entry has an **opaque,
 stable id**. In the source a single line `// ⛔G-nn  docs/SimmableUpdateComponent-guards.md` sits
 directly above the statement or declaration where the forbidden edit would be typed. An **absence
 tag** — one with a blank line under it — marks the place where something retired would be re-added.
@@ -132,7 +133,7 @@ the `noteDelayedInputComponent` call.
 `ASimulationManagerUImpl::relayRemoteInput` finds no component and returns — nothing is staged
 anywhere. The hazard is the opposite window: the route registered while no host is linked. Then
 `relayRemoteInput` reaches `stageRelayedInput`, which falls back to `m_detachedRelayStagingRing`
-(G-12): unseen by every client and unlogged.
+(the sibling's G-13 since task 20b; this file's G-12 before): unseen by every client and unlogged.
 
 **The prohibition.** Do not move `noteDelayedInputComponent` above the host spawn. ⚠ This is an
 ordering fence.
@@ -153,214 +154,6 @@ on a client, and not behind any further condition.
 a missing route drops delivered input. And `m_delayedInputComponentsById` is also the roster
 `pushRingoutScoresToCharacters` walks (`SimulationManagerUImpl-rationale.md`, the ring-out score
 push): narrow this registration and those characters' scores silently never leave the server.
-
----
-
-## G-08 — on EndPlay the authority destroys the relay host; a client only unbinds it
-
-**Site:** the inner `if (isAuthority)` in `EndPlay`.
-
-**As shipped:**
-> ⛔ AUTHORITY DESTROYS, CLIENT ONLY UNBINDS -- a local destroy races the destruction bunch. §6
-
-**Consequence.** A client-side `Destroy` of a replicated actor races the server's destruction bunch.
-The authority path is `ASimulationInputRelay::detachFromParentAndDestroy`, which clears the callback,
-removes the Iris dependent-actor link (Iris builds only) and then destroys.
-
----
-
-## G-09 — once a wire-format mismatch is latched, every later `OnRep_CorrectionState` no-ops
-
-**Site:** `if (m_wireFormatMismatchDetected) return;`
-
-**As shipped:**
-> ⛔ ONCE A MISMATCH IS LATCHED EVERY LATER OnRep NO-OPS -- a mismatched peer must not correct. §8
-
-**Consequence.** Without the latch a mismatched peer would drive correction logic with bytes it cannot
-parse (rationale §8).
-
----
-
-## G-10 — absence: `OnRep_CorrectionInput` stood here
-
-**Site:** absence tag after `OnRep_CorrectionState`'s definition.
-
-**As shipped:**
-> ⛔ `OnRep_CorrectionInput` STOOD HERE, all of it retired -- see SimulationNetSync::sendCorrectionAll. §9
-
-**The prohibition.** Do not re-add the server→client correction-input notification. The channel, its
-property (G-36), its registration (G-32) and its core binding were retired together (rationale §9).
-
----
-
-## G-11 — absence: `OnRep_RelayedInputRing()` stood here
-
-**Site:** absence tag after G-10.
-
-**As shipped:**
-> ⛔ `OnRep_RelayedInputRing()` STOOD HERE -- it moved to the relay host with its property. §6
-
-**The prohibition.** Do not re-add a ring notification on this component; the ring and its
-notification live on `ASimulationInputRelay` (G-37, G-33, rationale §6).
-
----
-
-## G-12 — the no-host staging fallback is `m_detachedRelayStagingRing`, never `m_detachedRelayRing`
-
-**Site:** `FRelayedInputRing& stage = (host != nullptr) ? host->editRelayedInputStagingRing() : m_detachedRelayStagingRing;`
-
-**As shipped (header, at `m_detachedRelayStagingRing`):**
-> [T34] The same fallback, for the flush STAGE. `stageRelayedInput` must have somewhere to write when
-> no host is linked, and it must NOT be the detached ring above: that one is what
-> `getRelayedInputRing()` hands the core, so staging into it would let an unpublished burst read back
-> as if it had replicated.
-
-**Consequence.** As quoted: an unpublished burst would read back through the core's read accessor as
-if it had replicated. The edit is typed here, which is why the tag moved from the header member to
-this statement.
-
----
-
-## G-13 — a stage overflow is counted on the host, never absorbed
-
-**Site:** `if (outcome.droppedOldest && host != nullptr) host->noteStageOverflowDrop();`
-
-**As shipped:**
-> ⛔ COUNTED, NOT ABSORBED, and on the HOST -- the one input loss this side can see. §6
-
-**Consequence.** A burst longer than `relayedInputRing::kMaxDepth` in one frame drops its oldest
-entry; this is the only visible record of that input loss (rationale §6, "Staging, not writing").
-
----
-
-## G-14 — the host callback captures a weak pointer, never a raw `this`
-
-**Site:** `host->setOnRelayedInputReceivedCallback([weakSelf](const FRelayedInputRing& ring) { ... });`
-
-**As shipped:**
-> ⛔ WEAK CAPTURE, NEVER A RAW `this` -- the host can outlive this component by a frame. §6
-
-**Consequence.** A raw `this` is a dangling call from a replicated notification during teardown.
-
----
-
-## G-15 — the owner-skip check stays gated on `num() > 0` and reads the LATCHED provider decision
-
-**Site:** `if (m_hasLocalInputProvider && ring.num() > 0 && !m_loggedOwnerSkipDivergence)` in
-`onRelayedInputRingArrived`.
-
-**As shipped (two fences, merged because they govern the same condition):**
-> ⛔ DO NOT DROP THE `num() > 0` GATE -- the host replicates to its owner, so empty is normal.
-
-> ⛔ LATCHED, NEVER RECOMPUTED AT ARRIVAL -- onRelayedInputRingArrived's divergence check
-> is only meaningful if it reads literally this evaluation. §6
-
-(The second stood at `m_hasLocalInputProvider = isLocallyPredicted;` in `tryRegisterWithNewFramework`;
-the edit it forbids — a fresh role test in place of the latch — is typed here.)
-
-**Consequence.** `ASimulationInputRelay` is `bAlwaysRelevant` and does reach its owner (only the
-property is `COND_SkipOwner`), so an empty ring at a provider-present character is normal: dropping
-the gate fires on every clean run. Recomputing provider presence here compares a different
-evaluation from the one the core registered with, so the check no longer tests what it claims.
-
----
-
-## G-16 — the owner-skip divergence is an `ensure`, never a `check`
-
-**Site:** `ensureMsgf(false, TEXT("[InputRelay] relay ring arrived for a provider-present character (id=%u)"), ...)`
-
-**As shipped:**
-> ⛔ `ensure`, NEVER `check`, one-shot -- a bandwidth regression must stay playable to diagnose.
-
-**Consequence.** A `check` turns a bandwidth/correctness diagnosis into a crash; the one-shot latch
-(`m_loggedOwnerSkipDivergence`) keeps it from spamming.
-
----
-
-## G-17 — an empty input bundle is idle traffic, not a version mismatch
-
-**Site:** `if (bundle.wireBytes.Num() == 0) return;` in `ServerReceiveRemoteMove_Implementation`.
-
-**As shipped:**
-> ⛔ AN EMPTY BUNDLE IS IDLE TRAFFIC, NOT A MISMATCH -- no wire header means no version byte. §8
-
-**Consequence.** Removing or reordering it below the version test logs a false wire-format mismatch
-every idle frame.
-
----
-
-## G-18 — refuse a mismatched bundle, but do not disconnect here
-
-**Site:** the `return;` closing the version-mismatch branch of `ServerReceiveRemoteMove_Implementation`.
-
-**As shipped:**
-> ⛔ REFUSE, BUT DO NOT DISCONNECT HERE -- the disconnect path is engine-managed. §8
-
-**Consequence.** Disconnect policy is a dedicated-server validation concern owned by the engine's
-connection path, not this fence (rationale §8).
-
----
-
-## G-19 — no netcode policy below the fence; the order is fence, one RTT sample, core loop
-
-**Site:** `ASimulationManagerUImpl* authorityManager = ASimulationManagerUImpl::instanceFor(/*isAuthority=*/true);`
-
-**As shipped:**
-> ⛔ NO NETCODE POLICY BELOW THIS FENCE -- tier derivation, dedup, park/drain, the malformed-
-> slot fence and the per-slot loop are all core. This side resolves engine primitives only. §7
->
-> ⛔ ORDER IS LOAD-BEARING: fence, then ONE RTT sample, then the core per-slot loop. §7
-
-**Consequence.** Policy added here is policy a second engine's adapter would silently lack, and the
-core's tests do not cover (rationale §7).
-
----
-
-## G-20 — resolve the root connection once
-
-**Site:** `UNetConnection* rootConn = (coordinator != nullptr) ? GetRootNetConnection(GetOwner()) : nullptr;`
-
-**As shipped:**
-> ⛔ RESOLVE THE ROOT CONNECTION ONCE -- split-screen siblings collapse to their shared wire. §7
-
-**Consequence.** A child connection, or a per-slot re-resolve, splits one wire into several tier and
-slot keys.
-
----
-
-## G-21 — the no-wire fallback is adapter-side; the core only ever sees a valid wire
-
-**Site:** `if (coordinator == nullptr || rootConn == nullptr)`.
-
-**As shipped:**
-> ⛔ THE NO-WIRE FALLBACK IS ADAPTER-SIDE -- the core only ever sees a valid wire. §7
-
-**Consequence.** Passing a null wire into `ServerReceptionCoordinator` hands the core a sentinel it is
-written never to see.
-
----
-
-## G-22 — one RTT sample per bundle, never per slot
-
-**Site:** `coordinator->noteRttSample(handle, id, ..., readRoundTripMs(rootConn), *this);`
-
-**As shipped:**
-> ⛔ ONE RTT SAMPLE PER BUNDLE, NEVER PER SLOT -- per-slot couples the tier EMA to depth. §7
-
-**Consequence.** Sampling per slot feeds one reading into the tier EMA up to `kMaxSlots` times and
-couples smoothing to redundancy depth.
-
----
-
-## G-23 — the delay is applied exactly once, park-to-release, on the original capture tick
-
-**Site:** `coordinator->receiveInputBundle<SimulatableBrawler>(id, handle, playerSlot, bundle, *authorityManager, *authorityManager);`
-
-**As shipped:**
-> ⛔ THE DELAY IS APPLIED EXACTLY ONCE (park-to-release) -- a released input keeps its ORIGINAL
-> captureTick, and SimulationInputResolution::collectInputAll pops it in ARRIVAL order. §7
-
-**Consequence.** Any offset or re-stamp added at this call applies the delay twice.
 
 ---
 
@@ -469,43 +262,19 @@ invisible (rationale §10); a second machine-state source is a new cross-thread 
 
 ---
 
-## G-32 — absence: the `m_replicatedInputSyncedBuffer` lifetime registration
+## G-38 — `EndPlay` detaches the relay host through the sibling, between the unregister and the unbind
 
-**Site:** absence tag in `GetLifetimeReplicatedProps`, after the state-buffer registration.
+**Site:** `if (isNetSyncBound()) netSync().detachInputRelayHost(isAuthority);` in `EndPlay`. (New in task 20b; since
+task 21 the sibling is reached through the binding's `isNetSyncBound()` and `netSync()`.)
 
-**As shipped:**
-> ⛔ THE `m_replicatedInputSyncedBuffer` REGISTRATION STOOD HERE -- removed in the SAME edit
-> as the member: one half alone is a compile error, the other a silently dead field. §9
->
-> ⛔ REMOVING A PROPERTY NEEDS NO VERSION BUMP -- registrations are lifetime entries. §9
+**The prohibition.** Keep this call, and keep it after `unregisterFromNewFramework` and before `unbindNetSync()`. Do
+not leave the detach to the sibling's own `EndPlay`: that one detaches only while no binding is attached (the sibling's
+G-11), so with this call gone a sibling that ends first never detaches, and one that ends last detaches after the
+unbind; the order between the two components' `EndPlay` calls is not a contract.
 
----
-
-## G-33 — absence: the ring's registration on this component
-
-**Site:** absence tag after G-32.
-
-**As shipped:**
-> ⛔ `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` STOOD HERE, with NO COND_.
-> It is now COND_SkipOwner on the ring's own per-character dependent object. §6
->
-> ⛔ THE COND_ COULD NOT HAVE BEEN ADDED HERE -- the shared atomic batch is what forced it. §6
-
-**Consequence.** Re-adding it here — even with the condition — re-couples the ring to the correction
-state's atomic replication batch (rationale §6). `SimulationManagerUImpl-rationale.md` cites this
-fence as evidence the component no longer carries the ring.
-
----
-
-## G-34 — absence: the `COND_OwnerOnly` tier registration
-
-**Site:** absence tag after G-33.
-
-**As shipped:**
-> ⛔ THE COND_OwnerOnly TIER REGISTRATION IS GONE -- owner-only RELEVANCY narrows it now. §5
-
-**Consequence.** The tier replicates from `ASimulationConnectionRelay` (`bOnlyRelevantToOwner`); a
-per-character registration here restores one tier per sibling on a shared wire.
+**Consequence.** Moved above the unregister, the authority destroys the host before the manager has dropped the
+character. Moved below `unbindNetSync()`, it never runs, because the unbind clears the binding's sibling pointer. Deleted (or moved
+below the unbind), the host stays linked and, on the authority, alive whenever the sibling ends first (rationale §17).
 
 ---
 
@@ -522,55 +291,207 @@ the pair (verified: no script there names `OGSIM_OPTIMIZE_ON`), so this tag is t
 
 ---
 
-## G-36 — absence (header): the replicated correction-input property
-
-**Site:** absence tag in the private section of `SimmableUpdateComponent.h`, after the
-`ServerReceiveRemoteMove` declaration. (Until og-syncedInput-rework task 9, 2026-10-03, it followed
-`m_clientToServerInputSyncedBuffer`, which sat between the two.)
-
-**As shipped:**
-> [og-netcode-v2-input-relay T8] THE REPLICATED CORRECTION-INPUT PROPERTY IS
-> GONE. `UPROPERTY(ReplicatedUsing = OnRep_CorrectionInput)
-> FSimulationInputSyncBuffer m_replicatedInputSyncedBuffer;` and its
-> `OnRep_CorrectionInput()` UFUNCTION stood here, registered in
-> GetLifetimeReplicatedProps beside the state buffer. The server->client echo
-> of "the input I applied for you" is retired; a remote character's input
-> reaches peers on the relay ring below, and the correction state names which
-> capture it applied via T4's ref.
->
-> NOTE the surviving `m_clientToServerInputSyncedBuffer` above is a DIFFERENT
-> member with the same type and the opposite direction — it is not replicated
-> and it is not affected.
-
-**Correction (R0).** "on the relay ring below" — the ring is no longer declared below; it is a
-property of `ASimulationInputRelay` (G-37).
-
-**Correction (R0, og-syncedInput-rework task 9, 2026-10-03).** The NOTE's "surviving
-`m_clientToServerInputSyncedBuffer`" no longer survives: that member, its accessor, its typedef and
-the input sync buffer type itself were deleted together with the core concept requirement that was
-their only reason to exist. The component holds no input sync buffer in either direction now; the
-input leaves through `sendLocalInputToAuthority`.
-
----
-
-## G-37 — absence (header): the relayed-input ring as a property of this component
-
-**Site:** absence tag after G-36.
-
-**As shipped (the retirement paragraph; the host-link paragraph that followed it is rationale §6):**
-> [og-netcode-v2-input-relay / T1] The outbound input relay ring stood here as
-> `UPROPERTY(ReplicatedUsing = OnRep_RelayedInputRing) FRelayedInputRing
-> m_relayedInputRing;` with its `OnRep_RelayedInputRing()` UFUNCTION, and was
-> registered with a plain DOREPLIFETIME (no COND_) in GetLifetimeReplicatedProps.
->
-> ⭐ [T39] ALL THREE MOVED TO ASimulationInputRelay, IN ONE EDIT — property,
-> OnRep and registration together ...
-
-**Consequence.** Two reasons, rationale §6: scheduling (a shared atomic Iris batch killed ring and
-state together) and ownership (`COND_SkipOwner` on an actor owned by the character).
-
----
-
 ## §R — Retired ids
 
-None.
+⛔ **An id is never reused.** A retired id may be named in prose; it may never again appear as a
+`⛔G-nn` tag.
+
+### G-09 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-03
+
+**Was:** *"once a wire-format mismatch is latched, every later OnRep no-ops"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the latch test at the top of `OnRep_CorrectionState`.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-03.
+
+### G-10 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-04
+
+**Was:** *"absence: the retired correction-input notification stood here"*. Its tag sat in `SimmableUpdateComponent.cpp`, an absence tag after `OnRep_CorrectionState`'s definition.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-04.
+
+### G-11 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-05
+
+**Was:** *"absence: the ring's notification stood here"*. Its tag sat in `SimmableUpdateComponent.cpp`, an absence tag after G-10.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-05.
+
+### G-17 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-06
+
+**Was:** *"an empty input bundle is idle traffic, not a version mismatch"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the empty-bundle return in `ServerReceiveRemoteMove_Implementation`.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-06.
+
+### G-18 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-07
+
+**Was:** *"refuse a mismatched bundle, but do not disconnect here"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the `return;` that closed the RPC's version-mismatch branch.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-07.
+
+### G-32 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-08
+
+**Was:** *"absence: the correction-input property's lifetime registration"*. Its tag sat in `SimmableUpdateComponent.cpp`, an absence tag in `GetLifetimeReplicatedProps` after the state-buffer registration.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-08.
+
+### G-33 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-09
+
+**Was:** *"absence: the ring's registration on this component"*. Its tag sat in `SimmableUpdateComponent.cpp`, an absence tag after G-32.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-09.
+
+### G-34 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-10
+
+**Was:** *"absence: the owner-only tier registration"*. Its tag sat in `SimmableUpdateComponent.cpp`, an absence tag after G-33.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-10.
+
+### G-36 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-01
+
+**Was:** *"absence (header): the replicated correction-input property"*. Its tag sat in `SimmableUpdateComponent.h`, an absence tag after the `ServerReceiveRemoteMove` declaration.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-01.
+
+### G-37 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-02
+
+**Was:** *"absence (header): the relayed-input ring as a property of this component"*. Its tag sat in `SimmableUpdateComponent.h`, an absence tag after G-36.
+
+**Why it retired.** Its subject moved. Task 20a moved the component's reflected wire surface (the replicated
+correction-state buffer, its notification, the input RPC and the lifetime registrations) into
+`USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it. The entry moved with
+its text unchanged apart from its site and cross-references. **Successor:** `SimulatableNetSyncComponent-guards.md` G-02.
+
+### G-08 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20b (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-12
+
+**Was:** *"on EndPlay the authority destroys the relay host; a client only unbinds it"*. Its tag sat in `SimmableUpdateComponent.cpp`, at the inner `if (isAuthority)` in `EndPlay` (now in the sibling's `detachInputRelayHost`).
+
+**Why it retired.** Its subject moved. Task 20b moved the component's relay-host link (the host pointer, the two
+fallback rings, the accessors, the relayed-ring callbacks, the attach, the arrival check, the staging target, the
+detach) and the tier send into `USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it.
+The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`SimulatableNetSyncComponent-guards.md` G-12.
+
+### G-12 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20b (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-13
+
+**Was:** *"the no-host staging fallback is `m_detachedRelayStagingRing`, never `m_detachedRelayRing`"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the staging-target choice in `stageRelayedInput` (now the sibling's `relayStagingTarget`).
+
+**Why it retired.** Its subject moved. Task 20b moved the component's relay-host link (the host pointer, the two
+fallback rings, the accessors, the relayed-ring callbacks, the attach, the arrival check, the staging target, the
+detach) and the tier send into `USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it.
+The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`SimulatableNetSyncComponent-guards.md` G-13.
+
+### G-14 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20b (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-14
+
+**Was:** *"the host callback captures a weak pointer, never a raw `this`"*. Its tag sat in `SimmableUpdateComponent.cpp`, above `host->setOnRelayedInputReceivedCallback` in `attachInputRelayHost`.
+
+**Why it retired.** Its subject moved. Task 20b moved the component's relay-host link (the host pointer, the two
+fallback rings, the accessors, the relayed-ring callbacks, the attach, the arrival check, the staging target, the
+detach) and the tier send into `USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it.
+The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`SimulatableNetSyncComponent-guards.md` G-14.
+
+### G-15 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20b (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-15
+
+**Was:** *"the owner-skip check stays gated on `num() > 0` and reads the LATCHED provider decision"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the owner-skip condition in `onRelayedInputRingArrived`.
+
+**Why it retired.** Its subject moved. Task 20b moved the component's relay-host link (the host pointer, the two
+fallback rings, the accessors, the relayed-ring callbacks, the attach, the arrival check, the staging target, the
+detach) and the tier send into `USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it.
+The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`SimulatableNetSyncComponent-guards.md` G-15.
+
+### G-16 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20b (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-16
+
+**Was:** *"the owner-skip divergence is an `ensure`, never a `check`"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the `ensureMsgf` in `onRelayedInputRingArrived`.
+
+**Why it retired.** Its subject moved. Task 20b moved the component's relay-host link (the host pointer, the two
+fallback rings, the accessors, the relayed-ring callbacks, the attach, the arrival check, the staging target, the
+detach) and the tier send into `USimulatableNetSyncComponent` (OGSimulationUnreal), and the guarded code went with it.
+The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`SimulatableNetSyncComponent-guards.md` G-16.
+
+### G-13 — RETIRED by og-ue-simulationcomponentandmanagersplit task 21 (2026-10-21): moved to `UESimulatableOwnerBinding-guards.md` G-01
+
+**Was:** *"a stage overflow is counted on the host, never absorbed"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the overflow count in `stageRelayedInput`.
+
+**Why it retired.** Its subject moved. Task 21 moved the component's typed half (the five binding overrides, the
+forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five latency stamp
+blocks and the stage) into the CRTP template `UESimulatableOwnerBinding` (OGSimulationUnreal), and the guarded code went
+with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`UESimulatableOwnerBinding-guards.md` G-01.
+
+### G-19 — RETIRED by og-ue-simulationcomponentandmanagersplit task 21 (2026-10-21): moved to `UESimulatableOwnerBinding-guards.md` G-02
+
+**Was:** *"no netcode policy below the fence; the order is fence, one RTT sample, core loop"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the first statement of `receiveRemoteMoveBundle` (the authority manager lookup).
+
+**Why it retired.** Its subject moved. Task 21 moved the component's typed half (the five binding overrides, the
+forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five latency stamp
+blocks and the stage) into the CRTP template `UESimulatableOwnerBinding` (OGSimulationUnreal), and the guarded code went
+with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`UESimulatableOwnerBinding-guards.md` G-02.
+
+### G-20 — RETIRED by og-ue-simulationcomponentandmanagersplit task 21 (2026-10-21): moved to `UESimulatableOwnerBinding-guards.md` G-03
+
+**Was:** *"resolve the root connection once"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the `rootConn` resolution in `receiveRemoteMoveBundle`.
+
+**Why it retired.** Its subject moved. Task 21 moved the component's typed half (the five binding overrides, the
+forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five latency stamp
+blocks and the stage) into the CRTP template `UESimulatableOwnerBinding` (OGSimulationUnreal), and the guarded code went
+with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`UESimulatableOwnerBinding-guards.md` G-03.
+
+### G-21 — RETIRED by og-ue-simulationcomponentandmanagersplit task 21 (2026-10-21): moved to `UESimulatableOwnerBinding-guards.md` G-04
+
+**Was:** *"the no-wire fallback is adapter-side; the core only ever sees a valid wire"*. Its tag sat in `SimmableUpdateComponent.cpp`, above the no-coordinator-or-no-wire branch in `receiveRemoteMoveBundle`.
+
+**Why it retired.** Its subject moved. Task 21 moved the component's typed half (the five binding overrides, the
+forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five latency stamp
+blocks and the stage) into the CRTP template `UESimulatableOwnerBinding` (OGSimulationUnreal), and the guarded code went
+with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`UESimulatableOwnerBinding-guards.md` G-04.
+
+### G-22 — RETIRED by og-ue-simulationcomponentandmanagersplit task 21 (2026-10-21): moved to `UESimulatableOwnerBinding-guards.md` G-05
+
+**Was:** *"one RTT sample per bundle, never per slot"*. Its tag sat in `SimmableUpdateComponent.cpp`, above `coordinator->noteRttSample` in `receiveRemoteMoveBundle`.
+
+**Why it retired.** Its subject moved. Task 21 moved the component's typed half (the five binding overrides, the
+forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five latency stamp
+blocks and the stage) into the CRTP template `UESimulatableOwnerBinding` (OGSimulationUnreal), and the guarded code went
+with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`UESimulatableOwnerBinding-guards.md` G-05.
+
+### G-23 — RETIRED by og-ue-simulationcomponentandmanagersplit task 21 (2026-10-21): moved to `UESimulatableOwnerBinding-guards.md` G-06
+
+**Was:** *"the delay is applied exactly once, park-to-release, on the original capture tick"*. Its tag sat in `SimmableUpdateComponent.cpp`, above `coordinator->receiveInputBundle` in `receiveRemoteMoveBundle`.
+
+**Why it retired.** Its subject moved. Task 21 moved the component's typed half (the five binding overrides, the
+forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five latency stamp
+blocks and the stage) into the CRTP template `UESimulatableOwnerBinding` (OGSimulationUnreal), and the guarded code went
+with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:**
+`UESimulatableOwnerBinding-guards.md` G-06.

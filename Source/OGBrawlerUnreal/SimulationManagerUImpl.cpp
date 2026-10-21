@@ -10,6 +10,7 @@
 #include "OGBrawlerUnreal/SimmableUpdateComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
+#include "OGBrawlerUnreal/BrawlerSessionGameUImpl.h"
 #include "GameFramework/PlayerController.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
 #include "OGSimulationUnreal/SimulationConnectionRelay.h"
@@ -40,14 +41,6 @@
 #include <utility>
 #include <vector>
 
-DEFINE_LOG_CATEGORY(LogOGSim);
-DEFINE_LOG_CATEGORY(LogOGSimTick);
-DEFINE_LOG_CATEGORY(LogOGMgmt);
-DEFINE_LOG_CATEGORY(LogOGNet);
-DEFINE_LOG_CATEGORY(LogOG);
-DEFINE_LOG_CATEGORY(LogOGRelayProbe);
-DEFINE_LOG_CATEGORY(LogOGDivergenceProbe);
-DEFINE_LOG_CATEGORY(LogOGResimProbe);
 DEFINE_LOG_CATEGORY(LogOGBrawler);
 
 #define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
@@ -59,58 +52,6 @@ namespace
 		// ⛔G-50  docs/SimulationManagerUImpl-guards.md
 		correctionFieldDiff::setEnabledPredicate(
 			[]() -> bool { return UE_LOG_ACTIVE(LogOGDivergenceProbe, Verbose); });
-	}
-
-	void RouteOGMessage(const char* msg)
-	{
-		FString fmsg(msg);
-
-		ELogVerbosity::Type severity = ELogVerbosity::Log;
-		FString body = fmsg;
-		if (fmsg.StartsWith(TEXT("[Verbose]")))
-		{
-			severity = ELogVerbosity::Verbose;
-			body = fmsg.RightChop(9);
-		}
-		else if (fmsg.StartsWith(TEXT("[Warning]")))
-		{
-			severity = ELogVerbosity::Warning;
-			body = fmsg.RightChop(9);
-		}
-
-#define EMIT_OG(cat) \
-		do { \
-			switch (severity) { \
-				case ELogVerbosity::Warning: UE_LOG(cat, Warning, TEXT("%s"), *fmsg); break; \
-				case ELogVerbosity::Verbose: UE_LOG(cat, Verbose, TEXT("%s"), *fmsg); break; \
-				default:                     UE_LOG(cat, Log,     TEXT("%s"), *fmsg); break; \
-			} \
-		} while (0)
-
-		for (const OGLogRouteEntry& entry : kOGLogRoutes)
-		{
-			if (!body.StartsWith(entry.prefix))
-				continue;
-
-			if (severity == ELogVerbosity::Log)
-				severity = entry.plainLevel;
-
-			switch (entry.route)
-			{
-			case OGLogRoute::SimTick:          EMIT_OG(LogOGSimTick); break;
-			case OGLogRoute::ResimProbe:       EMIT_OG(LogOGResimProbe); break;
-			case OGLogRoute::Sim:              EMIT_OG(LogOGSim); break;
-			case OGLogRoute::Net:              EMIT_OG(LogOGNet); break;
-			case OGLogRoute::RelayProbe:       EMIT_OG(LogOGRelayProbe); break;
-			case OGLogRoute::DivergenceProbe:  EMIT_OG(LogOGDivergenceProbe); break;
-			case OGLogRoute::Mgmt:             EMIT_OG(LogOGMgmt); break;
-			}
-			return;
-		}
-
-		EMIT_OG(LogOG);
-
-#undef EMIT_OG
 	}
 
 #if !UE_BUILD_SHIPPING

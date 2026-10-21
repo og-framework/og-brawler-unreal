@@ -99,7 +99,7 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 	if (ch == nullptr)
 		return;
 
-	// Latency-budget hop H1 start: this frame's input sample (docs/LatencyBudgetDiagnosticsUImpl-rationale.md §6).
+	// Latency-budget hop H1 start: this frame's input sample (docs/BrawlerSessionGameUImpl-rationale.md §2).
 	noteInputSampled();
 
 	// Resolve camera forward: PCM with FollowCamera fallback.
