@@ -13,6 +13,16 @@
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/SimulationManagerUImpl.h"
 
+static_assert(std::is_same_v<decltype(&UESimulationSession<BrawlerSessionTraitsUImpl>::getVizSlice<brawlerRingout::State>),
+		std::optional<brawlerRingout::State> (UESimulationSession<BrawlerSessionTraitsUImpl>::*)(unsigned int) const>,
+	"UESimulationSession<BrawlerSessionTraitsUImpl>::getVizSlice<brawlerRingout::State>, the scoreboard's read, must stay "
+	"a CONST member returning the slice BY VALUE. The scoreboard holds a const ASimulationManagerUImpl* and reads through "
+	"its const session(), so 'the scoreboard writes no simulation state' is a compile error to break; a reference would "
+	"hand a drawing surface a pointer into live storage for as long as it cared to keep it. Was the static_assert on "
+	"getRingoutVizState after the class in SimulationManagerUImpl.h, itself the 'const, AND BY VALUE' prose fence of "
+	"that header (task 11); re-expressed for getVizSlice by og-ue-simulationcomponentandmanagersplit task 22, and "
+	"re-targeted to the session's getVizSlice by task 24b.");
+
 namespace
 {
 
@@ -104,11 +114,11 @@ std::optional<uint32_t> displayTick(const ASimulationManagerUImpl* manager)
 	if (manager == nullptr)
 		return std::nullopt;
 
-	if (manager->runsPrediction())
-		return static_cast<uint32_t>(manager->getClientClock().getPredictionTick());
+	if (manager->session().runsPrediction())
+		return static_cast<uint32_t>(manager->session().getClientClock().getPredictionTick());
 
 	return static_cast<uint32_t>(
-		manager->getServerClock().getSimulationStep().getTick());
+		manager->session().getServerClock().getSimulationStep().getTick());
 }
 
 std::vector<brawlerScoreboardVisualization::ScoreboardRow> gatherScoreboardRows(
@@ -144,7 +154,7 @@ std::vector<brawlerScoreboardVisualization::ScoreboardRow> gatherScoreboardRows(
 		};
 
 		if (const std::optional<brawlerRingout::State> ringout =
-				manager->getRingoutVizState(row.characterId))
+				manager->session().getVizSlice<brawlerRingout::State>(row.characterId))
 		{
 			row.isDead = brawlerRingout::isDead(*ringout);
 

@@ -362,7 +362,7 @@ reasons as G-10.
   `COND_OwnerOnly` a proxy's slot never arrives, and the client's acquire waits
   (`[SimHost.Slot] wait=WaitForReplication`) until the component's 600-attempt `checkf` fires.
 * `COND_InitialOnly`: the authority writes the slot in `USimmableUpdateComponent::tryInitializeWithManager`
-  (through `ASimulationManagerUImpl::registerVizVolume`), one or more frames after the component's
+  (through `UESimulationSession::registerVizVolume`, the manager's until og-ue-simulationcomponentandmanagersplit task 24b), one or more frames after the component's
   `BeginPlay`. That can be after the pawn's first bunch, so the initial-only send would carry 0 and the
   slot would never be sent.
 

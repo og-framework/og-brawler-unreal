@@ -173,7 +173,7 @@ pair at the end changed no scope (there was no code after that point either); it
 
 **Loop one — `tryInitializeWithManager`.** Waits for the manager to exist. Once it does: cache the
 owner's input-collection component, register the target-visualization query volume through the
-manager's `registerVizVolume` (§10), construct the three visualization states, and schedule loop two.
+manager's session's `registerVizVolume` (§10), construct the three visualization states, and schedule loop two.
 
 In the Jolt configuration the volume hangs off the character's Jolt slot, so `registerVizVolume` first
 acquires the slot, and it can answer "not yet" (og-simulationscheduler-withjolt task 66): on a client the
@@ -259,14 +259,14 @@ is the proof that the engine-facing change did not leak into the core contract.
 member "resolves the host and degrades to a never-replicated local fallback". The core's owner concept
 (`PredictionSyncedBufferOwnerConcept`) names the callback pair and the `const` accessor; the core also
 reads the ring through the non-`const` overload at bind. `stageRelayedInput` is the manager's write
-door (`ASimulationManagerUImpl::relayRemoteInput`), not the core's. Since task 20b the four core-facing
+door (the session's `UESimulationSession::relayRemoteInput` since og-ue-simulationcomponentandmanagersplit task 26a), not the core's. Since task 20b the four core-facing
 members are one-line forwarders to the sibling, which resolves the host and the fallbacks.
 
 ### The spawn ordering, and what it protects
 
 The host is spawned on the authority at the moment registration completes, **above** the delivery-
 route registration, and that order is load-bearing (G-06). `noteDelayedInputComponent` is what lets
-`ASimulationManagerUImpl::relayRemoteInput` find this component at all; if the host were not linked by
+`UESimulationSession::relayRemoteInput` (the manager's until task 26a) find this component at all; if the host were not linked by
 then, the first relay writes would stage into the sibling's no-host fallback, invisible to every client
 and with nothing logged. Spawning first closes that window by construction rather than by timing.
 
@@ -284,8 +284,8 @@ staging one is on that path.
 
 Code moved to `UESimulatableOwnerBinding.h` (task 21): `stageRelayedInput`, its overflow count (G-13 here, G-01 there)
 and its no-depth `static_assert`. Their account moved to `UESimulatableOwnerBinding-rationale.md` §6, R0-checked on the
-way. The brawler's caller is unchanged: `ASimulationManagerUImpl::relayRemoteInput` calls `stageRelayedInput` on this
-component, now an inherited member.
+way. The brawler's caller was unchanged by that move: the manager's `relayRemoteInput` called `stageRelayedInput` on this
+component, now an inherited member. Since task 26a the caller is the session's `UESimulationSession::relayRemoteInput`.
 
 **History kept here (brawler-specific).** Before staging, the sink wrote the replicated ring directly at a
 session-configurable retention depth, so a second arrival in one server frame overwrote the first in memory before
@@ -311,7 +311,8 @@ the way.
 
 **What stays here is the brawler's delivery route.** The id → component route the coordinator's drain and its
 malformed-slot deliver-now fallback resolve against is registered once, at registration time
-(`noteDelayedInputComponent`, G-07), paired with the erase in `unregisterFromNewFramework` — not per parked slot inside
+(`noteDelayedInputComponent`, G-07), paired with the erase in `unregisterFromNewFramework` (the session's
+`forgetReceptionOwner`, called there, since task 26a) — not per parked slot inside
 the receive loop — so it exists for the whole registered lifetime of the component. Authority only: the coordinator,
 the delay queue and the drain are all absent on a pure client, and the inbound delivery callback is itself wired only at
 registration, so the route and its target come up together. The erase side is a pair as well: the manager drops its
@@ -398,8 +399,9 @@ lifetime arithmetic lines up with the simulation's own pruning.
 *Moved from `TickComponent` (task 25).*
 
 **The movement draw reads a sim-tick snapshot on the render clock.** `attackSimAllState` is
-`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes in
-`ASimulationManagerUImpl::OnPostPhysicsStep`, once per game frame at the end of physics, in both
+`getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes in the session's
+`UESimulationSession::onPostPhysicsStep` (the manager actor's `OnPostPhysicsStep` until
+og-ue-simulationcomponentandmanagersplit task 27a), once per game frame at the end of physics, in both
 physics backends. So every drawn `State` / `DerivedState` value is the newest tick the copy saw: a
 frame that ran several ticks shows only the last, a client that steps on a worker can lag the frame,
 and a render frame above 60 Hz redraws the same tick's values; `StaticData` is authored once per
@@ -449,10 +451,13 @@ here — muting on a degraded tier is a separate, optional change.
 
 ### The visualization adapters come from the manager, through three backend-neutral members
 
-The target and block-prediction passes query the world through `ASimulationManagerUImpl::editVizQuery`
-and read bodies through `ASimulationManagerUImpl::getVizReader`; loop one registers the target
-volume with `ASimulationManagerUImpl::registerVizVolume`, handing it the descriptor and the owner
-(og-simulationscheduler-withjolt task 51). The manager owns the choice of physics backend
+The target and block-prediction passes query the world through `UESimulationSession::editVizQuery`
+and read bodies through `UESimulationSession::getVizReader`; loop one registers the target
+volume with `UESimulationSession::registerVizVolume`, handing it the descriptor and the owner
+(og-simulationscheduler-withjolt task 51, on the manager; the manager's session's since
+og-ue-simulationcomponentandmanagersplit task 24b, reached as `session()`). The other composition reads the
+visualization makes (`editStorage`, `getLastRelayedInput`, `runsPrediction` and the two clocks) go through `session()`
+too. The manager owns the choice of physics backend
 (`SimulationManagerUImpl-rationale.md` §18), and these members exist in both configurations, so this
 component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
 instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
@@ -589,7 +594,7 @@ since Stage 1: no head-of-line blocking on input RPCs, and a dropped datagram se
 send repeats the last `redundancyDepthTicks` ticks.
 
 **`deliverDelayedRemoteInput`** is the delivery entry point for an input released from the server's
-`ServerInputDelayQueue`, reached on the game thread from `ASimulationManagerUImpl::deliverRemoteInput`
+`ServerInputDelayQueue`, reached on the game thread from `UESimulationSession::deliverRemoteInput` (the manager's until task 26a)
 before the authority physics step. It routes through the **same** callback the RPC's no-wire fallback
 uses, with the **original** capture tick, so from `RemoteMoveQueue` onward a delayed input is
 indistinguishable from an undelayed one and the capture-tick dedup keeps working. The delay is
@@ -639,9 +644,9 @@ Every id this component hands the core — `tryRegister`, `noteDelayedInputCompo
 **How the id arrives.** In `tryRegisterWithNewFramework`, after the manager exists:
 
 * **Authority:** if the pawn's id is still `None`, allocate one from
-  `ASimulationManagerUImpl::allocateSimCharacterId` (count-up 1 … 255, never reused) and set it with
+  `BrawlerRosterUImpl::allocateSimCharacterId`, through the manager's `roster()` (count-up 1 … 255, never reused), and set it with
   `AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId`. A refusal (all ids spent) is final —
-  guard G-01; the manager logs it at Error and `OG_CHECK`s.
+  guard G-01; the roster logs it at Error and `OG_CHECK`s.
 * **Client:** while the replicated id is still `None`, stay pending on the same retry loop and the same
   `m_registrationAttempts` budget, ending in a `checkf` if it never arrives.
 

@@ -316,7 +316,7 @@ void AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId(SimCharacterId NewId)
 {
 	checkf(HasAuthority(),
 		TEXT("SetAuthoritativeSimCharacterId called on a non-authority peer. The id is assigned only ")
-		TEXT("by the authority's ASimulationManagerUImpl::allocateSimCharacterId; a client learns it ")
+		TEXT("by the authority's BrawlerRosterUImpl::allocateSimCharacterId; a client learns it ")
 		TEXT("through replication of SimCharacterIdValue."));
 	checkf(NewId != SimCharacterId::None,
 		TEXT("SetAuthoritativeSimCharacterId called with SimCharacterId::None; 0 means 'no character' ")
@@ -358,7 +358,7 @@ void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)
 {
 	checkf(HasAuthority(),
 		TEXT("SetAuthoritativeRingoutScore called on a non-authority peer (id=%u). The score ")
-		TEXT("is pushed only from ASimulationManagerUImpl::OnPostPhysicsStep under the ")
+		TEXT("is pushed only by BrawlerRosterUImpl::pushRingoutScores, from ASimulationManagerUImpl::OnPostPhysicsStep under the ")
 		TEXT("authority manager's !runsPrediction() gate; a client learns it through OnRep_RingoutScore."),
 		toStorageKey(GetSimCharacterId()));
 

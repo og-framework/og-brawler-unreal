@@ -326,7 +326,7 @@ void AOGBrawlerUEHUD::drawInputHistoryPanel()
 		return;
 
 	// ⛔ POINTER TO CONST, and it stays one: the panel may not write a row it draws.
-	const InputHistoryRowRing* rows = manager->getInputHistoryRows(characterId);
+	const InputHistoryRowRing* rows = manager->inputHistoryFeed().getInputHistoryRows(characterId);
 	if (rows == nullptr || rows->empty())
 		return;
 
@@ -392,7 +392,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 	if (inputHistoryVisualizationUImpl::nearestStackEnabled())
 	{
 		nearestId = inputHistoryVisualizationUImpl::nearestCharacterIdTo(
-			manager, characterId, m_nearestCharacterId, nearestDistanceCm);
+			&manager->inputHistoryFeed(), characterId, m_nearestCharacterId, nearestDistanceCm);
 		m_nearestCharacterId = nearestId;
 	}
 	else
@@ -449,10 +449,10 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		// Centimetres are the simulation's unit and metres are the one a reader has an
 		// intuition for at fighting range.
 		nearestHeader.distanceMeters = nearestDistanceCm * 0.01f;
-		// ⛔ THE MANAGER'S ONE LOCALITY TEST, asked once and carried in the header from
+		// ⛔ THE SESSION'S ONE LOCALITY TEST, asked once and carried in the header from
 		//   here on: a ring that has not been created yet is not a local character.
 		nearestHeader.isLocallyControlled =
-			manager->isLocallyControlledOnThisPeer(*nearestId);
+			manager->session().isLocallyControlledOnThisPeer(*nearestId);
 
 		drawInputHistoryFrameMeterStack(*manager, *nearestId, 0.f, labelHeight, nearestHeader);
 		return;
@@ -472,7 +472,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
 	using namespace brawlerInputHistoryVisualization;
 
 	// ⛔ POINTER TO CONST, and it stays one: the bars may not write a cell they draw.
-	const InputHistoryTickLanes* lanes = manager.getInputHistoryLanes(characterId);
+	const InputHistoryTickLanes* lanes = manager.inputHistoryFeed().getInputHistoryLanes(characterId);
 	if (lanes == nullptr || !lanes->hasAxis())
 		return;
 
@@ -585,7 +585,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
 			&relayReadVerdictStyleOfOrdinal);
 
 		drawFrameMeterRelayReadout(geometry, layout,
-			manager.getRelayReadReadout(characterId),
+			manager.inputHistoryFeed().getRelayReadReadout(characterId),
 			buildRelayHealthReadout(*lanes, window, isLocallyControlled));
 	}
 

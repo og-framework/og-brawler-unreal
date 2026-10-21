@@ -274,16 +274,16 @@ std::optional<unsigned int> firstLocalCharacterId(const UWorld* world)
 	return toStorageKey(character->GetSimCharacterId());
 }
 
-std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* manager,
-                                                 unsigned int                   localId,
-                                                 std::optional<unsigned int>    previousChoice,
-                                                 float&                         outDistanceCm)
+std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUImpl* feed,
+                                                 unsigned int                        localId,
+                                                 std::optional<unsigned int>         previousChoice,
+                                                 float&                              outDistanceCm)
 {
-	if (manager == nullptr)
+	if (feed == nullptr)
 		return std::nullopt;
 
 	brawlerInputHistoryVisualization::NearestCharacterCandidateList candidates;
-	manager->gatherNearestCandidates(candidates);
+	feed->gatherNearestCandidates(candidates);
 
 	const std::optional<unsigned int> chosen =
 		brawlerInputHistoryVisualization::nearestCharacterIdTo(
@@ -304,3 +304,152 @@ std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* 
 }
 
 } // namespace inputHistoryVisualizationUImpl
+
+void BrawlerInputHistoryFeedUImpl::pollInputHistory(unsigned int id, uint32 newestTick, float deadzone)
+{
+	const LocalInputCache<simulatableBrawler::PlayerInput>* captures = m_session.getLocalInputCache(id);
+	if (captures == nullptr)
+		return;
+
+	m_inputHistory.poll(id, *captures, newestTick, deadzone);
+}
+
+void BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes(unsigned int id, uint32 liveTick,
+	DAttackState machineState, std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput,
+	bool pauseWhileIdle, bool includeDelay)
+{
+	const std::optional<uint32> predictionOffsetTicks =
+		// ⛔G-09  docs/InputHistoryVisualizationUImpl-guards.md
+		(m_session.getManager().has_value() && m_session.getManager()->runsPrediction())
+			? std::optional<uint32>(
+				  m_session.getManager()->getNetworkEstimator().getPredictionOffsetTicks())
+			: std::nullopt;
+
+	// ⛔G-10  docs/InputHistoryVisualizationUImpl-guards.md
+	const bool isLocallyControlled = m_session.isLocallyControlledOnThisPeer(id);
+
+	const std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay =
+		// ⛔G-11  docs/InputHistoryVisualizationUImpl-guards.md
+		(includeDelay && isLocallyControlled
+			&& m_session.getReplicatedTierConsumer() != nullptr && m_session.getManager().has_value())
+			? std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition>(
+				  brawlerInputHistoryVisualization::decomposeInputDelay(
+					  m_session.getReplicatedTierConsumer()->hasReceivedTier(),
+					  m_session.getReplicatedTierConsumer()->currentTierIndex(),
+					  m_session.getManager()->getTimeConfig(),
+					  m_session.getReplicatedTierConsumer()->effectiveInputDelayTicks(),
+					  m_session.getClientEffectiveInputDelayTicks()))
+			: std::nullopt;
+
+	std::optional<brawlerInputHistoryVisualization::ClockDriftReading> clock;
+	// ⛔G-12  docs/InputHistoryVisualizationUImpl-guards.md
+	if (m_session.getManager().has_value() && m_session.getManager()->runsPrediction())
+	{
+		const ClientPredictionClock& predictionClock = m_session.getManager()->getClientClock();
+		const NetworkTimeEstimator&  estimator       = m_session.getManager()->getNetworkEstimator();
+
+		brawlerInputHistoryVisualization::ClockDriftReading reading;
+		reading.predictionTick = predictionClock.getPredictionTick();
+		reading.targetTick     = estimator.getTargetPredictionTick();
+		reading.authorityTick  = estimator.getLastAuthorityTick();
+		reading.driftTicks     = static_cast<int32_t>(reading.targetTick)
+		                       - static_cast<int32_t>(reading.predictionTick);
+		reading.pendingAction  = predictionClock.evaluateDrift();
+		reading.stallDebtTicks = predictionClock.getRequiredInputDelayIncreaseStallTicks();
+		// ⛔G-13  docs/InputHistoryVisualizationUImpl-guards.md
+		reading.skipCount              = predictionClock.getDiagnostics().skipCount();
+		reading.lastSkipTick           = predictionClock.getDiagnostics().lastSkipTick();
+		reading.stallCount             = predictionClock.getDiagnostics().stallCount();
+		reading.lastStallTick          = predictionClock.getDiagnostics().lastStallTick();
+		reading.hardResyncCount        = predictionClock.getDiagnostics().hardResyncCount();
+		reading.lastHardResyncFromTick =
+			predictionClock.getDiagnostics().lastHardResyncFromTick();
+		reading.lastHardResyncToTick   = predictionClock.getDiagnostics().lastHardResyncToTick();
+
+		clock = reading;
+	}
+
+	const RelayedReadObservationRing* const relayedReads =
+		isLocallyControlled ? nullptr : m_session.getRelayedReadObservations(id);
+
+	const RelayedInputArrivalRing* const relayedArrivals =
+		isLocallyControlled ? nullptr : m_session.getRelayedInputArrivals(id);
+
+	const uint32 rollbackWindowTicks =
+		// ⛔G-14  docs/InputHistoryVisualizationUImpl-guards.md
+		(m_session.getManager().has_value() && m_session.getManager()->getTimeConfig().rollbackWindowTicks > 0)
+			? static_cast<uint32>(m_session.getManager()->getTimeConfig().rollbackWindowTicks)
+			: 0u;
+
+	const auto reader =
+		inputHistoryVisualizationUImpl::makeReconciliationSlotReader<SimulatableBrawler>(
+			m_session.editReconciliation(), id);
+
+	// ⛔G-15  docs/InputHistoryVisualizationUImpl-guards.md
+	if (relayedReads != nullptr && relayedArrivals != nullptr)
+	{
+		m_inputHistory.pollLanes(id, reader, liveTick, machineState, liveInput,
+			pauseWhileIdle, predictionOffsetTicks, delay, clock, *relayedReads,
+			*relayedArrivals, rollbackWindowTicks);
+	}
+	else
+	{
+		m_inputHistory.pollLanes(id, reader, liveTick, machineState, liveInput,
+			pauseWhileIdle, predictionOffsetTicks, delay, clock);
+	}
+}
+
+brawlerInputHistoryVisualization::RelayReadReadout BrawlerInputHistoryFeedUImpl::getRelayReadReadout(
+	unsigned int id) const
+{
+	brawlerInputHistoryVisualization::RelayReadReadout readout;
+
+	const RelayedReadObservationRing* const ring = m_session.getRelayedReadObservations(id);
+	if (ring == nullptr)
+		return readout;
+
+	bool   anyObservation = false;
+	uint32 newestSimTick  = 0u;
+
+	for (std::size_t index = 0u; index < ring->size(); ++index)
+	{
+		const RelayedReadObservation* const observation = ring->at(index);
+		if (observation == nullptr)
+			continue;
+
+		switch (observation->outcome)
+		{
+		case ScheduledRelayedReadOutcome::Hit:        ++readout.hits;        break;
+		case ScheduledRelayedReadOutcome::Miss:       ++readout.misses;      break;
+		case ScheduledRelayedReadOutcome::VerifyFail: ++readout.verifyFails; break;
+		case ScheduledRelayedReadOutcome::NoProbe:    ++readout.noProbes;    break;
+		}
+
+		// ⛔G-16  docs/InputHistoryVisualizationUImpl-guards.md
+		if (!anyObservation || observation->simTick > newestSimTick)
+		{
+			anyObservation       = true;
+			newestSimTick        = observation->simTick;
+			readout.dLatestKnown = observation->outcome != ScheduledRelayedReadOutcome::NoProbe;
+			readout.dLatest      = static_cast<uint32_t>(observation->dLatest);
+		}
+	}
+
+	readout.present = anyObservation;
+	return readout;
+}
+
+void BrawlerInputHistoryFeedUImpl::gatherNearestCandidates(
+	brawlerInputHistoryVisualization::NearestCharacterCandidateList& out) const
+{
+	m_session.getStorage().forEachSimulatable<SimulatableBrawler>(
+		[&out](unsigned int id, const auto& simulatable)
+		{
+			// ⛔G-17  docs/InputHistoryVisualizationUImpl-guards.md
+			const auto& movement = simulatable.getVizState().getState()
+				.template get<brawlerMovementSimulation::State>();
+
+			out.add(brawlerInputHistoryVisualization::NearestCharacterCandidate{
+				id, movement.bodyState.position.x, movement.bodyState.position.y });
+		});
+}

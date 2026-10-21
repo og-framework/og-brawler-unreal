@@ -22,6 +22,8 @@ class UWorld;
 class AActor;
 class USimmableUpdateComponent;
 class AOGBrawlerUECharacter;
+struct BrawlerSessionTraitsUImpl;
+template <typename TraitsT> class UESimulationSession;
 
 namespace physicsBackendUImpl
 {
@@ -51,19 +53,25 @@ concept PhysicsBackendHost = requires(BackendT& backend, const BackendT& constBa
 static_assert(std::is_same_v<EngineTraits, ChaosEngineTraitsUImpl> && std::is_same_v<EngineBinding, BrawlerChaosBindingUImpl>,
 	"The Chaos composition is ChaosTickBackendUImpl over ChaosEngineTraitsUImpl and BrawlerChaosBindingUImpl, so "
 	"PhysicsBackendUImpl.h's selector must pick that pair in the same configuration. Added by og-tickdriver task 15b.");
-using Backend       = ChaosTickBackendUImpl;
+template <typename SessionT>
+using BackendFor    = ChaosTickBackendUImpl;
+using Backend       = BackendFor<UESimulationSession<BrawlerSessionTraitsUImpl>>;
 using BackendWorlds = ChaosTickBackendWorldsUImpl;
 #else
 static_assert(std::is_same_v<EngineTraits, JoltEngineTraitsUImpl> && std::is_same_v<EngineBinding, BrawlerJoltBindingUImpl>,
 	"The Jolt composition is TickDriverBackendUImpl over JoltEngineTraitsUImpl and BrawlerJoltBindingUImpl, so "
 	"PhysicsBackendUImpl.h's selector must pick that pair in the same configuration. Added by og-tickdriver task 15b.");
-using Backend       = TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
+template <typename SessionT>
+using BackendFor    = TickDriverBackendUImpl<BrawlerTickDriverGameUImpl<SessionT>, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
+using Backend       = BackendFor<UESimulationSession<BrawlerSessionTraitsUImpl>>;
 using BackendWorlds = Backend::Worlds;
 #endif
 
 static_assert(PhysicsBackendHost<Backend>,
 	"physicsBackendUImpl::Backend must provide every entry point of the seam (the PhysicsBackendHost concept) in the "
 	"configuration being built: ChaosTickBackendUImpl, or TickDriverBackendUImpl over the Jolt engine traits and "
-	"binding. ASimulationManagerUImpl asserts it again where it calls them. Added by og-tickdriver task 15b.");
+	"binding. BrawlerSessionTraitsUImpl.h asserts it again on the traits' Backend<UESimulationSession<...>>, the type the "
+	"session holds (ASimulationManagerUImpl asserted it until og-ue-simulationcomponentandmanagersplit task 24a). Added "
+	"by og-tickdriver task 15b.");
 
 } // namespace physicsBackendUImpl

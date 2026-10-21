@@ -33,7 +33,8 @@
 DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
 #endif
 
-class ASimulationManagerUImpl;
+struct BrawlerSessionTraitsUImpl;
+template <typename TraitsT> class UESimulationSession;
 class ChaosTickBackendUImpl;
 class USimmableUpdateComponent;
 class AOGBrawlerUECharacter;
@@ -214,7 +215,9 @@ struct ChaosTickBackendWorldsUImpl
 class ChaosTickBackendUImpl
 {
 public:
-	ChaosTickBackendUImpl(ASimulationManagerUImpl& owner, ChaosTickBackendWorldsUImpl&) : m_owner(owner) {}
+	using Session = UESimulationSession<BrawlerSessionTraitsUImpl>;
+
+	ChaosTickBackendUImpl(Session& owner, ChaosTickBackendWorldsUImpl&) : m_owner(owner) {}
 
 	ChaosTickBackendUImpl(const ChaosTickBackendUImpl&) = delete;
 	ChaosTickBackendUImpl& operator=(const ChaosTickBackendUImpl&) = delete;
@@ -275,7 +278,7 @@ public:
 	const ChaosTickMapper& getChaosTickMapper() const { return m_chaosTickMapper; }
 
 private:
-	ASimulationManagerUImpl& m_owner;
+	Session& m_owner;
 
 	FSimulationManagerAsyncCallback* m_asyncCallback = nullptr;
 

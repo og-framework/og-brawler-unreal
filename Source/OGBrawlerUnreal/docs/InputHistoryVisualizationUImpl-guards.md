@@ -8,6 +8,9 @@ These are the prohibitions left after the comment conversion of the two files (o
 2026-09-26). Each one is reached by a one-line `⛔G-nn` tag at the line where the wrong edit would be typed.
 The reasoning behind them lives in `InputHistoryDisplay-rationale.md`, and §8 of that document covers this pair.
 Each entry opens with the text the source carried, verbatim, then says what the conversion verified or corrected.
+G-09 to G-17 moved in from `SimulationManagerUImpl-guards.md` (its G-05 to G-13) with the input-history feeds, which
+og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21) moved into `BrawlerInputHistoryFeedUImpl` in these two
+files. They keep that file's format: the fence verbatim, what breaks, and the R0 line task 22 added.
 
 ---
 
@@ -92,7 +95,8 @@ five, or adding a new toggle accessor without it, is typed elsewhere in the same
 > ONE key for both stores, so nothing can survive an unregister the other honoured.
 
 **Consequence.** Splitting the rows and the lanes into two maps opens a second erase that `forgetCharacter` must
-remember. The manager calls `m_inputHistory.forgetCharacter(id)` once, in `unregisterFromNewFramework`. A store the
+remember. The manager calls the feed's `forgetCharacter(id)` once, in `unregisterFromNewFramework`, and the feed
+forwards it to `m_inputHistory.forgetCharacter(id)` (task 22; the manager erased the store directly before). A store the
 erase misses keeps a ring keyed on a character that has gone. Since task 25, character ids are never reused within
 an authority manager's lifetime, so that entry is a pure leak rather than a collision.
 
@@ -128,7 +132,8 @@ header would then print a `d=` that does not belong to the character the stack f
 `unregisterSimulatableContainers`, through the `unregisterSimulatable` facade. Both are reached from
 `ASimulationManagerUImpl::tryRegister` / `unregisterFromNewFramework` on the game thread. The reader is called from
 the lane poll, which `USimmableUpdateComponent::TickComponent` runs on the game thread. The manager's own side of
-this argument is in `SimulationManagerUImpl-rationale.md` ("The presence test crosses nothing either").
+this argument is in `InputHistoryDisplay-rationale.md` §8.6 ("The presence test crosses nothing either"), which task 22
+moved there from `SimulationManagerUImpl-rationale.md` §1 with the feed.
 
 **Consequence.** Turning this into a read *through* the found cache (its states or inputs) is a game-thread read of
 physics-thread-written slots. That is a crossing this reader was argued free of.
@@ -170,6 +175,195 @@ HUD would stack the same panel. It also moves the row panel's selection to a dif
 it reads any child. Folding a child in here (for example `GInputHistory && GInputHistoryDisplay`) makes that early-out
 fire whenever the row panel is off. The lane poll behind it would then never run for a session that wants only the
 bars. The second half of the quoted sentence is corrected under G-03.
+
+---
+
+## G-09 — The prediction-offset read keeps its `runsPrediction()` guard
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-05 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the `(m_session.getManager().has_value() && m_session.getManager()->runsPrediction())` predicate of `predictionOffsetTicks` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 549-549 at b9f6d81 -->
+```
+// ⚠ getNetworkEstimator() exists only on a predicting role, hence the guard. §5
+```
+
+**What breaks if the edit is made.** `SimulationManager::getNetworkEstimator()` calls `std::terminate()` on a manager that holds no estimator — every authority manager. And the guard's `std::nullopt` is itself the signal: an authority passes no offset rather than `0`, because a display told "the offset is 0" draws an authority marker on the newest cell (`InputHistoryDisplay-rationale.md` §8.6).
+
+**Verified (R0, task 22).** `SimulationManager::getNetworkEstimator()` calls `std::terminate()` when `m_networkEstimator` is empty, and the manager's constructor emplaces the estimator (and the client clock) only on its `shouldRunPrediction` branch, so every authority manager holds none.
+
+---
+
+## G-10 — Local control is the CAPTURE-LINE test, never a role test
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-06 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `const bool isLocallyControlled = m_session.isLocallyControlledOnThisPeer(id);` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 569-571 at b9f6d81 -->
+```
+// The same test `pollInputHistory` makes, and for the same reason: a capture line
+// exists for exactly the characters this client controls. ⛔ NOT A ROLE TEST -- a
+// client can control several brawlers, and a listen-server host controls one. §1
+```
+
+**What breaks if the edit is made.** `runsPrediction()`, `HasAuthority()` and the net mode answer per MANAGER, not per character. A couch-co-op client drives several brawlers, and a listen-server host drives one on an AUTHORITY manager, so a role test gets both cases wrong. Everything after this line branches on the answer: the tier decomposition (G-11) and the two relayed-input sources are chosen from it, so a wrong answer draws the local connection's delay on a remote proxy, or blinds a local character's delay bar.
+
+**Verified (R0, task 22).** `isLocallyControlledOnThisPeer` answers `getLocalInputCache(id) != nullptr`, and the capture line exists only for an id with a local input provider (`SimulationInputResolution::registerLocalCharacter`), which is per character, not per manager.
+
+---
+
+## G-11 — The tier decomposition is drawn only for a LOCALLY controlled character
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-07 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the `(includeDelay && isLocallyControlled ...` predicate of `delay` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 574-575 at b9f6d81 -->
+```
+// A remote proxy's stack shows the relay it is being predicted from instead.
+// ⛔ THE TIER DECOMPOSITION IS THE LOCAL CONNECTION'S and is not read for a remote.
+```
+
+**What breaks if the edit is made.** `decomposeInputDelay` reads THIS connection's tier consumer, the shared `TimeConfig` and the resolution peer's published delay. For a remote proxy none of those describe the proxy's wire. Drop `isLocallyControlled` from the predicate and a remote proxy's delay bar is labelled with the viewer's own tier and delay — plausible-looking numbers that describe the wrong connection.
+
+**Verified (R0, task 22).** The three inputs are the tier consumer's `hasReceivedTier`, `currentTierIndex` and `effectiveInputDelayTicks`, the manager's `getTimeConfig()` and the resolution peer's `getClientEffectiveInputDelayTicks()`: this connection's state, read in the predicate's true arm only.
+
+---
+
+## G-12 — The clock reading keeps its `runsPrediction()` guard
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-08 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `if (m_session.getManager().has_value() && m_session.getManager()->runsPrediction())` around the `ClockDriftReading` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 588-588 at b9f6d81 -->
+```
+// ⛔ GUARDED LIKE THE OFFSET ABOVE: getClientClock() std::terminates on a server. §5
+```
+
+**What breaks if the edit is made.** The block calls both `getClientClock()` and `getNetworkEstimator()`, and both call `std::terminate()` on a manager that does not predict. The guard is what makes the reading absent, rather than fatal, on every authority and standalone manager.
+
+**Verified (R0, task 22).** Both `SimulationManager::getClientClock()` and `getNetworkEstimator()` call `std::terminate()` on an empty optional, and both optionals are emplaced only on the constructor's `shouldRunPrediction` branch.
+
+---
+
+## G-13 — Each event counter is read BEFORE its tick
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-09 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the first of the seven `predictionClock.getDiagnostics()` reads in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes` (`reading.skipCount`).
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 606-606 at b9f6d81 -->
+```
+// ⛔ COUNT BEFORE ITS TICK: the clock writes tick then count, so the tear is one-way.
+```
+
+**What breaks if the edit is made.** `ClientPredictionClock` writes each pair tick-first, count-second (`ClientPredictionClock.cpp`: `lastSkipTick` then `++skipCount`, and likewise for stall and hard resync). Reading count-first makes the harmful straddle — a fresh count beside a stale tick, which files an event against a tick that predates it — the one the program order does not produce. Reversing the reads makes it the likely one.
+
+⛔ **R0, task 11 — the fence overclaims, and the rationale doc's copy said "CANNOT be observed".** Both sides are plain `unsigned int`s: neither the writes nor the reads are atomic, so C++ gives no ordering guarantee at all, and an optimizing compiler may reorder either pair. Source order makes the harmful straddle unlikely; it does not make it impossible. The guard is still worth keeping — reversing the order makes the wrong case the expected one — but the property it protects is "unlikely", not "unreachable". A real guarantee needs acquire/release atomics in `og-simulation`, which is not this file's to change.
+
+The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes no bare accessor"* — is not a guard. The compiler already holds it (task 11 measured `c.skipCount()` → `C2039` and `c.m_eventSeamDiagnostics` → `C2248`).
+
+**Verified (R0, task 22).** All four write sites are in `ClientPredictionClock::advancePrediction`, and each writes its tick (the hard resync: both ticks) before `++` on its count. The seven fields are plain `unsigned int`s of `EventSeamDiagnostics`, read through `getDiagnostics()`. The task-11 R0 paragraph above stands.
+
+---
+
+## G-14 — The relay-health window is `TimeConfig::rollbackWindowTicks`, not the per-tier ceiling
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-10 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the `(m_session.getManager().has_value() && m_session.getManager()->getTimeConfig().rollbackWindowTicks > 0)` predicate of `rollbackWindowTicks` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 633-637 at b9f6d81 -->
+```
+// How far back a resim may still reach, which is what separates an arrival that could
+// still have been replayed into a tick from one that could not.
+// The per-tier ceiling beside it escalates nothing today and its own banner says so, and
+// a negative value disables the authority's future guard and is no window at all here.
+// ⛔ THE SHIPPED WINDOW, `TimeConfig::rollbackWindowTicks`. §5
+```
+
+**What breaks if the edit is made.** The window separates an arrival that could still have been replayed into its tick from one that could not, so it must be the window a resim actually reaches. The per-tier ceiling beside it, `TimeConfig::rollbackWindowHardCap`, escalates nothing today — its own declaration says the escalation is *"INTENDED, NOT IMPLEMENTED"*. Substitute it and the bar sorts arrivals against a number no resim uses. The `> 0` test is part of the same fence: a negative value is the authority's "future guard disabled" setting and is no window at all here, so it maps to `0`.
+
+⛔ **Correction (R0, task 22).** The paragraph above names the per-tier ceiling `TimeConfig::rollbackWindowHardCap`. That field is a single degraded-mobile ceiling, not a per-tier one, and it is read on both roles (the correction cache's log and release gates, the floor's derived ceiling, the reception coordinator's staleness bounds), so "a number no resim uses" does not describe it either. The per-tier ceiling the fence meant is `TimeConfig::rttTierRollbackCeilings`, read through `ReplicatedTierConsumer::effectiveRollbackCeiling`, whose declarations say "INTENDED API, NO PRODUCTION CALLER". The prohibition is unchanged and covers both: the window is `rollbackWindowTicks`. The `> 0` half is verified: the server's too-far-future guard runs only when `rollbackWindowTicks >= 0` (`SimulationQueues.h`, `queueMove`), so a negative value disables it.
+
+---
+
+## G-15 — The relay-health bar is NOT gated on `includeDelay`
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-11 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `if (relayedReads != nullptr && relayedArrivals != nullptr)` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 647-650 at b9f6d81 -->
+```
+// The relay-health bar rides the same two sources and is its own toggle, so the delay bar
+// being off must not blind it; `includeDelay` still decides the tier decomposition above,
+// which is the reading it actually names.
+// ⛔ NOT GATED ON `includeDelay`.
+```
+
+**What breaks if the edit is made.** The relay-health bar has its own toggle and rides the same two relayed sources as the delay bar's client half. Add `includeDelay` to this condition and turning the delay bar off silently blinds the relay-health bar too. `includeDelay` still decides the tier decomposition (G-11), which is the reading it actually names.
+
+**Verified (R0, task 22).** The condition is the two relayed-ring pointers alone; both are `nullptr` exactly when the character is locally controlled or has no ring yet.
+
+---
+
+## G-16 — The readout's `dLatest` stamp comes from the NEWEST observation by tick, never the last slot visited
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-12 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `if (!anyObservation || observation->simTick > newestSimTick)` in `BrawlerInputHistoryFeedUImpl::getRelayReadReadout`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 716-718 at b9f6d81 -->
+```
+// The stamp of the NEWEST observation, found by its own tick: the ring is addressed by
+// sim tick and therefore walked out of order, so the last slot read is not the last one
+// written. ⛔ NEVER THE LAST SLOT VISITED.
+```
+
+**What breaks if the edit is made.** The ring is addressed by sim tick, so walking it by index visits slots out of write order. "Last slot visited" is therefore an arbitrary observation, and the nearest stack would print a schedule stamp from whichever tick happened to sit in the highest index.
+
+**Verified (R0, task 22).** `RelayedReadObservationRing` stores each observation at `simTick % kRelayedReadObservationCapacityTicks`, so slot order is not write order.
+
+---
+
+## G-17 — The nearest-character gather reads the VIZ snapshot, never live state
+
+**Moved from** `SimulationManagerUImpl-guards.md` G-13 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `const auto& movement = simulatable.getVizState().getState()...` inside `BrawlerInputHistoryFeedUImpl::gatherNearestCandidates`.
+
+**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+
+<!-- header lines 736-738 at b9f6d81 -->
+```
+// `updateVisualizationAll(m_storage)` is the sanctioned physics->game handoff, and a HUD
+// reading live state would be a fresh, unargued crossing.
+// ⛔ READ OFF THE VIZ SNAPSHOT, NOT `getAllState()` -- the ring-out slice's reason. §1
+```
+
+**What breaks if the edit is made.** Same reason as `SimulationManagerUImpl-guards.md` G-04 (the scoreboard's slice read), at a second site: `getVizState()` is the copy taken by `updateVisualizationAll`, and reading the live composite from a per-frame HUD gather would be a new game-thread read of physics-written state that no crossing argument covers.
+
+**Verified (R0, task 22).** The gather reads `getVizState()` inside `forEachSimulatable` on the manager's `const` storage; `getAllState()` is the live composite.
 
 ---
 

@@ -27,6 +27,7 @@ in `ChaosTickBackendUImpl-guards.md`.
 * **§2** is the host itself: ownership, the delegates, the input hook, and the two pieces `buildWorld` moved.
 * **§3**, **§4** and **§5** moved here from `SimulationManagerUImpl-rationale.md` (§8's rewind-push probe, §9's tick
   alignment, §14's first replayed step) in og-simulationscheduler-withjolt task 82, with the code they describe.
+* **§6** is og-ue-simulationcomponentandmanagersplit task 24a: the owner is the session since then, and how the host reaches the actor.
 * **Names before og-tickdriver task 15b (historical):**
   class ChaosBackendUImpl (historical name), in ChaosBackendUImpl.h and ChaosBackendUImpl.cpp (historical file names);
   this document ChaosBackendUImpl-rationale.md and its guards ChaosBackendUImpl-guards.md (historical names);
@@ -47,8 +48,12 @@ the template `TickDriverBackendUImpl`).
 
 **What it is.**
 
-* **Plain C++, not reflected.** It holds a reference to its owner, `ASimulationManagerUImpl`, and the owner declares
-  it a friend (`friend physicsBackendUImpl::Backend;`, which names this class in the Chaos configuration), so its bodies read the owner's members exactly as the code did when it lived in the owner.
+* **Plain C++, not reflected.** It holds a reference to its owner, the session (`Session`,
+  `UESimulationSession<BrawlerSessionTraitsUImpl>`, since task 24a; `ASimulationManagerUImpl` before), and the owner
+  declares it a friend (`friend typename TraitsT::template Backend<UESimulationSession>;`, which names this class in the
+  Chaos configuration; the actor's `friend physicsBackendUImpl::Backend;` before, kept for the interim path of §6 until
+  og-ue-simulationcomponentandmanagersplit task 27b deleted it),
+  so its bodies read the owner's members exactly as the code did when it lived in the owner.
 * **Not copyable.** The copy constructor and assignment are deleted; it is a member of its owner and nothing else.
 * **The owner calls it through one fixed set of entry points, "the seam".** The table is in
   `SimulationManagerUImpl-rationale.md` §18. Each entry point is called from exactly one place, the site where the
@@ -69,7 +74,7 @@ rewind-push probe's stash type; the callback pointer and the two delegate handle
 that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1, `⛔G-11`); the
 input hook `InjectInputs_External`; the six passthroughs the callback calls (`onGameSimulation` …
 `noteResimGrant`; task 84 added a seventh for the push and task 88 removed it again, because
-`prepareResimulation` now pushes, §5); and forwarders to the owner's shared members (`editStorage`, the two clocks, `runsPrediction`). The two latency stamp
+`prepareResimulation` now pushes, §5); and forwarders to the owner's shared members (`editStorage`, the two clocks, `runsPrediction`; the session's since og-ue-simulationcomponentandmanagersplit task 24b, §6). The two latency stamp
 forwarders the callback calls sit on the host's diagnostics view since og-tickdriver task 18 (§2). The callback and its input hold a `ChaosTickBackendUImpl*` where they used to
 hold the owner.
 
@@ -77,9 +82,10 @@ hold the owner.
 
 ## §2 The host
 
-**Ownership.** The owner declares `physicsBackendUImpl::Backend m_backend{ *this, m_backendWorlds };`, which is this
-class in the Chaos configuration, directly after `std::optional<ManagerType> m_manager`, so the backend is destroyed
-before the manager. Task 82 declared ChaosBackendUImpl m_backend{ *this }; (the historical name) inside an `#if`; task 83 gave both hosts
+**Ownership.** The owner declares its backend `m_backend{ *this, m_backendWorlds }`, which is this class in the Chaos
+configuration, directly after `std::optional<ManagerType> m_manager`, so the backend is destroyed before the manager.
+Since og-ue-simulationcomponentandmanagersplit task 24a the owner is the session and the type is its traits' `Backend<UESimulationSession>`
+(`physicsBackendUImpl::Backend` in the actor before; §6). Task 82 declared ChaosBackendUImpl m_backend{ *this }; (the historical name) inside an `#if`; task 83 gave both hosts
 the same two-argument constructor so the declaration has none. The second argument is the owner's `m_backendWorlds`,
 which in the Chaos configuration is `ChaosTickBackendWorldsUImpl`, an empty struct: the Chaos host has no state that must
 outlive the owner's adapters, so the constructor ignores it (`TickDriverBackendUImpl-rationale.md` §1 says why the Jolt host
@@ -99,9 +105,9 @@ are removed, and the callback freed, in `onEndPlayWorld`.
 because the seam passes the world, not the solver. Nothing changes them between `buildWorld` and `startStepping`.
 
 **The input hook.** `InjectInputs_External` fills the callback's producer input with the world and this backend,
-computes `firstUpcomingSimTick` from the mapper (`⛔G-07`, the `+ 1` of §4), and calls the owner's
-`onFrameStepsDue_GameThread`, then its drain and reap when the owner has a reception coordinator. The order of those
-calls is unchanged.
+computes `firstUpcomingSimTick` from the mapper (`⛔G-07`, the `+ 1` of §4), and calls the session's
+`onFrameStepsDue_GameThread` (the actor's until og-ue-simulationcomponentandmanagersplit task 26b), then its drain and
+reap when the session has a reception coordinator (the actor's until task 26a). The order of those calls is unchanged.
 
 **`buildWorld` moved two pieces, and nothing else in the order changed.**
 
@@ -525,3 +531,31 @@ by the corrections stopping.
 weapon through the game-thread API, and `RewindToFrame` overwrites it to `FullResim` on every rewind
 of a dynamic body. The direct write does not consult resim type, so that stamp has no bearing on this
 fix. It was left unchanged.
+
+---
+
+## §6 The session as the owner (og-ue-simulationcomponentandmanagersplit task 24a)
+
+Since task 24a the composition this host works on is OGSimulationUnreal's `UESimulationSession<BrawlerSessionTraitsUImpl>`
+(`UESimulationSession-rationale.md`), and this class's owner is the session: `Session` in this header, the constructor's
+first parameter and `m_owner`. Every statement kept its order; the text changed only in the owner prefix.
+
+* **The session's members keep their spelling:** `m_owner.m_manager`, `m_owner.m_physAdapter`,
+  `m_owner.m_physReaderAdapter`, `m_owner.m_queryAdapter`, `m_owner.m_storage` and `editLatencyBudgetDiagnostics()` /
+  `getLatencyBudgetDiagnostics()`. The session befriends its traits' backend, which is this class here.
+* **The actor's members go through `owner()`** (the interim path, until tasks 26a to 27a move them into the session):
+  `InjectInputs_External`'s `GetWorld()`; the post-tick lambda's `OnPostPhysicsStep` (until
+  og-ue-simulationcomponentandmanagersplit task 27a, which moved it into the session: the lambda calls
+  `m_owner.onPostPhysicsStep()` since, under the session's friend line for its backend, and its weak object is still the
+  actor, `&m_owner.owner()`); and the diagnostics view's three `GetWorld()` calls. All of them are public. `InjectInputs_External`'s `onFrameStepsDue_GameThread` went through
+  `owner()` too, the one private member, until og-ue-simulationcomponentandmanagersplit task 26b moved it into the
+  session; it is `m_owner.onFrameStepsDue_GameThread` since, under the session's friend line for its backend, and the
+  actor's friend line for this class covered no call any more (task 27b deleted it). The reception coordinator test, its reap and `releaseDelayedInputsForStep` went through `owner()` too until
+  og-ue-simulationcomponentandmanagersplit task 26a moved them into the session; they read `m_owner.m_receptionCoordinator`
+  and call `m_owner.releaseDelayedInputsForStep` since, under the session's friend line for its backend.
+* **The four forwarders call the session** since task 24b: `getServerClock`, `getClientClock`, `runsPrediction` and
+  `editStorage` return `m_owner.getServerClock()` and the like, the session's public composition reads, which task 24b
+  moved there from the actor (`UESimulationSession-rationale.md` §8). Until then they called the actor's reads of the
+  same names through `owner()`, which forwarded to the same session members.
+* **The weak-lambda owner stays the actor.** Both delegates bind with `AddWeakLambda(&m_owner.owner(), …)`: a delegate's
+  weak object must be a `UObject`, the session is not one, and the actor is the object the bindings tested before.

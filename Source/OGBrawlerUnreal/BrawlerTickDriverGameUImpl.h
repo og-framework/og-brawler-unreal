@@ -13,9 +13,10 @@
 #include <cstdint>
 
 class AActor;
-class ASimulationManagerUImpl;
 class USimmableUpdateComponent;
 class AOGBrawlerUECharacter;
+struct BrawlerSessionTraitsUImpl;
+template <typename TraitsT> class UESimulationSession;
 
 #define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
 
@@ -48,7 +49,7 @@ public:
 
 	void afterInlineBatch(int32_t firstUpcomingSimTick)
 	{
-		if (typename SessionT::BrawlerReceptionCoordinator* coordinator = m_session.getReceptionCoordinator())
+		if (typename SessionT::ReceptionCoordinator* coordinator = m_session.getReceptionCoordinator())
 			coordinator->reapConnections(firstUpcomingSimTick);
 	}
 
@@ -62,7 +63,7 @@ public:
 
 	void onStepEnded() { m_session.editLatencyBudgetDiagnostics().stampStepEnd_Internal(); }
 
-	void onPostPhysics() { m_session.OnPostPhysicsStep(); }
+	void onPostPhysics() { m_session.onPostPhysicsStep(); }
 
 	static float gravity(const SessionT& session) { return session.m_staticData.m_movementStaticData.gravity; }
 
@@ -76,7 +77,7 @@ public:
 			TEXT("class checkf of tryAcquireJoltSlot."),
 			*owner.GetName());
 		const FTCHARToUTF8 name(*owner.GetName());
-		return slotCall(key, name.Get(), session.GetNetMode() != NM_Client, character->GetPhysicsSlot(),
+		return slotCall(key, name.Get(), session.owner().GetNetMode() != NM_Client, character->GetPhysicsSlot(),
 			[character](uint32_t slot) { character->SetAuthoritativePhysicsSlot(slot); });
 	}
 
@@ -84,6 +85,6 @@ private:
 	SessionT& m_session;
 };
 
-using BrawlerTickDriverGame = BrawlerTickDriverGameUImpl<ASimulationManagerUImpl>;
+using BrawlerTickDriverGame = BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>;
 
 #undef HasAuthority

@@ -212,7 +212,7 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 			glm::mat4(1.f),
 			collisionCategory::queryRouting};
 
-		const std::optional<QueryVolumeId> targetVolume = manager->registerVizVolume(targetVisDescriptor, *Owner);
+		const std::optional<QueryVolumeId> targetVolume = manager->session().registerVizVolume(targetVisDescriptor, *Owner);
 		if (!targetVolume.has_value())
 		{
 			if (m_initializationAttempts >= kMaxRegistrationAttempts)
@@ -282,7 +282,7 @@ void USimmableUpdateComponent::tryRegisterWithNewFramework()
 
 	if (isAuthority && character->GetSimCharacterId() == SimCharacterId::None)
 	{
-		const SimCharacterId assigned = regManager->allocateSimCharacterId();
+		const SimCharacterId assigned = regManager->roster().allocateSimCharacterId(regManager->GetNetMode());
 		// ⛔G-01  docs/SimmableUpdateComponent-guards.md
 		if (assigned == SimCharacterId::None)
 			return;
@@ -399,7 +399,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 	if (vizManager == nullptr)
 		return;
 
-	SimulationObjectStorage<SimulatableBrawler>& storage = vizManager->editStorage();
+	SimulationObjectStorage<SimulatableBrawler>& storage = vizManager->session().editStorage();
 	const unsigned int ownKey = toStorageKey(simCharacterId());
 	if (!storage.has<SimulatableBrawler>(ownKey))
 		return;
@@ -456,7 +456,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			simulatableBrawler::selectVisualizationInput(
 				hasLiveLocalInput,
 				[this]() { return m_ownerInputCollection->buildLatestVisualizationInput(); },
-				vizManager->getLastRelayedInput(ownKey));
+				vizManager->session().getLastRelayedInput(ownKey));
 
 		{
 			if (vizPlayerInput.has_value())
@@ -477,9 +477,9 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			}
 		}
 
-		const SimulationTimeStep vizSimulationStep = vizManager->runsPrediction()
-			? vizManager->getClientClock().getPredictionStep()
-			: vizManager->getServerClock().getSimulationStep();
+		const SimulationTimeStep vizSimulationStep = vizManager->session().runsPrediction()
+			? vizManager->session().getClientClock().getPredictionStep()
+			: vizManager->session().getServerClock().getSimulationStep();
 
 		{
 			brawlerProjectileVisualization::Input projectileVisualizationInput(
@@ -507,7 +507,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		{
 			dAttackTargetVisualizationTwo::Input attackTargetVisualizationInput(DeltaTime,
 				tmpAimInput,
-				vizManager->editVizQuery(),
+				vizManager->session().editVizQuery(),
 				rendererFunctorImpl,
 				DAttackTargetVisualizationCVars::legacyEnemyRangeArcsEnabled);
 			dAttackTargetVisualizationTwo::visualize(attackTargetVisualizationInput,
@@ -525,8 +525,8 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 					vizPlayerInput->aimDirection,
 					vizPlayerInput->moveStick,
 					vizPlayerInput->moveDirectionWorld,
-					vizManager->getVizReader(),
-					vizManager->editVizQuery(),
+					vizManager->session().getVizReader(),
+					vizManager->session().editVizQuery(),
 					rendererFunctorImpl);
 				dAttackBlockPredictionVisualization::visualize(blockPredInput,
 					m_attackBlockPredictionVisualizationState.value(),
@@ -558,7 +558,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				// ⛔G-29  docs/SimmableUpdateComponent-guards.md
 				if (rowCharacterId.has_value() && *rowCharacterId == ownCharacterId)
 				{
-					vizManager->pollInputHistory(*rowCharacterId,
+					vizManager->inputHistoryFeed().pollInputHistory(*rowCharacterId,
 						vizSimulationStep.getTick(),
 						dAttackMachineSimulation::g_moveStickDeadzone.load());
 				}
@@ -576,7 +576,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				}
 
 				// ⛔G-30  docs/SimmableUpdateComponent-guards.md
-				vizManager->pollInputHistoryLanes(ownCharacterId,
+				vizManager->inputHistoryFeed().pollInputHistoryLanes(ownCharacterId,
 					vizSimulationStep.getTick(),
 					(*attackSimState).get<dAttackMachineSimulation::State>().m_currentState,
 					liveInput,

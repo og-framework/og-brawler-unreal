@@ -499,7 +499,7 @@ void ChaosTickBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSt
 	FSimulationInput2* asyncInput = m_asyncCallback->GetProducerInputData_External();
 	asyncInput->Reset();
 	asyncInput->bInitialized = true;
-	asyncInput->m_world = m_owner.GetWorld();
+	asyncInput->m_world = m_owner.owner().GetWorld();
 	asyncInput->m_manager = this;
 
 	// ⛔G-07  docs/ChaosTickBackendUImpl-guards.md
@@ -603,7 +603,7 @@ void ChaosTickBackendUImpl::startStepping(UWorld& world, float, bool)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
 	m_hysScenePostTickCallbackHandle = physScene->OnPhysScenePostTick.AddWeakLambda(
-		&m_owner, [this](FChaosScene*) { m_owner.OnPostPhysicsStep(); });
+		&m_owner.owner(), [this](FChaosScene*) { m_owner.onPostPhysicsStep(); });
 
 	m_asyncCallback = solver->CreateAndRegisterSimCallbackObject_External<FSimulationManagerAsyncCallback>();
 	m_asyncCallback->setManager(this);
@@ -613,7 +613,7 @@ void ChaosTickBackendUImpl::startStepping(UWorld& world, float, bool)
 		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
 
 	m_injectInputsExternalCallbackHandle = solverCallback->InjectInputsExternal.AddWeakLambda(
-		&m_owner, [this](int32 PhysicsStep, int32 NumSteps) { InjectInputs_External(PhysicsStep, NumSteps); });
+		&m_owner.owner(), [this](int32 PhysicsStep, int32 NumSteps) { InjectInputs_External(PhysicsStep, NumSteps); });
 }
 
 void ChaosTickBackendUImpl::onEndPlayWorld(UWorld& world)
@@ -712,11 +712,11 @@ void ChaosTickBackendUImpl::Diagnostics::sampleLatencyWindow_GameThread(bool isC
 {
 	if (isClient)
 	{
-		FChaosScene* scene = m_host.m_owner.GetWorld() != nullptr ? m_host.m_owner.GetWorld()->GetPhysicsScene() : nullptr;
+		FChaosScene* scene = m_host.m_owner.owner().GetWorld() != nullptr ? m_host.m_owner.owner().GetWorld()->GetPhysicsScene() : nullptr;
 		if (scene != nullptr)
 			m_host.m_chaosDilationWindow.add(static_cast<double>(scene->GetNetworkDeltaTimeScale()));
 
-		const UWorld* world = m_host.m_owner.GetWorld();
+		const UWorld* world = m_host.m_owner.owner().GetWorld();
 		const APlayerController* localController =
 			world != nullptr ? world->GetFirstPlayerController() : nullptr;
 		if (localController != nullptr && localController->GetNetworkPhysicsTickOffsetAssigned())

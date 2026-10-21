@@ -10,8 +10,10 @@
 // Compile-time concept checks
 // ---------------------------------------------------------------------------
 
-static_assert(SimulationManagerOwnerConcept<ASimulationManagerUImpl>,
-    "ASimulationManagerUImpl must satisfy SimulationManagerOwnerConcept");
+static_assert(SimulationManagerOwnerConcept<UESimulationSession<BrawlerSessionTraitsUImpl>>,
+    "UESimulationSession<BrawlerSessionTraitsUImpl> must satisfy SimulationManagerOwnerConcept: the session holds the "
+    "timing relay's buffer and the timing callback since og-ue-simulationcomponentandmanagersplit task 25, which "
+    "moved them off ASimulationManagerUImpl");
 
 static_assert(
     SimulationNetSyncConcept<

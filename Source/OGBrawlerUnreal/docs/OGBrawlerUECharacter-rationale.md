@@ -590,7 +590,9 @@ Guard G-12 (an absence tag at the end of the function).
 > routes through is installed on BOTH roles by ASimulationManagerUImpl::BeginPlay.
 
 Verified: `ASimulationManagerUImpl::BeginPlay` calls `ogblog::setGlobal` in both its authority and
-its client branch. The sink is one process-global, so in a single-process PIE the last manager
+its client branch. *Since og-ue-simulationcomponentandmanagersplit task 27b* the call is the brawler's hook
+`BrawlerSessionGameUImpl::installGameLoggers`, which the session's `beginPlay` calls in both branches, from
+`ASimulationManagerUImpl::BeginPlay`. The sink is one process-global, so in a single-process PIE the last manager
 to begin play owns it.
 
 > [ringout task 5] ⭐ CLIENT-SIDE ARRIVAL. There is no client-side WORK to do — the
@@ -656,7 +658,7 @@ The declaration's pre-task-25 prose, kept as history:
 **Correction (R0, task 25).** The id is no longer the component's `GetUniqueID()`, and the
 "component is missing" case no longer exists: the accessor reads `SimCharacterIdValue`. What is
 true today:
-* The authority assigns the id once, through `ASimulationManagerUImpl::allocateSimCharacterId`
+* The authority assigns the id once, through `BrawlerRosterUImpl::allocateSimCharacterId` (the manager's until og-ue-simulationcomponentandmanagersplit task 23)
   (count-up 1..255, never reused; see `SimCharacterId-guards.md` G-01), and
   `USimmableUpdateComponent::tryRegisterWithNewFramework` writes it here with
   `SetAuthoritativeSimCharacterId`. Its three `checkf`s enforce authority-only,

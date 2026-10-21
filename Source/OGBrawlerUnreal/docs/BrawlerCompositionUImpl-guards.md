@@ -8,8 +8,9 @@ reasoning lives in `BrawlerCompositionUImpl-rationale.md`.
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The detection-before-routing order of `SystemsExec` is a `static_assert` in the header and needs no
-entry; so is the identity of the manager's `ManagerType` with `BrawlerCompositionUImpl::Manager`, which
-`SimulationManagerUImpl.h` asserts in `compositionContractsHold()` (rationale §3).
+entry; so is the identity of the session's manager type with the manager the tick-driver binding names (both
+`BrawlerCompositionUImpl::Manager`), which `UESimulationSession.h` asserts in its `compositionContractsHold()` since
+og-ue-simulationcomponentandmanagersplit task 24a (`SimulationManagerUImpl.h` until then; rationale §3).
 
 ---
 

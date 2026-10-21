@@ -14,8 +14,10 @@
 #include "OGBrawler/BrawlerInputHistoryVisualizationPoll.h"
 
 class APlayerController;
-class ASimulationManagerUImpl;
+class BrawlerInputHistoryFeedUImpl;
 class UWorld;
+struct BrawlerSessionTraitsUImpl;
+template <typename TraitsT> class UESimulationSession;
 
 namespace inputHistoryVisualizationUImpl
 {
@@ -52,10 +54,10 @@ std::optional<unsigned int> firstLocalCharacterId(const UWorld* world);
 
 bool nearestStackEnabled();
 
-std::optional<unsigned int> nearestCharacterIdTo(const ASimulationManagerUImpl* manager,
-                                                 unsigned int                   localId,
-                                                 std::optional<unsigned int>    previousChoice,
-                                                 float&                         outDistanceCm);
+std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUImpl* feed,
+                                                 unsigned int                        localId,
+                                                 std::optional<unsigned int>         previousChoice,
+                                                 float&                              outDistanceCm);
 
 template <typename SimulatableT, typename ReconciliationT>
 class ReconciliationSlotReader
@@ -193,3 +195,53 @@ private:
 };
 
 } // namespace inputHistoryVisualizationUImpl
+
+class BrawlerInputHistoryFeedUImpl
+{
+public:
+	using Session = UESimulationSession<BrawlerSessionTraitsUImpl>;
+
+	explicit BrawlerInputHistoryFeedUImpl(const Session& session) : m_session(session) {}
+
+	void pollInputHistory(unsigned int id, uint32 newestTick, float deadzone);
+
+	const brawlerInputHistoryVisualization::InputHistoryRowRing* getInputHistoryRows(
+		unsigned int id) const
+	{
+		return m_inputHistory.findRows(id);
+	}
+
+	void pollInputHistoryLanes(unsigned int id, uint32 liveTick, DAttackState machineState,
+		std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput,
+		bool pauseWhileIdle, bool includeDelay);
+
+	brawlerInputHistoryVisualization::RelayReadReadout getRelayReadReadout(unsigned int id) const;
+
+	void gatherNearestCandidates(
+		brawlerInputHistoryVisualization::NearestCharacterCandidateList& out) const;
+
+	const brawlerInputHistoryVisualization::InputHistoryTickLanes* getInputHistoryLanes(
+		unsigned int id) const
+	{
+		return m_inputHistory.findLanes(id);
+	}
+
+	void forgetCharacter(unsigned int id) { m_inputHistory.forgetCharacter(id); }
+
+private:
+	const Session& m_session;
+
+	static_assert(std::is_const_v<std::remove_reference_t<decltype(m_session)>>,
+		"BrawlerInputHistoryFeedUImpl reads production state through a CONST reference to the session only - the "
+		"manager, the storage, the reconciliation, the local and relayed input diagnostics, the tier consumer and the "
+		"effective input delay through the session's const reads - and mutates nothing but its own store. A mutable "
+		"reference here would be a write door from a diagnostic display into the session's mutable doors (editStorage, "
+		"editServerClock, editReconciliation, the visualization query, the effective-delay publish) and, through "
+		"owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
+		"og-ue-simulationcomponentandmanagersplit task 22, when the input-history feeds left ASimulationManagerUImpl, "
+		"on a const reference to the owner (its friend then); re-targeted to the session by task 24b; the tier consumer "
+		"and the effective delay are the session's own const reads since task 25 (read through its const owner() "
+		"before).");
+
+	inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
+};
