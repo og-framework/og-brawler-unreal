@@ -4,7 +4,7 @@
 <!-- lint-external-ref: AHUD::DrawRect -- the engine's own HUD rectangle call; owned by the host engine, not by this repository, and must not resolve here -->
 <!-- lint-external-ref: UEngine::GetSmallFont -- the engine's own fixed-size debug font; owned by the host engine, not by this repository, and must not resolve here -->
 <!-- lint-external-ref: TActorIterator -- the engine's own actor iteration template; owned by the host engine, not by this repository, and must not resolve here -->
-<!-- lint-external-ref: getRingoutVizState -- retired name: became ASimulationManagerUImpl::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in §2.4 -->
+<!-- lint-external-ref: getRingoutVizState -- retired name: became AOGBrawlerSimulationManager::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in §2.4 -->
 
 # The ring-out scoreboard — rationale
 
@@ -39,7 +39,7 @@ not settle it. Two things do:
   `og-brawler` submodule does not contain**: three console variables registered in
   `Source/OGBrawlerUnreal`, a join across a UE actor and a UE-side manager, and a draw
   method on `AOGBrawlerUEHUD`. `Source/OGBrawlerUnreal/docs` also already holds this
-  initiative's other rationale (`SimulationManagerUImpl-rationale.md`, whose §1 carries the
+  initiative's other rationale (`OGBrawlerSimulationManager-rationale.md`, whose §1 carries the
   score push's threading argument) and the sibling display's. One feature, one tier.
 
 ⚠ **So the two documents overlap, and the overlap is load-bearing rather than accidental.**
@@ -157,7 +157,7 @@ read of live simulation state, so the accessor deliberately offers no route to o
 
 ⛔ The accessor returns **by value and `const`**. The slice is five bytes of plain data;
 returning a reference would hand a drawing surface a pointer into live storage for as long
-as it cared to keep it. Together with the `const ASimulationManagerUImpl*` the HUD holds, whose `session()` is then
+as it cared to keep it. Together with the `const AOGBrawlerSimulationManager*` the HUD holds, whose `session()` is then
 the const one, "the scoreboard writes no simulation state" is a compile error to break rather than a
 promise made in a comment: the `static_assert` on the instantiation's signature sits in
 `ScoreboardVisualizationUImpl.cpp`, beside the call (since task 22; after the manager class before; on the session's
@@ -240,8 +240,8 @@ shows `OUT 0` for that frame rather than a wrapped number.
 
 Two opposing disciplines coexist in this project, and the reasoning is written at both
 sites so neither can be "fixed" in isolation. The original statement is in
-`SimmableUpdateComponent-rationale.md` §10 (the movement debug draw), guarded at the master
-switch's site by G-26 of `SimmableUpdateComponent-guards.md`.
+`OGBrawlerSimulatableComponent-rationale.md` §10 (the movement debug draw), guarded at the master
+switch's site by G-26 of `OGBrawlerSimulatableComponent-guards.md`.
 
 * A **`StaticData`** CVar is read **once, at construction**, so a tunable cannot move under
   a running session and put two peers on different numbers. ⛔ **Nothing simulated is read
@@ -421,7 +421,7 @@ this panel has two right-aligned columns rather than one.
 ### 6.0 ⭐⭐ Column one is a colour swatch, and what it does when a fighter dies
 
 **User request, 2026-09-13, from playing the mode.** The column used to print
-`characterId` — a number like `42353`, which is the `USimmableUpdateComponent`'s unique id.
+`characterId` — a number like `42353`, which is the `UOGBrawlerSimulatableComponent`'s unique id.
 It is the correct key and it is unreadable: nothing on screen carries that number, so a
 player could not connect a row to a body. Every brawler already wears a unique tint, so the
 column now draws that tint and the player reads the row the way they read the fight.

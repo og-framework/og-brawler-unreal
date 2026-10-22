@@ -20,10 +20,10 @@ template takes it as `TraitsT` and names every brawler type through it, so the p
 It holds types only: no data, no function and no behaviour. Since task 24a one `static_assert` follows it (§2). The behaviour a template needs from the game is
 `BrawlerSessionGameUImpl`'s static hooks, named here as `Game`.
 
-Three templates read it: the session, `UESimulationSession<BrawlerSessionTraitsUImpl>`, which `ASimulationManagerUImpl`
+Three templates read it: the session, `UESimulationSession<BrawlerSessionTraitsUImpl>`, which `AOGBrawlerSimulationManager`
 holds as `m_session` (task 24a; `UESimulationSession-rationale.md`, in OGSimulationUnreal's docs); the session's latency
 member, `UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>` (task 19a; the actor's member until task 24a); and the
-brawler component's binding base, `UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>`
+brawler component's binding base, `UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>`
 (task 21; `UESimulatableOwnerBinding-rationale.md` §2, in OGSimulationUnreal's docs). The initiative's later tasks add the
 members the rest of the session needs; the design lists the full set.
 
@@ -34,12 +34,12 @@ members the rest of the session needs; the design lists the full set.
 | member | brawler type | read by |
 |---|---|---|
 | `Simulatable` | `SimulatableBrawler` | the latency template: the storage walks and the two input-resolution reads. The binding: the reception coordinator's `receiveInputBundle` |
-| `PlayerInput` | `simulatableBrawler::PlayerInput` | the latency template: the input provider's result type; `ASimulationManagerUImpl` asserts that the template's provider type is its own `BrawlerInputProviderFn`. The binding: the bundle and ring element type, the send queue, the remote-move callback and the stage |
+| `PlayerInput` | `simulatableBrawler::PlayerInput` | the latency template: the input provider's result type; `AOGBrawlerSimulationManager` asserts that the template's provider type is its own `BrawlerInputProviderFn`. The binding: the bundle and ring element type, the send queue, the remote-move callback and the stage |
 | `State` | `simulatableBrawler::State` | the binding: the typed peek of an accepted correction (`onCorrectionStateAccepted`). Added by task 21 |
-| `Component` | `USimmableUpdateComponent` | the latency template: the registering component and the delayed-input map's element. The session: that map's element and the two reception sinks' target, since task 26a |
+| `Component` | `UOGBrawlerSimulatableComponent` | the latency template: the registering component and the delayed-input map's element. The session: that map's element and the two reception sinks' target, since task 26a |
 | `Character` | `AOGBrawlerUECharacter` | no template yet. Added by task 21 with `State`, as the design's component list names it; its first reader will be the session template's relay-host hook, in a later task of og-ue-simulationcomponentandmanagersplit |
 | `StaticData` | `simulatableBrawler::StaticData` | the session: the type of `m_staticData`. Added by task 24a |
-| `SessionOwner` | `ASimulationManagerUImpl` | the session: its owner reference, `owner()`, and its friend line (until task 28: task 27b's finding F27b-1, the registration still reads private members). The latency template: its `instanceFor`, its `editLatencyBudgetDiagnostics()` (the actor's, which forwards to the session's), and, until task 26a, `m_delayedInputComponentsById`, read through the session's `owner()` (the session's own since); the actor befriended the template (`template <typename TraitsT> friend class UELatencyBudgetDiagnostics;`) until task 27b deleted the line, which no read needed since task 26a. The binding: `instanceFor` and `session()` on the authority, both public, and through the session its `getReceptionCoordinator` and `getServerReceptionTick` and the session as both sinks (the actor's own until task 26a). Since task 25 the actor's `instanceFor` forwards to the session's registry and returns the registered session's owner |
+| `SessionOwner` | `AOGBrawlerSimulationManager` | the session: its owner reference, `owner()`, and its friend line (until task 28: task 27b's finding F27b-1, the registration still reads private members). The latency template: its `instanceFor`, its `editLatencyBudgetDiagnostics()` (the actor's, which forwards to the session's), and, until task 26a, `m_delayedInputComponentsById`, read through the session's `owner()` (the session's own since); the actor befriended the template (`template <typename TraitsT> friend class UELatencyBudgetDiagnostics;`) until task 27b deleted the line, which no read needed since task 26a. The binding: `instanceFor` and `session()` on the authority, both public, and through the session its `getReceptionCoordinator` and `getServerReceptionTick` and the session as both sinks (the actor's own until task 26a). Since task 25 the actor's `instanceFor` forwards to the session's registry and returns the registered session's owner |
 | `Game` | `BrawlerSessionGameUImpl` | the two input-sample hooks; the session's `m_game` reference and its `makeStaticData()` (task 24a); `afterVisualization` (task 27a); the six start-up hooks of the session's `beginPlay`, two of them called on `m_game` (task 27b) |
 | `Composition` | `BrawlerCompositionUImpl` | the session: its storage, peers, systems executor, integration layer and manager types. Added by task 24a |
 | `NetConfig` | `UEBrawlerNetConfig` | no template yet; the session's dt check will read it (a later task). Added by task 24a, as the design's list names it |
@@ -55,7 +55,7 @@ through `owner()` (`UESimulationSession-rationale.md` §4). The latency member m
 **The `PhysicsBackendHost` assertion.** After the struct, the header asserts that `Backend<UESimulationSession<
 BrawlerSessionTraitsUImpl>>`, the type the session holds as `m_backend`, models the brawler concept `PhysicsBackendHost`
 (`PhysicsBackendHostUImpl-rationale.md` §2). The concept is the brawler's, so the MPL session cannot name it; the row
-was `ASimulationManagerUImpl::compositionContractsHold`'s until task 24a.
+was `AOGBrawlerSimulationManager::compositionContractsHold`'s until task 24a.
 
 ---
 

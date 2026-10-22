@@ -7,8 +7,8 @@ pre-diet cap and its id set, the ring-out spawn-point seed and the score push. E
 `⛔G-nn` tag at the line where the wrong edit would be typed. The reasoning behind them lives in
 `BrawlerRosterUImpl-rationale.md`.
 
-All five moved in from `SimulationManagerUImpl-guards.md` with the code, when og-ue-simulationcomponentandmanagersplit
-task 23 (2026-10-21) moved the roster out of `ASimulationManagerUImpl`. They keep that file's format (the fence or
+All five moved in from `OGBrawlerSimulationManager-guards.md` with the code, when og-ue-simulationcomponentandmanagersplit
+task 23 (2026-10-21) moved the roster out of `AOGBrawlerSimulationManager`. They keep that file's format (the fence or
 prohibition verbatim, then what breaks), with their site and cross-references updated and one R0 line each from task 23.
 
 | here | site | was, in the manager's guards |
@@ -27,13 +27,13 @@ number is spent.
 
 ## G-01 — `seedSpawnPointsFromLevel` is a DELIBERATE post-construction write of `StaticData`
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-14 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-14 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
 with the code; the text is that entry's, with its site and cross-references updated. Until then the function was the
 manager's private `seedRingoutSpawnPointsFromLevel`, taking only the world.
 
 **Tag site:** `BrawlerRosterUImpl.h`, directly above the declaration of `seedSpawnPointsFromLevel`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 902-922 at b9f6d81 -->
 ```
@@ -62,9 +62,9 @@ manager's private `seedRingoutSpawnPointsFromLevel`, taking only the world.
 
 **What breaks if the edit is made.** The obvious "proper" fix — pass the level's spawn points to `m_staticData`'s constructor — cannot work: `m_staticData` is built by a default member initializer during actor construction, and `APlayerStart` actors are not reachable until `BeginPlay`. The property this write must not break is that no TICK ever sees `StaticData` change — a value two peers can disagree about, and a resim can replay against, mid-session — and the two `checkf`s at the definition hold that mechanically: the seed runs at most once, and only while neither `m_integrationLayer` nor `m_manager` exists. Deleting this declaration to "fix" the exception deletes this tag and fails the gate, which is the point of the tag's position.
 
-⚠ **R0, task 11 — two positional words in the fence are wrong.** *"The banner above states StaticData as constructed once and never moved"*: no banner above this declaration says that; the statement stood at `m_staticData`, BELOW it. *"`readMovementStaticDataCVars()` above"*: that declaration is BELOW this one too. (`SimulationManagerUImpl-rationale.md` §11 C12.) Since task 23 neither member is in this class at all; both stay in `ASimulationManagerUImpl`.
+⚠ **R0, task 11 — two positional words in the fence are wrong.** *"The banner above states StaticData as constructed once and never moved"*: no banner above this declaration says that; the statement stood at `m_staticData`, BELOW it. *"`readMovementStaticDataCVars()` above"*: that declaration is BELOW this one too. (`OGBrawlerSimulationManager-rationale.md` §11 C12.) Since task 23 neither member is in this class at all; both stay in `AOGBrawlerSimulationManager`.
 
-⛔ **R0, corrected after task 12's review — the fence's first sentence also MISATTRIBUTES (`SimulationManagerUImpl-rationale.md` §11 C19).** *"What that discipline actually protects is that NO TICK EVER SEES IT CHANGE"*: the construct-once, never-copied-or-moved discipline protects `StaticData`'s **internal sibling references**, and it does not forbid a write — `StaticData` deletes copy and move, not assignment to its members. "No tick sees it change" is a separate, true property, and it is what the `checkf`s hold.
+⛔ **R0, corrected after task 12's review — the fence's first sentence also MISATTRIBUTES (`OGBrawlerSimulationManager-rationale.md` §11 C19).** *"What that discipline actually protects is that NO TICK EVER SEES IT CHANGE"*: the construct-once, never-copied-or-moved discipline protects `StaticData`'s **internal sibling references**, and it does not forbid a write — `StaticData` deletes copy and move, not assignment to its members. "No tick sees it change" is a separate, true property, and it is what the `checkf`s hold.
 
 ⚠ **R0, task 23 — "the `checkf`s at the definition hold that, mechanically" now needs the caller's half.** The roster
 holds no reference to the actor (review m-16), so the second `checkf` reads its `compositionExists` parameter. `BeginPlay`
@@ -78,14 +78,14 @@ actor's construction (the sentence two paragraphs up holds); the integration exe
 to it (`SimulationIntegrationExecutor.h`), and the eight `Ringout.SpawnPoints.*` cases exist in
 `BrawlerRingoutSimulationTest.cpp`. *R0, task 27b rework 1:* re-verified against code: the session's initializer and the
 actor's `m_session` member; the executor's `const StaticDataT& m_staticData` member; eight `Ringout.SpawnPoints.*`
-`TEST_CASE`s. Until this rework the sentence said the initializer was `ASimulationManagerUImpl`'s (false since task 24a). That `APlayerStart` actors are unreachable at actor construction is
+`TEST_CASE`s. Until this rework the sentence said the initializer was `AOGBrawlerSimulationManager`'s (false since task 24a). That `APlayerStart` actors are unreachable at actor construction is
 engine behaviour and was not re-measured.
 
 ---
 
 ## G-02 — a refused `SimCharacterId` allocation is final: never wrap, reset or fall back to another id source
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-78 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-78 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
 with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `if (simId == SimCharacterId::None)` in `BrawlerRosterUImpl::allocateSimCharacterId`.
@@ -114,7 +114,7 @@ error, but a fallback typed in this branch compiles. Deleting the branch takes t
 orphans this entry.
 
 ⚠ **R0, task 23.** "255 ids issued by this manager" is still true: the allocator is a member of this roster, and the
-roster is a member of `ASimulationManagerUImpl`, so its lifetime is the manager's (`SimulationManagerUImpl-rationale.md`
+roster is a member of `AOGBrawlerSimulationManager`, so its lifetime is the manager's (`OGBrawlerSimulationManager-rationale.md`
 §15). Verified: `SimCharacterIdAllocator::kLastAssignable` is the `uint8_t` maximum, 255, and `SimCharacterId::None` is 0;
 the `static_assert` that the allocator is neither copyable nor assignable is in `SimCharacterId.h`; the six consumers
 listed above are the six bullets of that guard. ⚠ **"the planned hit ledger" is stale there and here**: that guard says the
@@ -125,11 +125,12 @@ ledger shipped (netcode task 27, `dAttackRadialSimulation::State::hitTargets`). 
 
 ## G-03 — the spawn slot is written through from `acquire`, never clamped and never derived per peer
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-67 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-67 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
 with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `ringoutIC.spawnSlot = m_spawnSlots.acquire(id);` in `BrawlerRosterUImpl::onBodiesCreated`, which
-`ASimulationManagerUImpl::tryRegister` calls on its first-call pass.
+`tryRegister` calls on its first-call pass (the actor's until og-ue-simulationcomponentandmanagersplit task 28; since then
+the session's, through the brawler's hook `BrawlerSessionGameUImpl::afterBodiesCreated`).
 
 **The prohibition, as it stood in the source:**
 
@@ -145,7 +146,7 @@ with the code; the text is that entry's, with its site and cross-references upda
 
 **Correction (R0).** No ⛔ banner remains on `brawlerRingout::SpawnSlotAllocator`. That header
 was converted, and the argument now lives in `BrawlerRingoutSimulation-rationale.md` §11a. See
-`SimulationManagerUImpl-rationale.md` §13.10, correction C13-9.
+`OGBrawlerSimulationManager-rationale.md` §13.10, correction C13-9.
 
 **Already partly enforced.** `kNoFreeSlot`'s *value* is pinned by a `static_assert` at its
 declaration. That assert says in its own message that it exists "instead of needing a second
@@ -161,11 +162,12 @@ written-through value on every session: the server logs `tryRegister: ring-out s
 
 ## G-04 — the pre-diet cap warns once per over-cap character, at `Warning`, and never asserts
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-68 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-68 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
 with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** the `if (isAuthority)` block of `BrawlerRosterUImpl::onRegistered` that inserts into `m_authorityRegisteredIds`
-(`tryRegister` calls it with `record.isAuthority`, at the statement position the block held).
+(`tryRegister` calls it with `record.isAuthority`, at the statement position the block held; since task 28 through the
+hook `BrawlerSessionGameUImpl::afterRegistered`).
 
 **The prohibition, as it stood in the source:**
 
@@ -178,7 +180,7 @@ with the code; the text is that entry's, with its site and cross-references upda
 **The consequence.** A latch stops reporting after the fifth character. An assert takes the
 server down mid-brawl.
 
-⚠ **R0, task 23.** The quote's `§10` is `SimulationManagerUImpl-rationale.md` §10, whose cap subsection is now this file's
+⚠ **R0, task 23.** The quote's `§10` is `OGBrawlerSimulationManager-rationale.md` §10, whose cap subsection is now this file's
 rationale, *The pre-diet character cap* (∴D-01 there). Its `§3` is the old source's own numbering and resolves to nothing
 in either rationale doc. *"Deleted with kPreDietCharacterCap by the diet"* describes the future: nothing owns that
 deletion today (og-netcode-v2-input-relay item 40 closed on 2026-10-03 without doing it). Verified: the line is a
@@ -189,12 +191,12 @@ has more than three characters.
 
 ## G-05 — unregistration releases the ring-out spawn slot, ungated
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-74 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-74 (og-ue-simulationcomponentandmanagersplit task 23, 2026-10-21),
 with the code; the text is that entry's, with its site and cross-references updated.
 
-**Site:** `m_spawnSlots.release(id);` in `BrawlerRosterUImpl::forgetCharacter`, which
-`ASimulationManagerUImpl::unregisterFromNewFramework` calls after the write probe's forget and before the
-input-history forget.
+**Site:** `m_spawnSlots.release(id);` in `BrawlerRosterUImpl::forgetCharacter`, which `unregisterFromNewFramework` calls
+after the write probe's forget and before the input-history forget (the actor's until og-ue-simulationcomponentandmanagersplit
+task 28; since then the session's, through the brawler's hook `BrawlerSessionGameUImpl::onUnregistered`).
 
 **The prohibition, as it stood in the source:**
 

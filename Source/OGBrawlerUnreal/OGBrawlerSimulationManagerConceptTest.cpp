@@ -3,8 +3,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-// SimulationManagerUImpl.h pulls in all peer headers, adapter headers, and owner traits.
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+// OGBrawlerSimulationManager.h pulls in all peer headers, adapter headers, and owner traits.
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 
 // ---------------------------------------------------------------------------
 // Compile-time concept checks
@@ -13,7 +13,7 @@
 static_assert(SimulationManagerOwnerConcept<UESimulationSession<BrawlerSessionTraitsUImpl>>,
     "UESimulationSession<BrawlerSessionTraitsUImpl> must satisfy SimulationManagerOwnerConcept: the session holds the "
     "timing relay's buffer and the timing callback since og-ue-simulationcomponentandmanagersplit task 25, which "
-    "moved them off ASimulationManagerUImpl");
+    "moved them off AOGBrawlerSimulationManager");
 
 static_assert(
     SimulationNetSyncConcept<
@@ -45,11 +45,11 @@ static_assert(
 // Runtime placeholder — concept checks are compile-time only
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FSimulationManagerUImplConceptTest,
-    "OGBrawlerUnreal.SimulationManagerUImpl.ConceptSatisfied",
+    FOGBrawlerSimulationManagerConceptTest,
+    "OGBrawlerUnreal.OGBrawlerSimulationManager.ConceptSatisfied",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FSimulationManagerUImplConceptTest::RunTest(const FString& Parameters)
+bool FOGBrawlerSimulationManagerConceptTest::RunTest(const FString& Parameters)
 {
     TestTrue(TEXT("SimulationManagerOwnerConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationNetSyncConcept satisfied at compile time"), true);

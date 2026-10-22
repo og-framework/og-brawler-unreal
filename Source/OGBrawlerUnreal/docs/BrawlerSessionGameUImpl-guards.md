@@ -33,7 +33,7 @@ tag still marks the one place the wrong edit (`return PlayerInput{};`) is typed.
 roles, so the guarded value now reaches the authority's neutral input as well as the client's (it did before the move: both
 branches called `getZeroPlayerInput()`; the tag sat on the client's).
 
-*Moved from `SimulationManagerUImpl-guards.md` G-60 (its task 12 conversion) by og-ue-simulationcomponentandmanagersplit task 27b. Ruling Q-J: it guards the
+*Moved from `OGBrawlerSimulationManager-guards.md` G-60 (its task 12 conversion) by og-ue-simulationcomponentandmanagersplit task 27b. Ruling Q-J: it guards the
 value, not the sequence, so it stays BUSL with the hook body; the sequence's guard on the authority call is
 `UESimulationSession-guards.md` G-23 (OGSimulationUnreal).*
 

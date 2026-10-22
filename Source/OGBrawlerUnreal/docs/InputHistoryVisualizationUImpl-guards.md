@@ -8,7 +8,7 @@ These are the prohibitions left after the comment conversion of the two files (o
 2026-09-26). Each one is reached by a one-line `⛔G-nn` tag at the line where the wrong edit would be typed.
 The reasoning behind them lives in `InputHistoryDisplay-rationale.md`, and §8 of that document covers this pair.
 Each entry opens with the text the source carried, verbatim, then says what the conversion verified or corrected.
-G-09 to G-17 moved in from `SimulationManagerUImpl-guards.md` (its G-05 to G-13) with the input-history feeds, which
+G-09 to G-17 moved in from `OGBrawlerSimulationManager-guards.md` (its G-05 to G-13) with the input-history feeds, which
 og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21) moved into `BrawlerInputHistoryFeedUImpl` in these two
 files. They keep that file's format: the fence verbatim, what breaks, and the R0 line task 22 added.
 
@@ -50,7 +50,7 @@ nearest stack, and it never writes `relayHealth` itself.
 > alone still needs the lane poll that feeds it.
 
 **Consequence.** Passing `false` here makes a session with only `OGBrawler.InputHistoryRelayHealth` on report "no bar".
-`USimmableUpdateComponent::TickComponent` gates the lane poll on `anyBarEnabled()` (`feedAnyBar`), and
+`UOGBrawlerSimulatableComponent::TickComponent` gates the lane poll on `anyBarEnabled()` (`feedAnyBar`), and
 `AOGBrawlerUEHUD::DrawHUD` gates the whole frame-meter branch on it. So the relay-health bar would never be fed and
 never drawn.
 
@@ -95,7 +95,9 @@ five, or adding a new toggle accessor without it, is typed elsewhere in the same
 > ONE key for both stores, so nothing can survive an unregister the other honoured.
 
 **Consequence.** Splitting the rows and the lanes into two maps opens a second erase that `forgetCharacter` must
-remember. The manager calls the feed's `forgetCharacter(id)` once, in `unregisterFromNewFramework`, and the feed
+remember. The unregistration calls the feed's `forgetCharacter(id)` once (the manager's `unregisterFromNewFramework` until
+og-ue-simulationcomponentandmanagersplit task 28; since then the brawler's hook `BrawlerSessionGameUImpl::onUnregistered`,
+from the session's `unregisterFromNewFramework`), and the feed
 forwards it to `m_inputHistory.forgetCharacter(id)` (task 22; the manager erased the store directly before). A store the
 erase misses keeps a ring keyed on a character that has gone. Since task 25, character ids are never reused within
 an authority manager's lifetime, so that entry is a pure leak rather than a collision.
@@ -130,10 +132,11 @@ header would then print a `d=` that does not belong to the character the stack f
 
 **Verified (R0).** `createCacheFor` is called only from `registerSimulatable`, and `removeCacheFor` only from
 `unregisterSimulatableContainers`, through the `unregisterSimulatable` facade. Both are reached from
-`ASimulationManagerUImpl::tryRegister` / `unregisterFromNewFramework` on the game thread. The reader is called from
-the lane poll, which `USimmableUpdateComponent::TickComponent` runs on the game thread. The manager's own side of
+`tryRegister` / `unregisterFromNewFramework` on the game thread (the actor's until og-ue-simulationcomponentandmanagersplit
+task 28, the session's since). The reader is called from
+the lane poll, which `UOGBrawlerSimulatableComponent::TickComponent` runs on the game thread. The manager's own side of
 this argument is in `InputHistoryDisplay-rationale.md` §8.6 ("The presence test crosses nothing either"), which task 22
-moved there from `SimulationManagerUImpl-rationale.md` §1 with the feed.
+moved there from `OGBrawlerSimulationManager-rationale.md` §1 with the feed.
 
 **Consequence.** Turning this into a read *through* the found cache (its states or inputs) is a game-thread read of
 physics-thread-written slots. That is a crossing this reader was argued free of.
@@ -171,7 +174,7 @@ HUD would stack the same panel. It also moves the row panel's selection to a dif
 > THE MASTER GATE -- `OGBrawler.InputHistory`, DEFAULT OFF. Read ALONE, once, by the
 > poll's early-out; every accessor below also folds it in, so no call site can forget it.
 
-**Consequence.** `USimmableUpdateComponent::TickComponent`'s input-history block returns on `!masterEnabled()` before
+**Consequence.** `UOGBrawlerSimulatableComponent::TickComponent`'s input-history block returns on `!masterEnabled()` before
 it reads any child. Folding a child in here (for example `GInputHistory && GInputHistoryDisplay`) makes that early-out
 fire whenever the row panel is off. The lane poll behind it would then never run for a session that wants only the
 bars. The second half of the quoted sentence is corrected under G-03.
@@ -180,11 +183,11 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 ## G-09 — The prediction-offset read keeps its `runsPrediction()` guard
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-05 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-05 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the `(m_session.getManager().has_value() && m_session.getManager()->runsPrediction())` predicate of `predictionOffsetTicks` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 549-549 at b9f6d81 -->
 ```
@@ -199,11 +202,11 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 ## G-10 — Local control is the CAPTURE-LINE test, never a role test
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-06 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-06 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `const bool isLocallyControlled = m_session.isLocallyControlledOnThisPeer(id);` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 569-571 at b9f6d81 -->
 ```
@@ -220,11 +223,11 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 ## G-11 — The tier decomposition is drawn only for a LOCALLY controlled character
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-07 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-07 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the `(includeDelay && isLocallyControlled ...` predicate of `delay` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 574-575 at b9f6d81 -->
 ```
@@ -240,11 +243,11 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 ## G-12 — The clock reading keeps its `runsPrediction()` guard
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-08 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-08 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `if (m_session.getManager().has_value() && m_session.getManager()->runsPrediction())` around the `ClockDriftReading` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 588-588 at b9f6d81 -->
 ```
@@ -259,11 +262,11 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 ## G-13 — Each event counter is read BEFORE its tick
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-09 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-09 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the first of the seven `predictionClock.getDiagnostics()` reads in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes` (`reading.skipCount`).
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 606-606 at b9f6d81 -->
 ```
@@ -282,11 +285,11 @@ The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes n
 
 ## G-14 — The relay-health window is `TimeConfig::rollbackWindowTicks`, not the per-tier ceiling
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-10 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-10 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the `(m_session.getManager().has_value() && m_session.getManager()->getTimeConfig().rollbackWindowTicks > 0)` predicate of `rollbackWindowTicks` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 633-637 at b9f6d81 -->
 ```
@@ -305,11 +308,11 @@ The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes n
 
 ## G-15 — The relay-health bar is NOT gated on `includeDelay`
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-11 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-11 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `if (relayedReads != nullptr && relayedArrivals != nullptr)` in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 647-650 at b9f6d81 -->
 ```
@@ -327,11 +330,11 @@ The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes n
 
 ## G-16 — The readout's `dLatest` stamp comes from the NEWEST observation by tick, never the last slot visited
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-12 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-12 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `if (!anyObservation || observation->simTick > newestSimTick)` in `BrawlerInputHistoryFeedUImpl::getRelayReadReadout`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 716-718 at b9f6d81 -->
 ```
@@ -348,11 +351,11 @@ The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes n
 
 ## G-17 — The nearest-character gather reads the VIZ snapshot, never live state
 
-**Moved from** `SimulationManagerUImpl-guards.md` G-13 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-13 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
 
 **Site:** `InputHistoryVisualizationUImpl.cpp`, directly above `const auto& movement = simulatable.getVizState().getState()...` inside `BrawlerInputHistoryFeedUImpl::gatherNearestCandidates`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 736-738 at b9f6d81 -->
 ```
@@ -361,7 +364,7 @@ The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes n
 // ⛔ READ OFF THE VIZ SNAPSHOT, NOT `getAllState()` -- the ring-out slice's reason. §1
 ```
 
-**What breaks if the edit is made.** Same reason as `SimulationManagerUImpl-guards.md` G-04 (the scoreboard's slice read), at a second site: `getVizState()` is the copy taken by `updateVisualizationAll`, and reading the live composite from a per-frame HUD gather would be a new game-thread read of physics-written state that no crossing argument covers.
+**What breaks if the edit is made.** Same reason as `OGBrawlerSimulationManager-guards.md` G-04 (the scoreboard's slice read), at a second site: `getVizState()` is the copy taken by `updateVisualizationAll`, and reading the live composite from a per-frame HUD gather would be a new game-thread read of physics-written state that no crossing argument covers.
 
 **Verified (R0, task 22).** The gather reads `getVizState()` inside `forEachSimulatable` on the manager's `const` storage; `getAllState()` is the live composite.
 

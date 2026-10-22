@@ -5,8 +5,8 @@
 #include "BrawlerJoltBindingUImpl.h"
 
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGSimulation/CompilerControl.h"
 #include "OGBrawler/BrawlerMovementSimulation.h"
 #include "OGBrawler/CollisionCategoryConstants.h"

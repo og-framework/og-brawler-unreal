@@ -1,15 +1,16 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: SimulationManagerUImpl.h -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager.h; kept in retired G-18's quoted last text -->
 <!-- lint-external-ref: writesThisFrame -- a term in the stated ceiling formula (G-17), not a declared identifier -->
 <!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
-<!-- lint-external-ref: getRingoutVizState -- retired name: became ASimulationManagerUImpl::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in the closed census -->
+<!-- lint-external-ref: getRingoutVizState -- retired name: became AOGBrawlerSimulationManager::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in the closed census -->
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: folded into BrawlerSessionGameUImpl::makeStaticData by og-ue-simulationcomponentandmanagersplit task 24a; historical mention in the closed census -->
-<!-- lint-external-ref: BrawlerNetSync -- retired alias: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a (the session names the composition's NetSync); quoted text of retired G-18 -->
-<!-- lint-external-ref: BrawlerSimulatables -- retired alias: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a; quoted text of retired G-18 -->
-# `SimulationManagerUImpl.h` and `.cpp` — guards
+<!-- lint-external-ref: BrawlerNetSync -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a (the session names the composition's NetSync); quoted text of retired G-18 -->
+<!-- lint-external-ref: BrawlerSimulatables -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; quoted text of retired G-18 -->
+# `OGBrawlerSimulationManager.h` and `.cpp` — guards
 
 Every prohibition that survived the triage of the header (task 11, ids G-01..G-49) and of the
 implementation file (task 12, ids G-50 onward). Each entry has an **opaque, stable id**; in the
-source a single line `// ⛔G-nn  docs/SimulationManagerUImpl-guards.md` sits directly above the
+source a single line `// ⛔G-nn  docs/OGBrawlerSimulationManager-guards.md` sits directly above the
 statement or declaration where the forbidden edit would be typed.
 
 **If this file and the source disagree, the source is authoritative and this file is stale.** Fix
@@ -25,7 +26,7 @@ duplicated, and no retired id reappears as a tag. ⚠ It checks that an entry EX
 checks that this text is TRUE.
 
 ⛔ **Nothing in this file is a rationale.** Orientation, provenance and derivations live in
-`SimulationManagerUImpl-rationale.md`, and the header's full pre-conversion comment text is carried
+`OGBrawlerSimulationManager-rationale.md`, and the header's full pre-conversion comment text is carried
 there, verbatim, in §12. A guard here is a prohibition, the fence that stated it, and what breaks.
 
 ⚠ **This file is not the source of truth for any VALUE.** Where a number appears below it makes an
@@ -90,12 +91,18 @@ below this line with the task that added it; it is not folded into the table abo
   statements became the six phase hooks of `BrawlerSessionGameUImpl`; the successors of G-50 and G-59 are
   `UESimulationSession-guards.md` G-22 and G-23, and G-60's is `BrawlerSessionGameUImpl-guards.md` G-01 (it stays BUSL with
   the hook `neutralInput()`, ruling Q-J). This class's `BeginPlay` is now `Super`, then `m_session.beginPlay()`. See §R.
+* **G-69, G-73** — retired by og-ue-simulationcomponentandmanagersplit task 28, 2026-10-21, when the registration sequences
+  (`tryRegister` and `unregisterFromNewFramework`, with `PendingRegistration` and `TryRegisterStatus`) moved into
+  OGSimulationUnreal's `UESimulationSession`, and their brawler statements became the four registration hooks of
+  `BrawlerSessionGameUImpl` (`rootBodyId`, `afterBodiesCreated`, `afterRegistered`, `onUnregistered`); their successors are
+  `UESimulationSession-guards.md` G-25 and G-26. This class keeps the `SimCharacterId` wrappers (the `None` check and
+  `toStorageKey`), which call the session's sequences. Since then `OGBrawlerSimulationManager.cpp` carries no tag. See §R.
 
 ---
 
 ## G-01 — The input provider is HANDED the raw-capture history; it does not fetch it
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above the `using BrawlerInputProviderFn = std::function<...>` alias, whose second parameter is the history.
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above the `using BrawlerInputProviderFn = std::function<...>` alias, whose second parameter is the history.
 
 **The fence, verbatim — the bytes it occupied in the header before task 11:**
 
@@ -105,7 +112,7 @@ below this line with the task that added it; it is not folded into the table abo
 // ⛔ The raw-capture history is a PARAMETER: the sequence matcher runs inside the provider.
 ```
 
-**What breaks if the edit is made.** The one production provider — `USimmableUpdateComponent`'s, built only for a locally predicted character — is a lambda that captures the input component and the id and nothing else, and runs the sequence matcher over the `LocalInputCache` it is passed. The component's own fence at that lambda forbids capturing the manager. Drop the parameter and the matcher has to find the history for itself: by capturing something that can reach the resolution peer, and by looking the cache up by id instead of being handed it by the peer that owns it. The alias is named once so that its four users — this alias, `tryRegister`'s parameter, `PendingRegistration::inputProvider` and the component's local — cannot drift apart; they change together or not at all.
+**What breaks if the edit is made.** The one production provider — `UOGBrawlerSimulatableComponent`'s, built only for a locally predicted character — is a lambda that captures the input component and the id and nothing else, and runs the sequence matcher over the `LocalInputCache` it is passed. The component's own fence at that lambda forbids capturing the manager. Drop the parameter and the matcher has to find the history for itself: by capturing something that can reach the resolution peer, and by looking the cache up by id instead of being handed it by the peer that owns it. The alias is named once so that its users — this alias, this class's `tryRegister` parameter and the component's local — cannot drift apart; they change together or not at all. Since og-ue-simulationcomponentandmanagersplit task 28 the pending record and the session's `tryRegister` parameter hold the latency member's `InputProvider` (`UESimulationSession.h`), which this class's `compositionContractsHold` asserts is the same type (`std::is_same_v`), so a drift there fails to compile. *R0, task 28:* verified: `BrawlerInputProviderFn` is spelled in `OGBrawlerSimulationManager.h` (the alias, the `tryRegister` declaration and the `static_assert`), `OGBrawlerSimulationManager.cpp` (the `tryRegister` definition) and `OGBrawlerSimulatableComponent.cpp` (the component's local), and in no other code file. *Task 29:* the component's local is the binding's skeleton's now, typed as the latency member's `InputProvider`, and the component's hook `makeInputProvider` returns that type, which the binding's inline hook check requires; `BrawlerInputProviderFn` is spelled in the two `OGBrawlerSimulationManager` files only (re-verified by grep). The one production provider is built by that hook.
 
 ---
 
@@ -130,7 +137,7 @@ below this line with the task that added it; it is not folded into the table abo
 
 ---
 
-## Entries G-50 and up — `SimulationManagerUImpl.cpp`
+## Entries G-50 and up — `OGBrawlerSimulationManager.cpp`
 
 <!-- ================= DECLARED LINT ESCAPES — entries G-50 and up ==========
      Every token below is CORRECT and cannot resolve. ========================= -->
@@ -146,7 +153,7 @@ the quote is left exactly as it was.
 
 Six prohibitions this file used to state in prose are now compile-time or runtime checks, and
 seven more turned out to be enforced already by something else. None of those has an entry
-here. The list, and how each was seen to fail, is in `SimulationManagerUImpl-rationale.md` §13.9.
+here. The list, and how each was seen to fail, is in `OGBrawlerSimulationManager-rationale.md` §13.9.
 
 ---
 
@@ -190,25 +197,7 @@ here. The list, and how each was seen to fail, is in `SimulationManagerUImpl-rat
 *G-66 moved to `UESimulationSession-guards.md` as G-09 (og-ue-simulationcomponentandmanagersplit task 25), with the statement it marks. See §R.*
 ---
 
-## G-69 — the executor is notified only once the character is in storage
-
-**Site:** `m_manager->notifyCharacterRegistered(id);` in `tryRegister`.
-
-**The prohibition, as it stood in the source:**
-
-> Notify the executor: the character is IN STORAGE, so
-> brawlerHitRouting::System::onCharacterRegistered can index it and read capsuleBodyId. §10
->
-> ⛔ The notify and the drop of the adapter's m_byRootBodyId insert land TOGETHER.
-
-**A second dependant, which the source did not name here.** `brawlerRingout::ScoreSystem`'s
-roster is seeded by the same notify. The ring-out score push's `checkf` relies on that seed
-landing **before** `tryRegister` returns `Ready`, and so before the route entry the push walks
-exists. See `SimulationManagerUImpl-rationale.md` §1, *the second read crossing*.
-
-**The consequence.** A notify moved above `registerSimulatable` indexes a character that is not
-in storage. A notify moved after the `return` breaks the score push's no-rehash precondition.
-
+*G-69 moved to `UESimulationSession-guards.md` as G-25 (og-ue-simulationcomponentandmanagersplit task 28), with the call it marks: `tryRegister` became the session's own sequence. See §R.*
 ---
 
 *G-70 moved to `UESimulationSession-guards.md` as G-18 (og-ue-simulationcomponentandmanagersplit task 26b), with the test it marks, which moved with `onFrameStepsDue_GameThread` into the session. See §R.*
@@ -221,20 +210,7 @@ in storage. A notify moved after the `return` breaks the score push's no-rehash 
 *G-72 moved to `UESimulationSession-guards.md` as G-19 (og-ue-simulationcomponentandmanagersplit task 26b), with the call it marks, which moved with `onFrameStepsDue_GameThread` into the session. See §R.*
 ---
 
-## G-73 — unregistration notifies the executor before `unregisterSimulatable`, behind the `has<>` guard
-
-**Site:** `if (m_storage.has<SimulatableBrawler>(id))` at the top of `unregisterFromNewFramework`.
-
-**The prohibition, as it stood in the source:**
-
-> ⛔ Drop the routing entry BEFORE unregisterSimulatable destroys it, while still in storage. §10
->
-> ⛔ The has<> guard is preserved: an unregistered character's view.get<>(id) is unsafe.
-
-**The consequence.** A notify after the destroy lets the routing hook dereference a character
-that storage has already freed. Dropping the guard runs `view.get<>(id)` for a character that
-never finished registering.
-
+*G-73 moved to `UESimulationSession-guards.md` as G-26 (og-ue-simulationcomponentandmanagersplit task 28), with the test it marks: `unregisterFromNewFramework` became the session's own sequence. See §R.*
 ---
 
 *G-75 moved to `UESimulationSession-guards.md` as G-01 (og-ue-simulationcomponentandmanagersplit task 24a), with the declaration it marks. See §R.*
@@ -260,7 +236,7 @@ so they are recorded there, not here.)*
 
 ### G-18 — RETIRED by og-simulationscheduler-withjolt task 81 (2026-10-15): the alias chain moved to `BrawlerCompositionUImpl.h`
 
-**Was:** *"The simulatable-pack aliases are CLASS-scoped"*. Its tag sat in `SimulationManagerUImpl.h`, directly
+**Was:** *"The simulatable-pack aliases are CLASS-scoped"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly
 above the first alias of the chain, `using BrawlerSimulatables = SimulatableList<SimulatableBrawler>;`. The fence,
 verbatim — the bytes it occupied in the header before task 11:
 
@@ -286,177 +262,177 @@ The class now holds only one-line re-exports of the struct's members. **Successo
 
 ### G-02 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-01
 
-**Was:** *"`bodyName` stores a pointer to a STRING LITERAL, and only a string literal"*. Its tag sat in `SimulationManagerUImpl.h`, above `FRewindPushProbeStashedBody::bodyName`.
+**Was:** *"`bodyName` stores a pointer to a STRING LITERAL, and only a string literal"*. Its tag sat in `OGBrawlerSimulationManager.h`, above `FRewindPushProbeStashedBody::bodyName`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-01.
 
 ### G-51 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-02
 
-**Was:** *"the push-probe verdict read stays at the top of `OnPreSimulate_Internal`, and its `else` stays"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the push-probe verdict read at the top of `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`.
+**Was:** *"the push-probe verdict read stays at the top of `OnPreSimulate_Internal`, and its `else` stays"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above the push-probe verdict read at the top of `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-02.
 
 ### G-52 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-03
 
-**Was:** *"the push probe reads X/R, never P/Q"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the X/R reads in `readLiveBodyForPushProbe`.
+**Was:** *"the push probe reads X/R, never P/Q"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above the X/R reads in `readLiveBodyForPushProbe`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-03.
 
 ### G-53 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-04
 
-**Was:** *"the push probe compares with the production predicate, over the fields the body's wire shape carries"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `pushProbeFieldsSimilar`.
+**Was:** *"the push probe compares with the production predicate, over the fields the body's wire shape carries"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above `pushProbeFieldsSimilar`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-04.
 
 ### G-54 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-05
 
-**Was:** *"the push-probe verdict's denominator is `nonInert`, and `VACUOUS` is a third verdict"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `pushProbeVerdictText`.
+**Was:** *"the push-probe verdict's denominator is `nonInert`, and `VACUOUS` is a third verdict"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above `pushProbeVerdictText`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-05.
 
 ### G-55 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-06
 
-**Was:** *"`noteResimGrant` is recorded before `prepareResimulation`"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `noteResimGrant` call in `FirstPreResimStep_Internal`.
+**Was:** *"`noteResimGrant` is recorded before `prepareResimulation`"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above the `noteResimGrant` call in `FirstPreResimStep_Internal`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-06.
 
 ### G-71 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-07
 
-**Was:** *"the upcoming sim tick comes from the mapper, and the `+ 1` is derived"*. Its tag sat in `SimulationManagerUImpl.cpp`, above `firstUpcomingSimTick` in the Chaos configuration's input hook.
+**Was:** *"the upcoming sim tick comes from the mapper, and the `+ 1` is derived"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above `firstUpcomingSimTick` in the Chaos configuration's input hook.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-07.
 
 ### G-76 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-08
 
-**Was:** *"the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `writeRestoredBodyState` call in `FirstPreResimStep_Internal`.
+**Was:** *"the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above the `writeRestoredBodyState` call in `FirstPreResimStep_Internal`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-08.
 
 ### G-77 — RETIRED by og-simulationscheduler-withjolt task 82 (2026-10-15): moved to `ChaosTickBackendUImpl-guards.md` G-09
 
-**Was:** *"the restored-state write sets only the fields the body's wire shape carries"*. Its tag sat in `SimulationManagerUImpl.cpp`, above the `wireCarriesRotationAndSpin` branch of `writeRestoredBodyState`.
+**Was:** *"the restored-state write sets only the fields the body's wire shape carries"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, above the `wireCarriesRotationAndSpin` branch of `writeRestoredBodyState`.
 
 **Why it retired.** Its subject moved. Task 82 moved the Chaos host out of this class into ChaosBackendUImpl (historical name; `ChaosTickBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `ChaosTickBackendUImpl-guards.md` G-09.
 
 
 ### G-80 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-01
 
-**Was:** *"`EndPlay` waits for every outstanding step task before any teardown"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the second statement of `EndPlay`, the frame host's wait for outstanding steps.
+**Was:** *"`EndPlay` waits for every outstanding step task before any teardown"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, in the Jolt configuration's code: the second statement of `EndPlay`, the frame host's wait for outstanding steps.
 
 **Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-01.
 
 ### G-81 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-02
 
-**Was:** *"the Jolt bind runs under the world mutex, and the game thread never applies occupancy"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the world-mutex scope line (JoltWorldLockScopeUImpl, since deleted) of `tryRegister`'s first-call bind.
+**Was:** *"the Jolt bind runs under the world mutex, and the game thread never applies occupancy"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, in the Jolt configuration's code: the world-mutex scope line (JoltWorldLockScopeUImpl, since deleted) of `tryRegister`'s first-call bind.
 
 **Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-02.
 
 ### G-82 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-03
 
-**Was:** *"the shadow world is built by the step world's calls, and every bind and release is mirrored into it"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the shadow world's construction in `buildShadowWorld`.
+**Was:** *"the shadow world is built by the step world's calls, and every bind and release is mirrored into it"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, in the Jolt configuration's code: the shadow world's construction in `buildShadowWorld`.
 
 **Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-03.
 
 ### G-83 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-04
 
-**Was:** *"the render apply teleports the capsule: no sweep"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the actor move (the engine's SetActorLocationAndRotation) in the render apply (applyRenderSnapshot_GameThread, since deleted).
+**Was:** *"the render apply teleports the capsule: no sweep"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, in the Jolt configuration's code: the actor move (the engine's SetActorLocationAndRotation) in the render apply (applyRenderSnapshot_GameThread, since deleted).
 
 **Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-04.
 
 ### G-84 — RETIRED by og-simulationscheduler-withjolt task 83 (2026-10-15): moved to `TickDriverBackendUImpl-guards.md` G-05
 
-**Was:** *"a client never picks a Jolt slot itself: it binds the slot the authority chose, or waits"*. Its tag sat in `SimulationManagerUImpl.cpp`, in the Jolt configuration's code: the `decideBodySlot` call in the slot acquire (tryAcquireJoltSlot, since deleted).
+**Was:** *"a client never picks a Jolt slot itself: it binds the slot the authority chose, or waits"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, in the Jolt configuration's code: the `decideBodySlot` call in the slot acquire (tryAcquireJoltSlot, since deleted).
 
 **Why it retired.** Its subject moved. Task 83 moved the Jolt host out of this class into JoltBackendUImpl (historical name; `TickDriverBackendUImpl` since og-tickdriver task 15b), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references. **Successor:** `TickDriverBackendUImpl-guards.md` G-05.
 
 ### G-05 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-09
 
-**Was:** *"The prediction-offset read keeps its `runsPrediction()` guard"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the `(m_manager.has_value() && m_manager->runsPrediction())` predicate of `predictionOffsetTicks` in `pollInputHistoryLanes`.
+**Was:** *"The prediction-offset read keeps its `runsPrediction()` guard"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the `(m_manager.has_value() && m_manager->runsPrediction())` predicate of `predictionOffsetTicks` in `pollInputHistoryLanes`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-09.
 
 ### G-06 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-10
 
-**Was:** *"Local control is the CAPTURE-LINE test, never a role test"*. Its tag sat in `SimulationManagerUImpl.h`, directly above `const bool isLocallyControlled = isLocallyControlledOnThisPeer(id);` in `pollInputHistoryLanes`.
+**Was:** *"Local control is the CAPTURE-LINE test, never a role test"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above `const bool isLocallyControlled = isLocallyControlledOnThisPeer(id);` in `pollInputHistoryLanes`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-10.
 
 ### G-07 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-11
 
-**Was:** *"The tier decomposition is drawn only for a LOCALLY controlled character"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the `(includeDelay && isLocallyControlled ...` predicate of `delay` in `pollInputHistoryLanes`.
+**Was:** *"The tier decomposition is drawn only for a LOCALLY controlled character"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the `(includeDelay && isLocallyControlled ...` predicate of `delay` in `pollInputHistoryLanes`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-11.
 
 ### G-08 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-12
 
-**Was:** *"The clock reading keeps its `runsPrediction()` guard"*. Its tag sat in `SimulationManagerUImpl.h`, directly above `if (m_manager.has_value() && m_manager->runsPrediction())` around the `ClockDriftReading` in `pollInputHistoryLanes`.
+**Was:** *"The clock reading keeps its `runsPrediction()` guard"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above `if (m_manager.has_value() && m_manager->runsPrediction())` around the `ClockDriftReading` in `pollInputHistoryLanes`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-12.
 
 ### G-09 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-13
 
-**Was:** *"Each event counter is read BEFORE its tick"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the first of the seven `predictionClock.getDiagnostics()` reads in `pollInputHistoryLanes` (`reading.skipCount`).
+**Was:** *"Each event counter is read BEFORE its tick"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the first of the seven `predictionClock.getDiagnostics()` reads in `pollInputHistoryLanes` (`reading.skipCount`).
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-13.
 
 ### G-10 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-14
 
-**Was:** *"The relay-health window is `TimeConfig::rollbackWindowTicks`, not the per-tier ceiling"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the `(m_manager.has_value() && m_manager->getTimeConfig().rollbackWindowTicks > 0)` predicate of `rollbackWindowTicks` in `pollInputHistoryLanes`.
+**Was:** *"The relay-health window is `TimeConfig::rollbackWindowTicks`, not the per-tier ceiling"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the `(m_manager.has_value() && m_manager->getTimeConfig().rollbackWindowTicks > 0)` predicate of `rollbackWindowTicks` in `pollInputHistoryLanes`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-14.
 
 ### G-11 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-15
 
-**Was:** *"The relay-health bar is NOT gated on `includeDelay`"*. Its tag sat in `SimulationManagerUImpl.h`, directly above `if (relayedReads != nullptr && relayedArrivals != nullptr)` in `pollInputHistoryLanes`.
+**Was:** *"The relay-health bar is NOT gated on `includeDelay`"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above `if (relayedReads != nullptr && relayedArrivals != nullptr)` in `pollInputHistoryLanes`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-15.
 
 ### G-12 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-16
 
-**Was:** *"The readout's `dLatest` stamp comes from the NEWEST observation by tick, never the last slot visited"*. Its tag sat in `SimulationManagerUImpl.h`, directly above `if (!anyObservation || observation->simTick > newestSimTick)` in `getRelayReadReadout`.
+**Was:** *"The readout's `dLatest` stamp comes from the NEWEST observation by tick, never the last slot visited"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above `if (!anyObservation || observation->simTick > newestSimTick)` in `getRelayReadReadout`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-16.
 
 ### G-13 — RETIRED by og-ue-simulationcomponentandmanagersplit task 22 (2026-10-21): moved to `InputHistoryVisualizationUImpl-guards.md` G-17
 
-**Was:** *"The nearest-character gather reads the VIZ snapshot, never live state"*. Its tag sat in `SimulationManagerUImpl.h`, directly above `const auto& movement = simulatable.getVizState().getState()...` inside `gatherNearestCandidates`.
+**Was:** *"The nearest-character gather reads the VIZ snapshot, never live state"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above `const auto& movement = simulatable.getVizState().getState()...` inside `gatherNearestCandidates`.
 
 **Why it retired.** Its subject moved. Task 22 moved the input-history feeds out of this class into `BrawlerInputHistoryFeedUImpl` (`InputHistoryVisualizationUImpl.h` and `.cpp`), and the guarded code went with it. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `InputHistoryVisualizationUImpl-guards.md` G-17.
 
 ### G-14 — RETIRED by og-ue-simulationcomponentandmanagersplit task 23 (2026-10-21): moved to `BrawlerRosterUImpl-guards.md` G-01
 
-**Was:** *"The seed is a DELIBERATE post-construction write of `StaticData`"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the declaration of the manager's private ring-out seed method.
+**Was:** *"The seed is a DELIBERATE post-construction write of `StaticData`"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the declaration of the manager's private ring-out seed method.
 
 **Why it retired.** Its subject moved. Task 23 moved the brawler roster out of this class into `BrawlerRosterUImpl` (`BrawlerRosterUImpl.h` and `.cpp`), and the guarded declaration went with it, as `seedSpawnPointsFromLevel`. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `BrawlerRosterUImpl-guards.md` G-01.
 
 ### G-67 — RETIRED by og-ue-simulationcomponentandmanagersplit task 23 (2026-10-21): moved to `BrawlerRosterUImpl-guards.md` G-03
 
-**Was:** *"the spawn slot is written through from `acquire`, never clamped and never derived per peer"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `ringoutIC.spawnSlot = m_spawnSlots.acquire(id);` in the first-call pass of `tryRegister`.
+**Was:** *"the spawn slot is written through from `acquire`, never clamped and never derived per peer"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `ringoutIC.spawnSlot = m_spawnSlots.acquire(id);` in the first-call pass of `tryRegister`.
 
 **Why it retired.** Its subject moved. Task 23 moved the brawler roster out of this class into `BrawlerRosterUImpl` (`BrawlerRosterUImpl.h` and `.cpp`), and the guarded code went with it, into `onBodiesCreated`. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `BrawlerRosterUImpl-guards.md` G-03.
 
 ### G-68 — RETIRED by og-ue-simulationcomponentandmanagersplit task 23 (2026-10-21): moved to `BrawlerRosterUImpl-guards.md` G-04
 
-**Was:** *"the pre-diet cap warns once per over-cap character, at `Warning`, and never asserts"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the `if (record.isAuthority)` block of `tryRegister` that inserted into `m_authorityRegisteredIds`.
+**Was:** *"the pre-diet cap warns once per over-cap character, at `Warning`, and never asserts"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the `if (record.isAuthority)` block of `tryRegister` that inserted into `m_authorityRegisteredIds`.
 
 **Why it retired.** Its subject moved. Task 23 moved the brawler roster out of this class into `BrawlerRosterUImpl` (`BrawlerRosterUImpl.h` and `.cpp`), and the guarded code went with it, into `onRegistered`. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `BrawlerRosterUImpl-guards.md` G-04.
 
 ### G-74 — RETIRED by og-ue-simulationcomponentandmanagersplit task 23 (2026-10-21): moved to `BrawlerRosterUImpl-guards.md` G-05
 
-**Was:** *"unregistration releases the ring-out spawn slot, ungated"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `m_spawnSlots.release(id);` in `unregisterFromNewFramework`.
+**Was:** *"unregistration releases the ring-out spawn slot, ungated"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `m_spawnSlots.release(id);` in `unregisterFromNewFramework`.
 
 **Why it retired.** Its subject moved. Task 23 moved the brawler roster out of this class into `BrawlerRosterUImpl` (`BrawlerRosterUImpl.h` and `.cpp`), and the guarded code went with it, into `forgetCharacter`. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `BrawlerRosterUImpl-guards.md` G-05.
 
 ### G-78 — RETIRED by og-ue-simulationcomponentandmanagersplit task 23 (2026-10-21): moved to `BrawlerRosterUImpl-guards.md` G-02
 
-**Was:** *"a refused `SimCharacterId` allocation is final: never wrap, reset or fall back to another id source"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `if (simId == SimCharacterId::None)` in `allocateSimCharacterId`.
+**Was:** *"a refused `SimCharacterId` allocation is final: never wrap, reset or fall back to another id source"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `if (simId == SimCharacterId::None)` in `allocateSimCharacterId`.
 
 **Why it retired.** Its subject moved. Task 23 moved the brawler roster out of this class into `BrawlerRosterUImpl` (`BrawlerRosterUImpl.h` and `.cpp`), and the guarded code went with it, with `allocateSimCharacterId` itself. The entry moved with its text unchanged apart from its site and cross-references, plus an R0 line. **Successor:** `BrawlerRosterUImpl-guards.md` G-02.
 
 ### G-75 — RETIRED by og-ue-simulationcomponentandmanagersplit task 24a (2026-10-21): moved to `UESimulationSession-guards.md` G-01
 
 **Was:** *"the systems executor is emplaced beside the adapters, and hands detection the same body adapter the integration
-layer uses"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the systems executor's declaration, the optional of
+layer uses"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the systems executor's declaration, the optional of
 the composition's systems executor.
 
 **Why it retired.** Its subject moved. Task 24a moved the composition out of this class into OGSimulationUnreal's
@@ -464,13 +440,13 @@ the composition's systems executor.
 session. The entry moved with its text game-neutral (the session names the executor and the adapters through its traits),
 plus an R0 line: the text said only the Chaos configuration builds, and both do. The emplace sites it governs are still
 this class's `BeginPlay` until task 27b. The brawler's verification of the wrong adapter (the hit detector, measured on
-the Chaos configuration) stayed with the brawler: `SimulationManagerUImpl-rationale.md` §2, "The systems executor's
+the Chaos configuration) stayed with the brawler: `OGBrawlerSimulationManager-rationale.md` §2, "The systems executor's
 adapters". **Successor:** `UESimulationSession-guards.md` G-01 (OGSimulationUnreal).
 
 The entry as it stood before the move:
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above `std::optional<BrawlerSystemsExec> m_systemsExec;`.
-The two emplace sites it governs are in `SimulationManagerUImpl.cpp`, one per role branch, each between
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above `std::optional<BrawlerSystemsExec> m_systemsExec;`.
+The two emplace sites it governs are in `OGBrawlerSimulationManager.cpp`, one per role branch, each between
 `m_integrationLayer.emplace(...)` and `m_manager.emplace(...)`.
 
 **The prohibition.** `BrawlerHitDetectionSystem` (`brawlerHitDetection::System<EngineTraits::BodyAdapter,
@@ -506,7 +482,7 @@ particle, as the physics step left it.
 ### G-04 — RETIRED by og-ue-simulationcomponentandmanagersplit task 24b (2026-10-21): moved to `UESimulationSession-guards.md` G-02
 
 **Was:** *"the scoreboard's ring-out slice is read off the VIZ snapshot, never `getAllState()`"*. Its tag sat in
-`SimulationManagerUImpl.h`, directly above the `return` of `getVizSlice` (`getRingoutVizState` until task 22).
+`OGBrawlerSimulationManager.h`, directly above the `return` of `getVizSlice` (`getRingoutVizState` until task 22).
 
 **Why it retired.** Its subject moved. Task 24b moved the composition reads out of this class into OGSimulationUnreal's
 `UESimulationSession` (`UESimulationSession.h`), and `getVizSlice` went with them, as a member of the session. The entry
@@ -519,7 +495,7 @@ copy on both). The scoreboard's by-value assertion stays beside the scoreboard, 
 
 The entry as it stood before the move:
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above the `return m_storage.get<SimulatableBrawler>(id).getVizState()...` statement in `getVizSlice`. Until og-ue-simulationcomponentandmanagersplit task 22 the accessor was `getRingoutVizState`; task 22 made it the generic `getVizSlice<SliceT>`, which the scoreboard instantiates for `brawlerRingout::State`, and the guard stayed with it.
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above the `return m_storage.get<SimulatableBrawler>(id).getVizState()...` statement in `getVizSlice`. Until og-ue-simulationcomponentandmanagersplit task 22 the accessor was `getRingoutVizState`; task 22 made it the generic `getVizSlice<SliceT>`, which the scoreboard instantiates for `brawlerRingout::State`, and the guard stayed with it.
 
 **The fence, verbatim — the bytes it occupied in the header before task 11:**
 
@@ -532,19 +508,19 @@ The entry as it stood before the move:
 //   fence this header's banner draws, so this accessor does not offer one. §1
 ```
 
-**What breaks if the edit is made.** `getVizState()` is the copy `updateVisualizationAll(m_storage)` takes once per game-thread pass in `OnPostPhysicsStep` — the sanctioned physics-to-game handoff. `getAllState()` is the live simulation state the physics thread writes. A HUD reading it would be a game-thread read of physics-written state that no crossing argument covers: `SimulationManagerUImpl-rationale.md` §0 and §1 enumerate the crossings, and this would be an unlisted one.
+**What breaks if the edit is made.** `getVizState()` is the copy `updateVisualizationAll(m_storage)` takes once per game-thread pass in `OnPostPhysicsStep` — the sanctioned physics-to-game handoff. `getAllState()` is the live simulation state the physics thread writes. A HUD reading it would be a game-thread read of physics-written state that no crossing argument covers: `OGBrawlerSimulationManager-rationale.md` §0 and §1 enumerate the crossings, and this would be an unlisted one.
 
 The accessor's other two properties — `const`, and returning **by value** — are no longer prose: they are a `static_assert` on its signature (task 11). Since task 22 that assert is re-expressed for the scoreboard's instantiation, `getVizSlice` for `brawlerRingout::State`, in `ScoreboardVisualizationUImpl.cpp`, beside the scoreboard's call.
 
 ### G-03 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-03
 
-**Was:** *"`requestInputDelayIncreaseStall` keeps its `runsPrediction()` guard"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the early return in `requestInputDelayIncreaseStall`.
+**Was:** *"`requestInputDelayIncreaseStall` keeps its `runsPrediction()` guard"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the early return in `requestInputDelayIncreaseStall`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the member it marks. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-03 (OGSimulationUnreal).
 
 The entry as it stood before the move:
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above the `if (!m_manager.has_value() || !m_manager->runsPrediction())` early return in `requestInputDelayIncreaseStall`.
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above the `if (!m_manager.has_value() || !m_manager->runsPrediction())` early return in `requestInputDelayIncreaseStall`.
 
 **The fence, verbatim — the bytes it occupied in the header before task 11:**
 
@@ -559,13 +535,13 @@ The entry as it stood before the move:
 
 ### G-15 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-04
 
-**Was:** *"The relay-delay-floor advisory is ADVISORY — never an assert"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the declaration of `logRelayDelayFloorAdvisory`.
+**Was:** *"The relay-delay-floor advisory is ADVISORY — never an assert"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the declaration of `logRelayDelayFloorAdvisory`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the declaration it marks. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-04 (OGSimulationUnreal).
 
 The entry as it stood before the move:
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above the declaration `void logRelayDelayFloorAdvisory(int32 floorTicks);`.
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above the declaration `void logRelayDelayFloorAdvisory(int32 floorTicks);`.
 
 **The fence, verbatim — the bytes it occupied in the header before task 11:**
 
@@ -578,13 +554,13 @@ The entry as it stood before the move:
 
 ### G-16 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-05
 
-**Was:** *"ONE recompute publishes the effective input delay, over BOTH inputs"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the declaration of `recomputeAndPublishEffectiveInputDelay`.
+**Was:** *"ONE recompute publishes the effective input delay, over BOTH inputs"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the declaration of `recomputeAndPublishEffectiveInputDelay`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the declaration it marks. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-05 (OGSimulationUnreal).
 
 The entry as it stood before the move:
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above the declaration `int32 recomputeAndPublishEffectiveInputDelay();`.
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above the declaration `int32 recomputeAndPublishEffectiveInputDelay();`.
 
 **The fence, verbatim — the bytes it occupied in the header before task 11:**
 
@@ -609,11 +585,11 @@ The entry as it stood before the move:
 
 **What breaks if the edit is made.** The floor rides the session relay and the tier rides the per-connection relay; the two `OnRep`s are independent and land in either order. Two writers each holding half the formula answer with a stale other half whenever they interleave. Every publish — tier `OnRep`, floor `OnRep`, both replays and the composition root's baseline — goes through this one function, which reads both cached inputs through `ReplicatedTierConsumer::effectiveInputDelayTicks`, the same derivation the server's queue mirrors. Its return value is the change in published delay, which is how a caller that must pay for an increase can.
 
-The second fence block is the orientation banner's statement of the same rule (lines 82-87), which now lives in `SimulationManagerUImpl-rationale.md` §0.
+The second fence block is the orientation banner's statement of the same rule (lines 82-87), which now lives in `OGBrawlerSimulationManager-rationale.md` §0.
 
 ### G-61 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-06
 
-**Was:** *"the tier cache is emplaced on the authority world too"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the tier consumer's emplace on the authority branch of `BeginPlay`.
+**Was:** *"the tier cache is emplaced on the authority world too"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the tier consumer's emplace on the authority branch of `BeginPlay`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the emplace it marks, which moved into the session's `beginTierConsumer`. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-06 (OGSimulationUnreal).
 
@@ -632,7 +608,7 @@ local player reads `0` delay where the no-tier fallback is correct.
 
 ### G-62 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-07
 
-**Was:** *"the client binds its relay listeners, then PULLS the latched tier and floor"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the client branch's connection-listener registration in `BeginPlay`.
+**Was:** *"the client binds its relay listeners, then PULLS the latched tier and floor"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the client branch's connection-listener registration in `BeginPlay`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the two pulls it governs, which moved into the session's `replayLatchedClientValues`. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-07 (OGSimulationUnreal).
 
@@ -654,7 +630,7 @@ session.
 
 ### G-65 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-08
 
-**Was:** *"`hadAnyTier` is read before `applyReplicatedConnectionTier`"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the `hadAnyTier` read in `onConnectionTierReceived`.
+**Was:** *"`hadAnyTier` is read before `applyReplicatedConnectionTier`"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the `hadAnyTier` read in `onConnectionTierReceived`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the statement it marks. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-08 (OGSimulationUnreal).
 
@@ -671,7 +647,7 @@ including the first. The first real tier resolution then requests a spurious sta
 
 ### G-66 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-09
 
-**Was:** *"the relay-delay-floor advisory is a log line, never an assert"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the classification `switch` in `logRelayDelayFloorAdvisory`.
+**Was:** *"the relay-delay-floor advisory is a log line, never an assert"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the classification `switch` in `logRelayDelayFloorAdvisory`.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the statement it marks. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-09 (OGSimulationUnreal).
 
@@ -695,13 +671,13 @@ one would assert in the function body, the other would change the function's con
 
 ### G-79 — RETIRED by og-ue-simulationcomponentandmanagersplit task 25 (2026-10-21): moved to `UESimulationSession-guards.md` G-10
 
-**Was:** *"the destructor touches no `UObject`: it clears the static instance table and nothing else"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the first statement of this class's destructor.
+**Was:** *"the destructor touches no `UObject`: it clears the static instance table and nothing else"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the first statement of this class's destructor.
 
 **Why it retired.** Its subject moved. Task 25 moved the transport's registry, its three listener interfaces, the effective input delay, the stall and the timing relay out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded code went with the owner registry; this class's destructor, whose whole body the guarded code was, became the session's. The entry moved with its text made game-neutral and verified (an R0 line on each). **Successor:** `UESimulationSession-guards.md` G-10 (OGSimulationUnreal).
 
 The entry as it stood before the move:
 
-**Site:** the first statement of `~ASimulationManagerUImpl` (the `s_instances[0]` test).
+**Site:** the first statement of `~AOGBrawlerSimulationManager` (the `s_instances[0]` test).
 
 **The prohibition** (og-brawler-uploadtosteam task 12, 2026-09-29). ⛔ Do not call `GetWorld()`,
 `GetPhysicsScene()` or any other method that reaches the actor's outer, its world or another
@@ -724,13 +700,13 @@ crash depends on the collector's purge order.
 
 ### G-17 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26a (2026-10-21): moved to `UESimulationSession-guards.md` G-12
 
-**Was:** *"The relay write probe's capacity is the CODEC CONSTANT `relayedInputRing::kMaxDepth`"*. Its tag sat in `SimulationManagerUImpl.h`, directly above the declaration of `m_relayWriteProbe`.
+**Was:** *"The relay write probe's capacity is the CODEC CONSTANT `relayedInputRing::kMaxDepth`"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above the declaration of `m_relayWriteProbe`.
 
 **Why it retired.** Its subject moved. Task 26a moved the input reception (the coordinator, the delayed-input map, the two sinks with PROBE 5, the per-step release, the reap and the forget) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`), and the guarded member went with PROBE 5, whose write and forget both moved. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-12 (OGSimulationUnreal).
 
 The entry as it stood before the move:
 
-**Tag site:** `SimulationManagerUImpl.h`, directly above `RelayWriteProbe m_relayWriteProbe{ RelayStageCapacity{ ...kMaxDepth } }`.
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above `RelayWriteProbe m_relayWriteProbe{ RelayStageCapacity{ ...kMaxDepth } }`.
 
 **The fence, verbatim — the bytes it occupied in the header before task 11:**
 
@@ -739,11 +715,11 @@ The entry as it stood before the move:
 // Capacity is INJECTED: under flush-on-poll the ceiling is min(writesThisFrame, kMaxDepth). §6
 ```
 
-**What breaks if the edit is made.** Under flush-on-poll the observable ceiling per frame is `min(writesThisFrame, kMaxDepth)`, and the stage the probe models is sized by that compile-time constant, inside the codec. The session-configurable depth that used to size the ring was retired with the replace-latest path (`SimulationManagerUImpl-rationale.md` §3, *The retired fourth knob*). Feed the probe any other number — a `TimeConfig` field, a literal — and `observableX1000` reports a ceiling the running write path does not have.
+**What breaks if the edit is made.** Under flush-on-poll the observable ceiling per frame is `min(writesThisFrame, kMaxDepth)`, and the stage the probe models is sized by that compile-time constant, inside the codec. The session-configurable depth that used to size the ring was retired with the replace-latest path (`OGBrawlerSimulationManager-rationale.md` §3, *The retired fourth knob*). Feed the probe any other number — a `TimeConfig` field, a literal — and `observableX1000` reports a ceiling the running write path does not have.
 
 ### G-56 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): moved to `UESimulationSession-guards.md` G-15
 
-**Was:** *"there is no relay-ring depth ini intake, deliberately"*. Its tag sat in `SimulationManagerUImpl.cpp`, on the blank line between the relay-delay-floor intake and the rotation-width intake in `BeginPlay` (an absence tag).
+**Was:** *"there is no relay-ring depth ini intake, deliberately"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, on the blank line between the relay-delay-floor intake and the rotation-width intake in `BeginPlay` (an absence tag).
 
 **Why it retired.** Its subject moved. Task 26b moved the session knobs and the per-frame work before the steps (`onFrameStepsDue_GameThread`, with PROBE A and PROBE 6 and their two members) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): the three ini intakes moved into the session's `readSessionKnobs`, which the owner calls at their position, and the absence tag moved to the same blank line there. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-15 (OGSimulationUnreal).
 
@@ -776,7 +752,7 @@ and the tag is the only record.
 
 ### G-57 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): moved to `UESimulationSession-guards.md` G-14
 
-**Was:** *"the relay-delay floor is read from the ini on the authority only"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the floor intake's `if (worldIsAuthority && GConfig != nullptr)` in `BeginPlay`.
+**Was:** *"the relay-delay floor is read from the ini on the authority only"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the floor intake's `if (worldIsAuthority && GConfig != nullptr)` in `BeginPlay`.
 
 **Why it retired.** Its subject moved. Task 26b moved the session knobs and the per-frame work before the steps (`onFrameStepsDue_GameThread`, with PROBE A and PROBE 6 and their two members) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): the three ini intakes moved into the session's `readSessionKnobs`, which the owner calls at their position, and the tag moved with the floor intake. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-14 (OGSimulationUnreal).
 
@@ -798,7 +774,7 @@ no reader).
 
 ### G-58 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): moved to `UESimulationSession-guards.md` G-16
 
-**Was:** *"the resim-trigger-policy intake is not authority-gated, is read once, and has no cooldown key"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the resim-trigger-policy intake's `if (GConfig != nullptr)` in `BeginPlay`.
+**Was:** *"the resim-trigger-policy intake is not authority-gated, is read once, and has no cooldown key"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the resim-trigger-policy intake's `if (GConfig != nullptr)` in `BeginPlay`.
 
 **Why it retired.** Its subject moved. Task 26b moved the session knobs and the per-frame work before the steps (`onFrameStepsDue_GameThread`, with PROBE A and PROBE 6 and their two members) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): the three ini intakes moved into the session's `readSessionKnobs`, which the owner calls at their position, and the tag moved with the policy intake. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-16 (OGSimulationUnreal).
 
@@ -837,7 +813,7 @@ matter.
 
 ### G-63 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): moved to `UESimulationSession-guards.md` G-17
 
-**Was:** *"the resim-trigger policy is applied and proved once, after both role branches"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the bare scope block that follows the role `if`/`else` in `BeginPlay`.
+**Was:** *"the resim-trigger policy is applied and proved once, after both role branches"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the bare scope block that follows the role `if`/`else` in `BeginPlay`.
 
 **Why it retired.** Its subject moved. Task 26b moved the session knobs and the per-frame work before the steps (`onFrameStepsDue_GameThread`, with PROBE A and PROBE 6 and their two members) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): the scope block's statements became the session's `applyResimTriggerPolicy`, which the owner calls at the block's position, and the tag moved to the function's first statement (task 27b moves the call itself and re-sites the "after both branches" half there). The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-17 (OGSimulationUnreal).
 
@@ -870,7 +846,7 @@ it is unconditional, still holds. See §13.10, correction C13-1.
 
 ### G-70 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): moved to `UESimulationSession-guards.md` G-18
 
-**Was:** *"the frame function's coordinator test guards PROBE 6 only, never PROBE A"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `if (!m_session.m_receptionCoordinator.has_value()) return;` in `onFrameStepsDue_GameThread`.
+**Was:** *"the frame function's coordinator test guards PROBE 6 only, never PROBE A"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `if (!m_session.m_receptionCoordinator.has_value()) return;` in `onFrameStepsDue_GameThread`.
 
 **Why it retired.** Its subject moved. Task 26b moved the session knobs and the per-frame work before the steps (`onFrameStepsDue_GameThread`, with PROBE A and PROBE 6 and their two members) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `onFrameStepsDue_GameThread` (PROBE A, the coordinator test, `[PacketBudget]` and PROBE 6) moved into the session whole, and the tag moved with the test. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-18 (OGSimulationUnreal).
 
@@ -898,7 +874,7 @@ on it: `releaseDelayedInputsForStep` (the session's since task 26a) tests the co
 
 ### G-72 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): moved to `UESimulationSession-guards.md` G-19
 
-**Was:** *"the send-budget probe feeds the engine's cumulative counters, not `OutBytes` / `OutPackets`"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the `m_connectionBudgetProbe.noteSample(` call in `onFrameStepsDue_GameThread`.
+**Was:** *"the send-budget probe feeds the engine's cumulative counters, not `OutBytes` / `OutPackets`"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the `m_connectionBudgetProbe.noteSample(` call in `onFrameStepsDue_GameThread`.
 
 **Why it retired.** Its subject moved. Task 26b moved the session knobs and the per-frame work before the steps (`onFrameStepsDue_GameThread`, with PROBE A and PROBE 6 and their two members) out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `onFrameStepsDue_GameThread` (PROBE A, the coordinator test, `[PacketBudget]` and PROBE 6) moved into the session whole, with the probe's member, and the tag moved with the call. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-19 (OGSimulationUnreal).
 
@@ -917,7 +893,7 @@ differencing them across a probe window silently loses whatever was reset in the
 
 ### G-64 — RETIRED by og-ue-simulationcomponentandmanagersplit task 27a (2026-10-21): moved to `UESimulationSession-guards.md` G-21
 
-**Was:** *"`EndPlay` resets the coordinator and the tier cache while `m_manager` still exists"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `m_session.m_delayedInputComponentsById.clear();` in `EndPlay`.
+**Was:** *"`EndPlay` resets the coordinator and the tier cache while `m_manager` still exists"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `m_session.m_delayedInputComponentsById.clear();` in `EndPlay`.
 
 **Why it retired.** Its subject moved. Task 27a moved this class's teardown and post-physics pass out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `EndPlay`'s statements before `Super` became the session's `endPlay`, which `EndPlay` now calls before `Super`, and `OnPostPhysicsStep` became the session's `onPostPhysicsStep`. The tag moved with the statements it marks. The entry moved with its text made game-neutral and verified (an R0 line, with a correction). **Successor:** `UESimulationSession-guards.md` G-21 (OGSimulationUnreal).
 
@@ -960,7 +936,7 @@ manager exists, until task 27a moves `EndPlay` into the session.
 
 ### G-85 — RETIRED by og-ue-simulationcomponentandmanagersplit task 27a (2026-10-21): moved to `UESimulationSession-guards.md` G-20
 
-**Was:** *"`m_backend.onEndPlayBegin()` stays the first statement of `EndPlay`: nothing moves above it"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `m_session.m_backend.onEndPlayBegin();` in `EndPlay`.
+**Was:** *"`m_backend.onEndPlayBegin()` stays the first statement of `EndPlay`: nothing moves above it"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `m_session.m_backend.onEndPlayBegin();` in `EndPlay`.
 
 **Why it retired.** Its subject moved. Task 27a moved this class's teardown and post-physics pass out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `EndPlay`'s statements before `Super` became the session's `endPlay`, which `EndPlay` now calls before `Super`, and `OnPostPhysicsStep` became the session's `onPostPhysicsStep`. The tag moved with the call it marks. The entry moved with its text made game-neutral and verified (an R0 line, with a correction). **Successor:** `UESimulationSession-guards.md` G-20 (OGSimulationUnreal).
 
@@ -987,7 +963,7 @@ tag with it and orphans this entry.
 
 ### G-50 — RETIRED by og-ue-simulationcomponentandmanagersplit task 27b (2026-10-21): moved to `UESimulationSession-guards.md` G-22
 
-**Was:** *"the field-diff predicate must ask the category and verbosity `RouteOGMessage` sends `[DivergenceProbe` to, live"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above the `correctionFieldDiff::setEnabledPredicate(` call in the file-local `bindCorrectionFieldDiffGate`.
+**Was:** *"the field-diff predicate must ask the category and verbosity `RouteOGMessage` sends `[DivergenceProbe` to, live"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above the `correctionFieldDiff::setEnabledPredicate(` call in the file-local `bindCorrectionFieldDiffGate`.
 
 **Why it retired.** Its subject moved. Task 27b moved this class's start-up out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `BeginPlay`'s statements after `Super` became the session's `beginPlay`, which `BeginPlay` now calls after `Super`, and the brawler statements in it became the phase hooks of `BrawlerSessionGameUImpl` (manager design §4.3), each at its statements' position. The file-local function moved with it, unchanged, as the session's private static member; the tag moved with the call it marks. The entry moved with its text made game-neutral and verified (an R0 line). **Successor:** `UESimulationSession-guards.md` G-22 (OGSimulationUnreal).
 
@@ -1021,11 +997,11 @@ that says so at the predicate. Since og-tickdriver task 12 the row is og-simulat
 `kSimulationLogRoutes`, route `SimulationLogRoute::DivergenceProbe`), and the category is chosen
 by `ogLogRouteOf`'s `DivergenceProbe` case, then by `RouteOGMessage`'s `OGLogRoute::DivergenceProbe`
 arm, both in the og-simulation-ue plugin's `UESimulationLogRoutes.h` since og-ue-simulationcomponentandmanagersplit
-task 19 (`SimulationManagerUImpl.h` and its `.cpp` before). A re-route is typed at either of those two.
+task 19 (`OGBrawlerSimulationManager.h` and its `.cpp` before). A re-route is typed at either of those two.
 
 ### G-59 — RETIRED by og-ue-simulationcomponentandmanagersplit task 27b (2026-10-21): moved to `UESimulationSession-guards.md` G-23
 
-**Was:** *"the authority branch sets the neutral input too, before any registration"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `m_session.m_inputResolution.setNeutralInput<SimulatableBrawler>(...)` on `BeginPlay`'s authority branch.
+**Was:** *"the authority branch sets the neutral input too, before any registration"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `m_session.m_inputResolution.setNeutralInput<SimulatableBrawler>(...)` on `BeginPlay`'s authority branch.
 
 **Why it retired.** Its subject moved. Task 27b moved this class's start-up out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `BeginPlay`'s statements after `Super` became the session's `beginPlay`, which `BeginPlay` now calls after `Super`, and the brawler statements in it became the phase hooks of `BrawlerSessionGameUImpl` (manager design §4.3), each at its statements' position. The call is the session's own statement on `beginPlay`'s authority branch, its value the game's hook `neutralInput()`; the tag moved with the call. **Successor:** `UESimulationSession-guards.md` G-23 (OGSimulationUnreal).
 
@@ -1052,7 +1028,7 @@ different wrong edit.
 
 ### G-60 — RETIRED by og-ue-simulationcomponentandmanagersplit task 27b (2026-10-21): moved to `BrawlerSessionGameUImpl-guards.md` G-01
 
-**Was:** *"the neutral input is `getZeroPlayerInput()`, not `PlayerInput{}`"*. Its tag sat in `SimulationManagerUImpl.cpp`, directly above `m_session.m_inputResolution.setNeutralInput<SimulatableBrawler>(...)` on `BeginPlay`'s client branch.
+**Was:** *"the neutral input is `getZeroPlayerInput()`, not `PlayerInput{}`"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `m_session.m_inputResolution.setNeutralInput<SimulatableBrawler>(...)` on `BeginPlay`'s client branch.
 
 **Why it retired.** Its subject moved. Task 27b moved this class's start-up out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `BeginPlay`'s statements after `Super` became the session's `beginPlay`, which `BeginPlay` now calls after `Super`, and the brawler statements in it became the phase hooks of `BrawlerSessionGameUImpl` (manager design §4.3), each at its statements' position. The value `getZeroPlayerInput()` is the body of the brawler's hook `neutralInput()`, and this guard guards the value, not the sequence, so it stays BUSL with the hook body (ruling Q-J); the session's client-branch call carries no tag. **Successor:** `BrawlerSessionGameUImpl-guards.md` G-01.
 
@@ -1070,3 +1046,48 @@ compile: `simulatableBrawler::PlayerInput` has no `operator==` (C2678), and
 
 **The consequence.** A value-initialised input carries zero forward vectors where the game
 expects `(0,0,1)`.
+
+### G-69 — RETIRED by og-ue-simulationcomponentandmanagersplit task 28 (2026-10-21): moved to `UESimulationSession-guards.md` G-25
+
+**Was:** *"the executor is notified only once the character is in storage"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `m_session.m_manager->notifyCharacterRegistered(id);` in `tryRegister`.
+
+**Why it retired.** Its subject moved. Task 28 moved this class's registration sequences out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `tryRegister`'s statements after the `SimCharacterId::None` check and the `toStorageKey` conversion became the session's `tryRegister`, which this class's `tryRegister` now calls, and the brawler statements in it became the registration hooks of `BrawlerSessionGameUImpl` (manager design §4.3), each at its statements' position. The notify is the session's own statement; the tag moved with it. **Successor:** `UESimulationSession-guards.md` G-25 (OGSimulationUnreal). Its R0 there corrects §10's "on the authority path": the notify runs on both roles, filtered per system.
+
+The entry as it stood before the move:
+
+**Site:** `m_manager->notifyCharacterRegistered(id);` in `tryRegister`.
+
+**The prohibition, as it stood in the source:**
+
+> Notify the executor: the character is IN STORAGE, so
+> brawlerHitRouting::System::onCharacterRegistered can index it and read capsuleBodyId. §10
+>
+> ⛔ The notify and the drop of the adapter's m_byRootBodyId insert land TOGETHER.
+
+**A second dependant, which the source did not name here.** `brawlerRingout::ScoreSystem`'s
+roster is seeded by the same notify. The ring-out score push's `checkf` relies on that seed
+landing **before** `tryRegister` returns `Ready`, and so before the route entry the push walks
+exists. See `OGBrawlerSimulationManager-rationale.md` §1, *the second read crossing*.
+
+**The consequence.** A notify moved above `registerSimulatable` indexes a character that is not
+in storage. A notify moved after the `return` breaks the score push's no-rehash precondition.
+
+### G-73 — RETIRED by og-ue-simulationcomponentandmanagersplit task 28 (2026-10-21): moved to `UESimulationSession-guards.md` G-26
+
+**Was:** *"unregistration notifies the executor before `unregisterSimulatable`, behind the `has<>` guard"*. Its tag sat in `OGBrawlerSimulationManager.cpp`, directly above `if (m_session.m_storage.has<SimulatableBrawler>(id))` at the top of `unregisterFromNewFramework`.
+
+**Why it retired.** Its subject moved. Task 28 moved `unregisterFromNewFramework`'s statements after the `toStorageKey` conversion into the session's `unregisterFromNewFramework`, which this class's `unregisterFromNewFramework` now calls; the roster forget and the input-history forget became the hook `onUnregistered`, and the latency forget is the session's own statement. The guarded test is the session's own; the tag moved with it. **Successor:** `UESimulationSession-guards.md` G-26 (OGSimulationUnreal).
+
+The entry as it stood before the move:
+
+**Site:** `if (m_storage.has<SimulatableBrawler>(id))` at the top of `unregisterFromNewFramework`.
+
+**The prohibition, as it stood in the source:**
+
+> ⛔ Drop the routing entry BEFORE unregisterSimulatable destroys it, while still in storage. §10
+>
+> ⛔ The has<> guard is preserved: an unregistered character's view.get<>(id) is unsafe.
+
+**The consequence.** A notify after the destroy lets the routing hook dereference a character
+that storage has already freed. Dropping the guard runs `view.get<>(id)` for a character that
+never finished registering.

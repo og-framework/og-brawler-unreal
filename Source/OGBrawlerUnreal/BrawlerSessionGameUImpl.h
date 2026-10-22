@@ -4,8 +4,9 @@
 #pragma once
 
 #include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
+#include "OGSimulation/BodyId.h"
 #include "OGSimulation/CompilerControl.h"
 #include "Engine/EngineBaseTypes.h"
 
@@ -14,12 +15,17 @@
 
 template <typename TraitsT> class UESimulationSession;
 class BrawlerRosterUImpl;
+class BrawlerInputHistoryFeedUImpl;
 class UWorld;
 
 class BrawlerSessionGameUImpl
 {
 public:
-	explicit BrawlerSessionGameUImpl(BrawlerRosterUImpl& roster) : m_roster(roster) {}
+	BrawlerSessionGameUImpl(BrawlerRosterUImpl& roster, BrawlerInputHistoryFeedUImpl& inputHistoryFeed)
+		: m_roster(roster)
+		, m_inputHistoryFeed(inputHistoryFeed)
+	{
+	}
 
 	static BrawlerSessionTraitsUImpl::StaticData makeStaticData();
 
@@ -39,6 +45,15 @@ public:
 
 	static void afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>& session);
 
+	static BodyId rootBodyId(const BrawlerSessionTraitsUImpl::Simulatable& simulatable);
+
+	void afterBodiesCreated(BrawlerSessionTraitsUImpl::Simulatable& simulatable,
+		BrawlerSessionTraitsUImpl::Character& character, unsigned int id, bool isAuthority, ENetMode netMode);
+
+	void afterRegistered(unsigned int id, bool isAuthority);
+
+	void onUnregistered(unsigned int id);
+
 	static BrawlerSessionTraitsUImpl::InputSampleSource inputSampleSource(
 		const BrawlerSessionTraitsUImpl::Component& owner);
 
@@ -50,6 +65,7 @@ private:
 	using BrawlerHitDetectionSystem = BrawlerCompositionUImpl::HitDetectionSystem;
 
 	BrawlerRosterUImpl& m_roster;
+	BrawlerInputHistoryFeedUImpl& m_inputHistoryFeed;
 };
 
 OGSIM_OPTIMIZE_OFF

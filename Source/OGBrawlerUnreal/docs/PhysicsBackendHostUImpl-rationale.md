@@ -10,7 +10,7 @@ carries no prose and has no guards document: what could go wrong in it is a comp
 
 **Seam B** of the physics backend, who schedules the steps: the concept every backend host models, and the
 **selector** of the composition. Seam A, what differs between physics engines, is `PhysicsBackendUImpl.h`
-(`PhysicsBackendUImpl-rationale.md`). The session holds its backend in two members whose types this header names (`ASimulationManagerUImpl` held them
+(`PhysicsBackendUImpl-rationale.md`). The session holds its backend in two members whose types this header names (`AOGBrawlerSimulationManager` held them
 until og-ue-simulationcomponentandmanagersplit task 24a; `UESimulationSession-rationale.md` §3, in OGSimulationUnreal's docs). The traits name them for
 the session as `BrawlerSessionTraitsUImpl::BackendWorlds` and `Backend<SessionT>` (§5):
 
@@ -19,7 +19,7 @@ the session as `BrawlerSessionTraitsUImpl::BackendWorlds` and `Backend<SessionT>
 | `physicsBackendUImpl::Backend` | `ChaosTickBackendUImpl`: Chaos's own tick schedules | `TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>` (OGSimulationUnreal's host since og-tickdriver task 15e; §4): og-simulation's `SimulationTickDriver` schedules |
 | `physicsBackendUImpl::BackendWorlds` | `ChaosTickBackendWorldsUImpl` (empty) | `Backend::Worlds`, that is `TickDriverBackendWorldsUImpl` over the host's world host |
 
-* **`SimulationManagerUImpl.h` and, since task 24a, `BrawlerSessionTraitsUImpl.h` include it** (the traits name its
+* **`OGBrawlerSimulationManager.h` and, since task 24a, `BrawlerSessionTraitsUImpl.h` include it** (the traits name its
   types; every file that includes the component sees it through them). It includes `PhysicsBackendUImpl.h` first, so an undefined
   `OG_PHYSICS_BACKEND_CHAOS` stops the build there with that header's error, and then the one host header of the
   configuration. The host headers have no `#if` and nothing else includes them, so this header holds the only
@@ -51,7 +51,7 @@ after both, by the session only, so task 15b left the selector here.
 
 ## §2 The seam concept
 
-`PhysicsBackendHost<BackendT>` lists every entry point of the seam (`SimulationManagerUImpl-rationale.md` §18, "The
+`PhysicsBackendHost<BackendT>` lists every entry point of the seam (`OGBrawlerSimulationManager-rationale.md` §18, "The
 seam") with its parameter types and its exact return type: `void` for the lifecycle, frame and registration entry
 points, `bool` for `createBodies_GameThread` (`false` means `TryRegisterStatus::Pending`), the visualization adapter
 references (`EngineTraits::VizQuery&`, and `const EngineTraits::VizReader&` from a `const` backend) and
@@ -68,7 +68,7 @@ that names the concept, rather than at whichever call site the compiler reaches 
 **What it does not check.** Construction (`Backend{ owner, worlds }`) is checked by the session's member initializer
 itself, and the declaration order of the two members by the session's `__builtin_offsetof` assertions (the UImpl's
 until task 24a). The concept
-names the parameters through forward declarations (`UWorld`, `AActor`, `USimmableUpdateComponent`,
+names the parameters through forward declarations (`UWorld`, `AActor`, `UOGBrawlerSimulatableComponent`,
 `AOGBrawlerUECharacter`) and the types the host headers already bring in (`SimulatableBrawler`,
 `QueryVolumeDescriptor`, `QueryVolumeId`).
 
@@ -113,7 +113,7 @@ the backend over itself, so the backend's type depends on the session's: each ar
   includes this header before it defines the struct, and `Backend` only names the session's specialization: the host's
   class is instantiated with the session incomplete, as it was with the actor incomplete before (it holds the session
   by reference; the game binding too). The members that read the session are instantiated where it is complete: the
-  explicit instantiation in `BrawlerJoltBindingUImpl.cpp`, which includes `SimulationManagerUImpl.h`, and so the
+  explicit instantiation in `BrawlerJoltBindingUImpl.cpp`, which includes `OGBrawlerSimulationManager.h`, and so the
   session's header and the complete actor.
 * **The Jolt arm's `extern template`** still names the host over `BrawlerTickDriverGame`, which is
   `BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>` since task 24a: the same type as

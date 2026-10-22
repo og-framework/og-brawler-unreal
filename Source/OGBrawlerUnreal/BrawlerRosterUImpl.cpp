@@ -8,7 +8,7 @@
 #include "OGSimulationUnreal/UESimulationLogRoutes.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 
 #include "Components/CapsuleComponent.h"
 #include "EngineUtils.h"
@@ -103,7 +103,7 @@ void BrawlerRosterUImpl::seedSpawnPointsFromLevel(UWorld& world, ENetMode netMod
 void BrawlerRosterUImpl::checkSeeded(ENetMode worldNetMode) const
 {
 	checkf(m_ringoutSpawnPointsSeeded,
-		TEXT("SimulationManagerUImpl::BeginPlay: the ring-out spawn table was not seeded on this peer ")
+		TEXT("OGBrawlerSimulationManager::BeginPlay: the ring-out spawn table was not seeded on this peer ")
 		TEXT("(netMode=%d). Every peer reads StaticData::spawnPoints - a client predicts its own ")
 		TEXT("respawn - so seedSpawnPointsFromLevel must not be role-gated. Was the NOT ")
 		TEXT("ROLE-GATED fence at the seed call."),
@@ -180,13 +180,13 @@ void BrawlerRosterUImpl::forgetCharacter(unsigned int id)
 
 void BrawlerRosterUImpl::pushRingoutScores(
     const brawlerRingout::ScoreSystem& scoreSystem,
-    const std::unordered_map<unsigned int, TWeakObjectPtr<USimmableUpdateComponent>>& routes)
+    const std::unordered_map<unsigned int, TWeakObjectPtr<UOGBrawlerSimulatableComponent>>& routes)
 {
     for (const auto& entry : routes)
     {
         const unsigned int id = entry.first;
 
-        USimmableUpdateComponent* component = entry.second.Get();
+        UOGBrawlerSimulatableComponent* component = entry.second.Get();
         if (component == nullptr)
             continue;
 

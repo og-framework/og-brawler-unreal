@@ -11,7 +11,7 @@
 # `ChaosTickBackendUImpl.h` and `.cpp` — guards
 
 The prohibitions on the Chaos host: the async callback, its rewind-push probe, the restored-state write and the
-input hook's tick. Every entry here moved from `SimulationManagerUImpl-guards.md` in og-simulationscheduler-withjolt
+input hook's tick. Every entry here moved from `OGBrawlerSimulationManager-guards.md` in og-simulationscheduler-withjolt
 task 82, with the code it guards; each names its old id. In the source a single line
 `// ⛔G-nn  docs/ChaosTickBackendUImpl-guards.md` sits directly above the statement or declaration where the forbidden
 edit would be typed.
@@ -43,11 +43,11 @@ only on the first replayed step (`G-08`). `G-06`'s engine claims were not re-rea
 
 ## G-01 — `bodyName` stores a pointer to a STRING LITERAL, and only a string literal
 
-*Was `SimulationManagerUImpl-guards.md` G-02; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-02; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Tag site:** `ChaosTickBackendUImpl.h`, directly above `FRewindPushProbeStashedBody::bodyName`.
 
-**The fence, verbatim — the bytes it occupied in `SimulationManagerUImpl.h` before task 11:**
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
 
 <!-- header lines 272-273 at b9f6d81 -->
 ```
@@ -61,7 +61,7 @@ only on the first replayed step (`G-08`). `G-06`'s engine claims were not re-rea
 
 ## G-02 — the push-probe verdict read stays at the top of `OnPreSimulate_Internal`, and its `else` stays
 
-*Was `SimulationManagerUImpl-guards.md` G-51; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-51; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Site:** the `if (m_pushProbeStashFrame != INDEX_NONE)` block at the top of
 `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`.
@@ -93,7 +93,7 @@ tag is the only record that its line position is what the probe measures.
 
 ## G-03 — the push probe reads X/R, never P/Q
 
-*Was `SimulationManagerUImpl-guards.md` G-52; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-52; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Site:** the `particle->GetX()` / `GetR()` reads in `readLiveBodyForPushProbe`.
 
@@ -126,7 +126,7 @@ the hypothesis whether or not it is true.
 
 ## G-04 — the push probe compares with the production predicate, over the fields the body's wire shape carries
 
-*Was `SimulationManagerUImpl-guards.md` G-53; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-53; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Site:** `pushProbeFieldsSimilar`.
 
@@ -173,7 +173,7 @@ function, and it has no tag of its own.
 
 ## G-05 — the push-probe verdict's denominator is `nonInert`, and `VACUOUS` is a third verdict
 
-*Was `SimulationManagerUImpl-guards.md` G-54; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-54; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Site:** `pushProbeVerdictText`.
 
@@ -201,7 +201,7 @@ a word.
 
 ## G-06 — `noteResimGrant` is recorded before `prepareResimulation`
 
-*Was `SimulationManagerUImpl-guards.md` G-55; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-55; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Site:** the `m_manager->noteResimGrant(PhysicsStep);` line in `FirstPreResimStep_Internal`. `m_manager` is the callback's `ChaosTickBackendUImpl*`, which forwards to the session's resim-gate probe.
 
@@ -229,7 +229,7 @@ entry. They are carried as they stood.
 
 ## G-07 — the upcoming sim tick comes from the mapper, and the `+ 1` is derived
 
-*Was `SimulationManagerUImpl-guards.md` G-71; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
+*Was `OGBrawlerSimulationManager-guards.md` G-71; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Only its site and its cross-references changed.*
 
 **Site:** `const int32 firstUpcomingSimTick =` in `ChaosTickBackendUImpl::InjectInputs_External`, the Chaos
 configuration's input hook (`ChaosTickBackendUImpl-rationale.md` §2). Re-sited there from
@@ -278,7 +278,7 @@ server clock adds an unsynchronized read of a physics-thread-written value on th
 
 ## G-08 — the restored body state is WRITTEN onto the particle in `FirstPreResimStep_Internal`, never pushed as a rewind target
 
-*Was `SimulationManagerUImpl-guards.md` G-76; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Reworded by og-simulationscheduler-withjolt task 84, when the hand-written per-body write loop became one call to og-simulation's push: the prohibitions are unchanged, and their site is now that call.*
+*Was `OGBrawlerSimulationManager-guards.md` G-76; moved here by og-simulationscheduler-withjolt task 82, when the Chaos host left the UImpl. Reworded by og-simulationscheduler-withjolt task 84, when the hand-written per-body write loop became one call to og-simulation's push: the prohibitions are unchanged, and their site is now that call.*
 
 *Reworded again by og-simulationscheduler-withjolt task 88, when the push moved into og-simulation's
 `SimulationManager::prepareResimulation`: the site is now the `prepareResimulation` call, which writes the

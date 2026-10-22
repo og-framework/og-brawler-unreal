@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/SimmableUpdateComponent-rationale.md · docs/SimmableUpdateComponent-guards.md
+// docs/OGBrawlerSimulatableComponent-rationale.md · docs/OGBrawlerSimulatableComponent-guards.md
 
 #pragma once
 
@@ -36,24 +36,25 @@
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGSimulation/SimulationQueues.h"
 
-#include "SimmableUpdateComponent.generated.h"
+#include "OGBrawlerSimulatableComponent.generated.h"
 
 class DAttackCircle;
 class UInputAction;
 class UEnhancedInputComponent;
-class USimmableUpdateComponent;
+class UOGBrawlerSimulatableComponent;
 class UOGBrawlerInputCollectionComponent;
 class ASimulationInputRelay;
+class AOGBrawlerSimulationManager;
 
-extern template class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;
+extern template class UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>;
 
 UCLASS(ClassGroup = DPhysics, BlueprintType, Blueprintable, EditInlineNew, meta = (BlueprintSpawnableComponent))
-class USimmableUpdateComponent : public UActorComponent, public UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>
+class UOGBrawlerSimulatableComponent : public UActorComponent, public UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>
 {
 	GENERATED_BODY()
 public:
 
-	USimmableUpdateComponent(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
+	UOGBrawlerSimulatableComponent(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 
 	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override final;
@@ -68,15 +69,13 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	friend class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;
+	friend class UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>;
 
-	void tryInitializeWithManager();
-	void tryRegisterWithNewFramework();
-	void scheduleNextInitializationAttempt();
-	void scheduleNextRegistrationAttempt();
+	ueSimulatableOwnerRegistration::Initialization initializeWithManager(AOGBrawlerSimulationManager& manager, AActor& owner);
+	ueSimulatableOwnerRegistration::ResolvedKey resolveRegistrationKey(AOGBrawlerSimulationManager& manager, bool isAuthority);
+	UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>::InputProvider makeInputProvider(unsigned int key);
+	SimulatableBrawler makeSimulatable();
 	SimCharacterId simCharacterId() const;
-	int32 m_initializationAttempts = 0;
-	int32 m_registrationAttempts = 0;
 
 	unsigned int storageKeyOfOwner() const;
 

@@ -41,7 +41,7 @@ backend (radius and half-height compared with `FMath::IsNearlyEqual`):
 * **Chaos configuration:** `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root branch, which
   adopts this capsule as the root body.
 * **Jolt configuration** (og-simulationscheduler-withjolt task 53, design D14): the check in
-  `ASimulationManagerUImpl::tryRegister`'s first-call bind, which is
+  `tryRegister`'s first-call bind (the session's since og-ue-simulationcomponentandmanagersplit task 28), which is
   `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's `createBodies_GameThread`, since
   og-tickdriver task 15a. Jolt builds the character body from the
   descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
@@ -196,7 +196,8 @@ player's child connection counts as its parent's owner.
   arrives, and its registration waits at `SimCharacterId::None` until the component's
   600-attempt `checkf` fires.
 * `COND_InitialOnly`: the authority assigns the id in
-  `USimmableUpdateComponent::tryRegisterWithNewFramework`, one or more frames after the
+  `UOGBrawlerSimulatableComponent::resolveRegistrationKey` (a registration hook the binding's `tryRegisterWithNewFramework`
+  calls, since og-ue-simulationcomponentandmanagersplit task 29), one or more frames after the
   component's `BeginPlay`. That is normally after the pawn's first bunch, so the initial-only
   send carries 0 and the id is never sent. Every client then waits until the same `checkf`.
 
@@ -361,7 +362,8 @@ reasons as G-10.
   one in the slot the authority chose for it, so it needs every character's slot, not just its own. Under
   `COND_OwnerOnly` a proxy's slot never arrives, and the client's acquire waits
   (`[SimHost.Slot] wait=WaitForReplication`) until the component's 600-attempt `checkf` fires.
-* `COND_InitialOnly`: the authority writes the slot in `USimmableUpdateComponent::tryInitializeWithManager`
+* `COND_InitialOnly`: the authority writes the slot in `UOGBrawlerSimulatableComponent::initializeWithManager` (a registration
+  hook the binding's `tryInitializeWithManager` calls, since og-ue-simulationcomponentandmanagersplit task 29)
   (through `UESimulationSession::registerVizVolume`, the manager's until og-ue-simulationcomponentandmanagersplit task 24b), one or more frames after the component's
   `BeginPlay`. That can be after the pawn's first bunch, so the initial-only send would carry 0 and the
   slot would never be sent.
@@ -374,7 +376,7 @@ Chaos configuration never reads the property, so there the failure is silent.
 
 ## G-21 — the NetSync bind stays in `PostInitializeComponents`, never in a `BeginPlay`
 
-**Site:** `SimmableUpdateComponent->bindNetSync(*SimulatableNetSync);`, the last statement of `PostInitializeComponents`.
+**Site:** `BrawlerSimulatable->bindNetSync(*SimulatableNetSync);`, the last statement of `PostInitializeComponents`.
 
 New guard (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21). It replaced no comment, so it has no `>`
 block.
@@ -385,7 +387,7 @@ the initial state's notifications fire in between, so a character that arrives w
 existing character, for a client that joins or rejoins a running session — gets its first `OnRep_CorrectionState`
 before any `BeginPlay`. Unbound, `USimulatableNetSyncComponent` stops on its `checkf` ("no binding attached").
 
-**Seen failing (task 20a).** With the bind moved into `USimmableUpdateComponent::BeginPlay`, a harness session's first
+**Seen failing (task 20a).** With the bind moved into `UOGBrawlerSimulatableComponent::BeginPlay`, a harness session's first
 client hit that `checkf` at its first join; with the move applied to the rejoining process only, the rejoining client hit
 it on an existing character, 5 s after it started. Rationale §15.
 

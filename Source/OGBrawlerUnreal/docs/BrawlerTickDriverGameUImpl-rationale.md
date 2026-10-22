@@ -12,7 +12,7 @@ Prohibitions: `BrawlerTickDriverGameUImpl-guards.md`.
 
 The brawler's `TickDriverGame` for og-simulation's `SimulationTickDriver`: the seven game hooks the driver and its
 step hooks call, each forwarded to the session, plus the manager and the storage the driver's step driver runs on.
-The session is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationcomponentandmanagersplit task 24a (`ASimulationManagerUImpl`
+The session is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationcomponentandmanagersplit task 24a (`AOGBrawlerSimulationManager`
 before); the hooks that still forward to the actor reach it through the session's `owner()` (§6). It owns nothing and adds no logic of its own; the one decision it makes is the
 reap's null check (§2).
 
@@ -24,7 +24,7 @@ complete with the session incomplete (it holds a reference), the concept check n
 each body is instantiated where it is first used, where the session is complete: in the host's `.cpp` until
 og-tickdriver task 15e (TickDriverBackendUImpl.cpp, a historical name), and since then in `BrawlerJoltBindingUImpl.cpp`,
 which instantiates the host. The only instantiation is `BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>` since task 24a
-(over `ASimulationManagerUImpl` before), named `BrawlerTickDriverGame` at the end of this header since task 15e (the
+(over `AOGBrawlerSimulationManager` before), named `BrawlerTickDriverGame` at the end of this header since task 15e (the
 host's own alias before). og-tickdriver task 15b made the host a template and kept this one a template: the session
 still holds the host by value, so its header still includes the host's before the session class is defined
 (`TickDriverBackendUImpl-rationale.md` §10).
@@ -60,7 +60,7 @@ friendship any more and lost its line.
   immediately before the tick it releases for. No receipt lands between inline steps (receipts happen in the
   engine's receive dispatch), so the queue contents are those of Chaos's batch; the difference is at consumption,
   in a multi-step frame with a per-character gap tick, where the batch let a later input fill the gap early.
-  The details are `SimulationManagerUImpl-rationale.md` §7.
+  The details are `OGBrawlerSimulationManager-rationale.md` §7.
 * **The reap's null check.** Before og-tickdriver task 8 the frame host made the call only when
   `getReceptionCoordinator()` returned one; the driver now calls `afterInlineBatch` on every inline frame with
   steps, an inline client's included, so the check moved here unchanged.
@@ -69,7 +69,7 @@ friendship any more and lost its line.
   `beforeSimulate` takes `t1` at that instant on both roles (`TickDriverStepHooks-guards.md` G-03); on a client it is
   early only by the Jolt scratch save, microseconds. The stamps read what `onGameSimulation` produced, so they are
   posted from `beforePhysics`; the step-end stamps go in `afterTick`, after the post-step pass and the ring save
-  (`SimulationManagerUImpl-rationale.md` §16, "The step-side stamp sites per configuration").
+  (`OGBrawlerSimulationManager-rationale.md` §16, "The step-side stamp sites per configuration").
 * **`onPostPhysics` every frame.** `onPostPhysicsStep` (the actor's `OnPostPhysicsStep` until task 27a) runs with or without steps, as the scene's post-tick delegate
   did, so the correction rotation still advances once per game frame. Its first backend call is the Jolt host's
   `beforePresent_GameThread` (`TickDriverBackendUImpl-rationale.md` §5, §6).
@@ -94,8 +94,8 @@ host used to name (lead ruling L1).
 
 | member | what it is | was, in the host |
 |---|---|---|
-| `Session` | `SessionT`, the brawler's `UESimulationSession<BrawlerSessionTraitsUImpl>` (`ASimulationManagerUImpl` until task 24a) | the owner's type |
-| `Component` | `USimmableUpdateComponent` | the component parameters of the three registration entry points |
+| `Session` | `SessionT`, the brawler's `UESimulationSession<BrawlerSessionTraitsUImpl>` (`AOGBrawlerSimulationManager` until task 24a) | the owner's type |
+| `Component` | `UOGBrawlerSimulatableComponent` | the component parameters of the three registration entry points |
 | `Character` | `AOGBrawlerUECharacter` | the character parameter, and the cast in `onRegistered_GameThread` |
 | `StaticData` | `simulatableBrawler::StaticData` | the static data's type in `createBodies_GameThread` |
 | `gravity(session)` | the session's movement gravity, `m_staticData.m_movementStaticData.gravity` | the same read in `buildWorld` |
@@ -109,7 +109,7 @@ host used to name (lead ruling L1).
 * **`gravity` and `callWithSlotRequest` read the session's private members** (`m_staticData`) and the actor's net mode;
   the session's friend line for this binding covers the first, and the net mode is public.
 * **The `HasAuthority` poison.** The role is the net mode's (`GetNetMode() != NM_Client`), never the session's
-  `HasAuthority()`, which is always true (`SimulationManagerUImpl-rationale.md` §13.9). The header defines
+  `HasAuthority()`, which is always true (`OGBrawlerSimulationManager-rationale.md` §13.9). The header defines
   `HasAuthority` to the session's poison name after its includes and undefines it at its end, as the host's `.cpp`
   did around this statement before (`TickDriverBackendUImpl-rationale.md` §1).
 * **`BrawlerTickDriverGame`** is the alias of the one instantiation, after the class; the seam

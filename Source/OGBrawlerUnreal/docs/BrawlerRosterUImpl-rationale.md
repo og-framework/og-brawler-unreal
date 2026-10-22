@@ -5,6 +5,7 @@
 <!-- lint-external-ref: FNameFastLess -- Unreal Engine FName comparator, outside every scan root -->
 <!-- lint-external-ref: CompareIndexes -- Unreal Engine FName method, outside every scan root -->
 <!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root -->
+<!-- lint-external-ref: USimmableUpdateComponent::tryRegisterWithNewFramework -- RETIRED by og-ue-simulationcomponentandmanagersplit task 29: the registration loop is UESimulatableOwnerBinding's skeleton since then; §2 and §3 quote the shipped comments verbatim. It must NOT resolve -->
 <!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (§2): the record field deleted with the two-source tripwire. It must NOT resolve -->
 # `BrawlerRosterUImpl` — rationale
 
@@ -19,16 +20,16 @@ a `⛔G-nn` tag in the source points there, and the one `∴D-nn` tag points at 
 ## 0. What the roster is, and how it reaches the actor's state (og-ue-simulationcomponentandmanagersplit task 23)
 
 **What it holds.** Everything about *which characters this peer has and where they spawn* that the manager used to hold
-itself, moved out of `ASimulationManagerUImpl` by task 23 (2026-10-21), by content and in order:
+itself, moved out of `AOGBrawlerSimulationManager` by task 23 (2026-10-21), by content and in order:
 
-| roster | was, in `ASimulationManagerUImpl` |
+| roster | was, in `AOGBrawlerSimulationManager` |
 |---|---|
 | `m_simCharacterIds`, `allocateSimCharacterId` | the same names (the allocator member; the public method) |
 | `m_spawnSlots` | the same member |
 | `kPreDietCharacterCap`, its `static_assert` against `brawlerRingout::kMaxSpawnPoints`, `m_authorityRegisteredIds` and its set `static_assert` | the same names; the set assert sat in `compositionContractsHold` |
 | `seedSpawnPointsFromLevel`, `m_ringoutSpawnPointsSeeded` | the private seed method and its flag |
 | `checkSeeded` | the seeded `checkf` after both role branches of `BeginPlay` (since task 27b called from the hook `afterSessionConfigured`) |
-| `pushRingoutScores` (a static member) | the file-local score push of `SimulationManagerUImpl.cpp` |
+| `pushRingoutScores` (a static member) | the file-local score push of `OGBrawlerSimulationManager.cpp` |
 | `onBodiesCreated` | the per-character init after the bodies: the capsule-id stamp, the teleport seed and the spawn-slot seed of `tryRegister`'s first-call pass |
 | `onRegistered` | the pre-diet cap block of `tryRegister`'s Ready path |
 | `forgetCharacter` | the two forgets of `unregisterFromNewFramework`: the id-set erase and the spawn-slot release |
@@ -62,13 +63,14 @@ session). It reads nothing at construction. The actor reaches it as `m_roster`; 
 `roster()`, a mutable and a `const` overload, because allocation mutates the allocator.
 
 **Threads.** Every entry point runs on the game thread, as the code did before it moved: `BeginPlay`, `tryRegister`,
-`unregisterFromNewFramework`, the component's registration attempt and the post-physics pass (the actor's
+`unregisterFromNewFramework` (the session's since og-ue-simulationcomponentandmanagersplit task 28, through the brawler's
+registration hooks), the component's registration attempt and the post-physics pass (the actor's
 `OnPostPhysicsStep` until og-ue-simulationcomponentandmanagersplit task 27a; since then the session's
 `onPostPhysicsStep`, through the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`). The score push is the one
-cross-thread read, and its argument (§3, and `SimulationManagerUImpl-rationale.md` §1, "The second read crossing") is
+cross-thread read, and its argument (§3, and `OGBrawlerSimulationManager-rationale.md` §1, "The second read crossing") is
 unchanged: the roster adds no member to any crossing.
 
-**Optimization state (lead ruling F1).** Every moved body came from inside `SimulationManagerUImpl.cpp`'s
+**Optimization state (lead ruling F1).** Every moved body came from inside `OGBrawlerSimulationManager.cpp`'s
 `OGSIM_OPTIMIZE_OFF`/`ON` pair, so `BrawlerRosterUImpl.cpp` wraps all seven definitions in a pair of its own. None is a
 template, so the pair keeps them unoptimized in Development, as before; task 23 measured it by disassembly before and
 after (its notes). The header defines no function.
@@ -78,14 +80,14 @@ after (its notes). The header defines no function.
 since `tryRegister` is still the only caller). Three fatal-only `checkf` messages name the renamed seed,
 `seedSpawnPointsFromLevel`, instead of its old name (design Q7: neutral checkf texts in moved code).
 
-**Section numbers.** The text below moved verbatim from `SimulationManagerUImpl-rationale.md`; a bare `§n` or Cnn
+**Section numbers.** The text below moved verbatim from `OGBrawlerSimulationManager-rationale.md`; a bare `§n` or Cnn
 inside it is that file's.
 
 ---
 
 ## 1. The ring-out respawn points come from the level
 
-*Moved from `SimulationManagerUImpl-rationale.md` §13.1 (task 23; ruling Q-B). The method is `seedSpawnPointsFromLevel`
+*Moved from `OGBrawlerSimulationManager-rationale.md` §13.1 (task 23; ruling Q-B). The method is `seedSpawnPointsFromLevel`
 since task 23, and the seeded check is `checkSeeded`.*
 
 > ⭐⭐ [ringout task 9, 2026-09-13] THE RESPAWN POINTS ARE THE LEVEL'S `APlayerStart` ACTORS.
@@ -191,7 +193,7 @@ At the call site in `BeginPlay`:
   binds none of them. Stepping starts at `m_backend.startStepping`, still the last call but one of the start-up (the
   session's `beginPlay` since og-ue-simulationcomponentandmanagersplit task 27b), so the conclusion holds: an empty
   `m_manager` proves that no step has run.
-- **C23-2.** *"directly after the two role branches"*: the resim-policy block (`SimulationManagerUImpl-guards.md` G-63;
+- **C23-2.** *"directly after the two role branches"*: the resim-policy block (`OGBrawlerSimulationManager-guards.md` G-63;
   since og-ue-simulationcomponentandmanagersplit task 26b the session's `applyResimTriggerPolicy`, called at the block's
   position, `UESimulationSession-guards.md` G-17) sits between the role branches and the check. The check still runs before the backend starts stepping, which is what
   makes it a check on every peer.
@@ -208,9 +210,10 @@ At the call site in `BeginPlay`:
 
 ## 2. The per-character init after the bodies
 
-*Moved from `SimulationManagerUImpl-rationale.md` §13.4, its brawler part (task 23; ruling Q-B): the capsule-id stamp,
+*Moved from `OGBrawlerSimulationManager-rationale.md` §13.4, its brawler part (task 23; ruling Q-B): the capsule-id stamp,
 the teleport seed and the spawn-slot seed, now `onBodiesCreated`. The cast, the body creation and the resolvability gate
-stay in `tryRegister` and stay in §13.4 (task 28 moves its generic part).*
+stayed in `tryRegister` and in §13.4; task 28 moved them into the session (`UESimulationSession-rationale.md` §12.1), the
+quotes to `BrawlerSessionGameUImpl-rationale.md` §7.3, and the call of `onBodiesCreated` into the hook `afterBodiesCreated`.*
 
 > Stamp the authoritative capsule body id into the brawler's CharacterBindings. §10
 >
@@ -324,7 +327,8 @@ Verified: `respawnDelayTicks` defaults to `120u`. The caller computes `isAuthori
 - *"`record.isAuthority` IS that test … the `checkf` states that equivalence"*: the `checkf` now compares the passed
   `isAuthority` with the passed `netMode`, which `tryRegister` takes from the manager's own `GetNetMode()` at the call,
   exactly the value the old statement read. The caller still computes `isAuthority` as `(GetNetMode() != NM_Client)` in
-  `tryRegisterWithNewFramework`.
+  `tryRegisterWithNewFramework` (*task 29:* the binding's skeleton, `UESimulatableOwnerBinding.h`, since then; the same
+  expression on the component, through `derived()`).
 - *"Not reachable as stated"*: still true. The only `release` call is in `forgetCharacter`, and its only caller is
   `unregisterFromNewFramework`.
 - Verified: `InitialConditions` is still 16 B (`uint32_t teleportPending`, `glm::vec3 teleportPos`), `drivesBody`
@@ -335,7 +339,7 @@ Verified: `respawnDelayTicks` defaults to `120u`. The caller computes `isAuthori
 
 ## 3. The ring-out score push
 
-*Moved from `SimulationManagerUImpl-rationale.md` §13.5 (task 23; ruling Q-B). The function is
+*Moved from `OGBrawlerSimulationManager-rationale.md` §13.5 (task 23; ruling Q-B). The function is
 `BrawlerRosterUImpl::pushRingoutScores` since task 23; its one call is still in `OnPostPhysicsStep`, under the same gate.
 Since task 27a the call and its gate are the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`, which the
 session's `onPostPhysicsStep` calls at the same position (`BrawlerSessionGameUImpl-rationale.md` §5).*
@@ -372,9 +376,11 @@ is unchanged (task 54).*
 > never leaves the server and their scoreboard row freezes at whatever last replicated. It
 > fails quiet, so it is written down rather than left to be rediscovered.
 
-The edit that would break this coupling is typed in `SimmableUpdateComponent.cpp`, not here,
-which is why it has no tag in this file. Verified: the route is registered under
-`if (isAuthority)` in `tryRegisterWithNewFramework`.
+The edit that would break this coupling is typed in `UESimulatableOwnerBinding.h` (since og-ue-simulationcomponentandmanagersplit
+task 29; `OGBrawlerSimulatableComponent.cpp` before), not here, which is why it has no tag in this file. Verified: the route
+is registered under `if (isAuthority)` in `tryRegisterWithNewFramework`, the binding's registration skeleton
+(`UESimulatableOwnerBinding-guards.md` G-11). *R0, task 29:* the quote's component-qualified `tryRegisterWithNewFramework`
+is the binding's member now; the coupling is unchanged.
 
 > ⛔⛔ THIS IS A CROSS-THREAD READ, AND THE ARGUMENT FOR IT IS THE CLASS BANNER'S THIRD
 > CROSSING — read that before touching this. The short form: `ScoreSystem`'s score table is
@@ -439,7 +445,8 @@ would fire it in Development.
   member to its threading table, and its one caller is `OnPostPhysicsStep` (since task 27a the brawler's hook
   `BrawlerSessionGameUImpl::afterVisualization`, which the session's `onPostPhysicsStep` calls).
 - The route table is still registered under `if (isAuthority)` in `tryRegisterWithNewFramework`
-  (`SimmableUpdateComponent-guards.md` G-07), and erased in `unregisterFromNewFramework` ahead of the component's
+  (`UESimulatableOwnerBinding-guards.md` G-11 since task 29, `OGBrawlerSimulatableComponent-guards.md` G-07 before), and
+  erased in `unregisterFromNewFramework` ahead of the component's
   unbind. The push reads it by `const&`, so `routes.erase(…)` still does not compile.
 - `SetAuthoritativeRingoutScore`'s `checkf` message names the push as `BrawlerRosterUImpl::pushRingoutScores`, called
   from `OnPostPhysicsStep`, since task 23. *Task 27a:* the message still says the actor's `OnPostPhysicsStep`; the call
@@ -449,7 +456,7 @@ would fire it in Development.
 
 ## 4. The pre-diet character cap ∴D-01
 
-*Moved from `SimulationManagerUImpl-rationale.md` §10, its subsection *The pre-diet character cap*, with the constant and both of its `static_assert`s (task 23). The manager's `D-01` is retired there; this heading carries the roster's.*
+*Moved from `OGBrawlerSimulationManager-rationale.md` §10, its subsection *The pre-diet character cap*, with the constant and both of its `static_assert`s (task 23). The manager's `D-01` is retired there; this heading carries the roster's.*
 
 `kPreDietCharacterCap = 4`, checked at character registration on the authority — a path that
 provably runs every session, once per character. **A cap that depends on nobody spawning a fifth
@@ -535,7 +542,7 @@ the same change. The tag lint's orphan check will say so if it does not.
 
 The allocator, `allocateSimCharacterId` and its refusal branch moved here from the manager in task 23. The design (why
 the id is peer-stable, why the counter is a member and not a process static, PIE's two managers, couch co-op, a rejoin)
-stays in `SimulationManagerUImpl-rationale.md` §15, which describes the manager's lifetime that the roster shares; the
+stays in `OGBrawlerSimulationManager-rationale.md` §15, which describes the manager's lifetime that the roster shares; the
 permanence rule is guard G-01 of `SimCharacterId-guards.md`, and the refusal branch is this file's guard G-02.
 
 ---

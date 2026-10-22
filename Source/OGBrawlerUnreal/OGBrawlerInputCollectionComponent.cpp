@@ -13,7 +13,7 @@
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGBrawler/InputMapping/StickRouting.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
@@ -508,7 +508,7 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	// og-brawler-3rdControllerMode task 5, holding it while moving does not) answerable from a
 	// shipped log line with no temporary instrumentation to add and remove. ⚠ LogOGSimTick defaults to Warning in
 	// Config/DefaultEngine.ini — this line is per-tick chatter: it logs at the Verbose level its
-	// `[ClientPrediction]` row in kOGLogRoutes (SimulationManagerUImpl.h) gives it, so it is silent
+	// `[ClientPrediction]` row in kOGLogRoutes (OGBrawlerSimulationManager.h) gives it, so it is silent
 	// until someone runs `Log LogOGSimTick Verbose` in the console.
 	OG_LOG_ROUTED(LogOGSimTick,
 		TEXT("[ClientPrediction] id=%u tick=%u attackLeft=%d triggeredActionId=%u movementFlags=0x%02X"),

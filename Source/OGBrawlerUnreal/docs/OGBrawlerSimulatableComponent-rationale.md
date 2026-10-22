@@ -1,13 +1,16 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-# `USimmableUpdateComponent` — rationale
+<!-- lint-external-ref: ASimulationManagerUImpl -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager; kept in the §11 history and named in its marker -->
+<!-- lint-external-ref: ASimulationManagerUImpl::BeginPlay -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager::BeginPlay; kept in the §11 history -->
+<!-- lint-external-ref: SimulationManagerUImpl-rationale.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager-rationale.md (ids unchanged); kept in the §11 history -->
+# `UOGBrawlerSimulatableComponent` — rationale
 
-Companion to `Source/OGBrawlerUnreal/SimmableUpdateComponent.h` and `SimmableUpdateComponent.cpp`.
+Companion to `Source/OGBrawlerUnreal/OGBrawlerSimulatableComponent.h` and `OGBrawlerSimulatableComponent.cpp`.
 Since the task-25 conversion both files carry only code and one-line tags. **The prohibitions are in
-`SimmableUpdateComponent-guards.md`, one id per site; this file carries the reasoning, the provenance
+`OGBrawlerSimulatableComponent-guards.md`, one id per site; this file carries the reasoning, the provenance
 and the worked derivations.** The old `§N` marks are gone from the source; §12 records where every
 pre-conversion comment went.
 
-Sibling document: `Source/OGBrawlerUnreal/docs/SimulationManagerUImpl-rationale.md`, which owns the
+Sibling document: `Source/OGBrawlerUnreal/docs/OGBrawlerSimulationManager-rationale.md`, which owns the
 manager side of every boundary named below. Where a fact belongs to the manager it is cited there
 rather than restated here.
 
@@ -18,11 +21,18 @@ notification and the input RPC; this component binds it and supplies the typed e
 Since task 20b it also holds the link to the character's relay host and sends the connection tier;
 this component supplies the relayed ring's stamps and the ring-flush callback (§17).
 
-**Since task 21 the typed half of this component is a CRTP base**, `UESimulatableOwnerBinding<USimmableUpdateComponent,
+**Since task 21 the typed half of this component is a CRTP base**, `UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent,
 BrawlerSessionTraitsUImpl>` (OGSimulationUnreal, MPL-2.0; `UESimulatableOwnerBinding-rationale.md`): the five binding
 overrides, the forwarders, the typed owner-concept members, the sibling pointer, the owner-concept aliases, the five
 latency stamp blocks and the stage are its members. This component keeps the registration, the visualization, the
 teardown order and one hook, `storageKeyOfOwner()` (§18).
+
+**Since task 29 the registration loop is the binding's too**: a generic skeleton (`UESimulatableOwnerBinding-rationale.md`
+§9) with the two polling loops, the attempt budget, the session-owner wait, the local-prediction test, the session's
+`tryRegister` and its `Pending` retry, the provider latch, the relay host's spawn or find and the delivery route. This
+component keeps the brawler's statements of that loop in four private registration hooks — `initializeWithManager`,
+`resolveRegistrationKey`, `makeInputProvider` and `makeSimulatable` — and calls `beginRegistration()` from its
+`BeginPlay` (§19).
 
 <!-- ================= DECLARED LINT ESCAPES =================================
      Every token below is CORRECT and cannot resolve. None is here to silence a
@@ -30,7 +40,6 @@ teardown order and one hook, `storageKeyOfOwner()` (§18).
      (§11). Three classes — engine symbols outside every scan root, names that
      are RETIRED and must NOT resolve, and one private-workspace document.
      ========================================================================= -->
-<!-- lint-external-ref: PostLogin -- Unreal Engine method, outside every scan root; the engine is not vendored into this repository -->
 <!-- lint-external-ref: LiveLink -- ⛔ MUST NOT RESOLVE. F-34-5: the baseline claimed this component ticks behind a LiveLink component and takes a tick prerequisite on one. No such component exists in this project; the day this name resolves, that claim has become true and Sec 2 must be re-checked -->
 <!-- lint-external-ref: LiveLinkComponent -- ⛔ MUST NOT RESOLVE. F-34-8: the argument of the commented-out prerequisite call, deleted with it -->
 <!-- lint-external-ref: getLatestInput -- RETIRED with the correction-input column; zero non-comment occurrences in the tree. It must NOT resolve -->
@@ -42,6 +51,8 @@ teardown order and one hook, `storageKeyOfOwner()` (§18).
 <!-- lint-external-ref: getSyncedCorrectionInputBuffer -- RETIRED (Sec 12): the authority accessor for the retired correction-input buffer. It must NOT resolve -->
 <!-- lint-external-ref: getMachineVizState -- RETIRED (Sec 12): deleted with the pawn flinch-freeze predicate that was its only caller. It must NOT resolve -->
 <!-- lint-external-ref: m_onCorrectionInputReceivedCallback -- RETIRED (Sec 12): removed with the correction-input channel. It must NOT resolve -->
+<!-- lint-external-ref: USimmableUpdateComponent -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to UOGBrawlerSimulatableComponent (this component); named in the §12 history marker -->
+<!-- lint-external-ref: SimmableUpdateComponent-guards.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to OGBrawlerSimulatableComponent-guards.md (this file's guards doc, ids unchanged); kept in the §12 history -->
 
 > **Licence.** This tier is **BUSL-1.1**, matching the code it describes. It is deliberately not in
 > the `og-simulation` docs tier, which is MPL-2.0 and travels with a different repository.
@@ -51,7 +62,7 @@ channels, the phase order, the concept surface. Everything below assumes it.
 
 ---
 
-## §0 Orientation — `USimmableUpdateComponent`
+## §0 Orientation — `UOGBrawlerSimulatableComponent`
 
 *Moved from the orientation banner at the top of the `.cpp` (task 25), with the phase order brought up to
 date.*
@@ -63,7 +74,7 @@ correction-state read and the input RPC's tail — whose reflected declarations 
 all of it is core, reached through the manager.
 
 **Binding declaration — this is UE adapter code.** Every engine or project type these files name —
-`USimmableUpdateComponent`, `ASimulationManagerUImpl`, `GEngine`, `ASimulationInputRelay`,
+`UOGBrawlerSimulatableComponent`, `AOGBrawlerSimulationManager`, `GEngine`, `ASimulationInputRelay`,
 `ASimulationConnectionRelay`, `AOGBrawlerUECharacter`, and equally the replication vocabulary
 (`UChildConnection`, `FNetPing`, `COND_SkipOwner`, `COND_OwnerOnly`, `NetSerialize`, Iris, `UObject`,
 `FSimulationStateSyncBuffer`) — is one adapter's binding for the role it
@@ -71,21 +82,25 @@ names, and another adapter substitutes its own. The engine-free core never sees 
 
 **Role.** One instance runs on each side and they are not the same object. The role test is
 `GetNetMode() != NM_Client`, world-level, the same predicate the manager picks its own role with
-(guard G-02).
+(the binding's guard G-07 since task 29; this file's G-02 before).
 
 **Phase order.** Every step polls, because every step can legitimately not be ready yet, and "not
-yet" is never an error:
+yet" is never an error. Since task 29 the two loops are the binding's skeleton, and this component's
+part of each is a hook (§19):
 
 ```
 (the character's PostInitializeComponents: bindNetSync to the sibling, §16)
-BeginPlay
-  -> tryInitializeWithManager      until the manager exists; then the query volumes and the
-                                   visualization state
-  -> tryRegisterWithNewFramework   until the manager exists; then (authority) allocate the pawn's
-                                   SimCharacterId, or (client) wait for it to replicate; then until
-                                   the bodies resolve; then register, latch the provider decision,
-                                   spawn (or find) the relay host, and -- authority only -- register
-                                   the id -> component route
+BeginPlay -> beginRegistration     (the binding) loop one on the next tick
+  -> tryInitializeWithManager      (the binding) until the manager exists; then the hook
+                                   initializeWithManager: the query volume and the visualization
+                                   state (Retry while the Jolt slot waits)
+  -> tryRegisterWithNewFramework   (the binding) until the manager exists; then the hook
+                                   resolveRegistrationKey: (authority) allocate the pawn's
+                                   SimCharacterId, or (client) wait for it to replicate; then the hooks
+                                   makeInputProvider (locally predicted only) and makeSimulatable;
+                                   then until the bodies resolve; then register, latch the provider
+                                   decision, spawn (or find) the relay host, and -- authority only --
+                                   register the id -> component route
 TickComponent                      visualization only, both roles
 EndPlay
   -> unregister, then the sibling's detachInputRelayHost (the authority destroys the relay host, a
@@ -107,7 +122,7 @@ to predict from (§4).
 
 ## §1 What this component is, and the four channels
 
-One `USimmableUpdateComponent` per simulated character, living on the character actor. It is the
+One `UOGBrawlerSimulatableComponent` per simulated character, living on the character actor. It is the
 **adapter**: the object that introduces a character to the simulation, holds that character's wire
 surfaces, and turns engine primitives into the arguments the engine-free core expects. It decides
 nothing about netcode.
@@ -116,9 +131,9 @@ Both roles run the same class. In one PIE process the server's world and each cl
 their own instance against their own manager; a listen server's single world runs the authority role
 only. ⚠ **Correction (R0, task 20a).** This said "on a listen server both run in the same process
 against two different manager instances"; a listen server fills only the authority slot of
-`ASimulationManagerUImpl::instanceFor`. The role test is `GetNetMode() != NM_Client` — **world-level**, never
+`AOGBrawlerSimulationManager::instanceFor`. The role test is `GetNetMode() != NM_Client` — **world-level**, never
 `HasAuthority()`, because that answers `true` on a non-replicated actor and would disagree with the
-gate the manager picks its own role with (`ASimulationManagerUImpl::instanceFor`).
+gate the manager picks its own role with (`AOGBrawlerSimulationManager::instanceFor`).
 
 The four wire channels — the correction state and the input bundle on the character's components, the
 relayed input and the connection tier on their own actors — are tabled in
@@ -143,15 +158,11 @@ below it, and **the string `LiveLink` occurs nowhere in this project's source ou
 — no such component exists to be ordered behind. What survives is the choice itself: the tick group
 is `TG_DuringPhysics`, and nothing in this file depends on a prerequisite.
 
-`kMaxRegistrationAttempts = 600` bounds both polling loops (§3). Each attempt is one
-`SetTimerForNextTick`, i.e. one **game frame**, so the budget is ten seconds only at 60 fps (2.5 s at
-240 fps). ⚠ The shipped comment said "~10 seconds at 60 Hz", which reads as the 60 Hz simulation tick;
-it is not (§11, F-25-1). Long enough for scene startup on a slow load, short enough that a genuine
-wiring bug fails loudly rather than hanging forever. Both loops count against it independently
-(`m_initializationAttempts`, `m_registrationAttempts`), and both end in a `checkf` rather than a silent
-give-up. Within loop one, the manager wait and the physics-slot wait (§3) share the one
-`m_initializationAttempts` count; within loop two, the manager wait, the task-25 id wait (§13) and the
-bodies-resolvable wait all share the one `m_registrationAttempts` count.
+**The attempt budget moved with the loops** (task 29): `kMaxRegistrationAttempts` and the two attempt counters are the
+binding's, and its account is `UESimulatableOwnerBinding-rationale.md` §9.3, moved there game-neutral. For the brawler,
+loop one's hook retries are the physics-slot wait (§3), and loop two's are the task-25 id wait (§13). ⚠ The shipped
+comment said "~10 seconds at 60 Hz", which reads as the 60 Hz simulation tick; it is one **game frame** per attempt
+(§11, F-25-1).
 
 **Deleted commented-out code (task 25).** Two commented-out overrides stood under the constructor in
 the header, `ShouldCreatePhysicsState() const override { return true; }` and `OnCreatePhysicsState()`.
@@ -167,51 +178,39 @@ pair at the end changed no scope (there was no code after that point either); it
 
 ## §3 Reaching the manager — two polling loops, and why both poll
 
-`BeginPlay` cannot do the work, because `ASimulationManagerUImpl::BeginPlay` and the character's
-`BeginPlay` race and neither ordering is guaranteed. So `BeginPlay` schedules
-`tryInitializeWithManager` for the next tick and returns.
+**Code moved to `UESimulatableOwnerBinding.h` (task 29):** the two loops, as the binding's skeleton. Their account —
+why `BeginPlay` cannot do the work, what each loop waits for, the four things a completed registration does in order,
+and that "not yet" is never an error — moved to `UESimulatableOwnerBinding-rationale.md` §9.2, game-neutral. What stays
+here is the brawler's part of each loop, in its hooks (§19).
 
-**Loop one — `tryInitializeWithManager`.** Waits for the manager to exist. Once it does: cache the
-owner's input-collection component, register the target-visualization query volume through the
-manager's session's `registerVizVolume` (§10), construct the three visualization states, and schedule loop two.
+**Loop one's hook, `initializeWithManager`.** Caches the owner's input-collection component, registers the
+target-visualization query volume through the manager's session's `registerVizVolume` (§10) and constructs the three
+visualization states; the skeleton then schedules loop two.
 
 In the Jolt configuration the volume hangs off the character's Jolt slot, so `registerVizVolume` first
 acquires the slot, and it can answer "not yet" (og-simulationscheduler-withjolt task 66): on a client the
 slot is the one the authority chose, read from the pawn's replicated `PhysicsSlotValue`, and the client
 waits until that value has arrived, and until no departed character still holds that slot on this client.
-The manager then returns an empty volume id, and loop one reschedules itself for the next frame
-(`scheduleNextInitializationAttempt`) **before** it builds the visualization states, so the states are
-only ever built over a registered volume. The wait counts against `kMaxRegistrationAttempts` like the
-manager wait, and its `checkf` names the owner. The Chaos configuration never waits here.
+The session then returns an empty volume id, and the hook answers `Retry` **before** it builds the visualization
+states, so the states are only ever built over a registered volume; the skeleton reschedules loop one for the next
+frame. The wait counts against the binding's `kMaxRegistrationAttempts` like the manager wait, and its `checkf` names
+the owner. The Chaos configuration never waits here.
 
-**Loop two — `tryRegisterWithNewFramework`.** Waits for the manager, then for the pawn's
-`SimCharacterId` (§13), then for the character's physics bodies to become resolvable — `tryRegister`
-answers `Pending` until they are, and in the Jolt configuration also while the character holds no slot,
-which loop one normally rules out — and on success does four things in a deliberate order: register with the core, latch the provider decision (§4), spawn or find the relay
-host (§6), and, on the authority only, register the id → component delivery route (§7).
-
-Every step of both loops can legitimately answer "not yet", repeatedly, and "not yet" is never an
-error. Only exhausting `kMaxRegistrationAttempts` is.
+**Loop two's hooks.** `resolveRegistrationKey` waits for the pawn's `SimCharacterId` (§13) and answers its storage key;
+`makeInputProvider` builds the locally predicted character's provider (§4); `makeSimulatable` builds the
+`SimulatableBrawler` from the component's static data. The session's `tryRegister` then answers `Pending` until the
+character's physics bodies are resolvable, and in the Jolt configuration also while the character holds no slot, which
+loop one normally rules out.
 
 ---
 
 ## §4 Provider presence, and what absence buys
 
-A **local input provider** is a callable this component hands to the core at registration. It is
-installed for exactly one kind of character: on a pure client, the locally-controlled one
-(`ROLE_AutonomousProxy`). Every other character — every simulated proxy, and every character on the
-authority — registers with a null provider.
-
-That is not a convenience null-check. **Provider presence is the identity test**, and the core
-branches on it:
-
-- **provider present** → `SimulationInputResolution::registerLocalCharacter` builds the local
-  delay line, and `SimulationNetSync` adds a sender-map entry so this character's captures go on the
-  wire.
-- **provider absent** → `SimulationInputResolution::registerRemoteCharacter` builds a neutral-seeded
-  `RemoteInputCache` for the id, and `SimulationNetSync::registerPredictionOwner` binds the relayed-
-  input callbacks by id. `SimulationInputResolution::collectInputAll` then predicts that character
-  from the store through the scheduled read, instead of extrapolating the last correction.
+**Moved to `UESimulatableOwnerBinding-rationale.md` §9.4 (task 29), game-neutral:** what a local input provider is, which
+owner gets one (on a pure client, the locally controlled one, `ROLE_AutonomousProxy`), and why provider presence is the
+core's identity test (`registerLocalCharacter` against `registerRemoteCharacter`, `SimulationInputResolution::collectInputAll`
+predicting an absent provider's character from the relay store). The local-prediction test is the binding's skeleton's
+(its G-09, this file's G-04 before). What stays here is the brawler's provider, built by the hook `makeInputProvider`.
 
 **The provider lambda captures nothing but the input collection and the id.** It used to capture the
 manager, and reached back through it for the motion matcher's input history; the core now hands the
@@ -229,9 +228,12 @@ actor per root connection, owner-only relevancy in place of the replication cond
 why the sink is per character — moved to `SimulatableNetSyncComponent-rationale.md` §9, R0-checked on the way. This
 component's RPC tail passes the sibling as `noteRttSample`'s sink (§7).
 
-**What stays here: nothing tier-related is initialized per character** (G-03). The client-side tier
-consumer used to be bound in this component, lazily, once per character. It lives on the manager now,
-one per world, emplaced where the manager creates its `TimeConfig`.
+**Nothing tier-related is initialized per character** (the binding's G-08 since task 29, an absence tag above the
+skeleton's call of this component's `initializeWithManager` hook; this file's G-03 before). The client-side tier
+consumer used to be bound in this component, lazily, once per character. It is the session's now, one per world,
+emplaced by the session's `beginPlay` (`beginTierConsumer`, on both roles). *R0 (task 29):* this said "it lives on the
+manager now … emplaced where the manager creates its `TimeConfig`"; the consumer is the session's since task 25, and
+its emplacement reads the `TimeConfig` of the session's manager.
 
 ---
 
@@ -243,7 +245,8 @@ the relay detach, the staging target and the owner-skip check. Their account —
 own actor, the link and its replay, the two fallbacks, who detaches and why twice is safe, the owner-skip
 precondition — moved to `SimulatableNetSyncComponent-rationale.md` §10, R0-checked on the way. What stays here is the
 brawler's side: the forwarders, the spawn order at registration, and the stage. Since task 21 the forwarders and the
-stage are members of the binding base (§18); the stage's account moved with it (below).
+stage are members of the binding base (§18); the stage's account moved with it (below). Since task 29 the spawn order
+and the provider latch are the binding's skeleton's (below).
 
 ### The concept surface, and why this file has forwarders
 
@@ -252,7 +255,7 @@ More importantly, the engine-free core must never name an engine type at all. So
 the relay through members of *this* object only — the ring accessor pair and the relayed-ring
 callback pair — and never learns that the ring is carried by a different actor, or since task 20b
 that the link to it is held by the sibling, or since task 21 that the members it calls are inherited from the binding
-base. `SimmableUpdateComponentConceptTest.cpp` passing unchanged
+base. `OGBrawlerSimulatableComponentConceptTest.cpp` passing unchanged
 is the proof that the engine-facing change did not leak into the core contract.
 
 ⚠ **Correction (R0, task 20b).** This said `stageRelayedInput` was part of that surface, and that each
@@ -262,18 +265,12 @@ reads the ring through the non-`const` overload at bind. `stageRelayedInput` is 
 door (the session's `UESimulationSession::relayRemoteInput` since og-ue-simulationcomponentandmanagersplit task 26a), not the core's. Since task 20b the four core-facing
 members are one-line forwarders to the sibling, which resolves the host and the fallbacks.
 
-### The spawn ordering, and what it protects
+### The spawn ordering, and what it protects — moved to the binding (task 29)
 
-The host is spawned on the authority at the moment registration completes, **above** the delivery-
-route registration, and that order is load-bearing (G-06). `noteDelayedInputComponent` is what lets
-`UESimulationSession::relayRemoteInput` (the manager's until task 26a) find this component at all; if the host were not linked by
-then, the first relay writes would stage into the sibling's no-host fallback, invisible to every client
-and with nothing logged. Spawning first closes that window by construction rather than by timing.
-
-This is also why the host is *not* spawned on demand from the write path, the way the connection
-relay is: that actor has no always-reached creation point earlier than its first write, and
-`PostLogin` misses seamless travel. This one does. The teardown has a synchronous signal for the same
-reason, the character ending play; who destroys and who unbinds is the sibling's §10.
+Code moved to `UESimulatableOwnerBinding.h` (task 29): the relay host's spawn (authority) or find (client) and the
+delivery-route registration below it, with their ordering guard (G-06 here, G-10 there). Their account — why the host is
+spawned above the route, and why it is not spawned on demand from the write path — moved to
+`UESimulatableOwnerBinding-rationale.md` §9.5, game-neutral.
 
 ⚠ **The fallback container's name was wrong in the baseline** (§11, F-34-6). The baseline said those
 writes would land in `m_detachedRelayRing`. Since the write path became a *staged* write they land in
@@ -293,11 +290,12 @@ replication ever compared the property — about 11.6 % of relayed inputs, measu
 signature `static_assert` was seen to fire (`C2338`) when a defaulted `uint32 depth` parameter was added to both the
 declaration and the definition.
 
-### The provider latch
+### The provider latch — moved to the binding (task 29)
 
 The registration writes its provider decision to the sibling through `setHasLocalInputProvider` (reached through the
-binding's `netSync()` since task 21), at the statement where it used to write its own member, and the sibling's owner-skip check reads it
-(sibling G-15). The decision is the same evaluation the core registered with, taken once.
+binding's `netSync()` since task 21), at the statement where it used to write its own member, and the sibling's
+owner-skip check reads it (sibling G-15). Since task 29 that statement is the binding's skeleton's, and its account is
+`UESimulatableOwnerBinding-rationale.md` §9.5.
 
 ---
 
@@ -309,15 +307,13 @@ the root connection resolved once; the adapter-side no-wire fallback; one RTT sa
 applied once; the two sinks — moved to `UESimulatableOwnerBinding-rationale.md` §3, R0-checked and made game-neutral on
 the way.
 
-**What stays here is the brawler's delivery route.** The id → component route the coordinator's drain and its
-malformed-slot deliver-now fallback resolve against is registered once, at registration time
-(`noteDelayedInputComponent`, G-07), paired with the erase in `unregisterFromNewFramework` (the session's
-`forgetReceptionOwner`, called there, since task 26a) — not per parked slot inside
-the receive loop — so it exists for the whole registered lifetime of the component. Authority only: the coordinator,
-the delay queue and the drain are all absent on a pure client, and the inbound delivery callback is itself wired only at
-registration, so the route and its target come up together. The erase side is a pair as well: the manager drops its
-own claim through `ServerReceptionCoordinator::forgetOwner` at the same moment. In the RPC tail the session owner is
-`ASimulationManagerUImpl`, which passes itself as both the delivery and the relay sink.
+**The delivery route moved to the binding too (task 29).** The id → component route the session resolves delivered
+and relayed input against is registered once, at registration time, on the authority only, by the binding's skeleton
+(`noteDelayedInputComponent`, its G-11, this file's G-07 before); its account is
+`UESimulatableOwnerBinding-rationale.md` §9.6. What stays here is the brawler's use of the same map: the ring-out score
+push walks it as its list of characters (`BrawlerRosterUImpl-rationale.md` §3, and §19 here). In the RPC tail the
+session owner is `AOGBrawlerSimulationManager`; since task 26a the tail passes the owner's session as both the delivery and
+the relay sink. *R0 (task 29):* this said the owner "passes itself as both … sink", stale since task 26a.
 
 ---
 
@@ -438,7 +434,7 @@ line, which a remote proxy does not have. The machine state comes off the same `
 block-prediction pass reads; there is no per-tick machine-state history, so a missed tick stays a hole
 and is never back-filled. Each lanes ledger is bounded at `kTickLaneCapacity` (240 ticks). The poll is a
 render-rate game-thread read of a physics-written capture line — the accepted tear argued in
-`SimulationManagerUImpl-rationale.md`'s CROSSING table. Nothing decides on it.
+`OGBrawlerSimulationManager-rationale.md`'s CROSSING table. Nothing decides on it.
 
 **The aim and block-prediction passes** both consume the shared `vizPlayerInput`; a remote proxy with
 nothing relayed yet is skipped for that frame. The block-prediction pass shares the target pass's
@@ -458,7 +454,7 @@ volume with `UESimulationSession::registerVizVolume`, handing it the descriptor 
 og-ue-simulationcomponentandmanagersplit task 24b, reached as `session()`). The other composition reads the
 visualization makes (`editStorage`, `getLastRelayedInput`, `runsPrediction` and the two clocks) go through `session()`
 too. The manager owns the choice of physics backend
-(`SimulationManagerUImpl-rationale.md` §18), and these members exist in both configurations, so this
+(`OGBrawlerSimulationManager-rationale.md` §18), and these members exist in both configurations, so this
 component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
 instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
 query adapter and the game-thread reader, and `registerVizVolume` builds the query parameters this
@@ -478,6 +474,8 @@ and the component skipped the two passes there; task 56 removed that skip.)
 ---
 
 ## §11 Corrections — claims this file carried that were not true
+
+*Names here are as they stood then: task 30 renamed the manager actor `ASimulationManagerUImpl` to `AOGBrawlerSimulationManager`, its files to `OGBrawlerSimulationManager.h` and `OGBrawlerSimulationManager.cpp`, and its docs pair to `OGBrawlerSimulationManager-rationale.md` and `OGBrawlerSimulationManager-guards.md` (ids unchanged).*
 
 *History. Code moved to `SimulatableNetSyncComponent.cpp` (task 20a): the rows below that name the
 OnRep, the RPC's fences or the version byte describe code that now lives in the sibling component.
@@ -535,6 +533,8 @@ exists — they verify existence, never truth.
 ---
 
 ## §12 The task-25 conversion — where every pre-conversion comment went
+
+*Names here are as they stood then: task 21a renamed this component `USimmableUpdateComponent` to `UOGBrawlerSimulatableComponent`, its files to `OGBrawlerSimulatableComponent.h` and `OGBrawlerSimulatableComponent.cpp`, and this docs pair to `OGBrawlerSimulatableComponent-rationale.md` and `OGBrawlerSimulatableComponent-guards.md` (ids unchanged).*
 
 *History. Code moved to `SimulatableNetSyncComponent.cpp` (task 20a): the rows naming G-09 … G-11,
 G-17, G-18, G-32 … G-34, G-36, G-37, §8 and §9 record where those comments went in task 25. The ids
@@ -639,16 +639,22 @@ Every id this component hands the core — `tryRegister`, `noteDelayedInputCompo
 `TickComponent`, the relayed-input read, the input-history polls — is the pawn's replicated
 `SimCharacterId`, read through the private helper `simCharacterId()` (which answers
 `SimCharacterId::None` if the owner is not an `AOGBrawlerUECharacter`). It is **not** this component's
-`GetUniqueID()`, which is a different number on every peer.
+`GetUniqueID()`, which is a different number on every peer. *R0 (task 29):* the registration's own reads never went
+through the helper: the loop read `character->GetSimCharacterId()` on the cast pawn, and since task 29 the hook
+`resolveRegistrationKey` does, answering `toStorageKey` of it; the same pawn, the same value.
 
-**How the id arrives.** In `tryRegisterWithNewFramework`, after the manager exists:
+**How the id arrives.** In the registration hook `resolveRegistrationKey`, which the binding's skeleton calls once the
+manager exists (in this component's own `tryRegisterWithNewFramework` until task 29); the hook answers the storage key,
+`toStorageKey` of the pawn's id, and the skeleton hands that key to the session's `tryRegister` and
+`noteDelayedInputComponent`, the provider and the `NewFramework: registered` line:
 
 * **Authority:** if the pawn's id is still `None`, allocate one from
   `BrawlerRosterUImpl::allocateSimCharacterId`, through the manager's `roster()` (count-up 1 … 255, never reused), and set it with
   `AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId`. A refusal (all ids spent) is final —
-  guard G-01; the roster logs it at Error and `OG_CHECK`s.
-* **Client:** while the replicated id is still `None`, stay pending on the same retry loop and the same
-  `m_registrationAttempts` budget, ending in a `checkf` if it never arrives.
+  guard G-01: the hook answers `abandon()`; the roster logs it at Error and `OG_CHECK`s.
+* **Client:** while the replicated id is still `None`, the hook answers `retry()`, and the skeleton stays pending on the
+  same retry loop and the same `m_registrationAttempts` budget (the binding's since task 29), ending in a `checkf` if it
+  never arrives.
 
 The id is replicated with the pawn, not on the correction wire, so no wire format changes. The
 sibling's `sendConnectionTierToOwningClient` `check` (task 20b) compares its `id` argument with the
@@ -662,13 +668,14 @@ Code moved to `UESimulatableOwnerBinding.h` (task 21): the five stamp blocks (`s
 `receiveRemoteMoveBundle`, `onCorrectionStateAccepted`, `noteRelayedRingArrived` and the flush callback
 `makeRingFlushedCallback` returns), verbatim and in place, each through `UELatencyBudgetDiagnostics::withInstance`.
 Their account moved to `UESimulatableOwnerBinding-rationale.md` §4. The brawler's hop table, threads and every site's
-measurement error stay `SimulationManagerUImpl-rationale.md` §16.
+measurement error stay `OGBrawlerSimulationManager-rationale.md` §16.
 
 **What stays here (the brawler's side).**
 
 **The provider lambda is unchanged, and G-05 still holds.** The capture stamp needs the manager, which
 that lambda may not capture, so it is a wrapper the manager applies in `tryRegister`
-(`SimulationManagerUImpl-rationale.md` §16). The only addition to this component's header for the stamps was
+(`OGBrawlerSimulationManager-rationale.md` §16; since og-ue-simulationcomponentandmanagersplit task 28 the session's
+`tryRegister` applies it, `UESimulationSession-rationale.md` §12.1). The only addition to this component's header for the stamps was
 `getOwnerInputCollection`, a `const` read the wrapper uses to reach the input-sample time (through
 `BrawlerSessionGameUImpl::inputSampleSource`). og-tickdriver task 18 added a second, a `const` overload of
 `getSyncedCorrectionStateBuffer`, so that the latency diagnostics read the correction buffer's tick through a const
@@ -720,7 +727,7 @@ callback pair and both `getSyncedCorrectionStateBuffer` overloads (the const one
 `sendLocalInputToAuthority` builds the bundle as before and hands it to the sibling's `sendInputBundleToAuthority`,
 which calls the RPC. The aliases `SyncedCorrectionBufferType` and `RelayedInputRingType` are unchanged, the core's owner
 type is still this component (`SimulatableOwnerTraits<SimulatableBrawler>` is unchanged), and
-`SimmableUpdateComponentConceptTest.cpp` compiles unchanged. Task 21 replaced the overrides and the forwarders with the
+`OGBrawlerSimulatableComponentConceptTest.cpp` compiles unchanged. Task 21 replaced the overrides and the forwarders with the
 CRTP binding template (§18).
 
 **Teardown.** `EndPlay` runs the manager's unregister, then (since task 20b) the sibling's relay-host detach, then
@@ -789,7 +796,7 @@ component, its call finds the host already cleared and does nothing, since the d
 
 ## §18 The typed half becomes the CRTP binding (og-ue-simulationcomponentandmanagersplit task 21)
 
-**The base.** `ISimulatableOwnerBinding` became `UESimulatableOwnerBinding<USimmableUpdateComponent,
+**The base.** `ISimulatableOwnerBinding` became `UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent,
 BrawlerSessionTraitsUImpl>`, after `UActorComponent` (`UESimulatableOwnerBinding-rationale.md` §2). The template derives
 from the interface, so the sibling's five calls are unchanged. Step 0 built the base change alone, with the template
 empty, in all four configurations before anything moved.
@@ -805,16 +812,16 @@ component's own engine calls (`GetOwner()`, the weak self) go through the bindin
 **What this component keeps.**
 - `storageKeyOfOwner()` (private), today's `toStorageKey(simCharacterId())` and the old `simulationKey()` body. The
   binding's `final` `simulationKey()` returns it and checks for it with an inline requires-expression; the binding is a
-  friend (`friend class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;`).
-- The registration writes the provider latch through `netSync().setHasLocalInputProvider(isLocallyPredicted)`, and
-  `EndPlay` keeps its order (G-38): unregister, then `if (isNetSyncBound()) netSync().detachInputRelayHost(isAuthority);`,
+  friend (`friend class UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>;`).
+- The registration writes the provider latch through `netSync().setHasLocalInputProvider(isLocallyPredicted)` (since
+  task 29 the binding's skeleton writes it, §19), and `EndPlay` keeps its order (G-38): unregister, then `if (isNetSyncBound()) netSync().detachInputRelayHost(isAuthority);`,
   then `unbindNetSync()`, then `Super`.
 - The header declares the specialization `extern template class …;` above the class, and the `.cpp` defines it once
   (`template class …;`, after `storageKeyOfOwner`), so the template's virtual members compile only there
   (`UESimulatableOwnerBinding-rationale.md` §7).
 
 **The core's owner type is still this component.** `SimulatableOwnerTraits<SimulatableBrawler>` is unchanged,
-`SimmableUpdateComponentConceptTest.cpp` compiles unchanged (the aliases and members are found through the base), and
+`OGBrawlerSimulatableComponentConceptTest.cpp` compiles unchanged (the aliases and members are found through the base), and
 the manager calls `attachInputRelayHost`, `deliverDelayedRemoteInput` and `stageRelayedInput` on this component as
 before.
 
@@ -823,3 +830,50 @@ statement positions. One check is new and fatal-only: `netSync()`'s `checkf`, at
 dereferenced the pointer unchecked. Lead ruling F1: the moved bodies compile optimized in Development (the template is
 instantiated in this `.cpp`, which ends with `OGSIM_OPTIMIZE_ON`); the hook `storageKeyOfOwner` stays unoptimized with
 the rest of this file.
+
+---
+
+## §19 The registration loop becomes the binding's skeleton (og-ue-simulationcomponentandmanagersplit task 29)
+
+**What moved** (ruling Q-M6), statement for statement, into `UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent,
+BrawlerSessionTraitsUImpl>` (`UESimulatableOwnerBinding-rationale.md` §9): `BeginPlay`'s next-tick call (the binding's
+`beginRegistration()`, which `BeginPlay` calls after `UActorComponent::BeginPlay()`), `tryInitializeWithManager`,
+`scheduleNextInitializationAttempt`, `scheduleNextRegistrationAttempt`, `tryRegisterWithNewFramework`, the two attempt
+counters and `kMaxRegistrationAttempts`; with them the guards G-02, G-03, G-04, G-06 and G-07 (G-07 … G-11 there) and
+this file's §3/§4 narrative, §2's attempt budget and §6/§7's spawn-order, provider-latch and delivery-route accounts.
+
+**The four hooks this component keeps** (private; the binding, a friend, calls them and checks them with an inline
+requires-expression in each loop):
+
+| hook | the statements it holds | answers |
+|---|---|---|
+| `initializeWithManager(manager, owner)` | the input-collection cache (`Cast<AOGBrawlerUECharacter>`), the target query volume through `manager.session().registerVizVolume`, the three visualization states | `Retry` while the volume waits for the Jolt slot (§3), else `Ready` |
+| `resolveRegistrationKey(manager, isAuthority)` | the character cast and its `checkf`, the authority's allocation through `manager.roster()` with G-01's refusal, the replicated id's read | `abandon()` on a refused allocation (G-01), `retry()` while the id is `None`, else `ready(toStorageKey(simId))` |
+| `makeInputProvider(key)` | the input-collection read, the id and the G-05 lambda | the lambda |
+| `makeSimulatable()` | `SimulatableBrawler(*m_staticData)` | the simulatable (constructed in the skeleton's local: guaranteed elision) |
+
+The owner actor is passed to `initializeWithManager` by the skeleton (which reads it and returns while it is null), so
+the hook reads no second `GetOwner()`. The hooks' names are their own: none is named like an `ISimulatableOwnerBinding`
+member, whose overrides are `final` (`UESimulatableOwnerBinding-rationale.md` §9.1).
+
+**The brawler's part of the delivery route.** The skeleton registers the route on the authority (binding G-11); the
+ring-out score push (`BrawlerRosterUImpl::pushRingoutScores`, called by the `afterVisualization` hook with the session's
+`getDelayedInputComponentsById`) walks the same map as its list of characters whose scores leave the server, so a
+narrower registration silently drops their scores (`BrawlerRosterUImpl-rationale.md` §3; this file's G-07's second
+half, kept in its §R entry).
+
+**Which manager door.** The skeleton calls the session's `tryRegister` and `noteDelayedInputComponent` with the storage
+key; the manager's two `SimCharacterId` wrappers (task 28) are no longer called by this component (they remain on the
+manager; its `unregisterFromNewFramework` wrapper is still this component's `EndPlay` call). The `tryRegister` wrapper's
+`checkf` that the id is not `None` guarded a condition the hook's `retry()` excludes one step earlier.
+
+**Equivalence.** `transcribe.py` (`map_29.json`) inlines each hook at its call site and maps each answer to the
+skeleton's handler, against the pre-task-25 pin: no statement difference. No log line changed. Three `checkf` texts are
+game-neutral now (ruling Q7): the manager wait in loop one, loop one's retry and loop two's id wait (this component's
+class name and "the pawn's SimCharacterId" are gone from them). The skeleton is a template, compiled optimized in
+Development (lead ruling F1); none of its statements is floating-point. The hook bodies stay in this file's
+`OGSIM_OPTIMIZE_OFF` region; the one floating-point expression of the old loop, the volume radius
+`getOuterRadius() * 2.f`, is in the hook and keeps its unoptimized compile.
+
+**The teardown is unchanged** (G-38): `EndPlay` unregisters, then detaches the relay host through the sibling, then
+unbinds; the delivery route's erase stays inside the session's unregistration.

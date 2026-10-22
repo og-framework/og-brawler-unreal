@@ -138,7 +138,7 @@ hash rather than testing this code.
 ## 7. The physics backend: the token and the login check
 
 Until task 21 of og-simulationscheduler-withjolt, one build of this game runs either the Chaos host or
-the Jolt host, chosen at compile time (`SimulationManagerUImpl-rationale.md` §18). Two peers of
+the Jolt host, chosen at compile time (`OGBrawlerSimulationManager-rationale.md` §18). Two peers of
 different backends cannot play together: they simulate the same inputs differently, so every
 prediction would be corrected. The build identity therefore carries a **backend token**, and the server
 refuses a login whose backend differs from its own. Two Jolt peers whose Jolt builds step differently (a

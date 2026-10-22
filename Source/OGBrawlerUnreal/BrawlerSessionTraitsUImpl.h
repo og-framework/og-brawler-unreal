@@ -10,9 +10,9 @@
 #include "OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h"
 
 class SimulatableBrawler;
-class USimmableUpdateComponent;
+class UOGBrawlerSimulatableComponent;
 class AOGBrawlerUECharacter;
-class ASimulationManagerUImpl;
+class AOGBrawlerSimulationManager;
 class UOGBrawlerInputCollectionComponent;
 class BrawlerSessionGameUImpl;
 template <typename TraitsT> class UESimulationSession;
@@ -23,9 +23,9 @@ struct BrawlerSessionTraitsUImpl
 	using PlayerInput       = simulatableBrawler::PlayerInput;
 	using State             = simulatableBrawler::State;
 	using StaticData        = simulatableBrawler::StaticData;
-	using Component         = USimmableUpdateComponent;
+	using Component         = UOGBrawlerSimulatableComponent;
 	using Character         = AOGBrawlerUECharacter;
-	using SessionOwner      = ASimulationManagerUImpl;
+	using SessionOwner      = AOGBrawlerSimulationManager;
 	using Game              = BrawlerSessionGameUImpl;
 	using InputSampleSource = const UOGBrawlerInputCollectionComponent*;
 	using Composition       = BrawlerCompositionUImpl;
@@ -42,5 +42,5 @@ static_assert(physicsBackendUImpl::PhysicsBackendHost<BrawlerSessionTraitsUImpl:
 	"the seam (the PhysicsBackendHost concept, PhysicsBackendHostUImpl.h): the session's owner calls each one from exactly "
 	"one site, unconditionally, in both configurations. PhysicsBackendHost is a brawler concept, so the MPL session cannot "
 	"assert it; it is asserted here, on the type the session holds as m_backend. Was the PhysicsBackendHost row of "
-	"ASimulationManagerUImpl::compositionContractsHold (og-simulationscheduler-withjolt task 83); moved beside the traits "
+	"AOGBrawlerSimulationManager::compositionContractsHold (og-simulationscheduler-withjolt task 83); moved beside the traits "
 	"by og-ue-simulationcomponentandmanagersplit task 24a.");

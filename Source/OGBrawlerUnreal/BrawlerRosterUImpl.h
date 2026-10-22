@@ -18,7 +18,7 @@
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
 
 class AOGBrawlerUECharacter;
-class USimmableUpdateComponent;
+class UOGBrawlerSimulatableComponent;
 class UWorld;
 
 class BrawlerRosterUImpl
@@ -32,8 +32,8 @@ public:
         "a character registered past the table gets kNoFreeSlot and respawns with NO teleport seed (one "
         "[Warning][Ringout.spawnSlot] per respawn). A cap above the table stops warning about exactly the "
         "characters that cannot be placed: raise both together. Was the 'COUPLED TO "
-        "brawlerRingout::kMaxSpawnPoints' prose fence of SimulationManagerUImpl.h (task 11); moved from "
-        "ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 23.");
+        "brawlerRingout::kMaxSpawnPoints' prose fence of OGBrawlerSimulationManager.h (task 11); moved from "
+        "AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 23.");
 
     SimCharacterId allocateSimCharacterId(ENetMode netMode);
 
@@ -52,7 +52,7 @@ public:
 
     static void pushRingoutScores(
         const brawlerRingout::ScoreSystem& scoreSystem,
-        const std::unordered_map<unsigned int, TWeakObjectPtr<USimmableUpdateComponent>>& routes);
+        const std::unordered_map<unsigned int, TWeakObjectPtr<UOGBrawlerSimulatableComponent>>& routes);
 
 private:
     std::set<unsigned int> m_authorityRegisteredIds;
@@ -60,8 +60,8 @@ private:
         "m_authorityRegisteredIds is the pre-diet cap's denominator and must be a SET, not a counter: "
         "tryRegister inserts only on the Ready path, while unregisterFromNewFramework erases for any "
         "component ending play - one abandoned mid-Pending included - so a counter drifts downward and "
-        "disarms the cap. Was the 'A SET, not a counter' prose fence of SimulationManagerUImpl.h "
-        "(task 11); moved from ASimulationManagerUImpl::compositionContractsHold by "
+        "disarms the cap. Was the 'A SET, not a counter' prose fence of OGBrawlerSimulationManager.h "
+        "(task 11); moved from AOGBrawlerSimulationManager::compositionContractsHold by "
         "og-ue-simulationcomponentandmanagersplit task 23.");
 
     brawlerRingout::SpawnSlotAllocator m_spawnSlots;

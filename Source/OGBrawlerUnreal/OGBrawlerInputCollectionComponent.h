@@ -19,7 +19,7 @@
 
 class UEnhancedInputComponent;
 struct FInputActionValue;
-// [T15] The ASimulationManagerUImpl forward declaration is gone with the manager
+// [T15] The AOGBrawlerSimulationManager forward declaration is gone with the manager
 // argument on buildPlayerInput — this component no longer names the manager at all.
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -133,7 +133,7 @@ public:
 	// binds it in collectInputAll and calls this BEFORE pushing the current tick's capture, so the
 	// line holds ticks <= step.getTick() - 1 and the current sample is what this function returns.
 	//
-	// It replaces the old `const ASimulationManagerUImpl*` argument, which existed only so the
+	// It replaces the old `const AOGBrawlerSimulationManager*` argument, which existed only so the
 	// matcher could reach manager -> reconciliation -> correction cache. That cache stores the
 	// APPLIED input keyed by APPLICATION tick, so under an input delay `d` every history read was
 	// displaced by `d` — see OGBrawler/BrawlerMotionMatching.h for the full statement of the defect
@@ -157,7 +157,7 @@ public:
 	// there and nowhere else. All three raw members are stored in the same "stick-up = -Y"
 	// convention (see the handlers), so routing needs no sign flips. All consumers
 	// (buildMoveDirectionWorld, buildAimDirection, buildPlayerInput, the character's camera
-	// and SimmableUpdateComponent) must go through these accessors so the routing is
+	// and OGBrawlerSimulatableComponent) must go through these accessors so the routing is
 	// observed uniformly.
 	glm::vec2 getMoveStick() const;
 	glm::vec2 getAimStick() const;
@@ -188,7 +188,7 @@ private:
 	// Game-thread-written caches. Written by updateGameThreadCache() (game thread),
 	// read by buildAimDirection() / buildMoveDirectionWorld() (physics thread).
 	// glm::vec3 is trivially copyable and aligned — same benign-race pattern as the
-	// pre-refactor m_camForward on SimmableUpdateComponent.
+	// pre-refactor m_camForward on OGBrawlerSimulatableComponent.
 	glm::vec3 m_camForwardCache = glm::vec3(1.f, 0.f, 0.f);
 	glm::vec3 m_mouseAimCache   = glm::vec3(0.f, 0.f, 0.f);
 

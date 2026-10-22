@@ -3,14 +3,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGSimulation/SimulationQueues.h"
 
 // ---------------------------------------------------------------------------
 // Inline concept definitions — mirrors SimulationNetSync.h exactly.
 // Defined here to avoid pulling SimulationNetSync.h into the OGBrawlerUnreal module
-// compilation unit via a second path (SimmableUpdateComponent.h already pulls
+// compilation unit via a second path (OGBrawlerSimulatableComponent.h already pulls
 // it in via the SimulatableOwnerTraits specialization at the bottom).
 //
 // Must stay byte-for-byte in sync with the corresponding concepts in
@@ -88,32 +88,32 @@ concept AuthoritySyncedBufferOwnerConceptLocal =
     };
 
 // ---------------------------------------------------------------------------
-// Compile-time concept checks for USimmableUpdateComponent
+// Compile-time concept checks for UOGBrawlerSimulatableComponent
 // ---------------------------------------------------------------------------
 
 static_assert(
     PredictionSyncedBufferOwnerConceptLocal<
-        USimmableUpdateComponent,
+        UOGBrawlerSimulatableComponent,
         simulatableBrawler::State,
         simulatableBrawler::PlayerInput>,
-    "USimmableUpdateComponent must satisfy PredictionSyncedBufferOwnerConcept");
+    "UOGBrawlerSimulatableComponent must satisfy PredictionSyncedBufferOwnerConcept");
 
 static_assert(
     AuthoritySyncedBufferOwnerConceptLocal<
-        USimmableUpdateComponent,
+        UOGBrawlerSimulatableComponent,
         simulatableBrawler::State,
         simulatableBrawler::PlayerInput>,
-    "USimmableUpdateComponent must satisfy AuthoritySyncedBufferOwnerConcept");
+    "UOGBrawlerSimulatableComponent must satisfy AuthoritySyncedBufferOwnerConcept");
 
 // ---------------------------------------------------------------------------
 // Runtime smoke test — behavioral parity: null callbacks fall through to old path.
 // ---------------------------------------------------------------------------
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-    FSimmableUpdateComponentConceptTest,
-    "OGBrawlerUnreal.SimmableUpdateComponent.ConceptSatisfied",
+    FOGBrawlerSimulatableComponentConceptTest,
+    "OGBrawlerUnreal.OGBrawlerSimulatableComponent.ConceptSatisfied",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
-bool FSimmableUpdateComponentConceptTest::RunTest(const FString& Parameters)
+bool FOGBrawlerSimulatableComponentConceptTest::RunTest(const FString& Parameters)
 {
     TestTrue(TEXT("PredictionSyncedBufferOwnerConcept satisfied at compile time"), true);
     TestTrue(TEXT("AuthoritySyncedBufferOwnerConcept satisfied at compile time"), true);

@@ -20,7 +20,7 @@ extern template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTr
 
 class UWorld;
 class AActor;
-class USimmableUpdateComponent;
+class UOGBrawlerSimulatableComponent;
 class AOGBrawlerUECharacter;
 struct BrawlerSessionTraitsUImpl;
 template <typename TraitsT> class UESimulationSession;
@@ -30,7 +30,7 @@ namespace physicsBackendUImpl
 
 template <typename BackendT>
 concept PhysicsBackendHost = requires(BackendT& backend, const BackendT& constBackend, UWorld& world, float dt,
-	bool flag, USimmableUpdateComponent& component, AOGBrawlerUECharacter& character, SimulatableBrawler& simulatable,
+	bool flag, UOGBrawlerSimulatableComponent& component, AOGBrawlerUECharacter& character, SimulatableBrawler& simulatable,
 	unsigned int id, const QueryVolumeDescriptor& descriptor, AActor& actor)
 {
 	{ backend.buildWorld(world, dt, flag) } -> std::same_as<void>;
@@ -71,7 +71,7 @@ static_assert(PhysicsBackendHost<Backend>,
 	"physicsBackendUImpl::Backend must provide every entry point of the seam (the PhysicsBackendHost concept) in the "
 	"configuration being built: ChaosTickBackendUImpl, or TickDriverBackendUImpl over the Jolt engine traits and "
 	"binding. BrawlerSessionTraitsUImpl.h asserts it again on the traits' Backend<UESimulationSession<...>>, the type the "
-	"session holds (ASimulationManagerUImpl asserted it until og-ue-simulationcomponentandmanagersplit task 24a). Added "
+	"session holds (AOGBrawlerSimulationManager asserted it until og-ue-simulationcomponentandmanagersplit task 24a). Added "
 	"by og-tickdriver task 15b.");
 
 } // namespace physicsBackendUImpl

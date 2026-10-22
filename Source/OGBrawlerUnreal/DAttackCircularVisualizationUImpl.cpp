@@ -88,7 +88,7 @@ void DAttackRendererFunctorUImpl::drawPoint(glm::vec3 point) const
 void DAttackRendererFunctorUImpl::drawSphere(glm::vec3 position, float radius, unsigned int colorId, float lifetime) const
 {
 	// Default lifetime = -1.f → single-frame draw (UE convention for "this frame only").
-	// The visualization is re-invoked every frame from SimmableUpdateComponent::TickComponent,
+	// The visualization is re-invoked every frame from OGBrawlerSimulatableComponent::TickComponent,
 	// so a multi-frame persistence on a moving sphere (e.g. the GuardFlinch indicator
 	// following the character through the flinch duration) leaves a trail. Callers that
 	// know the sphere position is static for the duration can pass a positive lifetime to

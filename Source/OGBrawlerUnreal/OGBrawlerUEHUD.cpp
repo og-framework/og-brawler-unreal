@@ -16,7 +16,7 @@
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
 #include "OGBrawlerUnreal/OGBrawlerJoinSessionSubsystem.h"
 #include "OGBrawlerUnreal/ScoreboardVisualizationUImpl.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 
 namespace
 {
@@ -288,7 +288,7 @@ void AOGBrawlerUEHUD::DrawHUD()
 	drawLocalPlayerLimitNotice();
 }
 
-const ASimulationManagerUImpl* AOGBrawlerUEHUD::findHistorySource(
+const AOGBrawlerSimulationManager* AOGBrawlerUEHUD::findHistorySource(
 	unsigned int& outCharacterId) const
 {
 	const UWorld* world = GetWorld();
@@ -310,7 +310,7 @@ const ASimulationManagerUImpl* AOGBrawlerUEHUD::findHistorySource(
 
 	// The same role expression the poll's own manager lookup uses: the history lives on
 	// one instance and reading the other role's would find none.
-	return ASimulationManagerUImpl::instanceFor(GetNetMode() != NM_Client);
+	return AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
 }
 
 void AOGBrawlerUEHUD::drawInputHistoryPanel()
@@ -321,7 +321,7 @@ void AOGBrawlerUEHUD::drawInputHistoryPanel()
 		return;
 
 	unsigned int                   characterId = 0u;
-	const ASimulationManagerUImpl* manager     = findHistorySource(characterId);
+	const AOGBrawlerSimulationManager* manager     = findHistorySource(characterId);
 	if (manager == nullptr)
 		return;
 
@@ -378,7 +378,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		return;
 
 	unsigned int                   characterId = 0u;
-	const ASimulationManagerUImpl* manager     = findHistorySource(characterId);
+	const AOGBrawlerSimulationManager* manager     = findHistorySource(characterId);
 	if (manager == nullptr)
 		return;
 
@@ -463,7 +463,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 }
 
 void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
-	const ASimulationManagerUImpl& manager,
+	const AOGBrawlerSimulationManager& manager,
 	unsigned int                   characterId,
 	float                          liftPixels,
 	float                          labelHeight,
@@ -1040,8 +1040,8 @@ void AOGBrawlerUEHUD::drawScoreboard()
 
 	// ⛔ POINTER TO CONST, and it stays one: the board may not write a thing it draws.
 	//   The same role expression every other manager lookup in this file uses.
-	const ASimulationManagerUImpl* manager =
-		ASimulationManagerUImpl::instanceFor(GetNetMode() != NM_Client);
+	const AOGBrawlerSimulationManager* manager =
+		AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
 
 	// ⭐ ALREADY ORDERED BY CHARACTER ID when it arrives, so two peers watching one match
 	//   see the same player in the same row. Never re-sorted, and never sorted here.

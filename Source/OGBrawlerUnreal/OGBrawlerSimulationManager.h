@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/SimulationManagerUImpl-rationale.md · docs/SimulationManagerUImpl-guards.md
+// docs/OGBrawlerSimulationManager-rationale.md · docs/OGBrawlerSimulationManager-guards.md
 
 #pragma once
 
@@ -62,7 +62,7 @@
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 #include "OGBrawlerUnreal/BrawlerRosterUImpl.h"
 
-#include "SimulationManagerUImpl.generated.h"
+#include "OGBrawlerSimulationManager.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBrawler, Log, All);
 
@@ -75,15 +75,13 @@ struct FMovementStaticDataCVars
 	float    gravity;
 };
 
-enum class TryRegisterStatus { Pending, Ready };
-
-// ⛔G-01  docs/SimulationManagerUImpl-guards.md
+// ⛔G-01  docs/OGBrawlerSimulationManager-guards.md
 using BrawlerInputProviderFn = std::function<simulatableBrawler::PlayerInput(
 	const SimulationTimeStep&,
 	const LocalInputCache<simulatableBrawler::PlayerInput>&)>;
 
-class USimmableUpdateComponent;
-class ASimulationManagerUImpl;
+class UOGBrawlerSimulatableComponent;
+class AOGBrawlerSimulationManager;
 class ASimulationTimingRelay;
 class ASimulationConnectionRelay;
 class AOGBrawlerUECharacter;
@@ -91,14 +89,14 @@ class AOGBrawlerUECharacter;
 extern template void UESimulationSession<BrawlerSessionTraitsUImpl>::onInputRelayHostReady(ASimulationInputRelay& host);
 
 UCLASS()
-class ASimulationManagerUImpl : public AActor
+class AOGBrawlerSimulationManager : public AActor
 {
     GENERATED_BODY()
 
 public:
-    ASimulationManagerUImpl();
+    AOGBrawlerSimulationManager();
 
-    static ASimulationManagerUImpl* instanceFor(bool isAuthority)
+    static AOGBrawlerSimulationManager* instanceFor(bool isAuthority)
     {
         UESimulationSession<BrawlerSessionTraitsUImpl>* session =
             UESimulationSession<BrawlerSessionTraitsUImpl>::instanceFor(isAuthority);
@@ -114,11 +112,11 @@ public:
     TryRegisterStatus tryRegister(
         SimCharacterId simId,
         SimulatableBrawler simulatable,
-        USimmableUpdateComponent& owner,
+        UOGBrawlerSimulatableComponent& owner,
         BrawlerInputProviderFn inputProvider,
         bool isAuthority);
 
-    void unregisterFromNewFramework(SimCharacterId simId, USimmableUpdateComponent& owner, bool isAuthority);
+    void unregisterFromNewFramework(SimCharacterId simId, UOGBrawlerSimulatableComponent& owner, bool isAuthority);
 
     const BrawlerRosterUImpl& roster() const { return m_roster; }
     BrawlerRosterUImpl&       roster()       { return m_roster; }
@@ -129,7 +127,7 @@ public:
     const UESimulationSession<BrawlerSessionTraitsUImpl>& session() const { return m_session; }
     UESimulationSession<BrawlerSessionTraitsUImpl>&       session()       { return m_session; }
 
-    void noteDelayedInputComponent(SimCharacterId simId, USimmableUpdateComponent& component);
+    void noteDelayedInputComponent(SimCharacterId simId, UOGBrawlerSimulatableComponent& component);
 
 private:
     friend class BrawlerSessionGameUImpl;
@@ -140,26 +138,19 @@ private:
 
     static FMovementStaticDataCVars readMovementStaticDataCVars();
 
-    BrawlerSessionGameUImpl m_game{ m_roster };
+    BrawlerSessionGameUImpl m_game{ m_roster, m_inputHistoryFeed };
 
     UESimulationSession<BrawlerSessionTraitsUImpl> m_session{ *this, m_game };
-
-    struct PendingRegistration
-    {
-        std::optional<SimulatableBrawler> simulatable;
-        bool bodiesCreated = false;
-        BrawlerInputProviderFn inputProvider;
-        bool isAuthority = false;
-    };
-    std::unordered_map<unsigned int, PendingRegistration> m_pendingRegistrations;
 
     static constexpr bool compositionContractsHold()
     {
         static_assert(std::is_same_v<BrawlerInputProviderFn, UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>::InputProvider>,
-            "tryRegister hands a client's BrawlerInputProviderFn to UELatencyBudgetDiagnostics::wrapInputProvider and "
-            "registers what it returns. The two spellings must name ONE std::function type: a different one would "
-            "convert, wrapping the provider in a second heap-allocated callable on every registration. Added by "
-            "og-tickdriver task 18.");
+            "tryRegister hands a client's BrawlerInputProviderFn to UESimulationSession::tryRegister, whose parameter is "
+            "the latency member's InputProvider; the session keeps it in the pending record, hands it to "
+            "UELatencyBudgetDiagnostics::wrapInputProvider and registers what that returns. The two spellings must name "
+            "ONE std::function type: a different one would convert, wrapping the provider in a second heap-allocated "
+            "callable on every call. Added by og-tickdriver task 18; the hand-off re-stated by "
+            "og-ue-simulationcomponentandmanagersplit task 28.");
         return true;
     }
 

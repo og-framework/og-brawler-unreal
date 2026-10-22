@@ -159,7 +159,7 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	m_cameraAxis->SetEnableGravity(false);
 
 	SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"));
-	SimmableUpdateComponent = CreateDefaultSubobject<USimmableUpdateComponent>(TEXT("USimmableUpdateComponent"));
+	BrawlerSimulatable = CreateDefaultSubobject<UOGBrawlerSimulatableComponent>(TEXT("BrawlerSimulatable"));
 	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
 	this->NetUpdateFrequency = 60.0f;
@@ -197,7 +197,7 @@ void AOGBrawlerUECharacter::PostInitializeComponents()
 	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
 	RebuildHumanoidMesh();
 	// ⛔G-21  docs/OGBrawlerUECharacter-guards.md
-	SimmableUpdateComponent->bindNetSync(*SimulatableNetSync);
+	BrawlerSimulatable->bindNetSync(*SimulatableNetSync);
 }
 
 void AOGBrawlerUECharacter::RebuildHumanoidMesh()
@@ -358,7 +358,7 @@ void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)
 {
 	checkf(HasAuthority(),
 		TEXT("SetAuthoritativeRingoutScore called on a non-authority peer (id=%u). The score ")
-		TEXT("is pushed only by BrawlerRosterUImpl::pushRingoutScores, from ASimulationManagerUImpl::OnPostPhysicsStep under the ")
+		TEXT("is pushed only by BrawlerRosterUImpl::pushRingoutScores, from AOGBrawlerSimulationManager::OnPostPhysicsStep under the ")
 		TEXT("authority manager's !runsPrediction() gate; a client learns it through OnRep_RingoutScore."),
 		toStorageKey(GetSimCharacterId()));
 

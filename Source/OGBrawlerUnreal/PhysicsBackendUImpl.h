@@ -4,7 +4,7 @@
 #pragma once
 
 #ifndef OG_PHYSICS_BACKEND_CHAOS
-#error "OG_PHYSICS_BACKEND_CHAOS is undefined: it is a PublicDefinitions entry of OGBrawlerUnreal.Build.cs. Was the D21 backend-switch rule (SimulationManagerUImpl-rationale.md section 18)."
+#error "OG_PHYSICS_BACKEND_CHAOS is undefined: it is a PublicDefinitions entry of OGBrawlerUnreal.Build.cs. Was the D21 backend-switch rule (OGBrawlerSimulationManager-rationale.md section 18)."
 #endif
 
 #include "OGSimulation/PhysicsEngineTraits.h"

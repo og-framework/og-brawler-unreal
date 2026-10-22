@@ -89,5 +89,5 @@ rows are evaluated here: task 15e saw a member swap in the host's header fail th
 (`TickDriverBackendUImpl-rationale.md` §12).
 
 **Why here.** The instantiation needs the complete session, component and character types, so it includes
-`SimulationManagerUImpl.h` and `SimmableUpdateComponent.h`; it belongs to the Jolt configuration only, and this file is
+`OGBrawlerSimulationManager.h` and `OGBrawlerSimulatableComponent.h`; it belongs to the Jolt configuration only, and this file is
 the game module's Jolt arm. The host's own `.cpp` held it until task 15e.

@@ -14,7 +14,7 @@
 #include "OGBrawler/BrawlerInputHistoryVisualizationPanel.h"
 
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 
 namespace
 {

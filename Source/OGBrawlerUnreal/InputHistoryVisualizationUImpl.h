@@ -238,7 +238,7 @@ private:
 		"reference here would be a write door from a diagnostic display into the session's mutable doors (editStorage, "
 		"editServerClock, editReconciliation, the visualization query, the effective-delay publish) and, through "
 		"owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
-		"og-ue-simulationcomponentandmanagersplit task 22, when the input-history feeds left ASimulationManagerUImpl, "
+		"og-ue-simulationcomponentandmanagersplit task 22, when the input-history feeds left AOGBrawlerSimulationManager, "
 		"on a const reference to the owner (its friend then); re-targeted to the session by task 24b; the tier consumer "
 		"and the effective delay are the session's own const reads since task 25 (read through its const owner() "
 		"before).");

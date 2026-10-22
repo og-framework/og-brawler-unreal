@@ -1,19 +1,19 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-<!-- lint-external-ref: BrawlerSimulatables -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
-<!-- lint-external-ref: BrawlerNetSync -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
-<!-- lint-external-ref: BrawlerIntegrationExecFor_UE -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
-<!-- lint-external-ref: BrawlerIntegrationExec -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 and the history of §1 are task 81's -->
-<!-- lint-external-ref: IntegrationLayerType -- retired alias: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24a -->
-<!-- lint-external-ref: BrawlerStorage -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24b (it typed one of the feed's const bridges); the table of §2 is task 81's -->
-<!-- lint-external-ref: BrawlerInputResolution -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24b (it typed one of the feed's const bridges); the table of §2 is task 81's -->
-<!-- lint-external-ref: BrawlerReconciliation -- retired re-export: deleted from ASimulationManagerUImpl by og-ue-simulationcomponentandmanagersplit task 24b (it typed one of the feed's const bridges); the table of §2 is task 81's -->
+<!-- lint-external-ref: BrawlerSimulatables -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
+<!-- lint-external-ref: BrawlerNetSync -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
+<!-- lint-external-ref: BrawlerIntegrationExecFor_UE -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
+<!-- lint-external-ref: BrawlerIntegrationExec -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 and the history of §1 are task 81's -->
+<!-- lint-external-ref: IntegrationLayerType -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a -->
+<!-- lint-external-ref: BrawlerStorage -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24b (it typed one of the feed's const bridges); the table of §2 is task 81's -->
+<!-- lint-external-ref: BrawlerInputResolution -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24b (it typed one of the feed's const bridges); the table of §2 is task 81's -->
+<!-- lint-external-ref: BrawlerReconciliation -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24b (it typed one of the feed's const bridges); the table of §2 is task 81's -->
 # `BrawlerCompositionUImpl` — rationale
 
 Companion to `Source/OGBrawlerUnreal/BrawlerCompositionUImpl.h` (og-simulationscheduler-withjolt task
 81). Prohibitions: `BrawlerCompositionUImpl-guards.md`. The class that owns the members these aliases
 type is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationcomponentandmanagersplit task 24a, which names them through
 `BrawlerSessionTraitsUImpl::Composition` (`UESimulationSession-rationale.md` §2, in OGSimulationUnreal's docs);
-`ASimulationManagerUImpl` owned them until then (`SimulationManagerUImpl-rationale.md` §2).
+`AOGBrawlerSimulationManager` owned them until then (`OGBrawlerSimulationManager-rationale.md` §2).
 
 ---
 
@@ -21,7 +21,7 @@ type is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationc
 
 The brawler's composition (the simulatable pack, the storage, the three peers, the integration and
 systems executors and the manager built from them) was a chain of private aliases inside
-`ASimulationManagerUImpl`. A class declared outside the UImpl could not name any of them. Three
+`AOGBrawlerSimulationManager`. A class declared outside the UImpl could not name any of them. Three
 consumers need to:
 
 * **The task-54 review, finding A1.** The Jolt step driver was then a `SimulationStepDriver` over
@@ -43,7 +43,7 @@ consumers need to:
 not a namespace so that the whole composition can be passed as **one template argument**, which is what
 a traits type (D2) is. Only the struct's name reaches file scope (`⛔G-01`).
 
-| `ASimulationManagerUImpl` re-export | `BrawlerCompositionUImpl` member |
+| `AOGBrawlerSimulationManager` re-export | `BrawlerCompositionUImpl` member |
 |---|---|
 | `BrawlerSimulatables` | `Simulatables` |
 | `BrawlerStorage` | `Storage` |
@@ -91,7 +91,7 @@ the render source's `kMaxSimulatableSlots` times the presenter's `kDeclarationsP
 source's `PhysicsComposite`, the brawler's physics composite).
 
 **No backend switch.** The adapter types come from `PhysicsBackendUImpl.h`, which holds the switch, so
-this header has no `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `SimulationManagerUImpl.h`;
+this header has no `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
 the dependency runs the other way.
 
 ## 3. The compile-time checks
@@ -102,7 +102,7 @@ the dependency runs the other way.
 * **The session's manager is this manager.** Since og-ue-simulationcomponentandmanagersplit task 24a `UESimulationSession::compositionContractsHold`
   asserts that the session's private `ManagerType` (its traits' `Composition::Manager`, this struct's `Manager`) is the
   tick-driver binding's `Manager` (`BrawlerTickDriverGameUImpl`, which names this struct's member). Until then
-  `compositionContractsHold()` in `SimulationManagerUImpl.h` asserted `std::is_same_v<ManagerType,
+  `compositionContractsHold()` in `OGBrawlerSimulationManager.h` asserted `std::is_same_v<ManagerType,
   BrawlerCompositionUImpl::Manager>`. It has to be inside the class,
   because `ManagerType` is private. A host outside the UImpl (task 83) names the manager through this
   struct; if `ManagerType` drifted to another `SimulationManager` instantiation, that host would type

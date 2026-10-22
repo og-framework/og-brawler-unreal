@@ -13,12 +13,12 @@
 #include <cstdint>
 
 class AActor;
-class USimmableUpdateComponent;
+class UOGBrawlerSimulatableComponent;
 class AOGBrawlerUECharacter;
 struct BrawlerSessionTraitsUImpl;
 template <typename TraitsT> class UESimulationSession;
 
-#define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction
+#define HasAuthority HasAuthority_is_constant_true_on_AOGBrawlerSimulationManager_use_worldIsAuthority_or_runsPrediction
 
 template <typename SessionT>
 class BrawlerTickDriverGameUImpl
@@ -28,7 +28,7 @@ public:
 	using Storage        = BrawlerCompositionUImpl::Storage;
 	using RenderSnapshot = BrawlerCompositionUImpl::RenderSnapshot;
 	using Session        = SessionT;
-	using Component      = USimmableUpdateComponent;
+	using Component      = UOGBrawlerSimulatableComponent;
 	using Character      = AOGBrawlerUECharacter;
 	using StaticData     = simulatableBrawler::StaticData;
 

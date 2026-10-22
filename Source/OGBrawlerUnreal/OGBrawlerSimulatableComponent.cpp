@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/SimmableUpdateComponent-rationale.md · docs/SimmableUpdateComponent-guards.md
+// docs/OGBrawlerSimulatableComponent-rationale.md · docs/OGBrawlerSimulatableComponent-guards.md
 
-#include "SimmableUpdateComponent.h"
+#include "OGBrawlerSimulatableComponent.h"
 #include "OGSimulation/CompilerControl.h"
 #include "OGBrawler/DAttackRadialSequence.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
@@ -32,7 +32,7 @@
 #include "OGBrawlerUnreal/DAttackCircularVisualizationUimpl.h"
 #include "OGSimulationUnreal/LoggingFunctorUImpl.h"
 #include "OGSimulation/SimulationTimeContext.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 #include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "OGSimulationUnreal/InputRedundancyBundleBuilder.h"
@@ -150,9 +150,7 @@ namespace DAttackTargetVisualizationCVars
 }
 
 
-constexpr int32 kMaxRegistrationAttempts = 600;
-
-USimmableUpdateComponent::USimmableUpdateComponent(const FObjectInitializer& ObjectInitializer)
+UOGBrawlerSimulatableComponent::UOGBrawlerSimulatableComponent(const FObjectInitializer& ObjectInitializer)
 	: UActorComponent(ObjectInitializer)
 {
 	m_staticData.emplace();
@@ -168,42 +166,19 @@ USimmableUpdateComponent::USimmableUpdateComponent(const FObjectInitializer& Obj
 }
 
 
-void USimmableUpdateComponent::BeginPlay()
+void UOGBrawlerSimulatableComponent::BeginPlay()
 {
 	UActorComponent::BeginPlay();
 
-	if (UWorld* world = GetWorld())
-	{
-		world->GetTimerManager().SetTimerForNextTick(
-			FTimerDelegate::CreateWeakLambda(this, [this]() { tryInitializeWithManager(); }));
-	}
+	beginRegistration();
 
 }
 
-void USimmableUpdateComponent::tryInitializeWithManager()
+ueSimulatableOwnerRegistration::Initialization UOGBrawlerSimulatableComponent::initializeWithManager(
+	AOGBrawlerSimulationManager& manager, AActor& owner)
 {
-	++m_initializationAttempts;
-
-	// ⛔G-02  docs/SimmableUpdateComponent-guards.md
-	const bool isAuthority = (GetNetMode() != NM_Client);
-	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(isAuthority);
-	AActor* Owner = GetOwner();
-	if (manager == nullptr)
-	{
-		if (m_initializationAttempts >= kMaxRegistrationAttempts)
-			checkf(false, TEXT("USimmableUpdateComponent: manager never spawned after %d attempts (netmode=%d)"),
-				kMaxRegistrationAttempts, (int)GetNetMode());
-		scheduleNextInitializationAttempt();
-		return;
-	}
-
-	if (Owner == nullptr)
-		return;
-
-	if (AOGBrawlerUECharacter* brawlerOwner = Cast<AOGBrawlerUECharacter>(Owner))
+	if (AOGBrawlerUECharacter* brawlerOwner = Cast<AOGBrawlerUECharacter>(&owner))
 		m_ownerInputCollection = brawlerOwner->getInputCollection();
-
-	// ⛔G-03  docs/SimmableUpdateComponent-guards.md
 
 	{
 		QueryVolumeDescriptor targetVisDescriptor{
@@ -212,168 +187,72 @@ void USimmableUpdateComponent::tryInitializeWithManager()
 			glm::mat4(1.f),
 			collisionCategory::queryRouting};
 
-		const std::optional<QueryVolumeId> targetVolume = manager->session().registerVizVolume(targetVisDescriptor, *Owner);
+		const std::optional<QueryVolumeId> targetVolume = manager.session().registerVizVolume(targetVisDescriptor, owner);
 		if (!targetVolume.has_value())
-		{
-			if (m_initializationAttempts >= kMaxRegistrationAttempts)
-				checkf(false,
-					TEXT("USimmableUpdateComponent: '%s' got no physics slot after %d attempts (netmode=%d); the ")
-					TEXT("manager logs a [SimHost.Slot] wait line naming what it waits for."),
-					*Owner->GetName(), kMaxRegistrationAttempts, (int)GetNetMode());
-			scheduleNextInitializationAttempt();
-			return;
-		}
+			return ueSimulatableOwnerRegistration::Initialization::Retry;
 		m_targetVisualizationVolumeIds.push_back(*targetVolume);
 	}
 	m_attackTargetVisualizationState.emplace(m_targetVisualizationVolumeIds);
 	m_attackAimVisualizationState.emplace();
 	m_attackBlockPredictionVisualizationState.emplace(m_targetVisualizationVolumeIds);
 
-	if (UWorld* world = GetWorld())
-	{
-		world->GetTimerManager().SetTimerForNextTick(
-			FTimerDelegate::CreateWeakLambda(this, [this]() { tryRegisterWithNewFramework(); }));
-	}
+	return ueSimulatableOwnerRegistration::Initialization::Ready;
 }
 
-void USimmableUpdateComponent::scheduleNextInitializationAttempt()
-{
-	if (UWorld* world = GetWorld())
-	{
-		world->GetTimerManager().SetTimerForNextTick(
-			FTimerDelegate::CreateWeakLambda(this, [this]() { tryInitializeWithManager(); }));
-	}
-}
-
-void USimmableUpdateComponent::scheduleNextRegistrationAttempt()
-{
-	if (UWorld* world = GetWorld())
-	{
-		world->GetTimerManager().SetTimerForNextTick(
-			FTimerDelegate::CreateWeakLambda(this, [this]() { tryRegisterWithNewFramework(); }));
-	}
-}
-
-SimCharacterId USimmableUpdateComponent::simCharacterId() const
+SimCharacterId UOGBrawlerSimulatableComponent::simCharacterId() const
 {
 	const AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(GetOwner());
 	return (character != nullptr) ? character->GetSimCharacterId() : SimCharacterId::None;
 }
 
-void USimmableUpdateComponent::tryRegisterWithNewFramework()
+ueSimulatableOwnerRegistration::ResolvedKey UOGBrawlerSimulatableComponent::resolveRegistrationKey(
+	AOGBrawlerSimulationManager& manager, bool isAuthority)
 {
-	++m_registrationAttempts;
-
-	const bool isAuthority = (GetNetMode() != NM_Client);
-	ASimulationManagerUImpl* regManager = ASimulationManagerUImpl::instanceFor(isAuthority);
-	if (regManager == nullptr)
-	{
-		if (m_registrationAttempts >= kMaxRegistrationAttempts)
-			checkf(false, TEXT("DeferredReg: manager never spawned after %d attempts (id=%u)"),
-				kMaxRegistrationAttempts, toStorageKey(simCharacterId()));
-		scheduleNextRegistrationAttempt();
-		return;
-	}
-
 	AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(GetOwner());
 	checkf(character != nullptr,
-		TEXT("USimmableUpdateComponent must be attached to an AOGBrawlerUECharacter: the pawn carries ")
+		TEXT("UOGBrawlerSimulatableComponent must be attached to an AOGBrawlerUECharacter: the pawn carries ")
 		TEXT("the replicated SimCharacterId this component registers under"));
 
 	if (isAuthority && character->GetSimCharacterId() == SimCharacterId::None)
 	{
-		const SimCharacterId assigned = regManager->roster().allocateSimCharacterId(regManager->GetNetMode());
-		// ⛔G-01  docs/SimmableUpdateComponent-guards.md
+		const SimCharacterId assigned = manager.roster().allocateSimCharacterId(manager.GetNetMode());
+		// ⛔G-01  docs/OGBrawlerSimulatableComponent-guards.md
 		if (assigned == SimCharacterId::None)
-			return;
+			return ueSimulatableOwnerRegistration::ResolvedKey::abandon();
 		character->SetAuthoritativeSimCharacterId(assigned);
 	}
 
 	const SimCharacterId simId = character->GetSimCharacterId();
 	if (simId == SimCharacterId::None)
-	{
-		if (m_registrationAttempts >= kMaxRegistrationAttempts)
-			checkf(false,
-				TEXT("DeferredReg: the pawn's SimCharacterId was not replicated after %d attempts"),
-				kMaxRegistrationAttempts);
-		scheduleNextRegistrationAttempt();
-		return;
-	}
+		return ueSimulatableOwnerRegistration::ResolvedKey::retry();
 
-	const AActor* ownerActor = GetOwner();
-	// ⛔G-04  docs/SimmableUpdateComponent-guards.md
-	const bool isLocallyPredicted = !isAuthority
-		&& ownerActor != nullptr
-		&& ownerActor->GetLocalRole() == ROLE_AutonomousProxy;
-
-	BrawlerInputProviderFn inputProvider;
-	if (isLocallyPredicted)
-	{
-		UOGBrawlerInputCollectionComponent* ic = m_ownerInputCollection;
-		const uint32 id = toStorageKey(simId);
-		// ⛔G-05  docs/SimmableUpdateComponent-guards.md
-		inputProvider = [ic, id](const SimulationTimeStep& step,
-		                         const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) {
-			return ic->buildPlayerInput(step, id, localInputCache);
-		};
-	}
-
-	SimulatableBrawler newSimulatable(*m_staticData);
-
-	const TryRegisterStatus status = regManager->tryRegister(
-		simId,
-		std::move(newSimulatable),
-		*this,
-		std::move(inputProvider),
-		isAuthority);
-
-	if (status == TryRegisterStatus::Pending)
-	{
-		if (m_registrationAttempts >= kMaxRegistrationAttempts)
-			checkf(false,
-				TEXT("DeferredReg: id=%u not ready after %d attempts"),
-				toStorageKey(simId), kMaxRegistrationAttempts);
-		scheduleNextRegistrationAttempt();
-		return;
-	}
-
-	netSync().setHasLocalInputProvider(isLocallyPredicted);
-
-	// ⛔G-06  docs/SimmableUpdateComponent-guards.md
-	if (isAuthority)
-	{
-		if (UWorld* world = GetWorld())
-		{
-			if (AActor* ownerActor2 = GetOwner())
-			{
-				attachInputRelayHost(
-					ASimulationInputRelay::spawnForCharacter(*world, *ownerActor2));
-			}
-		}
-	}
-	else
-	{
-		attachInputRelayHost(
-			ASimulationInputRelay::findForOwner(GetWorld(), GetOwner()));
-	}
-
-	// ⛔G-07  docs/SimmableUpdateComponent-guards.md
-	if (isAuthority)
-		regManager->noteDelayedInputComponent(simId, *this);
-
-	UE_LOG(LogOGMgmt, Log,
-		TEXT("NewFramework: registered id=%u isAuthority=%d isLocallyPredicted=%d"),
-		toStorageKey(simId), isAuthority ? 1 : 0, isLocallyPredicted ? 1 : 0);
+	return ueSimulatableOwnerRegistration::ResolvedKey::ready(toStorageKey(simId));
 }
 
-void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>::InputProvider UOGBrawlerSimulatableComponent::makeInputProvider(unsigned int key)
+{
+	UOGBrawlerInputCollectionComponent* ic = m_ownerInputCollection;
+	const uint32 id = key;
+	// ⛔G-05  docs/OGBrawlerSimulatableComponent-guards.md
+	return [ic, id](const SimulationTimeStep& step,
+	                const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) {
+		return ic->buildPlayerInput(step, id, localInputCache);
+	};
+}
+
+SimulatableBrawler UOGBrawlerSimulatableComponent::makeSimulatable()
+{
+	return SimulatableBrawler(*m_staticData);
+}
+
+void UOGBrawlerSimulatableComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	const bool isAuthority = (GetNetMode() != NM_Client);
-	ASimulationManagerUImpl* manager = ASimulationManagerUImpl::instanceFor(isAuthority);
+	AOGBrawlerSimulationManager* manager = AOGBrawlerSimulationManager::instanceFor(isAuthority);
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework(simCharacterId(), *this, isAuthority);
 
-	// ⛔G-38  docs/SimmableUpdateComponent-guards.md
+	// ⛔G-38  docs/OGBrawlerSimulatableComponent-guards.md
 	if (isNetSyncBound())
 		netSync().detachInputRelayHost(isAuthority);
 
@@ -383,19 +262,19 @@ void USimmableUpdateComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 }
 
 
-unsigned int USimmableUpdateComponent::storageKeyOfOwner() const
+unsigned int UOGBrawlerSimulatableComponent::storageKeyOfOwner() const
 {
 	return toStorageKey(simCharacterId());
 }
 
-template class UESimulatableOwnerBinding<USimmableUpdateComponent, BrawlerSessionTraitsUImpl>;
+template class UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>;
 
-void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	const bool vizIsAuthority = (GetNetMode() != NM_Client);
-	ASimulationManagerUImpl* vizManager = ASimulationManagerUImpl::instanceFor(vizIsAuthority);
+	AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(vizIsAuthority);
 	if (vizManager == nullptr)
 		return;
 
@@ -447,11 +326,11 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 		}
 
-		// ⛔G-24  docs/SimmableUpdateComponent-guards.md
+		// ⛔G-24  docs/OGBrawlerSimulatableComponent-guards.md
 		const bool hasLiveLocalInput =
 			m_ownerInputCollection != nullptr && m_ownerInputCollection->hasInputComponent();
 
-		// ⛔G-25  docs/SimmableUpdateComponent-guards.md
+		// ⛔G-25  docs/OGBrawlerSimulatableComponent-guards.md
 		const std::optional<simulatableBrawler::PlayerInput> vizPlayerInput =
 			simulatableBrawler::selectVisualizationInput(
 				hasLiveLocalInput,
@@ -493,7 +372,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				m_projectileVisualizationState);
 		}
 
-		// ⛔G-26  docs/SimmableUpdateComponent-guards.md
+		// ⛔G-26  docs/OGBrawlerSimulatableComponent-guards.md
 		if (OGBrawlerMovementVisualizationCVars::movementVizEnabled)
 		{
 			brawlerMovementVisualization::Input<DAttackRendererFunctorUImpl> movementVisualizationInput(
@@ -535,7 +414,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			}
 		}
 
-		// ⛔G-27  docs/SimmableUpdateComponent-guards.md
+		// ⛔G-27  docs/OGBrawlerSimulatableComponent-guards.md
 		if (!inputHistoryVisualizationUImpl::masterEnabled())
 			return;
 
@@ -544,7 +423,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 			const bool feedAnyBar     = inputHistoryVisualizationUImpl::anyBarEnabled();
 			const bool feedInputDelay = inputHistoryVisualizationUImpl::inputDelayEnabled();
 
-			// ⛔G-28  docs/SimmableUpdateComponent-guards.md
+			// ⛔G-28  docs/OGBrawlerSimulatableComponent-guards.md
 			if (!feedRowPanel && !feedAnyBar)
 				return;
 
@@ -555,7 +434,7 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				const std::optional<unsigned int> rowCharacterId =
 					inputHistoryVisualizationUImpl::firstLocalCharacterId(GetWorld());
 
-				// ⛔G-29  docs/SimmableUpdateComponent-guards.md
+				// ⛔G-29  docs/OGBrawlerSimulatableComponent-guards.md
 				if (rowCharacterId.has_value() && *rowCharacterId == ownCharacterId)
 				{
 					vizManager->inputHistoryFeed().pollInputHistory(*rowCharacterId,
@@ -569,13 +448,13 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 				std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput;
 				if (vizPlayerInput.has_value())
 				{
-					// ⛔G-31  docs/SimmableUpdateComponent-guards.md
+					// ⛔G-31  docs/OGBrawlerSimulatableComponent-guards.md
 					liveInput = brawlerInputHistoryVisualization::captureRowFieldsOf(
 						*vizPlayerInput,
 						dAttackMachineSimulation::g_moveStickDeadzone.load());
 				}
 
-				// ⛔G-30  docs/SimmableUpdateComponent-guards.md
+				// ⛔G-30  docs/OGBrawlerSimulatableComponent-guards.md
 				vizManager->inputHistoryFeed().pollInputHistoryLanes(ownCharacterId,
 					vizSimulationStep.getTick(),
 					(*attackSimState).get<dAttackMachineSimulation::State>().m_currentState,
@@ -591,6 +470,6 @@ void USimmableUpdateComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 }
 
-// ⛔G-35  docs/SimmableUpdateComponent-guards.md
+// ⛔G-35  docs/OGBrawlerSimulatableComponent-guards.md
 OGSIM_OPTIMIZE_ON
 

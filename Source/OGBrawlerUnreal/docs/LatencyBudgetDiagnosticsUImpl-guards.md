@@ -5,7 +5,7 @@ The game module's latency-budget class, a header and `.cpp` in `Source/OGBrawler
 were **moved into OGSimulationUnreal by og-ue-simulationcomponentandmanagersplit task 19a (2026-10-21)**: code moved to
 `UELatencyBudgetDiagnostics.h` (task 19a), a template over the brawler's `BrawlerSessionTraitsUImpl`. Its explanation
 went with it: `UELatencyBudgetDiagnostics-rationale.md` (OGSimulationUnreal) for the template, and
-`SimulationManagerUImpl-rationale.md` §16 for the brawler's wiring and the class's history.
+`OGBrawlerSimulationManager-rationale.md` §16 for the brawler's wiring and the class's history.
 
 This file is kept only as the record of the one id the header's tag used, so that it is never reused. It has no live
 entry and no source file.

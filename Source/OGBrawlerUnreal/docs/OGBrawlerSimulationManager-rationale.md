@@ -1,15 +1,20 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-<!-- lint-external-ref: getRingoutVizState -- retired name: became ASimulationManagerUImpl::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in the carried header comments (§12) -->
+<!-- lint-external-ref: ASimulationManagerUImpl -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager (this actor); kept in the history sections §0, §4 "History", §11 and §12, and named in their markers -->
+<!-- lint-external-ref: ASimulationManagerUImpl::readMovementStaticDataCVars -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager::readMovementStaticDataCVars; kept in the §12 history -->
+<!-- lint-external-ref: SimulationManagerUImpl.h -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager.h; kept in the history sections §0, §4 "History", §11 and §12 -->
+<!-- lint-external-ref: SimulationManagerUImpl.cpp -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager.cpp; kept in the §11 history -->
+<!-- lint-external-ref: SimulationManagerUImpl-guards.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager-guards.md (ids unchanged); kept in the §12 history -->
+<!-- lint-external-ref: getRingoutVizState -- retired name: became AOGBrawlerSimulationManager::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in the carried header comments (§12) -->
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: folded into BrawlerSessionGameUImpl::makeStaticData by og-ue-simulationcomponentandmanagersplit task 24a; historical mention in §0, §11 and the carried header comments (§12) -->
-# `ASimulationManagerUImpl` — rationale
+# `AOGBrawlerSimulationManager` — rationale
 
-Companion to `Source/OGBrawlerUnreal/SimulationManagerUImpl.h` and
-`Source/OGBrawlerUnreal/SimulationManagerUImpl.cpp`. This file carries the reasoning, the
+Companion to `Source/OGBrawlerUnreal/OGBrawlerSimulationManager.h` and
+`Source/OGBrawlerUnreal/OGBrawlerSimulationManager.cpp`. This file carries the reasoning, the
 provenance and the worked derivations.
 
 **Both source files carry no prose.** Each holds a two-line docs pointer, code, assertions whose
 messages say what they replaced, and one-line tags: `⛔G-nn` → an entry in
-`SimulationManagerUImpl-guards.md`, `∴D-nn` → the heading in this file that ends with that id. The
+`OGBrawlerSimulationManager-guards.md`, `∴D-nn` → the heading in this file that ends with that id. The
 header's ids are below 50; the `.cpp`'s start at `G-50` / `D-50`, so the two files' ids cannot
 collide.
 
@@ -74,6 +79,10 @@ collide.
 <!-- lint-external-ref: getLatestInput -- ABSENCE FENCE (§6): the deleted correction-input read. It must NOT resolve -->
 <!-- lint-external-ref: sampleAndDeriveConnectionTier -- ABSENCE FENCE (§7): relocated to the RPC boundary and deleted here. It must NOT resolve -->
 <!-- lint-external-ref: tryEnqueueDelayedRemoteInput -- ABSENCE FENCE (§7): relocated to the RPC boundary and deleted here. It must NOT resolve -->
+<!-- lint-external-ref: USimmableUpdateComponent -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to UOGBrawlerSimulatableComponent; kept in the history sections §11 and §12 (history keeps the old name) -->
+<!-- lint-external-ref: SimmableUpdateComponent.cpp -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to OGBrawlerSimulatableComponent.cpp; kept in the history of §4 ("History: what tasks 80 and 12 checked and measured") and in §12 -->
+<!-- lint-external-ref: SimmableUpdateComponent-rationale.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to OGBrawlerSimulatableComponent-rationale.md (ids unchanged); kept in the §11 history (C3) -->
+<!-- lint-external-ref: SimmableUpdateComponent-guards.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to OGBrawlerSimulatableComponent-guards.md (ids unchanged); kept in the §11 history (C3) -->
 
 > **Licence.** This tier is **BUSL-1.1**, matching the code it describes. It is deliberately not
 > in the `og-simulation` docs tier, which is MPL-2.0 and travels with a different repository.
@@ -85,6 +94,8 @@ session knobs — in about a hundred lines. Everything below assumes it.
 ---
 
 ## §0 Orientation — the header's banner, carried
+
+*Names here are as they stood then: task 30 renamed the actor `ASimulationManagerUImpl` to `AOGBrawlerSimulationManager`, its files to `OGBrawlerSimulationManager.h` and `OGBrawlerSimulationManager.cpp`, and this docs pair to `OGBrawlerSimulationManager-rationale.md` and `OGBrawlerSimulationManager-guards.md` (ids unchanged).*
 
 *Task 11 moved this out of `SimulationManagerUImpl.h`, where it was the first 105 lines. The bytes
 below are the shipped text at `b9f6d81`; the corrections after the block are R0 findings, and they
@@ -253,7 +264,7 @@ since og-ue-simulationcomponentandmanagersplit task 25 (this file's G-16 until t
 
 ## §1 Threads, and why every entry point here is narrow
 
-`ASimulationManagerUImpl` straddles two threads and owns the boundary between them.
+`AOGBrawlerSimulationManager` straddles two threads and owns the boundary between them.
 
 | | runs on | what it is |
 |---|---|---|
@@ -265,7 +276,7 @@ since og-ue-simulationcomponentandmanagersplit task 25 (this file's G-16 until t
 | the frame host's two tick functions → the tick driver → `onFrameStepsDue_GameThread`, the reap (authority), `onPostPhysicsStep`, through `BrawlerTickDriverGameUImpl` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | GAME | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`UETickDriverHost-rationale.md`; `SimulationTickDriver-rationale.md` §3) |
 | the tick driver's per-step body (`SimulationTickDriver`) → `SimulationStepDriver::runTick` and the four step hooks (`TickDriverStepHooks`), including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | PHYSICS: a worker task on a client, the game thread inline on the authority | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
 | `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides (Chaos configuration, §18; in `ChaosTickBackendUImpl.cpp` since task 82) — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
-| `pollInputHistory`, `pollInputHistoryLanes` (members of `BrawlerInputHistoryFeedUImpl`, this class's `m_inputHistoryFeed`, since task 22) | GAME | the input-history display's render-rate feed, driven from `USimmableUpdateComponent::TickComponent`; it reads the session `m_session` through a `const` reference since task 24b, this class before (`InputHistoryDisplay-rationale.md` §8.6) |
+| `pollInputHistory`, `pollInputHistoryLanes` (members of `BrawlerInputHistoryFeedUImpl`, this class's `m_inputHistoryFeed`, since task 22) | GAME | the input-history display's render-rate feed, driven from `UOGBrawlerSimulatableComponent::TickComponent`; it reads the session `m_session` through a `const` reference since task 24b, this class before (`InputHistoryDisplay-rationale.md` §8.6) |
 
 **There are three crossings, and they are not alike.** One is a write of one scalar; the other
 two are reads — of a whole capture by the input-history feed (argued in `InputHistoryDisplay-rationale.md` §8.6 since
@@ -319,7 +330,7 @@ OGSimulationUnreal's docs), and it still returns a pointer to `const`.
 
 *(ring-out initiative task 5, 2026-09-13)*
 
-`ASimulationManagerUImpl::OnPostPhysicsStep` now copies each character's ring-out score out of
+`AOGBrawlerSimulationManager::OnPostPhysicsStep` now copies each character's ring-out score out of
 `brawlerRingout::ScoreSystem` — reached through `m_systemsExec`, on the **game thread** — and
 onto that character's replicated `RingoutScore` property. `brawlerRingout::ScoreSystem`'s
 `postIntegrate` writes that table on the **physics thread**, beneath `onGameSimulation`. The two
@@ -345,9 +356,9 @@ new members is a table nobody can trust.
 * **The container cannot be restructured under the reader — the larger half, exactly as for
   `pollInputHistory`.** `ScoreSystem`'s table is a `std::unordered_map`, and its only inserting
   and erasing calls are `onCharacterRegistered` and `onCharacterUnregistered`. Both are driven
-  from `ASimulationManagerUImpl::tryRegister` and
-  `ASimulationManagerUImpl::unregisterFromNewFramework` — through `notifyCharacterRegistered` /
-  `notifyCharacterUnregistered` — and this class's own thread roster records both as game-thread
+  from the registration sequences, `tryRegister` and `unregisterFromNewFramework` (this class's until
+  og-ue-simulationcomponentandmanagersplit task 28, the session's since, `UESimulationSession-rationale.md` §12) — through
+  `notifyCharacterRegistered` / `notifyCharacterUnregistered` — and this class's own thread roster records both as game-thread
   in full. The push's `scoreOf` is therefore same-thread with the only writer of the map's
   structure, and the container cannot rehash under it.
 * **What can tear is one word, and the consequence is bounded.** The award reaches an entry that
@@ -382,7 +393,7 @@ cross-thread reach the entry point exists to bound. **Do not widen one into an a
 
 ⚠ **This list has now gone stale twice**, both times because a new member matching the pattern
 exactly was added without extending the sentence. The rule it states is about the *class* of
-member, not about these six names: **every public member of `ASimulationManagerUImpl` that
+member, not about these six names: **every public member of `AOGBrawlerSimulationManager` that
 forwards to one core-owned object for one purpose belongs here**, and the enumeration is a
 reading aid. Replacing the list outright with that sentence would end the drift, at the cost of
 the six anchors `doc_anchor_lint.ps1` currently resolves through it — a trade worth making only
@@ -440,8 +451,9 @@ OGSimulationUnreal's docs. This section keeps the brawler's part.
 The private data members, top to bottom: `m_roster`; `m_inputHistoryFeed` (the two frame probes that sat between them
 until task 26b are the session's, `UESimulationSession-rationale.md` §9.9, and so, since task 26a, are the reception
 coordinator, PROBE 5 and the delayed-input map, its §9.7); `m_game`, the brawler's phase hooks
-(`BrawlerSessionGameUImpl`; since task 27b it holds a reference to `m_roster`, declared above it); `m_session`, constructed with `*this` and `m_game`; and
-`m_pendingRegistrations`. The static instance table is the session's since task 25 (`UESimulationSession-rationale.md` §9.2).
+(`BrawlerSessionGameUImpl`; since task 27b it holds a reference to `m_roster`, and since task 28 one to `m_inputHistoryFeed`,
+both declared above it); and `m_session`, constructed with `*this` and `m_game`. The pending registrations, the last member
+until task 28, are the session's since (`UESimulationSession-rationale.md` §2, §12.2). The static instance table is the session's since task 25 (`UESimulationSession-rationale.md` §9.2).
 
 * **The order is today's for every member whose construction or destruction does something.** The roster, the two frame
   probes and the feed are declared before the session, so they are destroyed after it, as they were destroyed after the
@@ -511,7 +523,7 @@ path anywhere in the tree.** This invariant was migrated here from the now-delet
 `readMovementStaticDataCVars()` (this class befriends the hook's class), and returns the static data as a prvalue, so it is
 still constructed in place, never copied or moved. It replaced the member `m_movementStaticDataCVars`, which held the cvar
 result between the read and the construction; nothing else read that member. The hook is defined in
-`SimulationManagerUImpl.cpp`, inside its `OGSIM_OPTIMIZE_OFF` region, so the read and the construction keep the
+`OGBrawlerSimulationManager.cpp`, inside its `OGSIM_OPTIMIZE_OFF` region, so the read and the construction keep the
 optimization state they had in this class's constructor; the cvar read is in `MovementSchemeCVar.cpp`, unchanged.
 
 ### The alias chain
@@ -543,7 +555,7 @@ the intakes after the latency member's begin and before the backend builds its w
 after the neutral input, the policy after both role branches. The argument (the four steps, the floor, the rotation
 width, the resim policy and the retired fourth knob) moved with them, verified and game-neutral, to
 `UESimulationSession-rationale.md` §9.8, in OGSimulationUnreal's docs, with its four guards (G-57, G-56, G-58 and G-63
-here → the session's G-14 to G-17; `SimulationManagerUImpl-guards.md` §R). R0 corrections made in that move are listed
+here → the session's G-14 to G-17; `OGBrawlerSimulationManager-guards.md` §R). R0 corrections made in that move are listed
 there, marked "task 26b".
 
 What stays here is the brawler's own configuration, and the history (§11 C1, C17, C18).
@@ -574,7 +586,7 @@ in that move are listed in its sections, marked "until task 19".
 
 What stays in this module, and in this section:
 
-* `LogOGBrawler`, declared in `SimulationManagerUImpl.h` and defined in its `.cpp`. It is the game-rule category: the
+* `LogOGBrawler`, declared in `OGBrawlerSimulationManager.h` and defined in its `.cpp`. It is the game-rule category: the
   `ogblog` sink this module installs on both role branches (since task 27b the hook `installGameLoggers`, defined in this
   class's `.cpp`; `BeginPlay`'s two lambdas before) logs to it, and so does `MovementSchemeCVar.cpp`. The router
   never logs to it.
@@ -619,16 +631,16 @@ removes it, assigned to the row that routed it.
   files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
 - Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp`, this
   module's `.cpp`, and since task 26b the session header's PROBE A client line, instantiated only in this module),
-  `[ServerReceive]` (also `SimmableUpdateComponent.cpp`) and `[RelayProbe` (also the session header's PROBE A server
+  `[ServerReceive]` (also `OGBrawlerSimulatableComponent.cpp`) and `[RelayProbe` (also the session header's PROBE A server
   line and PROBE 6 lines, this module's `.cpp` until task 26b, and its PROBE 5 lines, this module's `.cpp` until task
   26a; the session is instantiated only in this module).
 - Emitted by this module only (kept here): `[ResimCheck.TriggerRewind]` (`ChaosTickBackendUImpl.cpp`),
   `[ClientPrediction]` (`OGBrawlerInputCollectionComponent.cpp`), `[ReceiveCorrectionState]`
-  (`SimmableUpdateComponent.cpp`), `[ReleaseBatch]` (this module's `.cpp` until task 26a; since then the session header's, instantiated only in this
+  (`OGBrawlerSimulatableComponent.cpp`), `[ReleaseBatch]` (this module's `.cpp` until task 26a; since then the session header's, instantiated only in this
   module), `SimulationManager:` (this
   module's `.cpp`), `tryRegister:` (`BrawlerJoltBindingUImpl.cpp`'s capsule `checkf`, the Jolt host's `.cpp` until og-tickdriver task
   15a, and this module's `.cpp`) and `NewFramework:`
-  (`SimmableUpdateComponent.cpp` and this module's `.cpp`).
+  (`OGBrawlerSimulatableComponent.cpp` and this module's `.cpp`).
 - No emitter (kept here; deleting them was out of scope): `[SendRemoteInputToClients]`,
   `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]`, `[DrainOutOfOrder]`.
 
@@ -643,10 +655,10 @@ level is set in one place for routed and direct lines alike. The sites:
 
 | row | site | file |
 |---|---|---|
-| `[ReleaseBatch]` | `releaseDelayedInputsForStep`, the session's since og-ue-simulationcomponentandmanagersplit task 26a | `UESimulationSession.h` (OGSimulationUnreal; `SimulationManagerUImpl.cpp` before) |
+| `[ReleaseBatch]` | `releaseDelayedInputsForStep`, the session's since og-ue-simulationcomponentandmanagersplit task 26a | `UESimulationSession.h` (OGSimulationUnreal; `OGBrawlerSimulationManager.cpp` before) |
 | `[ResimCheck.TriggerRewind]` | `TriggerRewindIfNeeded_Internal`, the two `rewind=0` lines (Chaos only) | `ChaosTickBackendUImpl.cpp` |
-| `[ServerReceive]` | `receiveRemoteMoveBundle` (the RPC tail since og-ue-simulationcomponentandmanagersplit task 20a), the no-coordinator path | `UESimulatableOwnerBinding.h` (since task 21; was `SimmableUpdateComponent.cpp`) |
-| `[ReceiveCorrectionState]` | `onCorrectionStateAccepted`, called from `USimulatableNetSyncComponent::OnRep_CorrectionState` since task 20a | `UESimulatableOwnerBinding.h` (since task 21; was `SimmableUpdateComponent.cpp`) |
+| `[ServerReceive]` | `receiveRemoteMoveBundle` (the RPC tail since og-ue-simulationcomponentandmanagersplit task 20a), the no-coordinator path | `UESimulatableOwnerBinding.h` (since task 21; was `OGBrawlerSimulatableComponent.cpp`) |
+| `[ReceiveCorrectionState]` | `onCorrectionStateAccepted`, called from `USimulatableNetSyncComponent::OnRep_CorrectionState` since task 20a | `UESimulatableOwnerBinding.h` (since task 21; was `OGBrawlerSimulatableComponent.cpp`) |
 | `[ClientPrediction]` | `buildPlayerInput` | `OGBrawlerInputCollectionComponent.cpp` |
 
 The category stays at the site. Nothing checks that it is the row's category; all six agree today.
@@ -657,10 +669,14 @@ The category stays at the site. Nothing checks that it is the row's category; al
   rare event, but it shares the `[ResimCheck.TriggerRewind]` tag with the per-step `rewind=0` lines,
   and the text that tells them apart is at the end of the line, where no prefix row can reach it.
 * `[RelayDelayFloor]` and `[ConnectionTier]` (session and tier events, at most about 0.1 per second;
-  `[ConnectionTier]` also in `SimmableUpdateComponent.cpp`). They have no row and need none. Their sites are the
+  `[ConnectionTier]` also in `OGBrawlerSimulatableComponent.cpp`). They have no row and need none. Their sites are the
   session header's since tasks 25 and 26b (the floor's ini line moved with `applySessionKnobs`).
 
 ### History: what tasks 80 and 12 checked and measured
+
+*Names here are as they stood then: task 21a renamed the brawler component `USimmableUpdateComponent` to `UOGBrawlerSimulatableComponent`, in `OGBrawlerSimulatableComponent.h` and `OGBrawlerSimulatableComponent.cpp` (docs `OGBrawlerSimulatableComponent-rationale.md` and `OGBrawlerSimulatableComponent-guards.md`, ids unchanged).*
+
+*Names here are as they stood then: task 30 renamed the actor `ASimulationManagerUImpl` to `AOGBrawlerSimulationManager`, its files to `OGBrawlerSimulationManager.h` and `OGBrawlerSimulationManager.cpp`, and this docs pair to `OGBrawlerSimulationManager-rationale.md` and `OGBrawlerSimulationManager-guards.md` (ids unchanged).*
 
 *Code moved to `UESimulationLogRoutes.h` (task 19). The records below are those tasks', kept here as they were: "the
 header" is `SimulationManagerUImpl.h` of that time, and "this module's block" is today's `kOGAdapterLogRoutes`. Task 19
@@ -808,10 +824,12 @@ and its emplace, its three accessors, the delayed-input map and its registration
 and the reap and the forget are the session's. The argument (the coordinator and the transport adapter, the two sinks,
 the map, the drain) moved with them, verified and game-neutral, to `UESimulationSession-rationale.md` §9.7, in
 OGSimulationUnreal's docs. This class keeps `noteDelayedInputComponent` as a wrapper that turns the pawn's
-`SimCharacterId` into the storage key (`toStorageKey`, §15) and passes it to the session's, and it calls the session at
+`SimCharacterId` into the storage key (`toStorageKey`, §15) and passes it to the session's (*task 29:* the wrapper has
+no caller since: the component's registration skeleton, `UESimulatableOwnerBinding`, calls the session's with the key), and it calls the session at
 the positions of the statements it held: `beginReceptionCoordinator(pctmloggerServer)` on the start-up's authority branch
 (the actor's `BeginPlay` until task 27b, as `m_session.beginReceptionCoordinator`; the session's `beginPlay` since), and
-`m_session.forgetReceptionOwner(id)` in `unregisterFromNewFramework`. What stays here is the
+`forgetReceptionOwner(id)` in `unregisterFromNewFramework` (this class's, as `m_session.forgetReceptionOwner`, until task
+28; the session's own since, `UESimulationSession-rationale.md` §12.3). What stays here is the
 history below and the brawler's two hosts' call patterns.
 
 `sampleAndDeriveConnectionTier` and `tryEnqueueDelayedRemoteInput` are **gone**; their
@@ -1028,92 +1046,27 @@ og-simulationscheduler-withjolt task 54).
 
 ---
 
-## §10 Registration and unregistration
+## §10 Registration and unregistration — moved to `UESimulationSession` (task 28)
 
-`tryRegister` is a two-phase contract. The first call creates bodies; later calls re-test
-resolvability and, once every body resolves, perform the registration and return `Ready`.
+*Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit task 28): `tryRegister` and
+`unregisterFromNewFramework`, after their first statements, are the session's own sequences, with the pending record
+(`PendingRegistration` and its map) and `TryRegisterStatus`; this class keeps the two `SimCharacterId` wrappers (the
+`SimCharacterId::None` check, `toStorageKey`, §15), which call them. The brawler statements are the four registration
+hooks of `BrawlerSessionGameUImpl`, at their statements' positions, and their bodies call the roster
+(`BrawlerRosterUImpl-rationale.md` §2 and §4) and the input-history feed.*
 
-*Code moved (og-ue-simulationcomponentandmanagersplit task 23): the capsule-id stamp, the teleport seed and the
-spawn-slot seed of the first call are `BrawlerRosterUImpl::onBodiesCreated`, the pre-diet cap of the Ready path is
-`BrawlerRosterUImpl::onRegistered`, and the id-set erase and the spawn-slot release of the unregistration are
-`BrawlerRosterUImpl::forgetCharacter`. `tryRegister` and `unregisterFromNewFramework` call them at the statement
-positions this section describes, so what it says about order is unchanged. Their own argument is
-`BrawlerRosterUImpl-rationale.md` §2 and §4.*
-
-**The capsule body id.** `setCharacterBindings` stamps the authoritative capsule `BodyId` into the
-brawler's `CharacterBindings`, and its **source is the movement sub-simulation's own
-`PhysicsDeclaration`** — `bindings.ownBodyId`, read out of the physics composite *after* the
-creation fold has run. Before the fold that id is still zero, which is why the stamp sits below it.
-
-The value is the capsule's, and it is the capsule's *by construction* rather than by coincidence:
-the movement descriptor sets `isRoot`, so `ChaosPhysicsFactory` **adopts** the engine character's
-existing capsule instead of creating a body under it, and its adopt-root arm ends in a `checkf`
-that the adopted body's id equals the parent id the factory derived from that same component. One
-body, one id, reached through the sub-simulation's own declaration.
-
-A **two-source tripwire** used to sit at this stamp: a second `checkf`, comparing the declaration's
-`ownBodyId` against a capsule id cached on `PendingRegistration` for as long as the two sources
-coexisted. Both are gone. The cached `parentBodyId` field had exactly two readers — that tripwire
-and the resolvability gate — and the gate now reads the same declaration, so the field had none
-left. Removing it removes a duplicate, not the only witness: the factory's own assertion, which
-this file does not own, still watches the identity. The capsule id is still derived inside the
-first-call pass, as a **local**, because the factory and each declaration's own
-`bindings.parentBodyId` consume it there.
-
-**The movement sub-simulation, and what it costs this file.** It is registered by exactly the same
-generic fold as radial, guard and the three projectile slots — `staticDataOf` hands the fold its
-static-data slice, `descriptor()` the body and shapes, `queryVolumes` the probe volume — so no
-line in this file branches on it. Three things about it are nonetheless this file's business:
-
-* **It adopts; it does not create.** `isRoot` on its descriptor means the engine character's
-  capsule *is* its body. `simulatePhysics = true` on that adopted component is what switches the
-  engine's own character-movement component off, and the sub-simulation's `drivesBody` is the
-  other half of that pair. Neither may be flipped alone: `simulatePhysics` without `drivesBody`
-  leaves nobody driving the capsule, and `drivesBody` without `simulatePhysics` leaves two.
-* **Its collision category is hand-written engine work, and this file pays it.** `character` needs
-  one row in EACH of the two mapping tables in `BeginPlay` — authority branch and client branch,
-  duplicated with no shared constant — and the channel itself must be declared in the project's
-  collision settings. Generic creation, hand-written collision; the fold's own comment states both
-  halves, because stating only the first one overstates the claim.
-* **Its spawn pose is seeded here, exactly once.** The first-call pass writes `teleportPending`
-  and `teleportPos` into the sub-simulation's `InitialConditions` from the capsule's current
-  transform. That edge is on the wire, so a respawn replays identically on a client and through a
-  resim, and it is the one body write that ignores `drivesBody` — which is safe here only because
-  it is seeded from the capsule's own location and is therefore a value no-op.
-
-**Attach parent and parent body are the same capsule** under the one-deep hierarchy, so passing one
-handle expresses "these shapes belong to this character". They used to be passed separately, which
-let callers get them out of sync; the factory derives the parent `BodyId` from the attach parent's
-body-instance handle internally now, and that factory-owned parent id becomes the root for every
-shape it registers — so `overlap()` emits an actor-level `rootBodyId` equal to the capsule id.
-
-**On the authority path**, registration also notifies the systems executor that the character is
-now *in storage*, so `brawlerHitRouting::System::onCharacterRegistered` indexes it for inbound-hit
-routing and reads `capsuleBodyId` itself. Wiring that notify and dropping the old adapter-owned
-`m_byRootBodyId` insert landed in the **same** change, so there was never a window in which both
-the adapter map and the system map were populated and an inbound-hit stream could be double-routed.
-
-**Unregistration is a contract, not a garbage-collection hope.** `unregisterFromNewFramework`:
-
-1. notifies the systems executor to drop the routing entry **before** `unregisterSimulatable`
-   destroys the `SimulatableBrawler`, while the character is still in storage — so the hook
-   resolves it through the view and erases by stored-pointer identity, and the per-tick routing
-   pass never dereferences a dangling pointer. The `has<>` guard is preserved: a character never
-   fully registered into storage has no system-map entry to drop, and the hook's `view.get<>(id)`
-   would be unsafe;
-2. drops this owner's claim and dedup watermark from the reception coordinator and its
-   id→component mapping — **promptly**, rather than waiting for GC to make an engine handle stale.
-   This is what replaced the core's former GC-liveness read, since the core claim map is id-keyed
-   and cannot hold an engine weak pointer. No-op on a pure client;
-3. drops the write probe's per-owner state, so its map stays bounded by live ids exactly as the
-   coordinator's does. A half-open run belonging to a dead owner is discarded rather than reported,
-   which is correct: its length is unknowable;
-4. erases the id from `m_authorityRegisteredIds` and releases its ring-out spawn slot, in that order, through the
-   roster's `forgetCharacter` (task 23), before the input-history forget and the latency forget.
+*This section moved two ways (manager design §4.3; R0 on every claim). The generic contract — the two phases, the
+resolvability gate, the systems executor's notify, the unregistration's order (its items 1 to 3) — is
+`UESimulationSession-rationale.md` §12, in OGSimulationUnreal's docs, game-neutral. The brawler's part — the capsule body
+id, the movement sub-simulation, the shared attach parent, the notify's brawler dependants and the roster and display
+forgets (item 4) — is `BrawlerSessionGameUImpl-rationale.md` §7, with three corrections task 28 found: the collision
+category needs one row per configuration's table, not one per role branch of `BeginPlay`; the notify runs on both roles,
+not only the authority's; and the first-call pass's body work is the backend's `createBodies_GameThread`, not
+`tryRegister`'s own. The pre-diet cap's subsection moved to the roster in task 23 (below).*
 
 ### ∴D-01 — RETIRED by og-ue-simulationcomponentandmanagersplit task 23 (2026-10-21): the pre-diet cap moved to `BrawlerRosterUImpl`
 
-**Was:** the derivation tag on `kPreDietCharacterCap`'s declaration in `SimulationManagerUImpl.h`, which pointed at
+**Was:** the derivation tag on `kPreDietCharacterCap`'s declaration in `OGBrawlerSimulationManager.h`, which pointed at
 this subsection, *The pre-diet character cap*: where 4 came from, why the emission is once per over-cap character at
 `Warning`, why the denominator is a set, what lifting the cap means, and the coupling to
 `brawlerRingout::kMaxSpawnPoints`.
@@ -1125,6 +1078,10 @@ this subsection, *The pre-diet character cap*: where 4 came from, why the emissi
 ---
 
 ## §11 Corrections — claims these files carried that were not true
+
+*Names here are as they stood then: task 21a renamed the brawler component `USimmableUpdateComponent` to `UOGBrawlerSimulatableComponent`, in `OGBrawlerSimulatableComponent.h` and `OGBrawlerSimulatableComponent.cpp` (docs `OGBrawlerSimulatableComponent-rationale.md` and `OGBrawlerSimulatableComponent-guards.md`, ids unchanged).*
+
+*Names here are as they stood then: task 30 renamed the actor `ASimulationManagerUImpl` to `AOGBrawlerSimulationManager`, its files to `OGBrawlerSimulationManager.h` and `OGBrawlerSimulationManager.cpp`, and this docs pair to `OGBrawlerSimulationManager-rationale.md` and `OGBrawlerSimulationManager-guards.md` (ids unchanged).*
 
 This pass verified every claim before compressing it. Four did not survive, and are recorded here
 rather than quietly repaired, because an archive that repairs itself stops being a record.
@@ -1402,6 +1359,10 @@ editor of either has the evidence.
 ---
 
 ## §12 The header's declaration comments, carried
+*Names here are as they stood then: task 21a renamed the brawler component `USimmableUpdateComponent` to `UOGBrawlerSimulatableComponent`, in `OGBrawlerSimulatableComponent.h` and `OGBrawlerSimulatableComponent.cpp` (docs `OGBrawlerSimulatableComponent-rationale.md` and `OGBrawlerSimulatableComponent-guards.md`, ids unchanged).*
+
+*Names here are as they stood then: task 30 renamed the actor `ASimulationManagerUImpl` to `AOGBrawlerSimulationManager`, its files to `OGBrawlerSimulationManager.h` and `OGBrawlerSimulationManager.cpp`, and this docs pair to `OGBrawlerSimulationManager-rationale.md` and `OGBrawlerSimulationManager-guards.md` (ids unchanged).*
+
 *Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit task 24a): the composition members below (the adapters, the storage, the cvar
 result and the static data, the peers, the systems executor, the integration layer, the manager and the backend) and the
 construction-order and destruction-order assertions their "Where it went" lines name are the session's; the cvar member
@@ -2614,18 +2575,18 @@ module.*
 // `decl.bindings.parentBodyId` consume it; nothing needed it to survive the call.
 ```
 
-**Where it went:** Rationale — §10, *The capsule body id*.
+**Where it went:** Rationale — §10, *The capsule body id*. *(Code moved to `UESimulationSession.h`, task 28: the record is
+the session's; the paragraph is `BrawlerSessionGameUImpl-rationale.md` §7.1.)*
 
 ---
 
-## §13 `SimulationManagerUImpl.cpp` — what its comments carried that §1–§12 did not
+## §13 `OGBrawlerSimulationManager.cpp` — what its comments carried that §1–§12 did not
 
 <!-- ================= DECLARED LINT ESCAPES — §13 ==========================
      Every token below is CORRECT and cannot resolve. ========================= -->
 <!-- lint-external-ref: RewindToFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (13.4): the record field deleted with the two-source tripwire. It must NOT resolve -->
 
-The implementation file was converted to guard tags (`SimulationManagerUImpl-guards.md`, ids
+The implementation file was converted to guard tags (`OGBrawlerSimulationManager-guards.md`, ids
 **G-50 onward**) and one derivation tag (**D-50**, §13.8; retired by task 26b, which moved its expression into the
 session, where it is the session's D-01). Most of what its comments said was
 already in §1–§11, which were written from those same comments (§12 carries the header's). This section holds the
@@ -2644,7 +2605,7 @@ task 23's R0 notes are `BrawlerRosterUImpl-rationale.md` §1 (ruling Q-B: §13.1
 
 ### 13.2 The gravity cross-check — moved to `BrawlerSessionGameUImpl-rationale.md` §6.1 (task 27b)
 
-*Code moved to `SimulationManagerUImpl.cpp`'s hook `BrawlerSessionGameUImpl::beforeWorldBuild` (og-ue-simulationcomponentandmanagersplit
+*Code moved to `OGBrawlerSimulationManager.cpp`'s hook `BrawlerSessionGameUImpl::beforeWorldBuild` (og-ue-simulationcomponentandmanagersplit
 task 27b), the first statements of the brawler's start-up hook, unchanged. The quoted comment and its verification are
 `BrawlerSessionGameUImpl-rationale.md` §6.1 (ruling Q-B: §13.2 moves to the hooks' doc).*
 
@@ -2734,60 +2695,14 @@ The client branch's copy said only that it matched, and why the client needs it 
 > (why an unmapped category silently became ECC_WorldStatic, and what the reverse map does) is
 > spelled out at the authority table above. KEEP IN SYNC with it.
 
-### 13.4 Registration's first-call pass
+### 13.4 Registration's first-call pass — moved to `BrawlerSessionGameUImpl-rationale.md` §7.3 and `UESimulationSession-rationale.md` §12 (task 28)
 
-*`tryRegister`.*
-
-> First-call body creation pass.
-> ⭐ [movement-sim task 19] THIS CAST IS THE REGISTRATION PATH, AND IT IS NOT AN ACCESSOR SWAP.
-> It used to name the engine's walking-pawn base; task 19 rebased `AOGBrawlerUECharacter` on
-> `APawn`, so that base is no longer in the hierarchy and the old cast would return NULL HERE —
-> on the FIRST-CALL body-creation pass — which is registration failing outright: no bodies, no
-> simulation, no character. The root capsule this pass needs is declared by
-> `AOGBrawlerUECharacter` itself now, so that class IS the type the contract requires.
-> ⚠ `checkf` COMPILES OUT IN SHIPPING (task 36). There a wrong owner type is a null dereference
-> on the very next line rather than an assert, which is why the message below names the exact
-> class rather than a family.
-
-> ⚠ CharacterBindings is NO LONGER STAMPED HERE. [movement-sim T13] moved it BELOW the
-> physics fold, because its source is now that fold's output. See the §10 banner there.
-
-> ⛔ Attach and parent-body are the SAME capsule, so ONE handle - two let callers desync. §10
-
-> The factory's parentBodyId roots every shape, so overlap() emits the capsule id.
-
-> Generic — each declaration names its own slice (PhysicsDeclaration.h). Adding a
-> body-owning sub-simulation therefore edits no engine file to have its body CREATED,
-> BOUND, CAPTURED, REWOUND and CHECKSUMMED.
->
-> ⚠ [movement-sim T13, from the task-10 review] THAT IS THE WHOLE OF THE CLAIM, and the
-> earlier unqualified wording overstated it. Making that body COLLIDABLE OR QUERYABLE is
-> still hand-written engine work: its `collisionCategory` needs one entry in EACH of the two
-> ChaosCategoryMapping tables in BeginPlay above (authority branch and client branch,
-> duplicated with no shared constant), or ChaosPhysicsFactory::applyDescriptor types the
-> shape by the unmapped fallback and no object query can ask for it. Tasks 39 and 43 paid
-> exactly that cost for `world` and `character`. Generic creation, hand-written collision —
-> state both halves.
-
-Since this conversion there is **one** table per configuration (§13.3; since og-tickdriver task 15a
-`BrawlerChaosBindingUImpl::categoryChannels` and `BrawlerJoltBindingUImpl::categoryChannels`), so a new
-category needs one row in each, not one per role branch.
-
-*The brawler part of this pass moved to `BrawlerRosterUImpl-rationale.md` §2 (og-ue-simulationcomponentandmanagersplit
-task 23; ruling Q-B): the capsule-id stamp, the two-source tripwire, the teleport seed, and the spawn-slot seed with its
-authority-only test, with corrections C13-13 and C13-14. That code is `BrawlerRosterUImpl::onBodiesCreated`, which
-`tryRegister` calls where it stood. What stays here is the generic half, which task 28 moves.*
-
-> Resolvability gate.
->
-> ⭐ [movement-sim task 17] THE SOURCE IS THE MOVEMENT DECLARATION'S OWN `ownBodyId`, which is
-> what `PendingRegistration::parentBodyId` used to hold and no longer exists to hold. The value
-> is the same body — the descriptor's `isRoot` makes the factory ADOPT the pawn's root capsule,
-> so the movement declaration's own id IS the capsule id (stated in full at the stamp above).
->
-> ⚠ AND IT IS DELIBERATELY REDUNDANT WITH THE FOLD BELOW, which visits every declaration and
-> therefore visits this one too. It is kept as the named, order-first read so the gate says out
-> loud WHICH body a `Pending` is waiting on; it adds no guarantee the fold does not already give.
+*Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit task 28): the cast, the body creation,
+the DO_CHECK walk and the resolvability gate are the session's `tryRegister`; the brawler's root body is the hook
+`BrawlerSessionGameUImpl::rootBodyId`. The generic part of this subsection (the cast's role, generic creation and
+hand-written collision, the gate's order-first read) is `UESimulationSession-rationale.md` §12.1, game-neutral; the quoted
+comments, verbatim, with this subsection's note on the tables, are `BrawlerSessionGameUImpl-rationale.md` §7.3 (ruling
+Q-B: §13.4's generic part moves with task 28). The brawler part moved to `BrawlerRosterUImpl-rationale.md` §2 in task 23.*
 
 ### 13.5 The ring-out score push — moved to `BrawlerRosterUImpl-rationale.md` §3 (task 23)
 
@@ -2847,7 +2762,9 @@ onto the particle (`ChaosTickBackendUImpl-rationale.md` §5), so the after-push 
 > `BodyStateT` is the declaration's ACTUAL wire shape, before the widening
 > conversion into `pushBodyState`'s `const PhysicsBodyState&` erases it.
 
-Verified: `createPhysicalObject(D::descriptor(), D::name)` is the factory call in `tryRegister`.
+Verified: `createPhysicalObject(D::descriptor(), D::name)` is the factory call of the first-call bind. *R0, task 28:* it is
+in the self-scheduled host's `ChaosTickBackendUImpl::createBodies_GameThread` (since og-simulationscheduler-withjolt task 82),
+which `tryRegister`'s first call reaches through the backend; it was never `tryRegister`'s own statement after that task.
 There is no member named `m_physics`; the lookup goes through `getPhysicsComposite()`.
 
 > ⛔ At PostPushData: direct SetX/SetV/SetW is a NO-OP on ResimAsFollower bodies.
@@ -2874,7 +2791,7 @@ Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit 
 #### ∴D-50 — RETIRED by og-ue-simulationcomponentandmanagersplit task 26b (2026-10-21): the `[PacketBudget]` word rounding moved to `UESimulationSession`
 
 **Was:** the derivation tag on the first argument of the `[PacketBudget]` line in `onFrameStepsDue_GameThread`
-(`SimulationManagerUImpl.cpp`), `(usableBits / 32) * 4`, which pointed at this subsection: the usable bytes are rounded
+(`OGBrawlerSimulationManager.cpp`), `(usableBits / 32) * 4`, which pointed at this subsection: the usable bytes are rounded
 down to whole 32-bit words before four bytes per word are counted, because the channel writes a bunch in words, so the
 natural-looking `usableBits / 8` would print a number a bunch cannot carry; and the brawler's literal compared with it
 by hand is an upper bound.
@@ -2895,7 +2812,7 @@ observed. The file was then restored and its hash checked.
 |---|---|---|
 | "ORDER IS LOAD-BEARING: this MUST precede the `[Resim.` catch-all" and the defensive `[ResimProbe` placement | `static_assert(ogLogRoutesAreAllReachable())` over `kOGLogRoutes`: no prefix may begin with an earlier one, compared case-insensitively as `FString::StartsWith` does | `[Resim.` moved above `[Resim.Input]` ⇒ `C2338`; `[Resim.` widened to `[Resim` ⇒ `C2338`; a lower-case duplicate `[resim.input]` appended ⇒ `C2338` |
 | the two collision tables and their "KEEP IN SYNC" | one table, emplaceBrawlerQueryAdapter, called from both branches (since og-tickdriver task 15a the Chaos binding's `BrawlerChaosBindingUImpl::categoryChannels`) | nothing left to poison: the two copies no longer exist |
-| "NOT `HasAuthority()`" at four sites | `#define HasAuthority HasAuthority_is_constant_true_on_ASimulationManagerUImpl_use_worldIsAuthority_or_runsPrediction` after the includes, `#undef` at the end of the file (it must not leak into the next file of a unity blob) | `HasAuthority()` typed in `BeginPlay` ⇒ `C3861` naming that identifier |
+| "NOT `HasAuthority()`" at four sites | `#define HasAuthority HasAuthority_is_constant_true_on_AOGBrawlerSimulationManager_use_worldIsAuthority_or_runsPrediction` after the includes, `#undef` at the end of the file (it must not leak into the next file of a unity blob) | `HasAuthority()` typed in `BeginPlay` ⇒ `C3861` naming that identifier |
 | PROBE A's "COMPARABLE WITH ResimGateProbe … same 120 samples" | `static_assert(kFrameHealthProbeWindowSamples == kResimGateProbeWindowSamples)` (in the session's `onFrameStepsDue_GameThread` since task 26b) | a local shadow of 121 ⇒ `C2338` |
 | "NOT ROLE-GATED" at the spawn-point seed | `checkf(m_ringoutSpawnPointsSeeded)` after both role branches (in `BrawlerRosterUImpl::checkSeeded` since task 23) | compiled only. A runtime check in the UE layer cannot be exercised from a low-level test |
 | the stamp-after-the-fold order and "anyone simplifying `isRoot` away" | `checkf(movementOwnBodyId == parentBodyId)` above `setCharacterBindings` (in `BrawlerRosterUImpl::onBodiesCreated` since task 23) | compiled only, same reason |
@@ -2970,7 +2887,8 @@ compile-time poison that replaces all four (§13.9).
 
 > Line 1 - THE RATIO, client role. p99 and max are why this exists: a mean hides a hitch.
 
-> Same unregister contract for the display. ⛔ A kept ring is a leak keyed on a dead id. §10
+*The display's unregister note ("Same unregister contract for the display") moved with the unregistration's display forget
+to `BrawlerSessionGameUImpl-rationale.md` §7.4 (task 28).*
 
 > The (old -> new) delta IS the transition signal: the client runs no RTT sampling. §5
 >
@@ -3011,7 +2929,10 @@ authority's manager assigns it from its roster's `m_simCharacterIds` (`BrawlerRo
 og-ue-simulationcomponentandmanagersplit task 23), the pawn replicates it, and every
 peer registers under the same number. `tryRegister`, `noteDelayedInputComponent` and
 `unregisterFromNewFramework` take a `SimCharacterId`, so an engine object id passed to them is a
-compile error. Inside, `toStorageKey` turns it into the `unsigned int` key every container already
+compile error. *R0, task 29:* the component's registration no longer goes through the first two: the binding's
+skeleton passes the session the storage key its game's hook answered (`ready(toStorageKey(simId))`, the brawler's
+`resolveRegistrationKey`), so on that path the typed id ends inside the hook; `unregisterFromNewFramework` still takes
+the `SimCharacterId` from the component's `EndPlay`. Inside, `toStorageKey` turns it into the `unsigned int` key every container already
 used. No container changed type. There is no wire change, because the id rides the pawn's
 replication, not the correction composite.
 
@@ -3077,8 +2998,9 @@ probe's code had before og-tickdriver task 18 moved it out of this class:
   own statement, `UESimulationSession-rationale.md` §11);
 * the teardown: `end`, inside the world test, before `onEndPlayWorld` (in this class's `EndPlay` until task 27a, in the
   session's `endPlay` since, `UESimulationSession-rationale.md` §10);
-* `tryRegister`: `wrapInputProvider`, on the client branch;
-* `unregisterFromNewFramework`: `forgetCharacter`;
+* `tryRegister`: `wrapInputProvider`, on the client branch (this class's until task 28, the session's own statement since,
+  `UESimulationSession-rationale.md` §12.1);
+* `unregisterFromNewFramework`: `forgetCharacter` (likewise, §12.3);
 * the last statement of the post-physics pass: `tick_GameThread`, with the backend's `editDiagnostics()` view (this
   class's `OnPostPhysicsStep` until task 27a, the session's `onPostPhysicsStep` since, after the brawler's hook).
 
@@ -3105,10 +3027,11 @@ authority inline too).
 
 ### Why the capture stamp is a wrapper in `tryRegister`, not a line in the provider lambda
 
-`USimmableUpdateComponent`'s provider lambda may not capture the manager (its guard G-05). The capture stamp therefore
-lives in the wrapper `wrapInputProvider` returns, which `tryRegister` applies to a client's provider before handing it to
-the core. The wrapper calls the component's lambda, then posts `InputSampled` and `Captured` for `step.getTick()`. It
-captures `this`, the diagnostics object, a member of this class, which owns the core container the callable is stored in,
+`UOGBrawlerSimulatableComponent`'s provider lambda may not capture the manager (its guard G-05). The capture stamp therefore
+lives in the wrapper `wrapInputProvider` returns, which `tryRegister` (the session's since task 28) applies to a client's
+provider before handing it to the core. The wrapper calls the component's lambda, then posts `InputSampled` and `Captured`
+for `step.getTick()`. It captures `this`, the diagnostics object, a member of the session (of this class until task 24a),
+which owns the core container the callable is stored in,
 so it adds no lifetime edge to another actor, and the input sample source `BrawlerSessionGameUImpl::inputSampleSource`
 returned at registration: the same input-collection pointer the inner lambda already holds. **An empty provider is
 returned unchanged**: provider presence is the core's local-versus-remote identity test, and a `checkf` states that the
@@ -3288,7 +3211,7 @@ user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos 
   `EngineTraits` (the session through `BrawlerSessionTraitsUImpl::EngineTraits`). Until task 15a the header held the
   adapter aliases, the name and the fingerprint itself, per configuration, in namespace `physicsBackendUImpl`; task 15a
   kept six of those names for the files outside it, and task 15b switched those files (`BrawlerCompositionUImpl`'s
-  `IntegrationExecFor` and `HitDetectionSystem`, `SimulationManagerUImplConceptTest.cpp`, the build identity and
+  `IntegrationExecFor` and `HitDetectionSystem`, `OGBrawlerSimulationManagerConceptTest.cpp`, the build identity and
   `PhysicsBackendHostUImpl.h`) to `EngineTraits` and deleted the names (`PhysicsBackendUImpl-rationale.md` §5).
 
 ### What the arms hold (tasks 82 and 83)
@@ -3330,14 +3253,14 @@ the clock counts at the window start (m_latencyClockAtWindowStart, historical na
 (`m_clockAtWindowStart`; the class is `UELatencyBudgetDiagnostics` since task 19a).
 
 The guards on that code moved with it. This class's G-02, G-51 to G-55, G-71, G-76 and G-77 are retired
-(`SimulationManagerUImpl-guards.md` §R) and are `ChaosTickBackendUImpl-guards.md` G-01 to G-09.
+(`OGBrawlerSimulationManager-guards.md` §R) and are `ChaosTickBackendUImpl-guards.md` G-01 to G-09.
 
 `TickDriverBackendUImpl` holds what the Jolt arms held before task 83: the Jolt includes, console variables and
 anonymous helpers; the stepping mode, the world build, the slot table, the bind and the release; the frame host,
 the hooks and the step driver (since og-tickdriver task 8 the frame host, the game binding and the tick driver); the render publish, interpolation, correction smoothing and apply; the shadow
 world's hand-over, restore and overwrite; and the contact counts. Its world state is `TickDriverBackendWorldsUImpl`,
 which this class holds as `m_backendWorlds`. The guards moved too: this class's G-80 to G-84 are retired
-(`SimulationManagerUImpl-guards.md` §R) and are `TickDriverBackendUImpl-guards.md` G-01 to G-05. Since og-tickdriver tasks 9
+(`OGBrawlerSimulationManager-guards.md` §R) and are `TickDriverBackendUImpl-guards.md` G-01 to G-05. Since og-tickdriver tasks 9
 and 10 the render half is og-simulation's presenter, and the stepping mode, the world build, the slots, the bind, the
 release, the shadow world and the contact counts are og-simulation-jolt's world host `JoltTickWorldHost`, held in
 `TickDriverBackendWorldsUImpl`; of those guards only G-01 is live (`TickDriverBackendUImpl-guards.md` §R names the successors).
@@ -3391,7 +3314,7 @@ the value is the one the check compared before (`TickDriverBackendUImpl-rational
    OGSimulationJoltUnreal, which has no arm. The frame host's `.cpp` was a third until og-tickdriver task 11 moved it to OGSimulationUnreal,
    where it has no arm (`UETickDriverHost-rationale.md` §7). The two backend headers have no `#if`, and only the
    selector includes them, each in its own configuration (task 83, which replaced task 82's list; this class's
-   two files had arms until then). `USimmableUpdateComponent` and
+   two files had arms until then). `UOGBrawlerSimulatableComponent` and
    `AOGBrawlerUECharacter` have none. The component reaches the visualization adapters through three members
    that exist in both configurations (below).
 3. **Both adapter sets compile in both configurations** once the Jolt arm exists (task 18). The
@@ -3424,7 +3347,7 @@ the value is the one the check compared before (`TickDriverBackendUImpl-rational
 * **`editVizQuery()`, `getVizReader()` and `registerVizVolume(descriptor, owner)`** replace
   `editQueryAdapter()` and `getPhysicsBodyReaderAdapter()`, and the unused body-adapter accessor is
   deleted, so no code outside this class can name a body adapter. The first two return references to
-  a world every peer's game thread may query (`SimmableUpdateComponent-rationale.md` §10; task 53 made
+  a world every peer's game thread may query (`OGBrawlerSimulatableComponent-rationale.md` §10; task 53 made
   them pointers, null on a worker client, until task 56 gave that client its shadow world). In the Chaos configuration
   they always return the Chaos query adapter and reader; `registerVizVolume` builds the query
   parameters the component used to build itself (simple collision, the owner ignored) and registers
