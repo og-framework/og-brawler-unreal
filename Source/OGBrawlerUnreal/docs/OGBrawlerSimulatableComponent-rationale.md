@@ -4,6 +4,8 @@
 <!-- lint-external-ref: SimulationManagerUImpl-rationale.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager-rationale.md (ids unchanged); kept in the §11 history -->
 # `UOGBrawlerSimulatableComponent` — rationale
 
+New to this code? Start with [SimulationArchitecture.md](SimulationArchitecture.md).
+
 Companion to `Source/OGBrawlerUnreal/OGBrawlerSimulatableComponent.h` and `OGBrawlerSimulatableComponent.cpp`.
 Since the task-25 conversion both files carry only code and one-line tags. **The prohibitions are in
 `OGBrawlerSimulatableComponent-guards.md`, one id per site; this file carries the reasoning, the provenance

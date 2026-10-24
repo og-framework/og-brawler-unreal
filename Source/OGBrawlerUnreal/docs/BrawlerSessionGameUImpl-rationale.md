@@ -5,8 +5,9 @@
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: the actor's cvar member that makeStaticData replaced (og-ue-simulationcomponentandmanagersplit task 24a); named in section 4 to say what the hook folded -->
 # `BrawlerSessionGameUImpl` — rationale
 
-Companion to `Source/OGBrawlerUnreal/BrawlerSessionGameUImpl.h`. The source file carries no prose: a two-line docs
-pointer and code.
+Companion to `Source/OGBrawlerUnreal/BrawlerSessionGameUImpl.h` and, since og-ue-simulationcomponentandmanagersplit task
+33, `Source/OGBrawlerUnreal/BrawlerSessionGameUImpl.cpp`. The source files carry no prose: a two-line docs pointer and
+code.
 
 > **Licence.** This tier is **BUSL-1.1**, matching the code it describes.
 
@@ -17,7 +18,7 @@ pointer and code.
 * **§6** is the six start-up hooks (task 27b), with the gravity cross-check and the neutral input's guard.
 * **§7** is the four registration hooks (task 28), with the brawler's part of the registration: the capsule body id, the
   movement sub-simulation, the notify's dependants and the first-call pass's quoted comments.
-* **§3** is how the header is compiled and who includes it.
+* **§3** is how the header and the `.cpp` are compiled, and who includes the header.
 
 ---
 
@@ -65,29 +66,40 @@ provider on the client branch, and a listen host's local players have no client 
 
 ---
 
-## §3 How the header is compiled
+## §3 How the header and the .cpp are compiled
 
 * **Inline, in one `OGSIM_OPTIMIZE_OFF` / `OGSIM_OPTIMIZE_ON` pair.** The hook bodies are the statements that compiled in
   the latency class's own translation unit under that pair, so they keep its optimization state; the declarations sit
   above the pair.
-* **Who includes it.** `OGBrawlerSimulationManager.cpp`, the one file that instantiates the wrapper (`tryRegister` calls
-  `wrapInputProvider`; since task 28 the session's `tryRegister`, instantiated there by the actor's wrapper), and, since task 24a, `OGBrawlerSimulationManager.h`: the actor holds `m_game` by value, and the
-  session's constructor, which calls `makeStaticData()`, is instantiated wherever the actor's constructors are (its `.cpp`
-  and the reflection code's helper constructor). The header needs the complete component and input collection
-  component, so it includes both; every file that includes the manager now sees them. `BrawlerSessionTraitsUImpl.h`
-  still only forward-declares `BrawlerSessionGameUImpl`.
-* **`makeStaticData` is declared here and defined in `OGBrawlerSimulationManager.cpp`** (§4), and so, since task 27a, is
-  **`afterVisualization`** (§5). Its parameter names the session, so the header declares the session template (the
-  traits header does too). Since task 27b five of the six start-up hooks are defined there too, in its `OGSIM_OPTIMIZE_OFF`
-  region (one needs `LogOGBrawler`, which the actor's header declares after it includes this one; all five keep the
-  unoptimized state the statements had in the actor's `BeginPlay`). The sixth, `neutralInput()`, is inline here, in this
-  header's pair, because its guard is this file's (§6).
+* **Who includes it.** Since task 24a, `OGBrawlerSimulationManager.h`: the actor holds `m_game` by value, and the
+  session's constructor, which calls `makeStaticData()`, is instantiated wherever the actor's constructors are (its
+  `.cpp` and the reflection code's helper constructor). So every file that includes the manager's header sees this one.
+  `OGBrawlerSimulationManager.cpp` also names it in an include: it instantiates the session's `tryRegister`, which calls
+  the registration hooks and the wrapper's `wrapInputProvider`, through the actor's wrapper (since task 29 the
+  component's `.cpp` instantiates it too, through the binding's `tryRegisterWithNewFramework`). Since task 33,
+  `BrawlerSessionGameUImpl.cpp` includes it too, first (UBT requires a `.cpp`'s own header first). The header needs the
+  complete component and input collection component, so it includes both; every file that includes the manager now sees
+  them. `BrawlerSessionTraitsUImpl.h` still only forward-declares `BrawlerSessionGameUImpl`.
+* **The out-of-line hooks are defined in `BrawlerSessionGameUImpl.cpp`** (since task 33; until then in
+  `OGBrawlerSimulationManager.cpp`, between the actor's own members, in its `OGSIM_OPTIMIZE_OFF` region). There are
+  eleven, in this order: `makeStaticData` (§4, task 24a), five of the six start-up hooks (§6, task 27b),
+  `afterVisualization` (§5, task 27a) and the four registration hooks (§7, task 28). They cannot be inline here: they
+  need what the actor's header declares (the complete actor, whose private `readMovementStaticDataCVars()`
+  `makeStaticData` calls because the actor befriends this class, and `LogOGBrawler`), and that header includes this one
+  before it declares them. So the `.cpp` includes the actor's header, right after this one (UBT requires a `.cpp`'s own
+  header to be its first include). It has its own `OGSIM_OPTIMIZE_OFF` / `OGSIM_OPTIMIZE_ON` pair around the bodies, so
+  these non-template functions compile unoptimized in Development, as the statements did in the actor; task 33's notes
+  compare each one's disassembly with its pre-move body. It also carries the manager's `HasAuthority` fence
+  (`OGBrawlerSimulationManager-rationale.md` §13.9), because every moved statement was under it. `afterVisualization`'s
+  parameter names the session, so the header declares the session template (the traits header does too). The sixth
+  start-up hook, `neutralInput()`, is inline here, in this header's pair, because its guard is this file's (§6).
 * **Since task 27b** the header forward-declares the roster (the class holds a reference to it) and `UWorld`, and includes
   the engine's base types header (for `ENetMode`), `<optional>` and `<string_view>`; the hook `emplaceSystems` names the
   composition's `SystemsExec` and the engine traits' two adapters, which the traits header already brings in.
-* **Since task 28** the four registration hooks are declared here and defined in `OGBrawlerSimulationManager.cpp`'s
-  `OGSIM_OPTIMIZE_OFF` region (§7); the header forward-declares the input-history feed (the class holds a reference to it)
-  and includes og-simulation's `BodyId.h` (`rootBodyId` returns a `BodyId`).
+* **Since task 28** the four registration hooks are declared here (§7; defined in `OGBrawlerSimulationManager.cpp`'s
+  `OGSIM_OPTIMIZE_OFF` region until task 33, in `BrawlerSessionGameUImpl.cpp`'s since); the header forward-declares the
+  input-history feed (the class holds a reference to it) and includes og-simulation's `BodyId.h` (`rootBodyId` returns a
+  `BodyId`).
 
 ---
 
@@ -104,11 +116,13 @@ provider on the client branch, and a listen host's local players have no client 
 * **In place.** `simulatableBrawler::StaticData` deletes its copy and move operations. The hook returns a prvalue and the
   session initializes its member from it, so the object is constructed once, in the session (guaranteed copy elision).
 * **Friendship.** `readMovementStaticDataCVars()` is a private static of the actor, defined in `MovementSchemeCVar.cpp`
-  (not edited); the actor befriends this class so the hook can call it.
-* **Defined in `OGBrawlerSimulationManager.cpp`, in its `OGSIM_OPTIMIZE_OFF` region.** The hook needs the complete actor,
-  and this header is included by the actor's header before the actor is defined, so the body cannot be inline here.
-  As a non-template function in that region it compiles unoptimized in Development, as the two initializers did in the
-  actor's constructor (the session's constructor itself is a template and compiles optimized; lead ruling F1).
+  (not edited); the actor befriends this class so the hook can call it. The friendship is the class's, not the file's,
+  so the call compiles unchanged from `BrawlerSessionGameUImpl.cpp` (task 33).
+* **Defined in `BrawlerSessionGameUImpl.cpp`, in its `OGSIM_OPTIMIZE_OFF` region** (in
+  `OGBrawlerSimulationManager.cpp`'s until task 33). The hook needs the complete actor, and this header is included by
+  the actor's header before the actor is defined, so the body cannot be inline here (§3). As a non-template function in
+  that region it compiles unoptimized in Development, as the two initializers did in the actor's constructor (the
+  session's constructor itself is a template and compiles optimized; lead ruling F1).
 
 ---
 
@@ -132,9 +146,10 @@ provider on the client branch, and a listen host's local players have no client 
 * **The crossing is unchanged.** The push reads the score table on the game thread while the step writes it on the physics
   thread; why that tear is accepted is `OGBrawlerSimulationManager-rationale.md` §1 ("The second read crossing") and the
   `checkf` it rests on is `BrawlerRosterUImpl-rationale.md` §3.
-* **Defined in `OGBrawlerSimulationManager.cpp`, in its `OGSIM_OPTIMIZE_OFF` region,** where the actor's `OnPostPhysicsStep`
-  was, as `makeStaticData` is (§4). As a non-template function there it compiles unoptimized in Development, as the
-  statements did in the actor; the session's `onPostPhysicsStep`, a template, compiles optimized (lead ruling F1).
+* **Defined in `BrawlerSessionGameUImpl.cpp`, in its `OGSIM_OPTIMIZE_OFF` region,** as `makeStaticData` is (§4); from
+  task 27a until task 33 it was in `OGBrawlerSimulationManager.cpp`'s, where the actor's `OnPostPhysicsStep` had been.
+  As a non-template function there it compiles unoptimized in Development, as the statements did in the actor; the
+  session's `onPostPhysicsStep`, a template, compiles optimized (lead ruling F1).
 
 ---
 
@@ -173,9 +188,10 @@ the position of the brawler statements that sat there in the actor's `BeginPlay`
   brawler's zero input aims at `(0,0,1)`, and a value-initialized input does not. The session sets it on both roles; why the
   authority needs it too is the session's (`UESimulationSession-rationale.md` §11.3, `UESimulationSession-guards.md` G-23).
   The guard stays here because it guards the value, not the sequence.
-* **Compiled** as §3 says: five in `OGBrawlerSimulationManager.cpp`'s `OGSIM_OPTIMIZE_OFF` region, `neutralInput()` inline in
-  this header's pair, so every statement keeps the unoptimized state it had in the actor (ruling F1 governs only the
-  session's template; task 27b's notes check the gravity check's floating point).
+* **Compiled** as §3 says: five in `BrawlerSessionGameUImpl.cpp`'s `OGSIM_OPTIMIZE_OFF` region (in
+  `OGBrawlerSimulationManager.cpp`'s until task 33), `neutralInput()` inline in this header's pair, so every statement
+  keeps the unoptimized state it had in the actor (ruling F1 governs only the session's template; task 27b's notes check
+  the gravity check's floating point).
 
 ### 6.1 The gravity cross-check (was `OGBrawlerSimulationManager-rationale.md` §13.2)
 
@@ -229,8 +245,9 @@ docs) call four hooks, each at the position of the brawler statements that sat t
   and the spawn-slot release are `BrawlerRosterUImpl-guards.md` G-03, G-04 and G-05 (the actor's G-67, G-68 and G-74 until
   task 23). The two guards of the sequences themselves moved to the session (`OGBrawlerSimulationManager-guards.md` G-69 and
   G-73 → `UESimulationSession-guards.md` G-25 and G-26).
-* **Compiled** as §3 says: in `OGBrawlerSimulationManager.cpp`'s `OGSIM_OPTIMIZE_OFF` region, non-template, so every statement
-  keeps the unoptimized state it had in the actor (ruling F1 governs only the session's template).
+* **Compiled** as §3 says: in `BrawlerSessionGameUImpl.cpp`'s `OGSIM_OPTIMIZE_OFF` region (in
+  `OGBrawlerSimulationManager.cpp`'s until task 33), non-template, so every statement keeps the unoptimized state it had
+  in the actor (ruling F1 governs only the session's template).
 
 ### 7.1 The capsule body id, and what the movement sub-simulation costs (was `OGBrawlerSimulationManager-rationale.md` §10)
 

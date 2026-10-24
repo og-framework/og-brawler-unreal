@@ -8,6 +8,8 @@
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: folded into BrawlerSessionGameUImpl::makeStaticData by og-ue-simulationcomponentandmanagersplit task 24a; historical mention in §0, §11 and the carried header comments (§12) -->
 # `AOGBrawlerSimulationManager` — rationale
 
+New to this code? Start with [SimulationArchitecture.md](SimulationArchitecture.md).
+
 Companion to `Source/OGBrawlerUnreal/OGBrawlerSimulationManager.h` and
 `Source/OGBrawlerUnreal/OGBrawlerSimulationManager.cpp`. This file carries the reasoning, the
 provenance and the worked derivations.
@@ -523,8 +525,9 @@ path anywhere in the tree.** This invariant was migrated here from the now-delet
 `readMovementStaticDataCVars()` (this class befriends the hook's class), and returns the static data as a prvalue, so it is
 still constructed in place, never copied or moved. It replaced the member `m_movementStaticDataCVars`, which held the cvar
 result between the read and the construction; nothing else read that member. The hook is defined in
-`OGBrawlerSimulationManager.cpp`, inside its `OGSIM_OPTIMIZE_OFF` region, so the read and the construction keep the
-optimization state they had in this class's constructor; the cvar read is in `MovementSchemeCVar.cpp`, unchanged.
+`BrawlerSessionGameUImpl.cpp` (since task 33; in `OGBrawlerSimulationManager.cpp` until then), inside its
+`OGSIM_OPTIMIZE_OFF` region, so the read and the construction keep the optimization state they had in this class's
+constructor; the cvar read is in `MovementSchemeCVar.cpp`, unchanged.
 
 ### The alias chain
 
@@ -587,8 +590,9 @@ in that move are listed in its sections, marked "until task 19".
 What stays in this module, and in this section:
 
 * `LogOGBrawler`, declared in `OGBrawlerSimulationManager.h` and defined in its `.cpp`. It is the game-rule category: the
-  `ogblog` sink this module installs on both role branches (since task 27b the hook `installGameLoggers`, defined in this
-  class's `.cpp`; `BeginPlay`'s two lambdas before) logs to it, and so does `MovementSchemeCVar.cpp`. The router
+  `ogblog` sink this module installs on both role branches (since task 27b the hook `installGameLoggers`, defined in
+  `BrawlerSessionGameUImpl.cpp` since task 33 and in this class's `.cpp` before; `BeginPlay`'s two lambdas before task
+  27b) logs to it, and so does `MovementSchemeCVar.cpp`. The router
   never logs to it.
 * The router's callers: both role branches of the start-up hand `RouteOGMessage` to the core's components (`setLogger`)
   and to `simlog::setGlobal` (the session's `beginPlay` since task 27b, this class's `BeginPlay` before). The frame probes (PROBE A, whose server line is `[RelayProbe.Frame]`, and PROBE 6) log through it
@@ -2609,6 +2613,9 @@ task 23's R0 notes are `BrawlerRosterUImpl-rationale.md` §1 (ruling Q-B: §13.1
 task 27b), the first statements of the brawler's start-up hook, unchanged. The quoted comment and its verification are
 `BrawlerSessionGameUImpl-rationale.md` §6.1 (ruling Q-B: §13.2 moves to the hooks' doc).*
 
+*Code moved to `BrawlerSessionGameUImpl.cpp` (og-ue-simulationcomponentandmanagersplit task 33): the hook's body,
+unchanged.*
+
 ### 13.3 The collision-category table
 
 *Now one table per configuration, in the brawler's engine bindings: `BrawlerChaosBindingUImpl::categoryChannels`, which the Chaos host's `buildWorld` hands the query adapter, and `BrawlerJoltBindingUImpl::categoryChannels`, which the Jolt host's `buildWorld` hands the static importer (og-tickdriver task 15a). Before that it was one file-local function, emplaceBrawlerQueryAdapter, called from both role branches; og-simulationscheduler-withjolt task 82 moved it into `ChaosTickBackendUImpl.cpp`, called once from `buildWorld`, and task 83 gave the Jolt configuration its own table, brawlerCategoryChannels in the Jolt host's `.cpp` (TickDriverBackendUImpl.cpp, a historical name: og-tickdriver task 15e deleted it).*
@@ -2812,7 +2819,7 @@ observed. The file was then restored and its hash checked.
 |---|---|---|
 | "ORDER IS LOAD-BEARING: this MUST precede the `[Resim.` catch-all" and the defensive `[ResimProbe` placement | `static_assert(ogLogRoutesAreAllReachable())` over `kOGLogRoutes`: no prefix may begin with an earlier one, compared case-insensitively as `FString::StartsWith` does | `[Resim.` moved above `[Resim.Input]` ⇒ `C2338`; `[Resim.` widened to `[Resim` ⇒ `C2338`; a lower-case duplicate `[resim.input]` appended ⇒ `C2338` |
 | the two collision tables and their "KEEP IN SYNC" | one table, emplaceBrawlerQueryAdapter, called from both branches (since og-tickdriver task 15a the Chaos binding's `BrawlerChaosBindingUImpl::categoryChannels`) | nothing left to poison: the two copies no longer exist |
-| "NOT `HasAuthority()`" at four sites | `#define HasAuthority HasAuthority_is_constant_true_on_AOGBrawlerSimulationManager_use_worldIsAuthority_or_runsPrediction` after the includes, `#undef` at the end of the file (it must not leak into the next file of a unity blob) | `HasAuthority()` typed in `BeginPlay` ⇒ `C3861` naming that identifier |
+| "NOT `HasAuthority()`" at four sites | `#define HasAuthority HasAuthority_is_constant_true_on_AOGBrawlerSimulationManager_use_worldIsAuthority_or_runsPrediction` after the includes, `#undef` at the end of the file (it must not leak into the next file of a unity blob), in `OGBrawlerSimulationManager.cpp` and, since task 33, the same two lines in `BrawlerSessionGameUImpl.cpp`, whose hook bodies were under it here | `HasAuthority()` typed in `BeginPlay` ⇒ `C3861` naming that identifier; task 33: `HasAuthority()` typed in a hook body of `BrawlerSessionGameUImpl.cpp` ⇒ `C3861`, the same identifier |
 | PROBE A's "COMPARABLE WITH ResimGateProbe … same 120 samples" | `static_assert(kFrameHealthProbeWindowSamples == kResimGateProbeWindowSamples)` (in the session's `onFrameStepsDue_GameThread` since task 26b) | a local shadow of 121 ⇒ `C2338` |
 | "NOT ROLE-GATED" at the spawn-point seed | `checkf(m_ringoutSpawnPointsSeeded)` after both role branches (in `BrawlerRosterUImpl::checkSeeded` since task 23) | compiled only. A runtime check in the UE layer cannot be exercised from a low-level test |
 | the stamp-after-the-fold order and "anyone simplifying `isRoot` away" | `checkf(movementOwnBodyId == parentBodyId)` above `setCharacterBindings` (in `BrawlerRosterUImpl::onBodiesCreated` since task 23) | compiled only, same reason |

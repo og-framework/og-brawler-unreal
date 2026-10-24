@@ -4,6 +4,10 @@
 Prohibitions with a tagged site in `Source/OGBrawlerUnreal/BrawlerSessionGameUImpl.h`. Ids are opaque, stable, and
 retired rather than reused. The reasoning lives in `BrawlerSessionGameUImpl-rationale.md`.
 
+`Source/OGBrawlerUnreal/BrawlerSessionGameUImpl.cpp` (og-ue-simulationcomponentandmanagersplit task 33, the class's
+out-of-line hook bodies) carries no tag. Its one prohibition, no `HasAuthority()`, is a compile-time fence, not a tag
+(`OGBrawlerSimulationManager-rationale.md` §13.9).
+
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The rule on the latency hooks' call site (the source is resolved once, outside the wrapper's lambda) is typed in the
