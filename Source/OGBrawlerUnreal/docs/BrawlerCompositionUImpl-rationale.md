@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerSystemList -- retired member list template: replaced by og-simulation's SystemList in og-ue-simulationcomponentandmanagersplit task 36; named in §2's record of that change -->
 <!-- lint-external-ref: BrawlerSimulatables -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
 <!-- lint-external-ref: BrawlerNetSync -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
 <!-- lint-external-ref: BrawlerIntegrationExecFor_UE -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
@@ -39,8 +40,11 @@ consumers need to:
 
 ## 2. What it holds
 
-`struct BrawlerCompositionUImpl` holds only member aliases and one `static_assert`. It is a struct and
-not a namespace so that the whole composition can be passed as **one template argument**, which is what
+`struct BrawlerCompositionUImpl` holds member aliases, two of them alias templates (`IntegrationExecFor` and the systems'
+expander `SystemsExecFor`), and one `static_assert` (§4). og-ue-simulationcomponentandmanagersplit task 35 added a member
+list template, `BrawlerSystemList`, and a struct expander; task 36 replaced them with og-simulation's `SystemList` and
+the alias template. It is a
+struct and not a namespace so that the whole composition can be passed as **one template argument**, which is what
 a traits type (D2) is. Only the struct's name reaches file scope (`⛔G-01`).
 
 | `AOGBrawlerSimulationManager` re-export | `BrawlerCompositionUImpl` member |
@@ -80,7 +84,8 @@ are engine- and game-specific (the static data and the two physics adapters), so
 unpack the pack marker into them. The wrapper fixes those three slots first, and `apply_t` then applies
 the pack, which keeps `Simulatables` the single source of truth.
 
-**`SystemsExec`'s template order is the systems' firing order.** Detection must fire before routing in
+**`SystemsExec`'s template order is the systems' firing order**, and since task 35 that order is the order of the
+`Systems` list it is built from (§4). Detection must fire before routing in
 the same `preIntegrate` pass; the `static_assert` below the alias holds that (§3). The roles each system
 fires on are not set here: each system declares its own role affinity, and the executor gates every
 hook on the role the manager hands it.
@@ -100,11 +105,60 @@ the dependency runs the other way.
   `SystemsExec`, moved here from the UImpl with its message unchanged. The message still names `BrawlerSystemsExec`, the UImpl's re-export of `SystemsExec`.
   Task 81 swapped the two systems in `SystemsExec` and saw the assert fail.
 * **The session's manager is this manager.** Since og-ue-simulationcomponentandmanagersplit task 24a `UESimulationSession::compositionContractsHold`
-  asserts that the session's private `ManagerType` (its traits' `Composition::Manager`, this struct's `Manager`) is the
-  tick-driver binding's `Manager` (`BrawlerTickDriverGameUImpl`, which names this struct's member). Until then
+  asserts that the session's private `ManagerType` (this struct's `Manager`; since task 34 the session spells it as
+  og-simulation's `SimulationManager` over its own aliases and asserts it equal to `Manager`, and before that it was its
+  traits' `Composition::Manager`) is the
+  tick-driver binding's `Manager` (`BrawlerTickDriverGameUImpl`, which names this struct's member). Until task 24a
   `compositionContractsHold()` in `OGBrawlerSimulationManager.h` asserted `std::is_same_v<ManagerType,
   BrawlerCompositionUImpl::Manager>`. It has to be inside the class,
   because `ManagerType` is private. A host outside the UImpl (task 83) names the manager through this
   struct; if `ManagerType` drifted to another `SimulationManager` instantiation, that host would type
   its driver over a different manager than `m_manager`. Task 81 pointed `ManagerType` at another
   instantiation and saw the assert fail.
+* **The session's core systems are og-simulation's (task 34).** The session asserts that its `Storage`,
+  `Reconciliation`, `InputResolution`, `NetSync` and `ManagerType` are this struct's `Storage`, `Reconciliation`,
+  `InputResolution`, `NetSync` and `Manager` (user ruling 2026-10-24: the session requires og-simulation's own core
+  systems), and the brawler's traits assert the rows of their core-system map against this struct's aliases
+  (`BrawlerSessionTraitsUImpl-rationale.md` §4). An alias here that names another type fails the build.
+* **The session's executors are og-simulation's (task 35).** The session spells `IntegrationExec` and `SystemsExec`
+  itself, from this struct's `Simulatables` and `Systems` and its traits' `StaticData` and `EngineTraits`, and asserts
+  that each is this struct's `IntegrationExec` and `SystemsExec` (`UESimulationSession-rationale.md` §14, in
+  OGSimulationUnreal's docs). Because both are built from the same list, a reordered `Systems` list changes both and
+  passes that row; the `firesBefore` assert above is what fails it when detection no longer precedes routing (§4).
+
+## 4. The systems list (og-ue-simulationcomponentandmanagersplit tasks 35 and 36)
+
+**What changed.** Until task 35 `SystemsExec` was spelled directly: `SimulationSystemsExecutor<Simulatables,
+simulatableBrawler::StaticData, HitDetectionSystem, brawlerHitRouting::System, brawlerRingout::ScoreSystem>`. Since task
+35 the struct declares its systems once, in their firing order, as `Systems`, and `SystemsExec` is built from it: the
+same `SimulationSystemsExecutor` over the same three systems in the same order. Since task 36 the list is og-simulation's
+`SystemList` (`SimulatableList.h`), `Systems = SystemList<HitDetectionSystem, brawlerHitRouting::System,
+brawlerRingout::ScoreSystem>`, and `SystemsExec` is `apply_t<SystemsExecFor, Systems>`, the shape of `IntegrationExec`
+(§2). Task 35's game-side list template and its partially specialized expander struct are gone; the type is unchanged
+(the session's row and the traits' row both compare it). The session spells its own `SystemsExec` from `Systems`
+(`UESimulationSession-rationale.md` §14, in OGSimulationUnreal's docs), so a game hands the session its list, not an
+executor.
+
+**Why og-simulation's `SystemList`, not `SimulatableList`.** `SimulatableList` is the simulatable pack: the systems
+executor takes the simulatables through it, and its `IsSimulatableList` concept gates each system's
+`RequiredSimulatables`. A list of systems spelled as a `SimulatableList` would model that concept and read as a list of
+simulatables, so task 35 declared a minimal list of the brawler's own that carried the pack and nothing else (lead
+ruling, 2026-10-24). Task 36 moved that marker into og-simulation as `SystemList`, beside `SimulatableList` and `apply`,
+with its own `apply` specialization (lead ruling, 2026-10-24); `SimulatableList.h` asserts that `SystemList` does not
+model `IsSimulatableList`.
+
+**Why inside the struct.** Only the struct's name reaches file scope (`⛔G-01`), so the expander `SystemsExecFor` is a
+member alias template, as `IntegrationExecFor` is.
+
+**`SystemsExecFor` is the systems' bind wrapper.** Like `IntegrationExecFor` (§2), it fixes the executor's leading
+parameters (the simulatable list and the static data), and `apply_t` applies the list's pack to it. Task 35 could not
+use `apply_t`, which then unpacked only a `SimulatableList`; the `apply<F, SystemList<Ts...>>` specialization is what
+lets it.
+
+**The order.** Firing order is template order (§2), so the list's order is the order the systems fire in. The
+`firesBefore` assert is unchanged and still reads `SystemsExec`; a list that puts routing before detection fails it. Any
+other order of the list is the game's choice (the user's ruling, 2026-10-24: a game chooses its systems and their order)
+and is checked by no row: the session's row compares two types built from the same list.
+
+**The ruling (user, 2026-10-24).** A game also uses og-simulation's own integration executor and systems executor; it
+chooses the systems and their order, its static data, its engine (through its traits) and its physics backend.

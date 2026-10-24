@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerInputProviderFn -- retired alias: removed with the callerless wrappers by og-ue-simulationcomponentandmanagersplit task 36; named in the census and in retired G-01's entry and quoted last text -->
 <!-- lint-external-ref: SimulationManagerUImpl.h -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager.h; kept in retired G-18's quoted last text -->
 <!-- lint-external-ref: writesThisFrame -- a term in the stated ceiling formula (G-17), not a declared identifier -->
 <!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
 <!-- lint-external-ref: getRingoutVizState -- retired name: became AOGBrawlerSimulationManager::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in the closed census -->
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: folded into BrawlerSessionGameUImpl::makeStaticData by og-ue-simulationcomponentandmanagersplit task 24a; historical mention in the closed census -->
-<!-- lint-external-ref: BrawlerNetSync -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a (the session names the composition's NetSync); quoted text of retired G-18 -->
+<!-- lint-external-ref: BrawlerNetSync -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a (the session named the composition's NetSync until task 34, which spells it with og-simulation's template, checked against it); quoted text of retired G-18 -->
 <!-- lint-external-ref: BrawlerSimulatables -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; quoted text of retired G-18 -->
 # `OGBrawlerSimulationManager.h` and `.cpp` — guards
 
@@ -96,23 +97,16 @@ below this line with the task that added it; it is not folded into the table abo
   OGSimulationUnreal's `UESimulationSession`, and their brawler statements became the four registration hooks of
   `BrawlerSessionGameUImpl` (`rootBodyId`, `afterBodiesCreated`, `afterRegistered`, `onUnregistered`); their successors are
   `UESimulationSession-guards.md` G-25 and G-26. This class keeps the `SimCharacterId` wrappers (the `None` check and
-  `toStorageKey`), which call the session's sequences. Since then `OGBrawlerSimulationManager.cpp` carries no tag. See §R.
+  `toStorageKey`), which call the session's sequences (task 36 removed the callerless `tryRegister` one; the
+  `unregisterFromNewFramework` one remains). Since then `OGBrawlerSimulationManager.cpp` carries no tag. See §R.
+* **G-01** — retired by og-ue-simulationcomponentandmanagersplit task 36, 2026-10-24, when the callerless `tryRegister` and
+  `noteDelayedInputComponent` wrappers were removed and `BrawlerInputProviderFn`, then used only by its own contract
+  check, went with them. No successor id: the compiler holds the prohibition. See §R. Since then
+  `OGBrawlerSimulationManager.h` carries no tag either.
 
 ---
 
-## G-01 — The input provider is HANDED the raw-capture history; it does not fetch it
-
-**Tag site:** `OGBrawlerSimulationManager.h`, directly above the `using BrawlerInputProviderFn = std::function<...>` alias, whose second parameter is the history.
-
-**The fence, verbatim — the bytes it occupied in the header before task 11:**
-
-<!-- header lines 208-209 at b9f6d81 -->
-```
-// The provider signature, named once so the four sites passing one cannot drift apart. §5
-// ⛔ The raw-capture history is a PARAMETER: the sequence matcher runs inside the provider.
-```
-
-**What breaks if the edit is made.** The one production provider — `UOGBrawlerSimulatableComponent`'s, built only for a locally predicted character — is a lambda that captures the input component and the id and nothing else, and runs the sequence matcher over the `LocalInputCache` it is passed. The component's own fence at that lambda forbids capturing the manager. Drop the parameter and the matcher has to find the history for itself: by capturing something that can reach the resolution peer, and by looking the cache up by id instead of being handed it by the peer that owns it. The alias is named once so that its users — this alias, this class's `tryRegister` parameter and the component's local — cannot drift apart; they change together or not at all. Since og-ue-simulationcomponentandmanagersplit task 28 the pending record and the session's `tryRegister` parameter hold the latency member's `InputProvider` (`UESimulationSession.h`), which this class's `compositionContractsHold` asserts is the same type (`std::is_same_v`), so a drift there fails to compile. *R0, task 28:* verified: `BrawlerInputProviderFn` is spelled in `OGBrawlerSimulationManager.h` (the alias, the `tryRegister` declaration and the `static_assert`), `OGBrawlerSimulationManager.cpp` (the `tryRegister` definition) and `OGBrawlerSimulatableComponent.cpp` (the component's local), and in no other code file. *Task 29:* the component's local is the binding's skeleton's now, typed as the latency member's `InputProvider`, and the component's hook `makeInputProvider` returns that type, which the binding's inline hook check requires; `BrawlerInputProviderFn` is spelled in the two `OGBrawlerSimulationManager` files only (re-verified by grep). The one production provider is built by that hook.
+*G-01 retired by og-ue-simulationcomponentandmanagersplit task 36 with the alias it marked; no successor id, the compiler holds the prohibition. See §R.*
 
 ---
 
@@ -897,7 +891,8 @@ differencing them across a probe window silently loses whatever was reset in the
 
 **Why it retired.** Its subject moved. Task 27a moved this class's teardown and post-physics pass out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `EndPlay`'s statements before `Super` became the session's `endPlay`, which `EndPlay` now calls before `Super`, and `OnPostPhysicsStep` became the session's `onPostPhysicsStep`. The tag moved with the statements it marks. The entry moved with its text made game-neutral and verified (an R0 line, with a correction). **Successor:** `UESimulationSession-guards.md` G-21 (OGSimulationUnreal).
 
-The entry as it stood before the move:
+The entry as it stood before the move (names as they stood then: the session's `m_backend` is `m_physicsBackend` since og-ue-simulationcomponentandmanagersplit
+task 35):
 
 **Site:** `m_session.m_delayedInputComponentsById.clear();` in `EndPlay`, the first statement after
 `m_backend.onEndPlayBegin();` (`⛔G-85`); the tag covers it, and the coordinator's and the tier cache's resets
@@ -940,7 +935,8 @@ manager exists, until task 27a moves `EndPlay` into the session.
 
 **Why it retired.** Its subject moved. Task 27a moved this class's teardown and post-physics pass out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `EndPlay`'s statements before `Super` became the session's `endPlay`, which `EndPlay` now calls before `Super`, and `OnPostPhysicsStep` became the session's `onPostPhysicsStep`. The tag moved with the call it marks. The entry moved with its text made game-neutral and verified (an R0 line, with a correction). **Successor:** `UESimulationSession-guards.md` G-20 (OGSimulationUnreal).
 
-The entry as it stood before the move:
+The entry as it stood before the move (names as they stood then: the session's `m_backend` is `m_physicsBackend` since og-ue-simulationcomponentandmanagersplit
+task 35):
 
 **Site:** `m_backend.onEndPlayBegin();`, the first statement of `EndPlay`.
 
@@ -1091,3 +1087,24 @@ The entry as it stood before the move:
 **The consequence.** A notify after the destroy lets the routing hook dereference a character
 that storage has already freed. Dropping the guard runs `view.get<>(id)` for a character that
 never finished registering.
+
+### G-01 — RETIRED by og-ue-simulationcomponentandmanagersplit task 36 (2026-10-24): its site was deleted; the compiler holds it
+
+**Was:** *"The input provider is HANDED the raw-capture history; it does not fetch it"*. Its tag sat in `OGBrawlerSimulationManager.h`, directly above `using BrawlerInputProviderFn = std::function<...>`.
+
+**Why it retired.** Its site was deleted. Task 36 removed this class's two callerless wrappers, `tryRegister` and `noteDelayedInputComponent` (no caller since task 29: the binding's registration skeleton calls the session's directly, re-verified by grep across every repository and by two arms that re-add a call and fail with `C2039`). The wrapper's parameter was the alias's last user apart from its own contract check in `compositionContractsHold`, so the alias, the check and `assertCompositionContracts` went with it, and the tag with the alias. The prohibition is still true, and it no longer needs a tag: the one provider type is spelled once, the latency member's `InputProvider` (`UELatencyBudgetDiagnostics.h`, in OGSimulationUnreal), so there is no second spelling to drift; its second parameter is the history; and the compiler rejects a provider without it at both places it could be typed. Seen failing (task 36): drop the parameter from `InputProvider` alone and the brawler's provider lambda no longer converts (`OGBrawlerSimulatableComponent.cpp`, `C2440`, arm G1); drop it there AND from the lambda, so the provider would have to fetch the history itself, and the session's registration fails, because og-simulation's `registerSimulatable` (`SimulationNetSync.h`) takes the provider with the `LocalInputCache` parameter (`C2665`, "cannot convert argument 8 from 'std::function<BrawlerSessionTraitsUImpl::PlayerInput (const SimulationTimeStep &)>'", arm G2). The component's own fence at that lambda (`OGBrawlerSimulatableComponent-guards.md` G-05) is unchanged. **Successor:** none as an id; the compiler, at the provider's conversion to `InputProvider` (arm G1) and at og-simulation's `registerSimulatable` (arm G2).
+
+The entry as it stood before the retirement:
+
+
+**Tag site:** `OGBrawlerSimulationManager.h`, directly above the `using BrawlerInputProviderFn = std::function<...>` alias, whose second parameter is the history.
+
+**The fence, verbatim — the bytes it occupied in the header before task 11:**
+
+<!-- header lines 208-209 at b9f6d81 -->
+```
+// The provider signature, named once so the four sites passing one cannot drift apart. §5
+// ⛔ The raw-capture history is a PARAMETER: the sequence matcher runs inside the provider.
+```
+
+**What breaks if the edit is made.** The one production provider — `UOGBrawlerSimulatableComponent`'s, built only for a locally predicted character — is a lambda that captures the input component and the id and nothing else, and runs the sequence matcher over the `LocalInputCache` it is passed. The component's own fence at that lambda forbids capturing the manager. Drop the parameter and the matcher has to find the history for itself: by capturing something that can reach the resolution peer, and by looking the cache up by id instead of being handed it by the peer that owns it. The alias is named once so that its users — this alias, this class's `tryRegister` parameter and the component's local — cannot drift apart; they change together or not at all. Since og-ue-simulationcomponentandmanagersplit task 28 the pending record and the session's `tryRegister` parameter hold the latency member's `InputProvider` (`UESimulationSession.h`), which this class's `compositionContractsHold` asserts is the same type (`std::is_same_v`), so a drift there fails to compile. *R0, task 28:* verified: `BrawlerInputProviderFn` is spelled in `OGBrawlerSimulationManager.h` (the alias, the `tryRegister` declaration and the `static_assert`), `OGBrawlerSimulationManager.cpp` (the `tryRegister` definition) and `OGBrawlerSimulatableComponent.cpp` (the component's local), and in no other code file. *Task 29:* the component's local is the binding's skeleton's now, typed as the latency member's `InputProvider`, and the component's hook `makeInputProvider` returns that type, which the binding's inline hook check requires; `BrawlerInputProviderFn` is spelled in the two `OGBrawlerSimulationManager` files only (re-verified by grep). The one production provider is built by that hook.

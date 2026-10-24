@@ -12,7 +12,7 @@ carries no prose and has no guards document: what could go wrong in it is a comp
 **selector** of the composition. Seam A, what differs between physics engines, is `PhysicsBackendUImpl.h`
 (`PhysicsBackendUImpl-rationale.md`). The session holds its backend in two members whose types this header names (`AOGBrawlerSimulationManager` held them
 until og-ue-simulationcomponentandmanagersplit task 24a; `UESimulationSession-rationale.md` §3, in OGSimulationUnreal's docs). The traits name them for
-the session as `BrawlerSessionTraitsUImpl::BackendWorlds` and `Backend<SessionT>` (§5):
+the session as `BrawlerSessionTraitsUImpl::PhysicsBackendWorlds` and `PhysicsBackend<SessionT>` (§5):
 
 | name | Chaos configuration | Jolt configuration |
 |---|---|---|
@@ -28,8 +28,9 @@ the session as `BrawlerSessionTraitsUImpl::BackendWorlds` and `Backend<SessionT>
 * **The two selectors agree by assertion.** Each arm of this header's `#if` opens with a `static_assert` that
   `EngineTraits` and `EngineBinding` are the pair its host is built over: `ChaosEngineTraitsUImpl` and
   `BrawlerChaosBindingUImpl` beside `ChaosTickBackendUImpl`, `JoltEngineTraitsUImpl` and `BrawlerJoltBindingUImpl`
-  beside the tick-driver host. The session types its adapters through `EngineTraits` and its backend through
-  `Backend`, so a selector that picked a different pair would hand the host adapters of another engine.
+  beside the tick-driver host. The session types its adapters through the traits' `EngineTraits` and its backend
+  through the traits' `PhysicsBackend` (this header's `BackendFor`, over the session; `Backend` is the same type over
+  the brawler's session), so a selector that picked a different pair would hand the host adapters of another engine.
 * **The Jolt arm names its game binding, engine traits and engine binding,**
   `TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>` since og-tickdriver
   task 15e (the engine traits and the binding only, from task 15b), as the composition is written in og-tickdriver task 15's plan; a later driver-scheduled
@@ -59,7 +60,7 @@ references (`EngineTraits::VizQuery&`, and `const EngineTraits::VizReader&` from
 
 It is asserted twice, on the configuration being built only (the other host's header is not included): once here,
 after the selector, for the composition the arm picked; and once in `BrawlerSessionTraitsUImpl.h`, on the
-traits' `Backend<UESimulationSession<BrawlerSessionTraitsUImpl>>`, the type the session holds (in the actor's
+traits' `PhysicsBackend<UESimulationSession<BrawlerSessionTraitsUImpl>>`, the type the session holds (in the actor's
 `compositionContractsHold()` until og-ue-simulationcomponentandmanagersplit task 24a; the MPL session cannot name the brawler concept). So a host that loses, renames or changes an entry point fails with a message
 that names the concept, rather than at whichever call site the compiler reaches first. A Chaos build checks
 `ChaosTickBackendUImpl` and a Jolt build the tick-driver host. Task 83 saw it fail on the Jolt host
@@ -106,7 +107,7 @@ Since task 24a the composition lives in OGSimulationUnreal's `UESimulationSessio
 the backend over itself, so the backend's type depends on the session's: each arm defines an alias template
 `BackendFor<SessionT>` (the Chaos host, which ignores `SessionT`; or `TickDriverBackendUImpl` over
 `BrawlerTickDriverGameUImpl<SessionT>`), and `Backend` is `BackendFor` over the brawler's session. The traits'
-`Backend<SessionT>` is `BackendFor<SessionT>`, so the session's friend line and its `m_backend` name the same type the
+`PhysicsBackend<SessionT>` is `BackendFor<SessionT>`, so the session's friend line and its `m_physicsBackend` name the same type the
 `extern template` and the explicit instantiation do.
 
 * **The header forward-declares `BrawlerSessionTraitsUImpl` and `UESimulationSession`.** `BrawlerSessionTraitsUImpl.h`

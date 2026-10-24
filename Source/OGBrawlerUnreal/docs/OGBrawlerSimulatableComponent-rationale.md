@@ -865,9 +865,10 @@ narrower registration silently drops their scores (`BrawlerRosterUImpl-rationale
 half, kept in its §R entry).
 
 **Which manager door.** The skeleton calls the session's `tryRegister` and `noteDelayedInputComponent` with the storage
-key; the manager's two `SimCharacterId` wrappers (task 28) are no longer called by this component (they remain on the
-manager; its `unregisterFromNewFramework` wrapper is still this component's `EndPlay` call). The `tryRegister` wrapper's
-`checkf` that the id is not `None` guarded a condition the hook's `retry()` excludes one step earlier.
+key; the manager's two `SimCharacterId` wrappers (task 28) are no longer called by this component (they stayed on the
+manager until og-ue-simulationcomponentandmanagersplit task 36 removed them; its `unregisterFromNewFramework` wrapper is
+still this component's `EndPlay` call). The `tryRegister` wrapper's `checkf` that the id is not `None` guarded a
+condition the hook's `retry()` excludes one step earlier.
 
 **Equivalence.** `transcribe.py` (`map_29.json`) inlines each hook at its call site and maps each answer to the
 skeleton's handler, against the pre-task-25 pin: no statement difference. No log line changed. Three `checkf` texts are

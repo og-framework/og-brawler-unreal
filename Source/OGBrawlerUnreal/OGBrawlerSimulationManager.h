@@ -75,11 +75,6 @@ struct FMovementStaticDataCVars
 	float    gravity;
 };
 
-// ⛔G-01  docs/OGBrawlerSimulationManager-guards.md
-using BrawlerInputProviderFn = std::function<simulatableBrawler::PlayerInput(
-	const SimulationTimeStep&,
-	const LocalInputCache<simulatableBrawler::PlayerInput>&)>;
-
 class UOGBrawlerSimulatableComponent;
 class AOGBrawlerSimulationManager;
 class ASimulationTimingRelay;
@@ -109,13 +104,6 @@ public:
     const UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>& getLatencyBudgetDiagnostics() const { return m_session.getLatencyBudgetDiagnostics(); }
     UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>&       editLatencyBudgetDiagnostics()       { return m_session.editLatencyBudgetDiagnostics(); }
 
-    TryRegisterStatus tryRegister(
-        SimCharacterId simId,
-        SimulatableBrawler simulatable,
-        UOGBrawlerSimulatableComponent& owner,
-        BrawlerInputProviderFn inputProvider,
-        bool isAuthority);
-
     void unregisterFromNewFramework(SimCharacterId simId, UOGBrawlerSimulatableComponent& owner, bool isAuthority);
 
     const BrawlerRosterUImpl& roster() const { return m_roster; }
@@ -126,8 +114,6 @@ public:
 
     const UESimulationSession<BrawlerSessionTraitsUImpl>& session() const { return m_session; }
     UESimulationSession<BrawlerSessionTraitsUImpl>&       session()       { return m_session; }
-
-    void noteDelayedInputComponent(SimCharacterId simId, UOGBrawlerSimulatableComponent& component);
 
 private:
     friend class BrawlerSessionGameUImpl;
@@ -141,21 +127,4 @@ private:
     BrawlerSessionGameUImpl m_game{ m_roster, m_inputHistoryFeed };
 
     UESimulationSession<BrawlerSessionTraitsUImpl> m_session{ *this, m_game };
-
-    static constexpr bool compositionContractsHold()
-    {
-        static_assert(std::is_same_v<BrawlerInputProviderFn, UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>::InputProvider>,
-            "tryRegister hands a client's BrawlerInputProviderFn to UESimulationSession::tryRegister, whose parameter is "
-            "the latency member's InputProvider; the session keeps it in the pending record, hands it to "
-            "UELatencyBudgetDiagnostics::wrapInputProvider and registers what that returns. The two spellings must name "
-            "ONE std::function type: a different one would convert, wrapping the provider in a second heap-allocated "
-            "callable on every call. Added by og-tickdriver task 18; the hand-off re-stated by "
-            "og-ue-simulationcomponentandmanagersplit task 28.");
-        return true;
-    }
-
-    void assertCompositionContracts()
-    {
-        static_assert(compositionContractsHold());
-    }
 };

@@ -190,7 +190,7 @@ At the call site in `BeginPlay`:
 ⚠ **R0, task 23.**
 - **C23-1.** *"the physics delegates that drive it (`OnPhysScenePreTick` / `OnPhysSceneStep` / `OnPhysScenePostTick`) plus
   the async callback are bound at the very END of it"* is stale since og-simulationscheduler-withjolt task 51: this module
-  binds none of them. Stepping starts at `m_backend.startStepping`, still the last call but one of the start-up (the
+  binds none of them. Stepping starts at `m_physicsBackend.startStepping`, still the last call but one of the start-up (the
   session's `beginPlay` since og-ue-simulationcomponentandmanagersplit task 27b), so the conclusion holds: an empty
   `m_manager` proves that no step has run.
 - **C23-2.** *"directly after the two role branches"*: the resim-policy block (`OGBrawlerSimulationManager-guards.md` G-63;
@@ -551,7 +551,7 @@ permanence rule is guard G-01 of `SimCharacterId-guards.md`, and the refusal bra
 
 | id | the claim | what is true |
 |---|---|---|
-| C23-1 | §1: the scene delegates are bound at the end of `BeginPlay` | none is bound since task 51; `m_backend.startStepping` starts stepping there |
+| C23-1 | §1: the scene delegates are bound at the end of `BeginPlay` | none is bound since task 51; `m_physicsBackend.startStepping` starts stepping there |
 | C23-2 | §1: the seeded check sits directly after the two role branches | the resim-policy block sits between them |
 | C23-3 | §1: the seed's line is on its own category | `LogOGMgmt` is shared with the other composition-time lines |
 | C23-4 | §3: the score push is file-local and cannot be reached by anything else | it is a public `static` member of the roster |

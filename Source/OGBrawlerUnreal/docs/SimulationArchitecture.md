@@ -4,7 +4,7 @@
 A map for a programmer who knows Unreal and C++ and is new to this repository. It shows how the character, its two
 simulation components, the manager actor, the session template and the og-simulation core connect, and in what order
 they run. It explains no single class in depth: each class has a rationale document (the reasoning) and a guards
-document (the prohibitions), listed in the table at the end.
+document (the prohibitions), listed in the table of §6.
 
 The code is split in two halves by licence:
 
@@ -250,3 +250,47 @@ and binds it, an owner component deriving from `UESimulatableOwnerBinding` with 
 session's start, registration, per-frame and teardown sequences, the relays, netsync, input reception, the registration
 retry loop and the latency diagnostics. Start with `UESimulationSession-rationale.md` §1 and
 `UESimulatableOwnerBinding-rationale.md` §9.
+
+---
+
+## 8. Finding the core systems
+
+The session spells its core types with og-simulation's own templates, so Go To Definition (F12) reaches the core. From
+the manager: F12 on `BrawlerSessionTraitsUImpl` in `m_session`'s type, then on the template of a row of its core-system
+map (`SimulationNetSync` in `NetSync = SimulationNetSync<SimulatableBrawler>`). From the session: F12 on the template.
+
+| session member | alias | og-simulation template | header |
+|---|---|---|---|
+| `m_storage` | `Storage` | `SimulationObjectStorage` | `SimulationObjectStorage.h` |
+| `m_reconciliation` | `Reconciliation` | `SimulationReconciliation` | `SimulationReconciliation.h` |
+| `m_inputResolution` | `InputResolution` | `SimulationInputResolution` | `SimulationInputResolution.h` |
+| `m_netSync` | `NetSync` | `SimulationNetSync` | `SimulationNetSync.h` |
+| `m_manager` | `ManagerType` | `SimulationManager` | `SimulationManager.h` |
+| `m_systemsExec` | `SystemsExec` | `SimulationSystemsExecutor`, over the game's `Systems` (two lines, below) | `SystemsExecutor.h` |
+| `m_integrationLayer` | `IntegrationExec` | `SimulationIntegrationExecutor` | `SimulationIntegrationExecutor.h` |
+| none: the engine contract | `EngineTraits` | the concept `PhysicsEngineTraits` | `PhysicsEngineTraits.h` |
+
+The two executors are spelled the same way: an alias template that fixes the executor's leading parameters, and
+`apply_t` to unpack the list. For the systems, in the session (`UESimulationSession.h`):
+
+```cpp
+template <typename... SystemTs>
+using SystemsExecFor = SimulationSystemsExecutor<Simulatables, StaticData, SystemTs...>;
+using SystemsExec     = apply_t<SystemsExecFor, typename Composition::Systems>;
+```
+
+The game's `Systems` is og-simulation's `SystemList`, in firing order (`SimulatableList.h`, beside `SimulatableList` and
+`apply`); the brawler's composition declares `Systems = SystemList<HitDetectionSystem, brawlerHitRouting::System,
+brawlerRingout::ScoreSystem>` and spells its own `SystemsExec` with the same two lines (its static data spelled
+`simulatableBrawler::StaticData`).
+
+**What stays the game's.** The simulatable list (`Simulatables`), the systems and their order (`Systems`), the static
+data, the engine (`EngineTraits`) and the physics backend are the game's; it does not substitute the core systems or the
+two executors, which the session spells from those choices (user rulings 2026-10-24). The session reads them from
+`TraitsT` and `TraitsT::Composition`: the MPL plugin names no brawler type (the brawler may name og-simulation's, never
+the reverse). The session asserts each core alias and executor against the composition's, the traits each map row
+against `BrawlerCompositionUImpl` (`UESimulationSession-rationale.md` §13 and §14, `BrawlerSessionTraitsUImpl-rationale.md` §4).
+
+**`PhysicsBackend`** is the physics backend host: it owns and steps the physics worlds and updates the visuals (Jolt
+through the tick driver, or Chaos). The session holds it as `m_physicsBackend` and names it through the traits'
+`PhysicsBackend<SessionT>`.

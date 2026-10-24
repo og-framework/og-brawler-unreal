@@ -38,12 +38,14 @@ struct BrawlerCompositionUImpl
 	using HitDetectionSystem =
 		brawlerHitDetection::System<EngineTraits::BodyAdapter, EngineTraits::QueryAdapter>;
 
-	using SystemsExec = SimulationSystemsExecutor<
-		Simulatables,
-		simulatableBrawler::StaticData,
+	using Systems = SystemList<
 		HitDetectionSystem,
 		brawlerHitRouting::System,
 		brawlerRingout::ScoreSystem>;
+
+	template <typename... SystemTs>
+	using SystemsExecFor = SimulationSystemsExecutor<Simulatables, simulatableBrawler::StaticData, SystemTs...>;
+	using SystemsExec = apply_t<SystemsExecFor, Systems>;
 	static_assert(brawlerHitDetection::firesBefore<SystemsExec,
 					  HitDetectionSystem, brawlerHitRouting::System>,
 		"BrawlerSystemsExec must fire brawlerHitDetection::System BEFORE brawlerHitRouting::System "

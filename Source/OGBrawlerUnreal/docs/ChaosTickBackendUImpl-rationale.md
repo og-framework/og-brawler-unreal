@@ -50,7 +50,7 @@ the template `TickDriverBackendUImpl`).
 
 * **Plain C++, not reflected.** It holds a reference to its owner, the session (`Session`,
   `UESimulationSession<BrawlerSessionTraitsUImpl>`, since task 24a; `AOGBrawlerSimulationManager` before), and the owner
-  declares it a friend (`friend typename TraitsT::template Backend<UESimulationSession>;`, which names this class in the
+  declares it a friend (`friend typename TraitsT::template PhysicsBackend<UESimulationSession>;`, which names this class in the
   Chaos configuration; the actor's `friend physicsBackendUImpl::Backend;` before, kept for the interim path of §6 until
   og-ue-simulationcomponentandmanagersplit task 27b deleted it),
   so its bodies read the owner's members exactly as the code did when it lived in the owner.
@@ -82,11 +82,11 @@ hold the owner.
 
 ## §2 The host
 
-**Ownership.** The owner declares its backend `m_backend{ *this, m_backendWorlds }`, which is this class in the Chaos
+**Ownership.** The owner declares its backend `m_physicsBackend{ *this, m_physicsBackendWorlds }`, which is this class in the Chaos
 configuration, directly after `std::optional<ManagerType> m_manager`, so the backend is destroyed before the manager.
-Since og-ue-simulationcomponentandmanagersplit task 24a the owner is the session and the type is its traits' `Backend<UESimulationSession>`
+Since og-ue-simulationcomponentandmanagersplit task 24a the owner is the session and the type is its traits' `PhysicsBackend<UESimulationSession>`
 (`physicsBackendUImpl::Backend` in the actor before; §6). Task 82 declared ChaosBackendUImpl m_backend{ *this }; (the historical name) inside an `#if`; task 83 gave both hosts
-the same two-argument constructor so the declaration has none. The second argument is the owner's `m_backendWorlds`,
+the same two-argument constructor so the declaration has none. The second argument is the owner's `m_physicsBackendWorlds`,
 which in the Chaos configuration is `ChaosTickBackendWorldsUImpl`, an empty struct: the Chaos host has no state that must
 outlive the owner's adapters, so the constructor ignores it (`TickDriverBackendUImpl-rationale.md` §1 says why the Jolt host
 needs it). Its own destruction is

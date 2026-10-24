@@ -56,27 +56,6 @@ void AOGBrawlerSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReas
 
 template void UESimulationSession<BrawlerSessionTraitsUImpl>::onInputRelayHostReady(ASimulationInputRelay& host);
 
-TryRegisterStatus AOGBrawlerSimulationManager::tryRegister(
-    SimCharacterId simId,
-    SimulatableBrawler simulatable,
-    UOGBrawlerSimulatableComponent& owner,
-    BrawlerInputProviderFn inputProvider,
-    bool isAuthority)
-{
-    checkf(simId != SimCharacterId::None,
-           TEXT("tryRegister called with SimCharacterId::None; the component must wait until its ")
-           TEXT("pawn's id is assigned (authority) or replicated (client)."));
-    const unsigned int id = toStorageKey(simId);
-
-    return m_session.tryRegister(id, std::move(simulatable), owner, std::move(inputProvider), isAuthority);
-}
-
-void AOGBrawlerSimulationManager::noteDelayedInputComponent(
-    SimCharacterId simId, UOGBrawlerSimulatableComponent& component)
-{
-    m_session.noteDelayedInputComponent(toStorageKey(simId), component);
-}
-
 void AOGBrawlerSimulationManager::unregisterFromNewFramework(
     SimCharacterId simId, UOGBrawlerSimulatableComponent& owner, bool isAuthority)
 {
