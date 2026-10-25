@@ -11,8 +11,9 @@ Prohibitions: `BrawlerTickDriverGameUImpl-guards.md`.
 ## §1 What it is
 
 The brawler's `TickDriverGame` for og-simulation's `SimulationTickDriver`: the seven game hooks the driver and its
-step hooks call, each forwarded to the session `ASimulationManagerUImpl`, plus the manager and the storage the
-driver's step driver runs on. It owns nothing and adds no logic of its own; the one decision it makes is the
+step hooks call, each forwarded to the session, plus the manager and the storage the driver's step driver runs on.
+The session is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationcomponentandmanagersplit task 24a (`AOGBrawlerSimulationManager`
+before); the hooks that still forward to the actor reach it through the session's `owner()` (§6). It owns nothing and adds no logic of its own; the one decision it makes is the
 reap's null check (§2).
 
 **Why a class template over the session.** `TickDriverBackendUImpl.h` names the driver type, and the session's header
@@ -22,14 +23,20 @@ not define them, because every body calls a member of the still-incomplete sessi
 complete with the session incomplete (it holds a reference), the concept check needs only the declarations, and
 each body is instantiated where it is first used, where the session is complete: in the host's `.cpp` until
 og-tickdriver task 15e (TickDriverBackendUImpl.cpp, a historical name), and since then in `BrawlerJoltBindingUImpl.cpp`,
-which instantiates the host. The only instantiation is `BrawlerTickDriverGameUImpl<ASimulationManagerUImpl>`, named
-`BrawlerTickDriverGame` at the end of this header since task 15e (the host's own alias before). og-tickdriver task 15b made the host a template and kept this one a template: the session
+which instantiates the host. The only instantiation is `BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>` since task 24a
+(over `AOGBrawlerSimulationManager` before), named `BrawlerTickDriverGame` at the end of this header since task 15e (the
+host's own alias before). og-tickdriver task 15b made the host a template and kept this one a template: the session
 still holds the host by value, so its header still includes the host's before the session class is defined
 (`TickDriverBackendUImpl-rationale.md` §10).
 
-**Friendship.** The bodies reach the session's private members (`m_manager`, `m_storage`,
-`onFrameStepsDue_GameThread`, `releaseDelayedInputsForStep`), so the session names the template a friend, a
-declaration-only line in its header; the frame host, which made these calls before og-tickdriver task 8, needs no
+**Friendship.** The bodies reach the session's private members (`m_manager`, `m_storage`, `m_staticData`, and since
+og-ue-simulationcomponentandmanagersplit task 26b `onFrameStepsDue_GameThread`), so the session names the binding a
+friend (`friend typename TraitsT::template TickDriverGame<UESimulationSession>;`). Until task 26b they also reached the
+actor's private `onFrameStepsDue_GameThread` through `owner()` (and `releaseDelayedInputsForStep` too, until task 26a
+moved the release and the coordinator into the session), which is why the actor has a friend line for the template, a
+declaration-only line in its header; since task 26b the binding's remaining `owner()` calls (`OnPostPhysicsStep`,
+`GetNetMode`) are public, so that line no longer covers a call (since task 27a only `GetNetMode` goes through `owner()`:
+`onPostPhysics` calls the session's `onPostPhysicsStep`, as its friend); the frame host, which made these calls before og-tickdriver task 8, needs no
 friendship any more and lost its line.
 
 ## §2 The hooks
@@ -38,12 +45,12 @@ friendship any more and lost its line.
 |---|---|---|
 | `manager()`, `storage()` | the driver's constructor (the step driver runs on the manager) | `*m_session.m_manager`, `m_session.m_storage` |
 | `beforePump(hostNow, rate)` | once per frame, on the game thread, before the pump | nothing: the brawler changes no rate in the MVP |
-| `onFrameStepsDue(first, n)` | once per frame with steps, game thread, before the steps (`SimulationTickDriver-guards.md` G-02) | `onFrameStepsDue_GameThread(first, n)`: PROBE A on both roles, and on the authority PROBE 6 and the one-shot `[PacketBudget]` line (`SimulationManagerUImpl-rationale.md` §8) |
-| `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06) | the reception coordinator's `reapConnections(first)`, when the session has a coordinator: only the authority does, so an inline client reaps nothing |
-| `releaseInputsForAuthorityTick(tick)` | each authority step's `beforeTick`, on the game thread (`TickDriverStepHooks-guards.md` G-01) | `releaseDelayedInputsForStep(tick, 1)` (`⛔G-01`): one `[ReleaseBatch]` with `numSteps=1` per step |
-| `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `LatencyBudgetDiagnosticsUImpl-rationale.md` §2) |
+| `onFrameStepsDue(first, n)` | once per frame with steps, game thread, before the steps (`SimulationTickDriver-guards.md` G-02) | the session's `onFrameStepsDue_GameThread(first, n)` (the actor's, through `owner()`, until task 26b): PROBE A on both roles, and on the authority PROBE 6 and the one-shot `[PacketBudget]` line (`UESimulationSession-rationale.md` §9.9, OGSimulationUnreal) |
+| `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06) | the reception coordinator's `reapConnections(first)`, when the session has one (`getReceptionCoordinator()`; the actor's, through `owner()`, until task 26a): only the authority does, so an inline client reaps nothing |
+| `releaseInputsForAuthorityTick(tick)` | each authority step's `beforeTick`, on the game thread (`TickDriverStepHooks-guards.md` G-01) | the session's `releaseDelayedInputsForStep(tick, 1)` (`⛔G-01`; the actor's, through `owner()`, until task 26a): one `[ReleaseBatch]` with `numSteps=1` per step |
+| `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `UELatencyBudgetDiagnostics-rationale.md` §3, OGSimulationUnreal) |
 | `onStepEnded()` | each step's `afterTick`, before the render and shadow publishes | `editLatencyBudgetDiagnostics().stampStepEnd_Internal()` |
-| `onPostPhysics()` | every frame at `TG_EndPhysics`, after the wait | `OnPostPhysicsStep()` |
+| `onPostPhysics()` | every frame at `TG_EndPhysics`, after the wait | the session's `onPostPhysicsStep()` (since task 27a; the actor's `OnPostPhysicsStep()`, through `owner()`, before) |
 
 ## §3 Why the brawler's hooks sit where they do
 
@@ -53,7 +60,7 @@ friendship any more and lost its line.
   immediately before the tick it releases for. No receipt lands between inline steps (receipts happen in the
   engine's receive dispatch), so the queue contents are those of Chaos's batch; the difference is at consumption,
   in a multi-step frame with a per-character gap tick, where the batch let a later input fill the gap early.
-  The details are `SimulationManagerUImpl-rationale.md` §7.
+  The details are `OGBrawlerSimulationManager-rationale.md` §7.
 * **The reap's null check.** Before og-tickdriver task 8 the frame host made the call only when
   `getReceptionCoordinator()` returned one; the driver now calls `afterInlineBatch` on every inline frame with
   steps, an inline client's included, so the check moved here unchanged.
@@ -62,8 +69,8 @@ friendship any more and lost its line.
   `beforeSimulate` takes `t1` at that instant on both roles (`TickDriverStepHooks-guards.md` G-03); on a client it is
   early only by the Jolt scratch save, microseconds. The stamps read what `onGameSimulation` produced, so they are
   posted from `beforePhysics`; the step-end stamps go in `afterTick`, after the post-step pass and the ring save
-  (`LatencyBudgetDiagnosticsUImpl-rationale.md` §6, "The step-side stamp sites per configuration").
-* **`onPostPhysics` every frame.** `OnPostPhysicsStep` runs with or without steps, as the scene's post-tick delegate
+  (`OGBrawlerSimulationManager-rationale.md` §16, "The step-side stamp sites per configuration").
+* **`onPostPhysics` every frame.** `onPostPhysicsStep` (the actor's `OnPostPhysicsStep` until task 27a) runs with or without steps, as the scene's post-tick delegate
   did, so the correction rotation still advances once per game frame. Its first backend call is the Jolt host's
   `beforePresent_GameThread` (`TickDriverBackendUImpl-rationale.md` §5, §6).
 
@@ -87,23 +94,41 @@ host used to name (lead ruling L1).
 
 | member | what it is | was, in the host |
 |---|---|---|
-| `Session` | `SessionT`, the brawler's `ASimulationManagerUImpl` | the owner's type |
-| `Component` | `USimmableUpdateComponent` | the component parameters of the three registration entry points |
+| `Session` | `SessionT`, the brawler's `UESimulationSession<BrawlerSessionTraitsUImpl>` (`AOGBrawlerSimulationManager` until task 24a) | the owner's type |
+| `Component` | `UOGBrawlerSimulatableComponent` | the component parameters of the three registration entry points |
 | `Character` | `AOGBrawlerUECharacter` | the character parameter, and the cast in `onRegistered_GameThread` |
 | `StaticData` | `simulatableBrawler::StaticData` | the static data's type in `createBodies_GameThread` |
 | `gravity(session)` | the session's movement gravity, `m_staticData.m_movementStaticData.gravity` | the same read in `buildWorld` |
-| `callWithSlotRequest(session, owner, key, slotCall)` | the cast and `checkf` of the owner, its name in UTF-8, the role from the net mode, the replicated slot and the slot publish, handed to `slotCall` with the host's key | the body of the host's `callWithSlotRequest`, the same statements and message in the same order |
+| `callWithSlotRequest(session, owner, key, slotCall)` | the cast and `checkf` of the owner, its name in UTF-8, the role from the actor's net mode (`session.owner().GetNetMode()` since task 24a), the replicated slot and the slot publish, handed to `slotCall` with the host's key | the body of the host's `callWithSlotRequest`, the same statements and message in the same order |
 
 * **The character type is a defaulted template parameter of `callWithSlotRequest`** (`CharacterT = Character`). The
   character is incomplete in this header, which the session's header includes, and a non-dependent cast or member call
   on it would be compiled where the template is defined. Over `CharacterT` they are compiled where the function is
   instantiated, in `BrawlerJoltBindingUImpl.cpp`, where the character is complete; the only argument it is ever
   given is the default.
-* **`gravity` and `callWithSlotRequest` read the session's private members** (`m_staticData`) and its net mode; the
-  session's friend line for this template already covers them.
+* **`gravity` and `callWithSlotRequest` read the session's private members** (`m_staticData`) and the actor's net mode;
+  the session's friend line for this binding covers the first, and the net mode is public.
 * **The `HasAuthority` poison.** The role is the net mode's (`GetNetMode() != NM_Client`), never the session's
-  `HasAuthority()`, which is always true (`SimulationManagerUImpl-rationale.md` §13.9). The header defines
+  `HasAuthority()`, which is always true (`OGBrawlerSimulationManager-rationale.md` §13.9). The header defines
   `HasAuthority` to the session's poison name after its includes and undefines it at its end, as the host's `.cpp`
   did around this statement before (`TickDriverBackendUImpl-rationale.md` §1).
 * **`BrawlerTickDriverGame`** is the alias of the one instantiation, after the class; the seam
   (`PhysicsBackendHostUImpl.h`) and the host's explicit instantiation name the host over it.
+
+## §6 Over the session (og-ue-simulationcomponentandmanagersplit task 24a)
+
+Since task 24a the session the binding is instantiated over is OGSimulationUnreal's `UESimulationSession<BrawlerSessionTraitsUImpl>`,
+which the actor holds as `m_session` (`UESimulationSession-rationale.md`, in OGSimulationUnreal's docs). The binding names
+it only through `SessionT`, so its text changed in five statements and the alias:
+
+* `manager()`, `storage()`, `gravity()` and the two latency stamps read the session, with the same spellings: the members
+  moved into the session and the session befriends the binding, and `editLatencyBudgetDiagnostics()` is the session's.
+* `onFrameStepsDue`, the reap's coordinator lookup, `releaseInputsForAuthorityTick` and `onPostPhysics` call members that
+  are still the actor's, so they go through the session's `owner()` (the interim path, until tasks 26a to 27a move them);
+  the coordinator's type was named through the session's owner type. Since og-ue-simulationcomponentandmanagersplit
+  task 26a the binding names it as the session's (`UESimulationSession::ReceptionCoordinator`) and calls the reap's
+  coordinator lookup and the release on the session directly, not through `owner()`.
+* `callWithSlotRequest` takes the role from `session.owner().GetNetMode()`: the session is not an actor.
+
+The calls are inline forwards. Task 24a read the disassembly of the Jolt Editor's per-step release and step stamps: the
+release and the step-start stamp are direct calls, and the step-end stamp is inlined, as before the task (its notes).

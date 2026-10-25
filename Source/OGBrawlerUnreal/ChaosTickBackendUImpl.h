@@ -16,7 +16,7 @@
 #include "OGSimulation/PhysicsBodyState.h"
 #include "OGSimulation/QueryGeometry.h"
 #include "OGSimulation/LatencyBudgetProbe.h"
-#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
+#include "OGSimulationUnreal/UELatencyBudgetDiagnostics.h"
 #include "OGSimulation/SimulationManager.h"
 #include "OGSimulation/SimulationObjectStorage.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
@@ -29,9 +29,14 @@
 #include <optional>
 #include <type_traits>
 
-class ASimulationManagerUImpl;
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+DECLARE_LOG_CATEGORY_EXTERN(LogOGChaosDilation, Log, All);
+#endif
+
+struct BrawlerSessionTraitsUImpl;
+template <typename TraitsT> class UESimulationSession;
 class ChaosTickBackendUImpl;
-class USimmableUpdateComponent;
+class UOGBrawlerSimulatableComponent;
 class AOGBrawlerUECharacter;
 class AActor;
 
@@ -137,63 +142,63 @@ private:
 			"override OnPreSimulate_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::PreIntegrate)
 			|| requires { requires std::is_same_v<decltype(&Self::OnPreIntegrate_Internal), void (Self::*)()>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreIntegrate but does not "
 			"override OnPreIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::PostIntegrate)
 			|| requires { requires std::is_same_v<decltype(&Self::OnPostIntegrate_Internal), void (Self::*)()>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostIntegrate but does not "
 			"override OnPostIntegrate_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::MidPhaseModification)
 			|| requires { requires std::is_same_v<decltype(&Self::OnMidPhaseModification_Internal), void (Self::*)(Chaos::FMidPhaseModifierAccessor&)>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::MidPhaseModification but does not "
 			"override OnMidPhaseModification_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::CCDModification)
 			|| requires { requires std::is_same_v<decltype(&Self::OnCCDModification_Internal), void (Self::*)(Chaos::FCCDModifierAccessor&)>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::CCDModification but does not "
 			"override OnCCDModification_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::StrainModification)
 			|| requires { requires std::is_same_v<decltype(&Self::OnStrainModification_Internal), void (Self::*)(Chaos::FStrainModifierAccessor&)>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::StrainModification but does not "
 			"override OnStrainModification_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::ContactModification)
 			|| requires { requires std::is_same_v<decltype(&Self::OnContactModification_Internal), void (Self::*)(Chaos::FCollisionContactModifier&)>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::ContactModification but does not "
 			"override OnContactModification_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::PreSolve)
 			|| requires { requires std::is_same_v<decltype(&Self::OnPreSolve_Internal), void (Self::*)()>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PreSolve but does not "
 			"override OnPreSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		static_assert(!EnumHasAnyFlags(options, Opt::PostSolve)
 			|| requires { requires std::is_same_v<decltype(&Self::OnPostSolve_Internal), void (Self::*)()>; },
 			"FSimulationManagerAsyncCallback registers ESimCallbackOptions::PostSolve but does not "
 			"override OnPostSolve_Internal. Each option bit adds this object to one more Chaos dispatch "
 			"list, and the base hook is check(false): the first time that list runs, the process "
 			"asserts. Add the override in the same edit, or drop the bit. Was the 'OPTION SET "
-			"IS A CONTRACT' prose fence of SimulationManagerUImpl.h (task 11).");
+			"IS A CONTRACT' prose fence of OGBrawlerSimulationManager.h (task 11).");
 		return true;
 	}
 
@@ -210,7 +215,9 @@ struct ChaosTickBackendWorldsUImpl
 class ChaosTickBackendUImpl
 {
 public:
-	ChaosTickBackendUImpl(ASimulationManagerUImpl& owner, ChaosTickBackendWorldsUImpl&) : m_owner(owner) {}
+	using Session = UESimulationSession<BrawlerSessionTraitsUImpl>;
+
+	ChaosTickBackendUImpl(Session& owner, ChaosTickBackendWorldsUImpl&) : m_owner(owner) {}
 
 	ChaosTickBackendUImpl(const ChaosTickBackendUImpl&) = delete;
 	ChaosTickBackendUImpl& operator=(const ChaosTickBackendUImpl&) = delete;
@@ -226,10 +233,10 @@ public:
 	const ChaosEngineTraitsUImpl::VizReader& getVizReader() const;
 	std::optional<QueryVolumeId> registerVizVolume(const QueryVolumeDescriptor& descriptor, AActor& owner);
 
-	bool createBodies_GameThread(USimmableUpdateComponent& owner, AOGBrawlerUECharacter& character,
+	bool createBodies_GameThread(UOGBrawlerSimulatableComponent& owner, AOGBrawlerUECharacter& character,
 		SimulatableBrawler& simulatable, unsigned int id);
-	void onRegistered_GameThread(USimmableUpdateComponent&, unsigned int) {}
-	void onUnregistered_GameThread(USimmableUpdateComponent&, unsigned int) {}
+	void onRegistered_GameThread(UOGBrawlerSimulatableComponent&, unsigned int) {}
+	void onUnregistered_GameThread(UOGBrawlerSimulatableComponent&, unsigned int) {}
 
 	class Diagnostics
 	{
@@ -271,7 +278,7 @@ public:
 	const ChaosTickMapper& getChaosTickMapper() const { return m_chaosTickMapper; }
 
 private:
-	ASimulationManagerUImpl& m_owner;
+	Session& m_owner;
 
 	FSimulationManagerAsyncCallback* m_asyncCallback = nullptr;
 

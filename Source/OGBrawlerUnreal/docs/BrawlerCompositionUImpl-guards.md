@@ -8,8 +8,9 @@ reasoning lives in `BrawlerCompositionUImpl-rationale.md`.
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The detection-before-routing order of `SystemsExec` is a `static_assert` in the header and needs no
-entry; so is the identity of the manager's `ManagerType` with `BrawlerCompositionUImpl::Manager`, which
-`SimulationManagerUImpl.h` asserts in `compositionContractsHold()` (rationale §3).
+entry; so is the identity of the session's manager type with the manager the tick-driver binding names (both
+`BrawlerCompositionUImpl::Manager`), which `UESimulationSession.h` asserts in its `compositionContractsHold()` since
+og-ue-simulationcomponentandmanagersplit task 24a (`OGBrawlerSimulationManager.h` until then; rationale §3).
 
 ---
 
@@ -17,9 +18,9 @@ entry; so is the identity of the manager's `ManagerType` with `BrawlerCompositio
 
 **Tag site:** `BrawlerCompositionUImpl.h`, directly above `using Simulatables = SimulatableList<SimulatableBrawler>;`, first of the alias chain.
 
-**Predecessor.** `SimulationManagerUImpl-guards.md` G-18 (*"The simulatable-pack aliases are
+**Predecessor.** `OGBrawlerSimulationManager-guards.md` G-18 (*"The simulatable-pack aliases are
 CLASS-scoped"*), retired by task 81 when the chain moved here. Its fence, verbatim — the bytes it
-occupied in `SimulationManagerUImpl.h` before that header's task 11:
+occupied in `OGBrawlerSimulationManager.h` before that header's task 11:
 
 <!-- header lines 1032-1035 at b9f6d81 -->
 ```
@@ -36,7 +37,7 @@ it.
 **What breaks if the edit is made.**
 * **File scope.** The OGSim core lives in the global namespace, and so would the hoisted names:
   `Storage`, `NetSync`, `Manager`, `SystemsExec` and the rest are far more generic than the
-  Brawler-prefixed names G-18 protected. `SimulationManagerUImpl.h` includes this header, and 12 of
+  Brawler-prefixed names G-18 protected. `OGBrawlerSimulationManager.h` includes this header, and 12 of
   the module's 29 `.cpp` files include that one directly; task 83's backend host includes this header
   too. Every one of them would see the names at global scope. Only the struct name is meant to reach
   file scope.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGBrawlerPlayerCameraManager.h"
-#include "SimulationManagerUImpl.h"
+#include "OGBrawlerSimulationManager.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/PlatformStackWalk.h"

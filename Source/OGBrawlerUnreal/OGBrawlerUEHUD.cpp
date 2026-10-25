@@ -16,7 +16,7 @@
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
 #include "OGBrawlerUnreal/OGBrawlerJoinSessionSubsystem.h"
 #include "OGBrawlerUnreal/ScoreboardVisualizationUImpl.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 
 namespace
 {
@@ -288,7 +288,7 @@ void AOGBrawlerUEHUD::DrawHUD()
 	drawLocalPlayerLimitNotice();
 }
 
-const ASimulationManagerUImpl* AOGBrawlerUEHUD::findHistorySource(
+const AOGBrawlerSimulationManager* AOGBrawlerUEHUD::findHistorySource(
 	unsigned int& outCharacterId) const
 {
 	const UWorld* world = GetWorld();
@@ -310,7 +310,7 @@ const ASimulationManagerUImpl* AOGBrawlerUEHUD::findHistorySource(
 
 	// The same role expression the poll's own manager lookup uses: the history lives on
 	// one instance and reading the other role's would find none.
-	return ASimulationManagerUImpl::instanceFor(GetNetMode() != NM_Client);
+	return AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
 }
 
 void AOGBrawlerUEHUD::drawInputHistoryPanel()
@@ -321,12 +321,12 @@ void AOGBrawlerUEHUD::drawInputHistoryPanel()
 		return;
 
 	unsigned int                   characterId = 0u;
-	const ASimulationManagerUImpl* manager     = findHistorySource(characterId);
+	const AOGBrawlerSimulationManager* manager     = findHistorySource(characterId);
 	if (manager == nullptr)
 		return;
 
 	// ⛔ POINTER TO CONST, and it stays one: the panel may not write a row it draws.
-	const InputHistoryRowRing* rows = manager->getInputHistoryRows(characterId);
+	const InputHistoryRowRing* rows = manager->inputHistoryFeed().getInputHistoryRows(characterId);
 	if (rows == nullptr || rows->empty())
 		return;
 
@@ -378,7 +378,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		return;
 
 	unsigned int                   characterId = 0u;
-	const ASimulationManagerUImpl* manager     = findHistorySource(characterId);
+	const AOGBrawlerSimulationManager* manager     = findHistorySource(characterId);
 	if (manager == nullptr)
 		return;
 
@@ -392,7 +392,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 	if (inputHistoryVisualizationUImpl::nearestStackEnabled())
 	{
 		nearestId = inputHistoryVisualizationUImpl::nearestCharacterIdTo(
-			manager, characterId, m_nearestCharacterId, nearestDistanceCm);
+			&manager->inputHistoryFeed(), characterId, m_nearestCharacterId, nearestDistanceCm);
 		m_nearestCharacterId = nearestId;
 	}
 	else
@@ -449,10 +449,10 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		// Centimetres are the simulation's unit and metres are the one a reader has an
 		// intuition for at fighting range.
 		nearestHeader.distanceMeters = nearestDistanceCm * 0.01f;
-		// ⛔ THE MANAGER'S ONE LOCALITY TEST, asked once and carried in the header from
+		// ⛔ THE SESSION'S ONE LOCALITY TEST, asked once and carried in the header from
 		//   here on: a ring that has not been created yet is not a local character.
 		nearestHeader.isLocallyControlled =
-			manager->isLocallyControlledOnThisPeer(*nearestId);
+			manager->session().isLocallyControlledOnThisPeer(*nearestId);
 
 		drawInputHistoryFrameMeterStack(*manager, *nearestId, 0.f, labelHeight, nearestHeader);
 		return;
@@ -463,7 +463,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 }
 
 void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
-	const ASimulationManagerUImpl& manager,
+	const AOGBrawlerSimulationManager& manager,
 	unsigned int                   characterId,
 	float                          liftPixels,
 	float                          labelHeight,
@@ -472,7 +472,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
 	using namespace brawlerInputHistoryVisualization;
 
 	// ⛔ POINTER TO CONST, and it stays one: the bars may not write a cell they draw.
-	const InputHistoryTickLanes* lanes = manager.getInputHistoryLanes(characterId);
+	const InputHistoryTickLanes* lanes = manager.inputHistoryFeed().getInputHistoryLanes(characterId);
 	if (lanes == nullptr || !lanes->hasAxis())
 		return;
 
@@ -585,7 +585,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeterStack(
 			&relayReadVerdictStyleOfOrdinal);
 
 		drawFrameMeterRelayReadout(geometry, layout,
-			manager.getRelayReadReadout(characterId),
+			manager.inputHistoryFeed().getRelayReadReadout(characterId),
 			buildRelayHealthReadout(*lanes, window, isLocallyControlled));
 	}
 
@@ -1040,8 +1040,8 @@ void AOGBrawlerUEHUD::drawScoreboard()
 
 	// ⛔ POINTER TO CONST, and it stays one: the board may not write a thing it draws.
 	//   The same role expression every other manager lookup in this file uses.
-	const ASimulationManagerUImpl* manager =
-		ASimulationManagerUImpl::instanceFor(GetNetMode() != NM_Client);
+	const AOGBrawlerSimulationManager* manager =
+		AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
 
 	// ⭐ ALREADY ORDERED BY CHARACTER ID when it arrives, so two peers watching one match
 	//   see the same player in the same row. Never re-sorted, and never sorted here.

@@ -4,8 +4,8 @@
 #if OG_PHYSICS_BACKEND_CHAOS
 #include "ChaosTickBackendUImpl.h"
 
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/BrawlerChaosBindingUImpl.h"
 #include "OGSimulation/CompilerControl.h"
@@ -19,6 +19,10 @@
 #include "Runtime/Experimental/Chaos/Public/PBDRigidsSolver.h"
 #include "Runtime/Experimental/Chaos/Public/RewindData.h"
 #include "Runtime/Experimental/Chaos/Public/PhysicsProxy/SingleParticlePhysicsProxy.h"
+
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+DEFINE_LOG_CATEGORY(LogOGChaosDilation);
+#endif
 
 namespace
 {
@@ -495,7 +499,7 @@ void ChaosTickBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSt
 	FSimulationInput2* asyncInput = m_asyncCallback->GetProducerInputData_External();
 	asyncInput->Reset();
 	asyncInput->bInitialized = true;
-	asyncInput->m_world = m_owner.GetWorld();
+	asyncInput->m_world = m_owner.owner().GetWorld();
 	asyncInput->m_manager = this;
 
 	// ⛔G-07  docs/ChaosTickBackendUImpl-guards.md
@@ -570,14 +574,14 @@ void ChaosTickBackendUImpl::buildWorld(UWorld& world, float dt, bool)
 {
 	FPhysScene* physScene = world.GetPhysicsScene();
 	if (physScene == nullptr)
-		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
+		checkf(false, TEXT("OGBrawlerSimulationManager: unexpected state"));
 
 	Chaos::FPhysicsSolver* solver = physScene->GetSolver();
 	if (solver == nullptr)
-		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
+		checkf(false, TEXT("OGBrawlerSimulationManager: unexpected state"));
 
 	checkf(static_cast<float>(solver->GetAsyncDeltaTime()) == dt,
-		TEXT("SimulationManagerUImpl: the Chaos solver's async dt (%f s) differs from ")
+		TEXT("OGBrawlerSimulationManager: the Chaos solver's async dt (%f s) differs from ")
 		TEXT("UPhysicsSettings::AsyncFixedTimeStepSize (%f s), which the manager now steps with. Was ")
 		TEXT("design D13: the two are the same number."),
 		static_cast<float>(solver->GetAsyncDeltaTime()), dt);
@@ -592,24 +596,24 @@ void ChaosTickBackendUImpl::startStepping(UWorld& world, float, bool)
 {
 	FPhysScene* physScene = world.GetPhysicsScene();
 	if (physScene == nullptr)
-		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
+		checkf(false, TEXT("OGBrawlerSimulationManager: unexpected state"));
 
 	Chaos::FPhysicsSolver* solver = physScene->GetSolver();
 	if (solver == nullptr)
-		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
+		checkf(false, TEXT("OGBrawlerSimulationManager: unexpected state"));
 
 	m_hysScenePostTickCallbackHandle = physScene->OnPhysScenePostTick.AddWeakLambda(
-		&m_owner, [this](FChaosScene*) { m_owner.OnPostPhysicsStep(); });
+		&m_owner.owner(), [this](FChaosScene*) { m_owner.onPostPhysicsStep(); });
 
 	m_asyncCallback = solver->CreateAndRegisterSimCallbackObject_External<FSimulationManagerAsyncCallback>();
 	m_asyncCallback->setManager(this);
 
 	FNetworkPhysicsCallback* solverCallback = static_cast<FNetworkPhysicsCallback*>(solver->GetRewindCallback());
 	if (solverCallback == nullptr)
-		checkf(false, TEXT("SimulationManagerUImpl: unexpected state"));
+		checkf(false, TEXT("OGBrawlerSimulationManager: unexpected state"));
 
 	m_injectInputsExternalCallbackHandle = solverCallback->InjectInputsExternal.AddWeakLambda(
-		&m_owner, [this](int32 PhysicsStep, int32 NumSteps) { InjectInputs_External(PhysicsStep, NumSteps); });
+		&m_owner.owner(), [this](int32 PhysicsStep, int32 NumSteps) { InjectInputs_External(PhysicsStep, NumSteps); });
 }
 
 void ChaosTickBackendUImpl::onEndPlayWorld(UWorld& world)
@@ -662,7 +666,7 @@ std::optional<QueryVolumeId> ChaosTickBackendUImpl::registerVizVolume(const Quer
 	return m_owner.m_queryAdapter->registerVolume(descriptor, queryParams, FActorInstanceHandle(&owner));
 }
 
-bool ChaosTickBackendUImpl::createBodies_GameThread(USimmableUpdateComponent& owner, AOGBrawlerUECharacter& character,
+bool ChaosTickBackendUImpl::createBodies_GameThread(UOGBrawlerSimulatableComponent& owner, AOGBrawlerUECharacter& character,
 	SimulatableBrawler& simulatable, unsigned int id)
 {
 	FBodyInstanceAsyncPhysicsTickHandle parentHandle =
@@ -708,11 +712,11 @@ void ChaosTickBackendUImpl::Diagnostics::sampleLatencyWindow_GameThread(bool isC
 {
 	if (isClient)
 	{
-		FChaosScene* scene = m_host.m_owner.GetWorld() != nullptr ? m_host.m_owner.GetWorld()->GetPhysicsScene() : nullptr;
+		FChaosScene* scene = m_host.m_owner.owner().GetWorld() != nullptr ? m_host.m_owner.owner().GetWorld()->GetPhysicsScene() : nullptr;
 		if (scene != nullptr)
 			m_host.m_chaosDilationWindow.add(static_cast<double>(scene->GetNetworkDeltaTimeScale()));
 
-		const UWorld* world = m_host.m_owner.GetWorld();
+		const UWorld* world = m_host.m_owner.owner().GetWorld();
 		const APlayerController* localController =
 			world != nullptr ? world->GetFirstPlayerController() : nullptr;
 		if (localController != nullptr && localController->GetNetworkPhysicsTickOffsetAssigned())
@@ -731,7 +735,7 @@ void ChaosTickBackendUImpl::Diagnostics::logLatencyWindow_GameThread(bool isClie
 {
 	if (isClient)
 	{
-		const LatencyBudgetDiagnosticsUImpl::ClockCounts clock =
+		const UELatencyBudgetDiagnostics<BrawlerSessionTraitsUImpl>::ClockCounts clock =
 			m_host.m_owner.getLatencyBudgetDiagnostics().clockCountsInWindow();
 		UE_LOG(LogOGChaosDilation, Warning,
 			TEXT("[ChaosDilation] role=Client min=%.4f mean=%.4f max=%.4f samples=%u resets=%u ")

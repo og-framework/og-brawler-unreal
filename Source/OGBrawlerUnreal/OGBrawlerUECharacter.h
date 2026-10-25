@@ -19,7 +19,7 @@
 #include <functional>
 #include <optional>
 #include <vector>
-#include "OGBrawlerUnreal/SimmableUpdateComponent.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
@@ -59,8 +59,11 @@ class AOGBrawlerUECharacter : public APawn
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
 		
+	UPROPERTY(VisibleAnywhere)
+	USimulatableNetSyncComponent* SimulatableNetSync;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
-	USimmableUpdateComponent* SimmableUpdateComponent;
+	UOGBrawlerSimulatableComponent* BrawlerSimulatable;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
 	UOGBrawlerInputCollectionComponent* InputCollection;

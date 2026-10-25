@@ -19,7 +19,7 @@
 // and thereby makes that guarantee real. Delete it once a production consumer
 // includes the config.
 //
-// Mirrors the existing SimulationManagerUImplConceptTest.cpp pattern, with one
+// Mirrors the existing OGBrawlerSimulationManagerConceptTest.cpp pattern, with one
 // deliberate difference: the static_asserts sit OUTSIDE the automation-test
 // guard so Server and Client targets (which build with
 // WITH_DEV_AUTOMATION_TESTS=0) verify the concept too, not just Editor.

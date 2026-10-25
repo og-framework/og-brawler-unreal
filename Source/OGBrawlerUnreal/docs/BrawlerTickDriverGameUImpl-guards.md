@@ -16,7 +16,7 @@ compile where `TickDriverBackendUImpl` names the driver.
 ## G-01 — the authority's release passes a step count of 1
 
 **Site:** `m_session.releaseDelayedInputsForStep(static_cast<int32>(authorityTick), 1);` in
-`releaseInputsForAuthorityTick`.
+`releaseInputsForAuthorityTick` (the call went through `owner()` from og-ue-simulationcomponentandmanagersplit task 24a until task 26a moved the release into the session; the literal is unchanged).
 
 **The prohibition.** ⛔ The binding releases the delayed inputs for `authorityTick` with a step count of **1**. Do not
 pass a larger count, a frame's step count, or a tick other than the one the hook was given. *Split from

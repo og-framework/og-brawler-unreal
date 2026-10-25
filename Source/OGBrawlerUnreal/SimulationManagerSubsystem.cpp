@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "SimulationManagerSubsystem.h"
-#include "OGBrawlerUnreal/SimulationManagerUImpl.h"
+#include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGSimulationUnreal/SimulationTimingRelay.h"
 
 bool USimulationManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
@@ -23,5 +23,5 @@ void USimulationManagerSubsystem::OnWorldBeginPlay(UWorld& InWorld)
     if (InWorld.GetNetMode() != NM_Client)
         InWorld.SpawnActor<ASimulationTimingRelay>();
 
-    InWorld.SpawnActor<ASimulationManagerUImpl>();
+    InWorld.SpawnActor<AOGBrawlerSimulationManager>();
 }

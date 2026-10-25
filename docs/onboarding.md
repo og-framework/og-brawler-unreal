@@ -115,4 +115,6 @@ CMake path.
 
 Once the project builds and runs, see [`docs/cross-repo-dev-loop.md`](cross-repo-dev-loop.md) for the multi-repo development workflow: submodule push order, handling pin bumps, recommended git config, and the "three commits, three PRs" pattern.
 
+To start reading the code, see [`SimulationArchitecture.md`](../Source/OGBrawlerUnreal/docs/SimulationArchitecture.md): how the character, its simulation components, the simulation manager, the session and netsync fit together.
+
 To package the game, publish it to Steam and run playtests, see [`docs/steam-publishing.md`](steam-publishing.md).

@@ -29,7 +29,7 @@ task 15a this header was the rough form of both seam-A layers: two `#if` blocks 
 `physicsBackendUImpl` (§7).
 
 The header still stops the build when `OG_PHYSICS_BACKEND_CHAOS` is undefined. Its `#error` text is unchanged
-(`SimulationManagerUImpl-rationale.md` §18 owns the macro).
+(`OGBrawlerSimulationManager-rationale.md` §18 owns the macro).
 
 ## §2 `PhysicsEngineTraits` (in og-simulation since og-tickdriver task 15f)
 
@@ -120,7 +120,7 @@ Two `static_assert`s follow it: `PhysicsEngineTraits<EngineTraits>` and
 `BrawlerEngineBinding<EngineBinding, EngineTraits>`. They check the configuration being built only, as
 `PhysicsBackendHost` does: the other configuration's headers are not included.
 
-* **Who names them.** `ASimulationManagerUImpl` types its three adapter optionals and its two visualization doors
+* **Who names them.** `AOGBrawlerSimulationManager` types its three adapter optionals and its two visualization doors
   through `EngineTraits`, and prints `EngineTraits::kName` in `[SimHost.Backend]`. Since og-tickdriver task 15b the
   composition (`BrawlerCompositionUImpl`'s integration executor and hit-detection system), the build identity, the
   session's concept test and the seam concept (`PhysicsBackendHostUImpl.h`) name them too. The Chaos host names its
@@ -132,7 +132,7 @@ Two `static_assert`s follow it: `PhysicsEngineTraits<EngineTraits>` and
   added them.
 * **The four seam-A headers have no `#if`.** This header includes the configuration's pair, and each host includes
   its own engine's headers. The `.cpp` files of the traits and bindings are whole-file arms
-  (`SimulationManagerUImpl-rationale.md` §18, rule 2), so the Jolt console variable registers in the Jolt
+  (`OGBrawlerSimulationManager-rationale.md` §18, rule 2), so the Jolt console variable registers in the Jolt
   configuration only, as before. Since og-tickdriver task 15e that variable is the Jolt binding's
   (`BrawlerJoltBindingUImpl-rationale.md` §6): the Jolt traits' `.cpp` is in a module that cannot see the switch and
   is no arm, and registers nothing.
@@ -147,7 +147,7 @@ and `computeDeterminismFingerprint`. Task 15b switched those files to `EngineTra
 |---|---|---|
 | `BrawlerCompositionUImpl.h` | the namespace's `BodyAdapter`, `QueryAdapter` | `EngineTraits::BodyAdapter`, `EngineTraits::QueryAdapter` |
 | `PhysicsBackendHostUImpl.h` | the namespace's `VizQuery`, `VizReader`, unqualified inside the namespace | `EngineTraits::VizQuery`, `EngineTraits::VizReader` |
-| `SimulationManagerUImplConceptTest.cpp` | the namespace's `BodyAdapter`, `QueryAdapter` | `EngineTraits::BodyAdapter`, `EngineTraits::QueryAdapter` |
+| `OGBrawlerSimulationManagerConceptTest.cpp` | the namespace's `BodyAdapter`, `QueryAdapter` | `EngineTraits::BodyAdapter`, `EngineTraits::QueryAdapter` |
 | `OGBuildIdentityUImpl.cpp` | the namespace's kBackendName, `computeDeterminismFingerprint` | `EngineTraits::kName`, `EngineTraits::computeDeterminismFingerprint` |
 
 They name the same types and call the same function as before. This header no longer opens the namespace; seam B's

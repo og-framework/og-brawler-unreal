@@ -6,10 +6,10 @@
 #include "PhysicsEngine/PhysicsSettings.h"       // UPhysicsSettings::DefaultGravityZ
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 // ⭐ [movement-sim task 16] For LogOGBrawler, FMovementStaticDataCVars and the
-// ASimulationManagerUImpl::readMovementStaticDataCVars declaration this TU DEFINES. The read
+// AOGBrawlerSimulationManager::readMovementStaticDataCVars declaration this TU DEFINES. The read
 // lives here, next to the variables it reads; the reason is carried in
-// docs/SimulationManagerUImpl-rationale.md section 12, at readMovementStaticDataCVars.
-#include "SimulationManagerUImpl.h"
+// docs/OGBrawlerSimulationManager-rationale.md section 12, at readMovementStaticDataCVars.
+#include "OGBrawlerSimulationManager.h"
 
 #include <atomic>
 
@@ -93,7 +93,7 @@ namespace
 	// ⭐⭐ THE FOUR ONE-TIME MOVEMENT VARIABLES — [movement-sim task 16, USER RULING #3].
 	//
 	// ⛔ ONE-TIME MEANS ONE-TIME. These four are read EXACTLY ONCE, in
-	// `ASimulationManagerUImpl::readMovementStaticDataCVars()` below, when the manager builds its
+	// `AOGBrawlerSimulationManager::readMovementStaticDataCVars()` below, when the manager builds its
 	// `StaticData`. Nothing reads them per tick, and nothing may: they are AUTHORED DATA that
 	// every peer must agree on for the whole session, and a value that moved mid-session would
 	// make a resimulated tick disagree with the tick it replays — a divergence with no wire
@@ -308,7 +308,7 @@ namespace
 //////////////////////////////////////////////////////////////////////////////////////////////
 // ⭐⭐ THE ONE-TIME READ ITSELF — [movement-sim task 16, USER RULING #3].
 //
-// Declared on ASimulationManagerUImpl, defined HERE so it loads the four file-static variables
+// Declared on AOGBrawlerSimulationManager, defined HERE so it loads the four file-static variables
 // the console writes directly. Called from exactly one place: `m_movementStaticDataCVars`'s
 // member initializer, which runs immediately before `m_staticData` is constructed from it.
 //
@@ -318,7 +318,7 @@ namespace
 // latch is armed by whichever runs first and the refusal sweep is reported once, because the
 // second manager's identical report would read as a second fault.
 FMovementStaticDataCVars
-ASimulationManagerUImpl::readMovementStaticDataCVars()
+AOGBrawlerSimulationManager::readMovementStaticDataCVars()
 {
 	const bool bFirstRead = !GMovementCVarsConsumed.exchange(true, std::memory_order_relaxed);
 

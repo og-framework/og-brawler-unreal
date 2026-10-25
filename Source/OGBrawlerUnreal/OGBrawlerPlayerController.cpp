@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGBrawlerPlayerController.h"
-#include "SimulationManagerUImpl.h"
+#include "OGBrawlerSimulationManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/ChildConnection.h"

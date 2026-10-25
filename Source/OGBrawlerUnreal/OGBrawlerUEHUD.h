@@ -30,7 +30,7 @@
 
 #include "OGBrawlerUEHUD.generated.h"
 
-class ASimulationManagerUImpl;
+class AOGBrawlerSimulationManager;
 
 namespace brawlerJoinScreen
 {
@@ -49,7 +49,7 @@ private:
 	// The one selection both displays make: this HUD's own local player, that player's
 	// character, and the role's manager. nullptr whenever any link is missing.
 	// ⛔ HELD AS const, so "reads only" is a compile error to break rather than a promise.
-	const ASimulationManagerUImpl* findHistorySource(unsigned int& outCharacterId) const;
+	const AOGBrawlerSimulationManager* findHistorySource(unsigned int& outCharacterId) const;
 
 	// The whole panel. Silently draws nothing when there is no local character, no
 	// manager or no history yet -- every one of those is an ordinary frame.
@@ -69,7 +69,7 @@ private:
 	// rather than a character -- is drawn on the primary alone.
 	// ⛔ THE NEAREST STACK SWAPS TWO READOUTS, NEVER THE BARS.
 	void drawInputHistoryFrameMeterStack(
-		const ASimulationManagerUImpl&                                 manager,
+		const AOGBrawlerSimulationManager&                                 manager,
 		unsigned int                                                   characterId,
 		float                                                          liftPixels,
 		float                                                          labelHeight,

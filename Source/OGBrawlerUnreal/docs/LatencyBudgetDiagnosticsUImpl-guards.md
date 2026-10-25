@@ -1,33 +1,25 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-# `LatencyBudgetDiagnosticsUImpl.h` — guards
+# LatencyBudgetDiagnosticsUImpl — guards (historical: retired ids only)
 
-Prohibitions with a tagged site in `Source/OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h` (og-tickdriver task 18).
-Ids are opaque, stable, and retired rather than reused. The reasoning lives in
-`LatencyBudgetDiagnosticsUImpl-rationale.md`.
+The game module's latency-budget class, a header and `.cpp` in `Source/OGBrawlerUnreal/` written by og-tickdriver task 18,
+were **moved into OGSimulationUnreal by og-ue-simulationcomponentandmanagersplit task 19a (2026-10-21)**: code moved to
+`UELatencyBudgetDiagnostics.h` (task 19a), a template over the brawler's `BrawlerSessionTraitsUImpl`. Its explanation
+went with it: `UELatencyBudgetDiagnostics-rationale.md` (OGSimulationUnreal) for the template, and
+`OGBrawlerSimulationManager-rationale.md` §16 for the brawler's wiring and the class's history.
 
-**If this file and the source disagree, the source is authoritative and this file is stale.**
-
-Two properties are checked by the compiler, not here: the const access to production state (the `static_assert` beside
-`m_owner`, rationale §3) and provider presence (the `checkf` in `wrapInputProvider`, in both states of the gate,
-rationale §2).
+This file is kept only as the record of the one id the header's tag used, so that it is never reused. It has no live
+entry and no source file.
 
 ---
 
-## G-01 — DIAGNOSTIC ONLY — READ BY NOTHING IN PRODUCTION
+## §R — Retired ids
 
-**Site:** `std::unique_ptr<latencyBudget::LatencyBudgetProbe> m_probe;`, the first member of the block of data members
-that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1.
+⛔ **An id is never reused.** A retired id may be named in prose; it may never again appear as a `⛔G-nn` tag.
 
-**The prohibition.** ⛔ Every data member of this class sits in this one block, and nothing in production reads any of
-them. Do not add a member here that a production decision, a production log line or a replicated value reads, do not
-add an accessor that hands one of them to production code, and do not move a production value into this block. A value
-that both feeds a decision and a latency line stays production, outside this class (`DiagnosticsConventions.md` §4:
-the marker names the channel, never the fact).
+### G-01 — RETIRED by og-ue-simulationcomponentandmanagersplit task 19a (2026-10-21): the fenced data block moved to the plugin template
 
-**The consequence.** The block is compiled out of Shipping (`(!UE_BUILD_SHIPPING)`) and out of the fence build. A
-production reader of one of these members either fails to compile there or, if it was itself gated to compile, makes
-Shipping behave differently from Development, which is exactly what the fence test (rationale §4) exists to rule out.
+**Was:** *"DIAGNOSTIC ONLY — READ BY NOTHING IN PRODUCTION"*. Its tag sat above `m_probe`, the first member of the block
+of data members that exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1.
 
-**What breaks if the tag moves.** Nothing mechanical: the gate makes a Shipping or fence build fail to compile on an
-ungated reader, but an edit inside this class can still hand a member out. The fence test's harness sessions are the
-behavioural check.
+**Why it retired.** Task 19a deleted the header; the block moved verbatim into the template, with its prohibition.
+**Successor:** `UELatencyBudgetDiagnostics-guards.md` G-01 (OGSimulationUnreal).

@@ -77,7 +77,7 @@ grows to 4 again logs the line again (measured: `left players=3`, then `joined p
 
 `PostLogin` is not called for players that a seamless travel carries into the new map; the engine calls
 `AGameModeBase::HandleSeamlessTravelPlayer` for them instead (T10 spike Q6;
-`SimmableUpdateComponent-rationale.md` records the same caveat for another reason). The project has no
+`OGBrawlerSimulatableComponent-rationale.md` records the same caveat for another reason). The project has no
 server travel today. So `noteListening` stops a dedicated server at start with a `checkf` when the
 GameMode's `bUseSeamlessTravel` is set, and its message says what to extend first. A check, not a
 comment: the flag is the one edit that would make the counts silently wrong.

@@ -1,4 +1,7 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: ASimulationManagerUImpl -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager; kept in the verbatim carried comments of §7 -->
+<!-- lint-external-ref: ASimulationManagerUImpl::OnPostPhysicsStep -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager (the post-physics pass is UESimulationSession::onPostPhysicsStep since task 27a); kept in the verbatim carried comments of §7 -->
+<!-- lint-external-ref: ASimulationManagerUImpl::BeginPlay -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager::BeginPlay; kept in the verbatim carried comments of §8 -->
 <!-- lint-external-ref: Character.cpp -- the engine's walking-pawn source file, read through the GitHub API; the engine is not vendored into this repository -->
 <!-- lint-external-ref: impl_notes_ringout_5.md -- a private workspace document of the brawler-ringout-gamemode initiative, quoted verbatim; not in this repository -->
 <!-- lint-external-ref: UActorChannel::ReplicateActor -- Unreal Engine method, outside every scan root -->
@@ -21,6 +24,7 @@
 <!-- lint-external-ref: CoreUObject/Private/UObject/UObjectGlobals.cpp -- Unreal Engine source file, outside every scan root -->
 <!-- lint-external-ref: ComponentInits -- Unreal Engine FObjectInitializer member, outside every scan root -->
 <!-- lint-external-ref: InitSubobjectProperties -- Unreal Engine FObjectInitializer method, outside every scan root -->
+<!-- lint-external-ref: USimmableUpdateComponent -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to UOGBrawlerSimulatableComponent (the property is BrawlerSimulatable since then, ruling R-1); kept in the verbatim quote of §9 -->
 # `AOGBrawlerUECharacter` — rationale
 
 Companion to `Source/OGBrawlerUnreal/OGBrawlerUECharacter.h` and
@@ -32,8 +36,8 @@ correction sits directly under the quote and in §13.
 
 Related documents, which remain authoritative for their own subjects:
 `ScoreboardDisplay-rationale.md` (how the scoreboard joins this pawn's replicated score and tint
-to simulation state), `SimmableUpdateComponent-rationale.md` (registration),
-`SimulationManagerUImpl-rationale.md` (the score push and the id allocator's owner).
+to simulation state), `OGBrawlerSimulatableComponent-rationale.md` (registration),
+`OGBrawlerSimulationManager-rationale.md` (the score push and the id allocator's owner).
 
 ---
 
@@ -116,13 +120,13 @@ branch takes this capsule as the character's root body, simulates it, and the en
 sync moves it to the physics result, interpolated two steps behind.
 
 In the **Jolt configuration** (the default since task 18; the switch is described once, in
-`SimulationManagerUImpl-rationale.md` §18) the capsule is **render-only**:
+`OGBrawlerSimulationManager-rationale.md` §18) the capsule is **render-only**:
 
 * **The simulated body is not this component.** It is a Jolt slot body that `JoltWorld` builds from
   the movement descriptor (`kCharacterCapsuleBody`, 42 / 96, `isRoot`); the descriptor's
   `simulatePhysics` makes that slot body dynamic. Nothing adopts this capsule, and `applyDescriptor`
   never runs on it, so it keeps the Pawn collision profile from the constructor for its whole life.
-* **It does not simulate.** `ASimulationManagerUImpl::tryRegister`, on the registration's Ready path
+* **It does not simulate.** `tryRegister` (the session's since og-ue-simulationcomponentandmanagersplit task 28), on the registration's Ready path
   (`TickDriverBackendUImpl::onRegistered_GameThread`),
   switches its physics simulation off and logs one `[SimHost.RenderTarget]` line per character with
   `capsuleSimulatesPhysics=0` and the names of the character's components that still simulate. Only
@@ -210,7 +214,7 @@ archetype.
 **Why `PostInitializeComponents` is early enough.** The capsule's body is created at component
 registration, with the default material. `SetPhysMaterialOverride` on a registered body pushes the
 material onto the existing shapes (`UpdatePhysicalMaterials`) and recomputes mass
-(`UpdateMassProperties`). Both happen before `BeginPlay`, and `USimmableUpdateComponent::BeginPlay`
+(`UpdateMassProperties`). Both happen before `BeginPlay`, and `UOGBrawlerSimulatableComponent::BeginPlay`
 is where the physics factory adopts the capsule. So the adopted body, and the first simulated step,
 already carry friction 0 and restitution 0. No code in this project sets a mass override, so the
 recomputed mass is what the engine derives from the override material.
@@ -389,6 +393,10 @@ Four properties replicate: `BrawlerColor`, `RingoutScore`, since task 25
 `SimCharacterIdValue`, and since og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1).
 All four use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10, G-20).
 
+One of the character's components replicates as well: `USimulatableNetSyncComponent`, the
+`SimulatableNetSync` subobject, which carries the correction state and the input RPC (§15). Before
+og-ue-simulationcomponentandmanagersplit task 20a that was `UOGBrawlerSimulatableComponent`.
+
 > ⛔ REPLICATED. Purely cosmetic: it never reaches the engine-free simulation
 > core, so it cannot affect determinism or the correction path.
 > ⚠ [ringout task 5] IT IS NO LONGER THE ONLY REPLICATED STATE ON THIS CLASS —
@@ -477,16 +485,18 @@ writes (§7).
   each remote proxy under that id. Under `COND_OwnerOnly` a proxy's id would never arrive, and
   the proxy's registration would wait until the retry budget's `checkf`;
 * not `COND_InitialOnly`: the authority assigns the id inside
-  `USimmableUpdateComponent::tryRegisterWithNewFramework`, at least two frames after the
-  component's `BeginPlay` (`BeginPlay` schedules `tryInitializeWithManager` for the next tick,
-  and that schedules `tryRegisterWithNewFramework` for the tick after). Assignment therefore
+  `UOGBrawlerSimulatableComponent::resolveRegistrationKey`, at least two frames after the
+  component's `BeginPlay` (`BeginPlay` calls the binding's `beginRegistration`, which schedules
+  `tryInitializeWithManager` for the next tick, and that schedules `tryRegisterWithNewFramework`, which calls the hook,
+  for the tick after; the loop is the binding's since og-ue-simulationcomponentandmanagersplit task 29). Assignment therefore
   normally lands after the pawn's first replication bunch has gone out. `COND_InitialOnly` would never send the id, and the
   client would wait until the 600-attempt `checkf`.
 
 **`PhysicsSlotValue`** (og-simulationscheduler-withjolt task 66) uses the plain form for the same two
 reasons, guard G-20: every client binds every character, proxies included, in the slot the authority chose,
 so it needs every character's slot; and the authority writes the slot one frame after the component's
-`BeginPlay` at the earliest (in `tryInitializeWithManager`), which can be after the first bunch.
+`BeginPlay` at the earliest (in the hook `initializeWithManager`, which the binding's `tryInitializeWithManager` calls),
+which can be after the first bunch.
 
 ## 7. The score's two doors — one in, one out
 
@@ -552,10 +562,10 @@ floats (`r`, `g`, `b`): verified.
 
 **Correction (R0).** Two parts are false. (1) The push is gated on `!runsPrediction()`, not on
 `GetNetMode()`, and the manager's `HasAuthority()` warning is now one compile-time poison (a
-`#define` in `SimulationManagerUImpl.cpp`), not two warnings. This was already routed by
-`SimulationManagerUImpl-rationale.md` §13.10. (2) The value would be overwritten by the next
+`#define` in `OGBrawlerSimulationManager.cpp`), not two warnings. This was already routed by
+`OGBrawlerSimulationManager-rationale.md` §13.10. (2) The value would be overwritten by the next
 **replication** of `RingoutScore`, not by a correction: the score is not on the correction wire
-(§6.1). The rest is true: `ASimulationManagerUImpl`'s constructor sets `bReplicates = false`, and
+(§6.1). The rest is true: `AOGBrawlerSimulationManager`'s constructor sets `bReplicates = false`, and
 `APawn`'s constructor sets `bReplicates = true`.
 
 > ⛔ THE UNCHANGED-VALUE GUARD. See the declaration: UE marks a replicated property dirty
@@ -585,8 +595,10 @@ Guard G-12 (an absence tag at the end of the function).
 > [ringout task 5] For OGBLOG_G — OnRep_RingoutScore's one diagnostic line. The sink it
 > routes through is installed on BOTH roles by ASimulationManagerUImpl::BeginPlay.
 
-Verified: `ASimulationManagerUImpl::BeginPlay` calls `ogblog::setGlobal` in both its authority and
-its client branch. The sink is one process-global, so in a single-process PIE the last manager
+Verified: `AOGBrawlerSimulationManager::BeginPlay` calls `ogblog::setGlobal` in both its authority and
+its client branch. *Since og-ue-simulationcomponentandmanagersplit task 27b* the call is the brawler's hook
+`BrawlerSessionGameUImpl::installGameLoggers`, which the session's `beginPlay` calls in both branches, from
+`AOGBrawlerSimulationManager::BeginPlay`. The sink is one process-global, so in a single-process PIE the last manager
 to begin play owns it.
 
 > [ringout task 5] ⭐ CLIENT-SIDE ARRIVAL. There is no client-side WORK to do — the
@@ -652,9 +664,10 @@ The declaration's pre-task-25 prose, kept as history:
 **Correction (R0, task 25).** The id is no longer the component's `GetUniqueID()`, and the
 "component is missing" case no longer exists: the accessor reads `SimCharacterIdValue`. What is
 true today:
-* The authority assigns the id once, through `ASimulationManagerUImpl::allocateSimCharacterId`
+* The authority assigns the id once, through `BrawlerRosterUImpl::allocateSimCharacterId` (the manager's until og-ue-simulationcomponentandmanagersplit task 23)
   (count-up 1..255, never reused; see `SimCharacterId-guards.md` G-01), and
-  `USimmableUpdateComponent::tryRegisterWithNewFramework` writes it here with
+  `UOGBrawlerSimulatableComponent::resolveRegistrationKey` (the component's own `tryRegisterWithNewFramework` until
+  og-ue-simulationcomponentandmanagersplit task 29) writes it here with
   `SetAuthoritativeSimCharacterId`. Its three `checkf`s enforce authority-only,
   never-`None` and assign-once.
 * The value is `SimCharacterId::None` (0) until the authority assigns it, or on a client until it
@@ -684,8 +697,8 @@ an optional slot, empty for 0, and `SetAuthoritativePhysicsSlot()` is its one wr
   §3, the slot table).
 * **Who writes it.** The Jolt host's slot acquire on the authority (og-simulation-jolt's `JoltTickWorldHost` calls
   the publish `TickDriverBackendUImpl::callWithSlotRequest` passes, since og-tickdriver task 10), the first time the
-  character asks for a slot (from `registerVizVolume`, called by the component's
-  `tryInitializeWithManager`). Its three `checkf`s enforce authority-only, an in-range slot and
+  character asks for a slot (from `registerVizVolume`, called by the component's registration hook
+  `initializeWithManager`, which the binding's `tryInitializeWithManager` calls since task 29). Its three `checkf`s enforce authority-only, an in-range slot and
   set-once: a character keeps its slot until it leaves, and a pawn that leaves is destroyed, so a
   second write would be a bug. A `static_assert` pins that slot + 1 fits the byte.
 * **Who reads it.** Only the Jolt configuration's acquire, on a client, where it is the only input to
@@ -963,3 +976,27 @@ the pitch to a literal 0.8 rad (about 46°). Task 7 seeded the boom at the iso r
 actor, with a mirrored length of 900, G-18) and made the PID target the iso pitch. Task 8 replaced the PID
 camera with the orbit camera in og-brawler (the PID was unstable above about 98.5 fps), which broke this
 file's build on purpose. Task 9 wired it in, as described above.
+
+## 15. The NetSync sibling: `SimulatableNetSync`, and the bind (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21)
+
+The constructor creates a second simulation component, **before** `BrawlerSimulatable`:
+`SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"))`, held by a
+`UPROPERTY(VisibleAnywhere)` pointer (ruling Q12 named both). `USimulatableNetSyncComponent` lives in OGSimulationUnreal
+and carries the character's reflected wire surface — the replicated correction-state buffer, its notification and the
+client→server input RPC — which `UOGBrawlerSimulatableComponent` carried until this task (`SimulatableNetSyncComponent-rationale.md`;
+`OGBrawlerSimulatableComponent-rationale.md` §16). The brawler component no longer replicates, so the sibling is the
+character's one replicated component; the automation test `OGBrawler.Replication.CharacterReplicatedComponents`
+(`BrawlerReplicatedComponentsTest.cpp`) lists the default object's replicated components and expects exactly it. The
+type reaches this file through `OGBrawlerSimulatableComponent.h`, which includes the sibling's header for its forwarders.
+
+**The bind is the last statement of `PostInitializeComponents`**: `BrawlerSimulatable->bindNetSync(*SimulatableNetSync)`
+attaches the brawler component to the sibling as its `ISimulatableOwnerBinding`. It sits after the capsule's
+phys-material override and the mesh rebuild, so the override stays the first statement after `Super` (G-17); none of
+the three touches replication, and all of them run before any notification can arrive. **It must not move into a
+`BeginPlay`** (G-21): on an Iris client the initial state's notifications fire between `PostInitializeComponents` and
+`BeginPlay` (`SimulatableNetSyncComponent-rationale.md` §3). The unbind is the brawler component's, in its `EndPlay`.
+
+**The subobject name is part of the wire.** Clients and server match the replicated default subobject by its stable name,
+so `SimulatableNetSync` is no more free to change than a property name; a build with a different name does not
+interoperate. Builds from before this task do not interoperate with builds after it either
+(`SimulatableNetSyncComponent-rationale.md` §6).

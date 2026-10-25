@@ -8,7 +8,7 @@
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGSimulation/SimulationTimeContext.h"
 #include "OGSimulation/Network/LocalInputCache.h"
-#include "OGBrawlerUnreal/LatencyBudgetDiagnosticsUImpl.h"
+#include "OGSimulationUnreal/UELatencyBudgetDiagnostics.h"
 #include "glm/vec2.hpp"
 #include "glm/vec3.hpp"
 
@@ -19,7 +19,7 @@
 
 class UEnhancedInputComponent;
 struct FInputActionValue;
-// [T15] The ASimulationManagerUImpl forward declaration is gone with the manager
+// [T15] The AOGBrawlerSimulationManager forward declaration is gone with the manager
 // argument on buildPlayerInput — this component no longer names the manager at all.
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
@@ -57,8 +57,8 @@ public:
 	glm::vec3 resolveMouseAim() const { return m_mouseAimCache; }
 
 #if OG_LATENCY_BUDGET_DIAGNOSTICS
-	// Diagnostics view (og-simulation's DiagnosticsConventions.md §1; og-tickdriver task 18). Read only by
-	// LatencyBudgetDiagnosticsUImpl's capture wrapper; it exists only while OG_LATENCY_BUDGET_DIAGNOSTICS is 1
+	// Diagnostics view (og-simulation's DiagnosticsConventions.md §1; og-tickdriver task 18). Read only by the
+	// latency wrapper's BrawlerSessionGameUImpl hook; it exists only while OG_LATENCY_BUDGET_DIAGNOSTICS is 1
 	// (every build but Shipping). inputSampledSeconds(): wall time (FPlatformTime::Seconds) of the latest
 	// updateGameThreadCache call, or 0 before the first. Written on the game thread, read at capture on the
 	// physics thread (atomic, relaxed): the latency-budget probe's hop H1 start. Feeds no simulation input.
@@ -133,7 +133,7 @@ public:
 	// binds it in collectInputAll and calls this BEFORE pushing the current tick's capture, so the
 	// line holds ticks <= step.getTick() - 1 and the current sample is what this function returns.
 	//
-	// It replaces the old `const ASimulationManagerUImpl*` argument, which existed only so the
+	// It replaces the old `const AOGBrawlerSimulationManager*` argument, which existed only so the
 	// matcher could reach manager -> reconciliation -> correction cache. That cache stores the
 	// APPLIED input keyed by APPLICATION tick, so under an input delay `d` every history read was
 	// displaced by `d` — see OGBrawler/BrawlerMotionMatching.h for the full statement of the defect
@@ -157,7 +157,7 @@ public:
 	// there and nowhere else. All three raw members are stored in the same "stick-up = -Y"
 	// convention (see the handlers), so routing needs no sign flips. All consumers
 	// (buildMoveDirectionWorld, buildAimDirection, buildPlayerInput, the character's camera
-	// and SimmableUpdateComponent) must go through these accessors so the routing is
+	// and OGBrawlerSimulatableComponent) must go through these accessors so the routing is
 	// observed uniformly.
 	glm::vec2 getMoveStick() const;
 	glm::vec2 getAimStick() const;
@@ -188,14 +188,14 @@ private:
 	// Game-thread-written caches. Written by updateGameThreadCache() (game thread),
 	// read by buildAimDirection() / buildMoveDirectionWorld() (physics thread).
 	// glm::vec3 is trivially copyable and aligned — same benign-race pattern as the
-	// pre-refactor m_camForward on SimmableUpdateComponent.
+	// pre-refactor m_camForward on OGBrawlerSimulatableComponent.
 	glm::vec3 m_camForwardCache = glm::vec3(1.f, 0.f, 0.f);
 	glm::vec3 m_mouseAimCache   = glm::vec3(0.f, 0.f, 0.f);
 
 #if OG_LATENCY_BUDGET_DIAGNOSTICS
 	// DIAGNOSTIC ONLY — READ BY NOTHING IN PRODUCTION. The latency-budget probe's hop H1 start, read only
 	// through getDiagnostics(); compiled out with the probe when OG_LATENCY_BUDGET_DIAGNOSTICS is 0, so a
-	// production reader does not compile there (docs/LatencyBudgetDiagnosticsUImpl-rationale.md §2).
+	// production reader does not compile there (OGSimulationUnreal's docs/UELatencyBudgetDiagnostics-rationale.md §3).
 	std::atomic<double> m_inputSampledSeconds{ 0.0 };
 #endif
 

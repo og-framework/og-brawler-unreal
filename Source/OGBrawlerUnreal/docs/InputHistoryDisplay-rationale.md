@@ -44,7 +44,7 @@ The ruling, and its reasons:
   new units.
 * **Here.** `Source/OGBrawlerUnreal/docs` is the BUSL-1.1 tier decision D9 created so that
   BUSL documents need not live in the MPL core; it is linted by default; and it already
-  holds this initiative's other rationale (`SimulationManagerUImpl-rationale.md`, whose §1
+  holds this initiative's other rationale (`OGBrawlerSimulationManager-rationale.md`, whose §1
   carries the threading half of the same feature). One feature, one tier, three pointers.
 
 ---
@@ -172,7 +172,7 @@ Nothing about this feature reaches production:
   master read is an **early-out placed above** the `firstLocalCharacterId` actor walk rather
   than a conjunct inside the condition below it — with the master off the whole per-frame
   cost is one `bool` read in `AOGBrawlerUEHUD::DrawHUD` and one per simulated character in
-  `USimmableUpdateComponent::TickComponent`. No allocation, no actor walk, no ring access.
+  `UOGBrawlerSimulatableComponent::TickComponent`. No allocation, no actor walk, no ring access.
 
 The one thing this feature *did* add to og-simulation is two const read seams, and
 `DiagnosticsConventions.md` §5 records both against the class that **owns** the data — the
@@ -230,7 +230,7 @@ the pure headers are named `*Visualization*` **on purpose**: that is the filenam
 That gap is now closed: the lint takes two roots and two globs — `*Visualization*` and
 `*UEHUD*` — so the `Source/OGBrawlerUnreal` files in the table above are scanned too, 25
 files in all. ⛔ It still sees DIRECT includes only, so a transitive reach through
-`SimulationManagerUImpl.h` is structurally invisible to it and is ruled on in
+`OGBrawlerSimulationManager.h` is structurally invisible to it and is ruled on in
 `VISUALIZATION_DISCIPLINE.md` §4.1 instead.
 
 ### 5.1 Why the direction glyph is DRAWN and not typed
@@ -332,8 +332,8 @@ pinned facts rather than something to rediscover in play.
 4. This file, §7.7 — why the lanes pause, what a paused lane stops recording, and the
    second cut in the axis a hard resync makes.
 5. This file, §7.12 — the clock line under the bars, and what `auth static` diagnoses.
-6. `SimulationManagerUImpl-rationale.md` §1 — the two game/physics thread crossings the
-   render-rate poll opens, and the tear argument for each.
+6. This file, §8.6 — the game/physics thread crossing the render-rate polls open (rows and lanes),
+   and the tear argument for each (in `OGBrawlerSimulationManager-rationale.md` §1 until task 22).
 7. `VISUALIZATION_DISCIPLINE.md` — the mesh-only invariant the pure units live under.
 8. `DiagnosticsConventions.md` §5 — how the two read seams were allowed to be added.
 
@@ -446,7 +446,7 @@ longer one toggle: it is three independent bar CVars behind a master, and
 block — which §7.10 extends rather than replaces.
 
 `OGBrawler.InputHistoryDisplay`, default **on**, independent of the three bar CVars so any
-of the four can be shown alone. In `USimmableUpdateComponent::TickComponent` the flags are
+of the four can be shown alone. In `UOGBrawlerSimulatableComponent::TickComponent` the flags are
 read into locals and the early-out above the `firstLocalCharacterId` actor walk fires when
 **none** is set; inside the block each poll is gated on its own flag (or, for the three bars,
 on whether any is on). In `AOGBrawlerUEHUD::DrawHUD` each display is one branch.
@@ -627,10 +627,10 @@ the one display built to say where authority is.
 `m_hasFirstSample`, all of which the estimator's own contract declares GAME-THREAD-written
 by `updateRTT`. The poll runs on the game thread, so this is a same-thread read and nothing
 can tear. ⭐ **The prediction tick is no longer read here at all**: the marker is paired with
-`liveSimTick`, the value `USimmableUpdateComponent::TickComponent` had already read once for
+`liveSimTick`, the value `UOGBrawlerSimulatableComponent::TickComponent` had already read once for
 the whole visualization block, so this display now takes **one** physics-written read per
 frame where it used to take two. That single read is still the accepted tear argued at the
-CROSSING block of `SimulationManagerUImpl-rationale.md` §0 (the header's former banner) — a four-byte aligned load that cannot tear and
+CROSSING block of `OGBrawlerSimulationManager-rationale.md` §0 (the header's former banner) — a four-byte aligned load that cannot tear and
 at worst is one tick stale — but a stale tick now moves the axis and the marker together.
 
 ⛔ **THE MARKER IS NEVER CLAMPED AND NEVER HIDDEN.** The lane axis is compacted (§7.7), so
@@ -760,14 +760,16 @@ decomposition needs — the replicated tier consumer, the shared `TimeConfig`, a
 resolution peer's published effective-delay atomic — are members `pollInputHistoryLanes`
 already runs on, on the GAME THREAD, for `predictionOffsetTicks` and the machine-state
 sample. `decomposeInputDelay(consumer.hasReceivedTier(), consumer.currentTierIndex(),
-m_manager->getTimeConfig(), consumer.effectiveInputDelayTicks(),
-m_inputResolution.getClientEffectiveInputDelayTicks())` runs **inside** that same passthrough,
+m_session.getManager()->getTimeConfig(), consumer.effectiveInputDelayTicks(),
+m_session.getClientEffectiveInputDelayTicks())` runs **inside** that same passthrough,
 as its own local `std::optional`, guarded on `includeDelay && m_replicatedTierConsumer &&
 m_manager` exactly like the offset read beside it. ⛔ **NO NEW PUBLIC ACCESSOR AND NO NEW
-PASSTHROUGH NAME.** The NARROW PASSTHROUGHS list (now `SimulationManagerUImpl-rationale.md` §0 and §1) is therefore
+PASSTHROUGH NAME.** The NARROW PASSTHROUGHS list (now `OGBrawlerSimulationManager-rationale.md` §0 and §1) is therefore
 **unchanged** — `pollInputHistoryLanes` was already the one name on it that this display
 reaches through, and three more same-thread reads inside an existing entry point widen what
-that one entry point does, not the set of entry points.
+that one entry point does, not the set of entry points. *(Since og-ue-simulationcomponentandmanagersplit task 22
+`pollInputHistoryLanes` is a member of the feed, `BrawlerInputHistoryFeedUImpl`, and off that list: the feed's `const`
+reference to the manager does the list's job, §8.6.)*
 
 **The same-thread argument, stated once rather than per field.** `ReplicatedTierConsumer`'s
 tier is GAME-THREAD-written (`applyReplicatedConnectionTier`, §5 of the manager rationale);
@@ -775,12 +777,12 @@ the shared `TimeConfig` is GAME-THREAD-bound at `BeginPlay` and mutated only by 
 listeners, also GAME THREAD; and `SimulationInputResolution::getClientEffectiveInputDelayTicks()`
 reads the atomic that `recomputeAndPublishEffectiveInputDelay` — GAME THREAD — writes, and
 that the PHYSICS thread only ever *loads*. `pollInputHistoryLanes` itself runs on the game
-thread, driven from `USimmableUpdateComponent::TickComponent`. Three GAME-THREAD readers of
+thread, driven from `UOGBrawlerSimulatableComponent::TickComponent`. Three GAME-THREAD readers of
 three GAME-THREAD writers is not a crossing at all, let alone a tear — it is the same
-same-thread shape §1 already argues for the offset. **The CROSSING block's read clause —
-then in `SimulationManagerUImpl.h`, carried since its task-11 conversion into
-`SimulationManagerUImpl-rationale.md` §0 — says so explicitly**, and `SimulationManagerUImpl-rationale.md`
-§1 states why the passthrough list did not need a fourth name.
+same-thread shape §8.6 already argues for the offset. **The CROSSING block's read clause —
+then in `OGBrawlerSimulationManager.h`, carried since its task-11 conversion into
+`OGBrawlerSimulationManager-rationale.md` §0 — says so explicitly**, and §8.6 states why the passthrough list did not
+need a fourth name (in `OGBrawlerSimulationManager-rationale.md` §1 until task 22).
 
 **The verdict, total over one cell** (`InputDelayVerdict`, `delayVerdictOf` —
 `BrawlerInputHistoryVisualizationLanes.h`), rules applied in this order:
@@ -892,7 +894,7 @@ would be a second, silent source of truth about whether the meter draws. The che
 retired-symbol sweep confirms zero remaining references to any of the three, anywhere in this
 task's files.
 
-**The gate** (`SimmableUpdateComponent.cpp`). The FIRST statement in the input-history poll
+**The gate** (`OGBrawlerSimulatableComponent.cpp`). The FIRST statement in the input-history poll
 block is now `if (!inputHistoryVisualizationUImpl::masterEnabled()) return;` — one `bool`
 read on the default path. Only past that does the block read `displayEnabled()`,
 `anyBarEnabled()` and `inputDelayEnabled()` into locals and apply the same early-out shape
@@ -1155,7 +1157,7 @@ at draw time. ⛔ **THE HUD FETCHES NOTHING** — a second read at draw time is 
 
 **The threading split, and why it needs no new argument.** The reading is built inside
 `pollInputHistoryLanes`, guarded on `runsPrediction()`, and it is the same PAIR of postures
-`SimulationManagerUImpl-rationale.md` §1 already argues for the prediction-offset read beside
+§8.6 (`OGBrawlerSimulationManager-rationale.md` §1 until task 22) already argues for the prediction-offset read beside
 it. The estimator's two ticks are GAME-THREAD-written and read here on the game thread —
 same-thread, nothing can tear. `ClientPredictionClock::getPredictionTick` is a plain
 `unsigned int` written on the PHYSICS thread: a naturally-aligned four-byte load on the x64
@@ -1239,6 +1241,11 @@ buys the first at the price of the second.
 reachable, and the misplaced mark is exactly the class of defect this display was rebuilt to
 stop telling.
 
+> ⚠ **R0 (og-ue-simulationcomponentandmanagersplit task 22, §8.6 C22-10) — "IMPOSSIBLE" overclaims**, as
+> `OGBrawlerSimulationManager-rationale.md` §11 C14 already records for the manager's copy of this argument. Both sides of
+> each pair are plain `unsigned int`s, neither releases nor acquires, so the order makes the misplaced mark unlikely,
+> not impossible. The read order is guard G-13 of `InputHistoryVisualizationUImpl-guards.md`.
+
 ⛔ **WHAT THIS LINE DOES NOT SHOW.** `AdvanceResult` is consumed and dropped inside the
 prediction step, so no per-tick record of a skip or a stall exists here — what the seam gives is
 a COUNT and the LAST tick of each kind, which is why a poll that saw three skips files one mark
@@ -1277,13 +1284,14 @@ edge cases follow from the code:
 
 * **0 until assigned.** Before the authority assigns it, or before it replicates to a client, it reads 0.
   `firstLocalCharacterId` then answers 0 rather than `nullopt`. No capture line is keyed 0, so
-  `ASimulationManagerUImpl::pollInputHistory` returns on the missing line, as it does for any id without one.
+  `BrawlerInputHistoryFeedUImpl::pollInputHistory` (the manager's until task 22) returns on the missing line, as it
+  does for any id without one.
   `getInputHistoryRows(0)` answers `nullptr`, so the HUD draws nothing.
 * **`nullopt`** means there is no world, game instance, local player, controller or pawn (a dedicated server, or a
   client before possession), or the pawn is not an `AOGBrawlerUECharacter`.
 
 **Single character is a selection, not a structure.** The row panel is fed for the first local player's character
-alone: `USimmableUpdateComponent::TickComponent` polls rows only when `firstLocalCharacterId` equals its own id.
+alone: `UOGBrawlerSimulatableComponent::TickComponent` polls rows only when `firstLocalCharacterId` equals its own id.
 The lanes are fed by every registered character's own component. The store is a map either way, so a second local
 character gets its own independent ring by being polled, and nothing here has to be reshaped.
 
@@ -1291,14 +1299,16 @@ character gets its own independent ring by being polled, and nothing here has to
 payload, or reaches `compute_checksum` (§3).
 
 **Lifetime.** A character's entry is created on its first poll (`m_byId[id]`) and erased by `forgetCharacter`.
-`ASimulationManagerUImpl::unregisterFromNewFramework` calls that once, mirroring the peer's own erase of the capture
+`unregisterFromNewFramework` calls that once, through the feed's own `forgetCharacter` (task 22; the actor's function
+until og-ue-simulationcomponentandmanagersplit task 28, the session's since, through the brawler's hook
+`BrawlerSessionGameUImpl::onUnregistered`), mirroring the peer's own erase of the capture
 line (`SimulationInputResolution::unregisterCharacter`, reached through `unregisterSimulatable`). An entry left
 behind is a leak keyed on an id that, since task 25, no character will ever hold again.
 
 ### 8.2 The gates and the knobs
 
 `OGBrawler.InputHistory` (`GInputHistory`) is the master and defaults **off**. `masterEnabled` reads it raw and
-alone. Its only caller is the input-history early-out in `USimmableUpdateComponent::TickComponent` (guard G-08).
+alone. Its only caller is the input-history early-out in `UOGBrawlerSimulatableComponent::TickComponent` (guard G-08).
 
 Six display toggles sit under it, and all default **on**, so that the master alone is what a reader flips:
 
@@ -1363,7 +1373,8 @@ there is none. The HUD draws only when its owning controller equals that answer,
 draws the display rather than every sibling's.
 
 `nearestCharacterIdTo` returns the brawler nearest `localId`, the character the second stack draws, or `nullopt`
-when the world holds no other. The gather is the manager's (`gatherNearestCandidates`) and the choice is the pure
+when the world holds no other. It takes the feed, not the manager (task 22). The gather is the feed's
+(`gatherNearestCandidates`; the manager's until task 22) and the choice is the pure
 header's (`brawlerInputHistoryVisualization::nearestCharacterIdTo`). This function owns neither, and it is the one
 place they are put together. `previousChoice` is last frame's answer. The pure selector's hysteresis
 (`kNearestHysteresisCm`) holds it, so two candidates at nearly equal range do not swap the stack every frame.
@@ -1376,12 +1387,13 @@ out-parameter rather than a second call, and it is left untouched when there is 
 `slotStateProvenance`. The pure poll asks both at the **same** simulation tick (`observation.appliedTick` in
 `rebuildAppliedCaptureInversion`). Same-tick is the load-bearing part: it is what licenses the join's rule that an
 observation naming no capture speaks for the tick it was asked about. The reader is templated on the peer types, so
-this header names no reconciliation type of its own. The composition root, `ASimulationManagerUImpl::pollInputHistoryLanes`,
-binds `SimulatableBrawler` through `makeReconciliationSlotReader`. It holds a **borrowed** reference that lives for
+this header names no reconciliation type of its own. The feed, `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes`
+(the composition root's until task 22), binds `SimulatableBrawler` through `makeReconciliationSlotReader`. It holds a **borrowed** reference that lives for
 one poll, because it is built at that call site. `hasCorrectionCache` is a same-thread presence test (guard G-06).
 
-`InputHistoryStore::poll` sweeps `id`'s resident capture window into its own ring at render rate. Its two
-`static_assert`s carry the accepted-tear argument, and their messages are the record. A capture slot is read from
+`InputHistoryStore::poll` sweeps `id`'s resident capture window into its own ring at render rate. Its
+`static_assert` carries the accepted-tear argument, and its message is the record; it names the two asserts it
+replaced (§8.6, C22-8). A capture slot is read from
 the game thread while the physics thread may be writing it, so a capture that owned memory would turn that tear
 from a wrong glyph into a crash.
 
@@ -1397,8 +1409,8 @@ live machine-state sample the lane poll can take this tick. Its parameters:
 * `remoteObservations` are the relayed reads this client served for a **remote** character, and they supply the
   delay lane's client half. `remoteArrivals` (when each relayed capture finally arrived) and `rollbackWindowTicks`
   (how far back a resim may still reach) together make the relay-health lane. A locally controlled character uses
-  the nine-argument overload, which forwards `NoRemoteDelayObservations`, `NoRemoteInputArrivals` and 0. The manager
-  makes that choice: it takes the twelve-argument form only when both relay rings exist. The pure poll selects the
+  the nine-argument overload, which forwards `NoRemoteDelayObservations`, `NoRemoteInputArrivals` and 0. The feed
+  makes that choice (the manager did until task 22): it takes the twelve-argument form only when both relay rings exist. The pure poll selects the
   source by **type**, and a `static_assert` pairs the two type choices, so this layer forwards a choice rather than
   making a second one.
 
@@ -1416,3 +1428,247 @@ locality, not a fence.
 | C25-5 | "`GetLocalPlayers()` is append-only" | `UGameInstance::AddLocalPlayer` appends, but `UGameInstance::RemoveLocalPlayer` erases with `RemoveAt` and shifts later entries. Index 0 is still the first-joined player, because this project's only removal path, `AOGBrawlerPlayerController::LeaveLocalPlayer`, never removes local player 0; since og-brawler-uploadtosteam task 13 it removes the last local player (guard G-07). |
 | C25-6 | ⛔ "a kept inversion would outlive the slots it describes" (a fence on the local) | `rebuildAppliedCaptureInversion` calls `inversion.clear()` on entry, and `pollInputHistoryLanes` rebuilds it before either lane reads it. A hoisted member would be cleared the same way, so the fence prevented nothing and was dropped rather than tagged. |
 | C25-7 | `firstLocalCharacterId` is `nullopt` for "a dedicated server, or a client before its pawn has been possessed" | Incomplete. It is also `nullopt` for a pawn that is not an `AOGBrawlerUECharacter`, and it answers **0**, not `nullopt`, while the pawn's id is unassigned (§8.1). |
+
+### 8.6 The feed, `BrawlerInputHistoryFeedUImpl` (og-ue-simulationcomponentandmanagersplit task 22)
+
+Until task 22 (2026-10-21) the display's feed lived on `AOGBrawlerSimulationManager`: the store, the two polls and the four
+reads were members of the manager, and their reasoning sat in `OGBrawlerSimulationManager-rationale.md` §1 and in that
+file's guards G-05 to G-13. Task 22 moved them, statement for statement and in order, into `BrawlerInputHistoryFeedUImpl`,
+declared in `InputHistoryVisualizationUImpl.h` beside `InputHistoryStore`. The text below is the manager rationale's,
+verified against the tree before it moved; what was false is corrected in place and listed in the table at the end.
+The guards are this file pair's G-09 to G-17 now.
+
+**What the feed holds.** The store (`m_inputHistory`, the `InputHistoryStore` of §8.1), the two polls
+(`pollInputHistory`, `pollInputHistoryLanes`), the four reads (`getInputHistoryRows`, `getInputHistoryLanes`,
+`getRelayReadReadout`, `gatherNearestCandidates`) and `forgetCharacter`, which the manager's
+`unregisterFromNewFramework` called once where it used to erase the store directly (since task 28 the brawler's hook
+`onUnregistered` calls it, from the session's `unregisterFromNewFramework`). The actor holds the feed as
+`m_inputHistoryFeed`. Callers reach it through `inputHistoryFeed()`: the HUD through the `const` overload, and the
+component's two polls through the mutable one, because a poll writes the feed's own store. `nearestCharacterIdTo`
+takes the feed rather than the manager (§8.3). The scoreboard's ring-out read did **not** move here: it became the
+manager's generic `getVizSlice`, the session's since task 24b (`ScoreboardDisplay-rationale.md` §2.4).
+
+**Const access, and the compiler holds it.** Since task 24b the feed holds a `const` reference to the session,
+`m_session` (its alias `Session` is `UESimulationSession<BrawlerSessionTraitsUImpl>`), bound at the actor's construction
+from the actor's own `m_session`, viewed as `const`. It reads the session's public const members: `getManager()` (the
+manager's optional), `getStorage()`, the const `editReconciliation()`, and the diagnostic doors `getLocalInputCache`,
+`isLocallyControlledOnThisPeer`, `getRelayedReadObservations` and `getRelayedInputArrivals`, and since task 25 the
+transport's `getReplicatedTierConsumer()` and `getClientEffectiveInputDelayTicks()` (in task 24b it read those two through
+the session's const `owner()`, from the actor, which held the transport until task 25). It writes nothing but its own store, and it is nobody's friend:
+every member it reads is public and `const`. A `static_assert` in the class pins the reference `const`, so a mutable
+reference, which would be a write door from a diagnostic display into the session's mutable doors and, through
+`owner()`, into the actor's, does not compile. That is the pattern of the latency member, `UELatencyBudgetDiagnostics`
+(og-tickdriver task 18).
+
+*Until task 24b the feed was the manager's friend and held a `const AOGBrawlerSimulationManager&`, reading the manager's
+private peers (`m_manager`, `m_storage`, `m_reconciliation`, `m_inputResolution`, `m_replicatedTierConsumer`) and the same
+four doors; from task 24a until task 24b four `const` bridges on the actor kept those names readable
+(`OGBrawlerSimulationManager-rationale.md` §2). Every read selects the same function on the same object as before: the
+session's members are the actor's, moved unchanged, and each private-member read became the public const member that
+returns that object (`m_manager` → `getManager()`, `m_storage` → `getStorage()`, `m_reconciliation` → the const
+`editReconciliation()`, the atomic through `getClientEffectiveInputDelayTicks()`, which reads `m_inputResolution`), or
+its address: `m_replicatedTierConsumer.has_value()` became `getReplicatedTierConsumer() != nullptr`, whose answer is the
+optional's value's address or null.*
+
+**Construction and destruction order.** `m_inputHistoryFeed` sits exactly where `m_inputHistory` sat, above the latency
+member, which is the session's since task 24a, so above `m_session`. Binding a reference to a member object of the
+object under construction is legal before that member is constructed (since task 24b the feed binds `m_session`,
+declared after it), and the feed forms no reference into any of the session's members at construction: it reads
+through the reference only from its polls and reads, which run after `BeginPlay`. So no member is referred to before its constructor has run (the rule the manager design's §4.5 states for
+these parts). The store is destroyed where it always was.
+
+**Optimization state (lead ruling F1).** Every moved function compiled optimized in Development before the move,
+because the manager's header defined them in the class, outside any `OGSIM_OPTIMIZE_OFF` / `ON` pair (measured on
+the pre-task object). They still do: the polls and two of the reads are defined in `InputHistoryVisualizationUImpl.cpp`,
+which has no such pair; the other two reads and `forgetCharacter` are defined in the class; `getVizSlice` is a member
+template, compiled with the instantiating translation unit's end state, which is optimized. No function's state
+changed.
+
+#### The read crossing — `pollInputHistory`, and why its tear is accepted
+
+`getLocalInputCache` opens a game-thread door onto `m_localInputCaches`, whose *contents* are
+written on the physics thread by `SimulationInputResolution::collectInputAll` (`LocalInputCache::push`)
+and by `wipeAllForResync` (`LocalInputCache::clear`). Unlike its neighbour `getLastRelayedInput`,
+this reader is **not** same-thread with that writer. `pollInputHistory` is the only caller that
+**dereferences** it, so the argument belongs here rather than at the door.
+`isLocallyControlledOnThisPeer` also calls it, but only compares the pointer with `nullptr`, which
+reads no slot byte (`OGBrawlerSimulationManager-rationale.md` §11 C6).
+
+**What is *not* racing, and it is the larger half.** The `std::unordered_map` that holds the lines
+is only ever restructured on the **game thread** — `registerLocalCharacter` and
+`unregisterCharacter` run from registration, which the peer's own thread roster records as
+game-thread in full. The poll's `find` is therefore same-thread with the only writer of the map's
+structure, and the container cannot rehash under it. `LocalInputCache`'s slot vector is sized once
+in its constructor and never resized, so the storage a read lands in cannot be reallocated either.
+**The exposure is confined to the bytes of one slot**, not to the container that holds it.
+
+**What can tear, and what the worst observable consequence is.** A slot is
+`{ tick, occupied, input }`, and `push` writes those in that order, so a game-thread read can
+observe a new `tick` beside the previous occupant's payload — or a payload half-updated. A
+`simulatableBrawler::PlayerInput` is three vectors and four scalars rather than the single byte
+`SlotStateProvenance` rides the same unsynchronized access with, so the precedent is cited but
+**not borrowed**. The worst outcome is that **one capture tick is classified from wrong values**:
+one row of a diagnostic panel briefly shows the wrong direction glyph or button mask, the two
+fields a row is made of. Because the row fold is idempotent, a wrong classification does not
+self-heal — it persists as a mis-drawn or mis-split row until that row scrolls out of the 64-row
+ring.
+
+**Why it cannot corrupt the ring.** `InputHistoryRowRing::appendCapture` is keyed on the capture
+tick **alone**, and the poll passes its own loop index, never a value read out of the slot. A torn
+payload therefore cannot move a tick, cannot reach `++tickCount` twice, and cannot make a stale
+tick rejoin an older row. The blast radius of a tear is the classification of one capture tick:
+the direction and button mask it contributes, and so whether its row extends or splits there.
+
+**Why it cannot reach the simulation.** The ring is client-local: it is never replicated, never
+enters a correction payload and never reaches `compute_checksum`. The poll's route into the core is
+`const`-only in both directions — `getLocalInputCache` returns a pointer to `const`, and both
+reconciliation seams are `const` members reached through a `const` reference (`slotStateProvenance`
+on the diagnostics view, `getAppliedCaptureTickRef` on the peer itself) — so there is no write path
+back at all, and nothing downstream of the ring decides anything. Since task 22 the whole manager is
+reached through a `const` reference too, and since task 24b the whole session.
+
+**Why it cannot fault.** A torn read yields wrong values, never a wrong pointer: a
+`static_assert` at the poll pins `simulatableBrawler::PlayerInput` trivially copyable (it owns
+no memory). A member that owned an
+allocation would turn this tear into a crash, and that assert is what stops one landing quietly.
+*(Until og-syncedInput-rework task 3 there were two asserts: the input was a six-slice composite,
+which fails `is_trivially_copyable` through `std::tuple`'s implementation alone, so the composite
+was pinned trivially destructible and the machine sub-input the display read trivially copyable.
+Since task 3 `simulatableBrawler::PlayerInput` is the flat `SyncedPlayerInput`, and one
+trivially-copyable assert, whose message names the two it replaced, covers both.)*
+
+**And it is bounded in time.** The read is diagnostics-only and gated at its call site in
+`UOGBrawlerSimulatableComponent::TickComponent` — the master `OGBrawler.InputHistory`, then the row-panel
+toggle, then the first local character's id — so it can be switched off outright without reshaping
+anything.
+
+**The second caller shares this crossing and heals faster than the first.** `pollInputHistoryLanes`
+reads the physics-written correction cache through the same two `const` seams, fronted by
+`ReconciliationSlotReader` so both are asked at one simulation tick. Its worst outcome is one wrong
+*cell*, not one wrong row — and unlike the row fold, which is idempotent and therefore keeps a bad
+classification until it scrolls away, a provenance cell is **rewritten on every poll while its tick
+is still resident**, so a torn lineage byte is corrected on the next frame. The machine-state lane
+crosses nothing at all: its sample is read at the caller's own visualization site, from the
+`attackSimState` the block-prediction visualization earlier in the same `TickComponent` body already
+reads.
+
+**A third feed inside the same poll, and it crosses NOTHING at all.** The input-delay
+decomposition `pollInputHistoryLanes` computes for `OGBrawler.InputHistoryInputDelay` reads
+`m_replicatedTierConsumer` (GAME-THREAD-written, `OGBrawlerSimulationManager-rationale.md` §5), the manager's
+`getTimeConfig()` (GAME-THREAD-set at `BeginPlay` by the three session-knob intakes, and afterwards mutated only by
+the relay-delay floor's replication listener, `applyReplicatedRelayDelayFloor`) and
+`m_inputResolution.getClientEffectiveInputDelayTicks()` (the atomic the write crossing of
+`OGBrawlerSimulationManager-rationale.md` §1 publishes — GAME-THREAD-written, and this reader is on the SAME thread as that
+writer, not the physics thread that only loads it). `pollInputHistoryLanes` itself already runs on the game
+thread. Three same-thread reads of three game-thread-written values is not a crossing, so the
+CROSSING block (`OGBrawlerSimulationManager-rationale.md` §0) names it in the READ row's prose rather than adding a third
+bullet, and this paragraph is the same-thread argument that entry names. ⛔ **NO NEW PUBLIC ACCESSOR was
+added for any of the three** — the tier consumer and the `TimeConfig` pointer were already public on the manager
+(`getReplicatedTierConsumer`, `getTimeConfigPtr`), and the resolution peer's atomic is read through the same private
+member, `m_inputResolution`, whose diagnostics this poll already reads through `isLocallyControlledOnThisPeer` and the
+two relayed-ring doors. Since task 22 the feed reads all three through its `const` manager reference; since task 24b
+the `TimeConfig` through the session's `getManager()`, and the tier consumer and the atomic through the actor's public
+`getReplicatedTierConsumer()` and `getClientEffectiveInputDelayTicks()` (which reads the same atomic through
+`m_inputResolution`), by way of the session's const `owner()`; since task 25 those two are the session's own const reads
+(`UESimulationSession-rationale.md` §9, in OGSimulationUnreal's docs).
+
+**The presence test crosses nothing either.** `ReconciliationSlotReader::hasCorrectionCache()`
+asks `m_reconciliation.findCorrectionCache<T>(id) != nullptr` through the same reader the two
+diagnostic seams already share, inside the same `pollInputHistoryLanes` call; the map it
+inspects is mutated on the GAME THREAD alone (`createCacheFor`/`removeCacheFor`, from the
+registration facade), never the physics thread, so this is a same-thread read like the three
+above it, not a fourth crossing (guard G-06).
+
+#### Why the polls are narrow, and why the list no longer names them
+
+Until task 22 the manager's NARROW PASSTHROUGHS list (`OGBrawlerSimulationManager-rationale.md` §1, *Why the passthroughs
+are narrow rather than `edit*()` accessors*) named `pollInputHistory`, `getInputHistoryRows`,
+`pollInputHistoryLanes` and `getInputHistoryLanes`. They left it with the code. The list exists to stop a game-thread
+caller getting a general mutable handle onto a core-owned object; the feed cannot hand one out, because it holds no
+mutable reference to anything but its store, and the `static_assert` above makes that a compile error to change.
+The paragraphs below moved with them.
+
+`getInputHistoryRows` and `getInputHistoryLanes` both return a pointer to `const` for the same
+reason: the panel that draws the rows, and the bars that draw the cells, must not write one.
+
+`pollInputHistoryLanes` guards on `runsPrediction()` around the one
+line that reads `getNetworkEstimator()`: an authority manager has no prediction offset, and
+it passes `std::nullopt` rather than a zero, because a display told "the offset is 0" would
+draw an authority marker on the newest cell (guard G-09). It guards the input-delay decomposition on the tier
+consumer's and the manager's presence (with `includeDelay` and the locality test,
+guard G-11), and for the same reason: a role with neither has nothing to decompose.
+
+⛔ **THE LIST WAS UNCHANGED BY THE INPUT-DELAY DISPLAY, AND THAT WAS THE POINT.**
+`pollInputHistoryLanes` already named the one entry point this display reaches through; its
+delay decomposition is three more same-thread reads INSIDE that existing poll, not a
+new one beside it. Widening what one narrow entry point does is exactly what "narrow" is
+meant to allow — it is adding a second *name* that would have been the drift that list warned about.
+
+⛔ **THE CLOCK READING ADDS NO NEW CROSSING CLASS, AND THIS SAYS SO RATHER THAN LEAVING IT
+SILENT.** The `ClockDriftReading` the same poll builds for the frame meter's clock line
+(§7.12) is the SAME PAIR of postures argued two paragraphs
+above for the prediction offset, not a third thing. `getTargetPredictionTick` and
+`getLastAuthorityTick` read `NetworkTimeEstimator` state its own contract declares
+GAME-THREAD-written, by `updateRTT` and `recordAuthorityTick`, and this reader is on that
+thread — same-thread, nothing to tear. `getPredictionTick`, `evaluateDrift` and
+`getRequiredInputDelayIncreaseStallTicks` reach the physics-written prediction tick and stall
+debt (the debt is written on both threads: the game thread's `requestInputDelayIncreaseStall` adds to it, the step's
+`advancePrediction` decrements it), which is the accepted tear already taken: a naturally-aligned four-byte load on x64
+cannot tear, so the worst case is one line of diagnostic text one tick stale. **The CROSSING
+table gains no bullet** — this is more reads inside one entry point.
+⛔ It takes `runsPrediction()` for the harder of the two reasons: `getClientClock()` does not
+return a wrong number on a role that does not predict, it calls `std::terminate` (guard G-12).
+
+⛔ **THE CLOCK'S EVENT SEAM IS SEVEN MORE READS INSIDE THAT SAME POLL, AND STILL NO
+NEW CROSSING CLASS.** `skipCount`, `lastSkipTick`, `stallCount`, `lastStallTick`,
+`hardResyncCount`, `lastHardResyncFromTick` and `lastHardResyncToTick` are plain
+physics-written words on `ClientPredictionClock`, taken under the SAME `runsPrediction()` guard,
+in the SAME call, for the SAME display that decides nothing. Each is a naturally-aligned
+four-byte load that cannot tear, so the accepted tear argued above covers all seven and **the
+CROSSING table gains no bullet**.
+⛔ **THEY ARE READ THROUGH `getDiagnostics()`, NEVER THROUGH A BARE ACCESSOR** — the clock
+deliberately publishes none, so the display cannot acquire a second, unfenced route to the same
+words.
+
+⭐ **THE COUNT OF EACH PAIR IS READ BEFORE ITS TICK, AND THE ORDER IS THE ARGUMENT** (guard G-13). The clock
+writes them the other way round — tick, then count — at every site in `advancePrediction`. Two
+opposed orders make the harmful straddle — a fresh count beside a stale tick, which would attribute an event to a
+tick that predates it — the one the program order does not produce. What the order leaves possible is the reverse —
+a stale count beside a fresh tick — and it costs nothing: the poll's difference is zero, so it files nothing and the
+next poll picks the event up whole.
+
+> ⚠ **R0, task 11 (`OGBrawlerSimulationManager-rationale.md` §11 C14).** Both sides of each pair are plain
+> `unsigned int`s: the writes are not releases and the reads are not acquires, so C++ promises no
+> ordering between them, and an optimizing compiler may reorder either pair. Program order makes
+> the harmful straddle *unlikely*; it does not make it *unobservable*. The read order is still
+> worth keeping — reversing it makes the harmful case the expected one. A guarantee would need
+> acquire/release atomics in `ClientPredictionClock`, which is `og-simulation`'s to change.
+
+⛔ **DO NOT REVERSE THE READ ORDER.** It is not a style choice: reading tick-first makes the
+harmful case the likely one, and that case is the one that would attribute an event to a tick
+that predates it — a wrong answer rather than a late one, on the one crossing whose
+consumer draws a position from the value.
+
+⭐ **The offset is read at the POLL, not at the draw, and that placement is the whole point.**
+The lane axis is built from the `liveTick` this same call is given, so pairing the offset
+with it there makes the authority marker and the axis it is measured against one snapshot by
+construction. An earlier version handed the display a `const` accessor that read the
+prediction tick a second time at HUD draw time; a physics step landing between the two reads
+moved the marker a column while its printed offset held, and the accessor is gone rather than
+tolerated. ⛔ Do not reintroduce a clock accessor for a display: give the display the poll's
+reading.
+
+#### Corrections (R0, task 22): claims the moved text and entries carried that were not true
+
+| id | the moved text said | the tree says |
+|---|---|---|
+| C22-1 | a torn row "shows the wrong direction glyph, button mask or action id", and "the blast radius of a tear is the three *fields* of at most one row" | A row is a direction and a button mask (`InputHistoryRow`); `appendCapture` takes only those two from a capture, and no action id reaches the ring. Corrected to the two fields and the extend-or-split choice they drive. |
+| C22-2 | `simulatableBrawler::PlayerInput` "is several vectors" | It is three glm vectors and four scalars (`SyncedPlayerInput`). Imprecise rather than false; made exact. |
+| C22-3 | the read "is gated on one predicate at its call site" | It is gated on three, in order: the master, the row-panel toggle, and the first local character's id equal to the component's own (`OGBrawlerSimulatableComponent-guards.md` G-27 to G-29). The conclusion, that it can be switched off outright, stands. |
+| C22-4 | the machine-state sample comes from state "the block-prediction visualization on the line above already holds" | The block-prediction visualization reads the same `attackSimState` earlier in the same `TickComponent` body, not on the line above. |
+| C22-5 | the `TimeConfig` is "GAME-THREAD-bound at `BeginPlay`, mutated only by the OnRep listeners" | It is set at `BeginPlay` by three intakes (`setRelayDelayFloorTicks`, `setCorrectionRotationK`, `setResimTriggerPolicy`) and afterwards mutated by one listener path, `applyReplicatedRelayDelayFloor`. All game thread, so the same-thread conclusion stands. |
+| C22-6 | the resolution peer's atomic "is read through the SAME private member this method already touches for the offset" | The offset is read through `m_manager` (the estimator); the atomic through `m_inputResolution`, which the poll already reaches through `isLocallyControlledOnThisPeer` and the relayed-ring doors. |
+| C22-7 | (G-10, now G-14) "the per-tier ceiling beside it, `TimeConfig::rollbackWindowHardCap`" | `rollbackWindowHardCap` is a single, non-per-tier ceiling, read on both roles. The per-tier ceiling is `TimeConfig::rttTierRollbackCeilings`, read through `ReplicatedTierConsumer::effectiveRollbackCeiling`: "INTENDED API, NO PRODUCTION CALLER". Annotated on the guard; the prohibition stands. |
+| C22-8 | §8.4: `InputHistoryStore::poll`'s "two `static_assert`s carry the accepted-tear argument" | There is one, and its message names the two it replaced (og-syncedInput-rework task 3). Corrected in §8.4. |
+| C22-9 | the stall debt is "physics-written" | It is written on both threads (added by the game thread's request, decremented by the step). The accepted-tear conclusion is unchanged. |
+| C22-10 | §7.12: "A FRESH COUNT BESIDE A STALE TICK IS THEREFORE IMPOSSIBLE" | The same overclaim `OGBrawlerSimulationManager-rationale.md` §11 C14 records: non-atomic data, so unlikely, not impossible. Annotated in §7.12. |
