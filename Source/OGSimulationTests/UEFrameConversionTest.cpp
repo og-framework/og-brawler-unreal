@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <type_traits>
 #include <vector>
 
 #include "CoreMinimal.h"
@@ -20,14 +21,20 @@
 
 namespace ueFrameConversionTest
 {
-    using UeCentimetres = BasicUeFrame<BasicSimFrame<AxisFrame::UeZUpLeftHanded, 100.f>>;
-    using YMetres = BasicUeFrame<BasicSimFrame<AxisFrame::YUpRightHanded, 1.f>>;
+    struct UeCentimetresSimFrame
+    {
+        static constexpr glm::vec3 kForward = glm::vec3(1.f, 0.f, 0.f);
+        static constexpr glm::vec3 kRight = glm::vec3(0.f, 1.f, 0.f);
+        static constexpr glm::vec3 kUp = glm::vec3(0.f, 0.f, 1.f);
+        static constexpr float kUeCentimetresPerUnit = 1.f;
+    };
 
+    using UeCentimetres = BasicUeFrame<UeCentimetresSimFrame>;
+    using YMetres = BasicUeFrame<simFrame>;
+
+    static_assert(std::is_same_v<YMetres, ueFrame>, "UEFrameConversion: the YMetres cases test the shipped ueFrame");
     static_assert(!UeCentimetres::kReflects, "UEFrameConversion: UE's own frame does not reflect");
     static_assert(YMetres::kReflects, "UEFrameConversion: og's right-handed Y-up frame reflects UE's left-handed Z-up frame");
-    static_assert(BasicUeFrame<BasicSimFrame<AxisFrame::YUpRightHanded, 100.f>>::kReflects
-            && !BasicUeFrame<BasicSimFrame<AxisFrame::UeZUpLeftHanded, 1.f>>::kReflects,
-        "UEFrameConversion: kReflects follows the axis frame only");
 
     bool sameBits(float a, float b)
     {
@@ -241,7 +248,7 @@ namespace ueFrameConversionTest
             }
         }
     }
-TEST_CASE("UEFrameConversion.UeCentimetresIsTodaysComponentCopy", "[SimulationFrame][UEFrameConversion]")
+TEST_CASE("UEFrameConversion.UeCentimetresIsAComponentCopy", "[SimulationFrame][UEFrameConversion]")
 {
     for (const glm::vec3& og : edgeAndSeededVectors(31u, 2000u, 5000.f))
     {

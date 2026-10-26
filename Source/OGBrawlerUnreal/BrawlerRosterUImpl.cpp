@@ -94,9 +94,9 @@ void BrawlerRosterUImpl::seedSpawnPointsFromLevel(UWorld& world, ENetMode netMod
 	{
 		const glm::vec3& point = staticData.m_ringoutStaticData.spawnPoints[slot];
 		UE_LOG(LogOGMgmt, Warning,
-			TEXT("[Ringout.spawnPoints]   slot %u -> (%.*f, %.*f, %.*f) [%s]"),
-			slot, simFrame::lengthDecimals(2), point.x, simFrame::lengthDecimals(2), point.y,
-			simFrame::lengthDecimals(2), point.z,
+			TEXT("[Ringout.spawnPoints]   slot %u -> (%.4f, %.4f, %.4f) [%s]"),
+			slot, point.x, point.y,
+			point.z,
 			(slot < placements.size()) ? TEXT("level") : TEXT("authored"));
 	}
 }

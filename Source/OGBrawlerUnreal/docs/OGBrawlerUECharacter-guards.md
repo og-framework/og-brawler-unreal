@@ -28,7 +28,7 @@ entry replaced.
 **Site:** `GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);` in the constructor.
 
 > ⛔⛔ 42 / 96 IS A CONTRACT. `brawlerMovementSimulation::PhysicsSetup::body` ships
-> `CapsuleGeometry{42.f, 96.f}` with `isRoot`, and `ChaosPhysicsFactory`'s adopt-root branch
+> `CapsuleGeometry{0.42f, 0.96f}` [metres since og-sim-metres-yup; the comment gave the centimetre values 42 and 96] with `isRoot`, and `ChaosPhysicsFactory`'s adopt-root branch
 > `checkf`s the authored capsule AGAINST the descriptor instead of resizing it — a different
 > number here asserts at the first character registration.
 
@@ -47,10 +47,10 @@ backend (radius and half-height compared with `FMath::IsNearlyEqual`):
   descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
   camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
 
-**Units (og-sim-metres-yup tasks 5a, 7, 8 and 7b).** 42 / 96 are UE centimetres. The descriptor now ships
-`CapsuleGeometry{simFrame::legacyCm(42.f), simFrame::legacyCm(96.f)}` (`BrawlerMovementSimulation.h`), in og-simulation
-lengths, and both checks convert the descriptor's sizes to UE units with `ueFrame::lengthToUe` before they compare. So the contract
-is 42 / 96 cm on this side at every unit knob, and this literal does not change when the simulation's unit does.
+**Units (og-sim-metres-yup tasks 5a, 7, 8, 7b and 22).** 42 / 96 are UE centimetres. The descriptor ships
+`CapsuleGeometry{0.42f, 0.96f}` (`BrawlerMovementSimulation.h`), in og-simulation metres, and both checks convert the
+descriptor's sizes to UE units with `ueFrame::lengthToUe` before they compare. So the contract is 42 / 96 cm on this
+side and 0.42 / 0.96 m on the simulation's: change both together.
 
 ⚠ Both `checkf`s compile out when `DO_CHECK == 0`, and a Shipping build would then run with a
 capsule whose size disagrees with the simulation's. Task 21 drops the Chaos bullet with the Chaos

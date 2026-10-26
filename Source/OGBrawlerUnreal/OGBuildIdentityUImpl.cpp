@@ -201,13 +201,11 @@ void applyNetworkVersion()
 	if (buildIdentityUImpl::overridesNetworkVersion(identity.label))
 		FNetworkVersion::SetProjectVersion(*(FNetworkVersion::GetProjectVersion() + TEXT("+") + label));
 
-	const FString wire  = joinScreenUImpl::toFString(buildIdentityUImpl::wireToken());
-	const FString units = joinScreenUImpl::toFString(buildIdentityUImpl::unitsNameOf(kUnitsPerMetre));
-	const FString axes  = joinScreenUImpl::toFString(buildIdentityUImpl::axesNameOf(kAxisFrame));
+	const FString wire = joinScreenUImpl::toFString(buildIdentityUImpl::wireToken());
 
 	UE_LOG(LogOGBuildIdentity, Display,
-		TEXT("OGBuildIdentity: label=%s source=%s backend=%s networkProjectVersion=%s wire=%s units=%s axes=%s"), *label,
-		sourceName(identity.source), *backend, *FNetworkVersion::GetProjectVersion(), *wire, *units, *axes);
+		TEXT("OGBuildIdentity: label=%s source=%s backend=%s networkProjectVersion=%s wire=%s units=m axes=YupRH"), *label,
+		sourceName(identity.source), *backend, *FNetworkVersion::GetProjectVersion(), *wire);
 
 #if !UE_BUILD_SHIPPING
 	if (const std::optional<FString> presented = wireTokenOverride())

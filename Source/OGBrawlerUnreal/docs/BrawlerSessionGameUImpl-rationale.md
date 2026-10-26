@@ -226,9 +226,10 @@ unchanged.*
 `ueFrame::lengthToSim` before they reach `FMovementStaticDataCVars`. Its `[Movement.cvar]` line still echoes the UE values
 it read, since it reports UE settings. So the hook converts the sim's value back, `simGravityZ` =
 `ueFrame::lengthToUe(gravity)` narrowed to `float`, and compares that with `GetGravityZ()` within the same 1e-3. The
-message still prints both values in cm/s². At the shipped knobs (centimetres) both conversions are a float-to-double copy
-and back, so the compared values are the same floats as before. If the sim's value reached `StaticData` unconverted in
-metres, the check would compare -98000 with -980 and fire.
+message still prints both values in cm/s². The simulation is in metres: `lengthToSim` turns the project's default
+-980 cm/s² (`UPhysicsSettings::DefaultGravityZ`) into the float -9.8 m/s², and `lengthToUe` multiplies that by 100 in
+double, which narrows back to exactly -980, so the check compares -980 with -980. If the value reached `StaticData`
+unconverted, the sim would run at -980 m/s², and the check would compare -98000 with -980 and fire.
 
 ---
 

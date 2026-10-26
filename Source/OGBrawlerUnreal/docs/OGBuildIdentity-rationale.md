@@ -41,7 +41,7 @@ and its login check are §8):
 * the dedicated server's `OGBrawlerSession: build label=<label>` line (§5).
 
 At engine start each process logs one line:
-`LogOGBuildIdentity: Display: OGBuildIdentity: label=<label> source=<source> backend=<token> networkProjectVersion=<v> wire=<token> units=<cm|m> axes=<ZupLH|YupRH>`
+`LogOGBuildIdentity: Display: OGBuildIdentity: label=<label> source=<source> backend=<token> networkProjectVersion=<v> wire=<token> units=m axes=YupRH`
 (the last three fields are §8).
 
 ## 2. Reading `build_info.txt`
@@ -227,22 +227,21 @@ pair.
 og-sim-metres-yup task 15 (the user's ruling Q2, 2026-10-25: a login lacking the token is refused). Each of
 og-simulation's three payloads carries its own version byte: the correction state
 (`correctionStateBuffer::kWireFormatVersion`), the relayed input ring (`relayedInputRing::kWireFormatVersion`)
-and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). While og-simulation moves to
-metres and a Y-up frame, each version is a `constexpr` function of the two knobs in `SimulationFrame.h`
-(`wireFormatVersionFor` in each codec), because a flip changes what the bytes mean without changing their
-layout:
+and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 8, 3 and 3, so the
+token is c8.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
+mean without changing their layout, so each step bumped the versions it changed. While the move ran, each version
+was a `constexpr` function of `SimulationFrame.h`'s two frame knobs; task 24 deleted the knobs and froze the
+versions at the last row:
 
-| knobs | correction | ring | bundle | token |
+| frame | correction | ring | bundle | token |
 |---|---|---|---|---|
-| cm, Z-up (shipped today) | 6 | 2 | 2 | c6.r2.b2 |
+| cm, Z-up (before the move) | 6 | 2 | 2 | c6.r2.b2 |
 | m, Z-up (after flip U) | 7 | 2 | 2 | c7.r2.b2 |
-| m, Y-up (after flip X) | 8 | 3 | 3 | c8.r3.b3 |
-| cm, Y-up (probe only) | 9 | 3 | 3 | c9.r3.b3 |
+| m, Y-up (after flip X; shipped) | 8 | 3 | 3 | c8.r3.b3 |
 
 The ring and the bundle carry the brawler's input, whose world vectors are directions with no length (the aim
-is checked to be a unit vector, the move direction comes from the stick), so only the axis changes them. Each codec's
-`kLegacyFrameWireFormatVersion` is its version at cm, Z-up: the version on main when the knobs landed.
-`WireVersionKnobTest.cpp` in og-simulation-tests checks all four combinations in one build.
+is checked to be a unit vector, the move direction comes from the stick), so only the axis changed them.
+`WireVersionKnobTest.cpp` in og-simulation-tests pins the three shipped numbers.
 
 **The token.** `buildIdentityUImpl::wireToken()` is `c<correction>.r<ring>.b<bundle>`, each version in
 decimal (`wireTokenFor`; a `static_assert` pins the format). It is built at compile time from the three
@@ -257,8 +256,8 @@ classifies it with `classifyWireLogin` (`WireLoginVerdict`: `Match`; `Missing` f
 `static_assert`s pin both functions. A refusal logs the same Warning as §7,
 `OGBuildIdentity: refused a login: <reason>`, with the server's token first:
 
-* "Different wire format: this server speaks c6.r2.b2, the client c0.r0.b0."
-* "Different build: the client reports no wire format, this server speaks c6.r2.b2." (a build from before
+* "Different wire format: this server speaks c8.r3.b3, the client c0.r0.b0."
+* "Different build: the client reports no wire format, this server speaks c8.r3.b3." (a build from before
   this check, or an empty token)
 
 A backend refusal takes precedence: a client of the other backend is told about the backend. The client sees
@@ -271,11 +270,13 @@ arrives, after the player was admitted. A client that receives a correction of a
 version (`USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation`). The player is then in a
 session that cannot work. The login check refuses before admission, and its text names both tokens.
 
-**The start line.** The `OGBuildIdentity:` Display line (§1) ends with `wire=<token> units=<cm|m>
-axes=<ZupLH|YupRH>`, from the same three constants and the two knobs (`unitsNameOf`, `axesNameOf`; a
-`static_assert` pins the four spellings). The fields are appended after the earlier ones, so a reader of the
-earlier fields is unaffected. `units=` is each capture's length-unit marker: a log line that reports
-simulation state prints its lengths in that unit, and log tooling reads the marker per capture.
+**The start line.** The `OGBuildIdentity:` Display line (§1) ends with `wire=<token> units=m axes=YupRH`: the
+token from the same three constants, then the simulation's length unit and axes as literals in the format string.
+The fields are appended after the earlier ones, so a reader of the earlier fields is unaffected. `units=` is each
+capture's length-unit marker: a log line that reports simulation state prints its lengths in that unit, and log
+tooling reads the marker per capture (a capture with no marker predates it and is in centimetres). While the frame
+knobs existed (og-sim-metres-yup tasks 15 to 23) the two values came from them, `units=cm` or `units=m` and
+`axes=ZupLH` or `axes=YupRH`; task 24 froze them, because the tools still read the marker.
 
 **Testing a mismatch: `-OGWireTokenOverride=<token>`.** In a non-Shipping build, a client started with
 `-OGWireTokenOverride=<token>` presents `<token>` at login instead of its own token. With no value

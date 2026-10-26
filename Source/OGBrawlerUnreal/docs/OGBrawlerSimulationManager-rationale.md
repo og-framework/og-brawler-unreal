@@ -2668,7 +2668,7 @@ its ground probe, a capsule sweep of `queryVolumeIds[0]` against `collisionCateg
 > in the shipped composite (SimulatableBrawler.h), so this runs for every character in every
 > session.
 > ⚠ [movement-sim task 17] THE SHAPE IS A CAPSULE, NOT A SPHERE. Task 11 replaced the skeleton's
-> 30 cm sphere with `CapsuleGeometry{42.f, 96.f}` and set `isRoot`, so the factory ADOPTS the
+> 30 cm sphere with `CapsuleGeometry{0.42f, 0.96f}` [metres since og-sim-metres-yup; the comment gave the centimetre values 42 and 96] and set `isRoot`, so the factory ADOPTS the
 > pawn's own root capsule rather than creating anything. The category, and every sentence below
 > about what an unmapped category would have done to it, are unaffected — only the noun was stale.
 > Channel is user ruling #6, closed 2026-09-04 and lead-verified free: ch1 is `Damageable` in
@@ -2691,7 +2691,7 @@ its ground probe, a capsule sweep of `queryVolumeIds[0]` against `collisionCateg
 > `character` and resolveHitIdentity only ever sees channels an object query asked for.
 
 Verified: `collisionCategory::world` is `4` and `character` is `5`. The capsule's shape is
-`CapsuleGeometry{42.f, 96.f}`. Channel 1 is `Damageable` in `DefaultEngine.ini`. The only query
+`CapsuleGeometry{0.42f, 0.96f}` (metres since og-sim-metres-yup; the 42 / 96 cm of the pawn's capsule). Channel 1 is `Damageable` in `DefaultEngine.ini`. The only query
 volume in the movement sub-simulation searches `worldOnly`. The "task 13" ownership note is
 workspace provenance and could not be verified from the tree.
 

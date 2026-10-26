@@ -781,9 +781,10 @@ reads the aim plane from the same pose (og-simulationscheduler-withjolt task 19)
 og-simulation axes, and `Tick`'s fallback before the input component is bound is `simFrame::kForward`. The humanoid mesh
 is UE-native data (design ruling Q6): its default forward `(0, 1, 0)` and the rotation built from it are UE-frame maths.
 So `Tick` converts the aim with `ueFrame::directionToUe` (narrowed back to `glm::vec3` by `ueNative::toGlm`) before
-`dMathUtil::getRotationMatrix`, and the rotation reaches the component through `ueNative::toFTransform`. At the shipped
-knobs the conversion is a float-to-double copy and back, so the rotation is computed from the same floats as before; the
-statement sits inside this file's `OGSIM_OPTIMIZE_OFF` span.
+`dMathUtil::getRotationMatrix`, and the rotation reaches the component through `ueNative::toFTransform`. In the Y-up
+frame `directionToUe` maps the og aim `(x, y, z)` to Unreal's `(−z, x, y)`, exactly (a direction has no length factor),
+so the rotation is computed from the Unreal-frame aim; before og-sim-metres-yup's flip X it was a float-to-double copy
+and back. The statement sits inside this file's `OGSIM_OPTIMIZE_OFF` span.
 
 ## 12. History — removed code and orientation comments
 

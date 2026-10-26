@@ -387,12 +387,12 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 	// ⛔ THE CHOICE IS FORGOTTEN WHILE THE STACK IS OFF, so switching it back on picks
 	//   from where the fight is NOW rather than resuming one made from stale positions.
 	std::optional<unsigned int> nearestId;
-	float                       nearestDistanceCm = 0.f;
+	float                       nearestDistance = 0.f;
 
 	if (inputHistoryVisualizationUImpl::nearestStackEnabled())
 	{
 		nearestId = inputHistoryVisualizationUImpl::nearestCharacterIdTo(
-			&manager->inputHistoryFeed(), characterId, m_nearestCharacterId, nearestDistanceCm);
+			&manager->inputHistoryFeed(), characterId, m_nearestCharacterId, nearestDistance);
 		m_nearestCharacterId = nearestId;
 	}
 	else
@@ -446,9 +446,8 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		FrameMeterStackHeader nearestHeader;
 		nearestHeader.isNearestStack = true;
 		nearestHeader.characterId    = *nearestId;
-		// Centimetres are the simulation's unit and metres are the one a reader has an
-		// intuition for at fighting range.
-		nearestHeader.distanceMeters = nearestDistanceCm * 0.01f;
+		// The candidates are og-simulation positions, so the range is already in metres.
+		nearestHeader.distanceMeters = nearestDistance;
 		// ⛔ THE SESSION'S ONE LOCALITY TEST, asked once and carried in the header from
 		//   here on: a ring that has not been created yet is not a local character.
 		nearestHeader.isLocallyControlled =

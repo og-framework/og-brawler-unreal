@@ -266,10 +266,12 @@ display calls `Left`. The angles themselves are unchanged;
 and asserts each arrow is `(-sin, -cos)` of the angle the motion matcher actually tested.
 
 ⛔ THE SIDE, AND A STALE SENTENCE IN `og-brawler`'s OWN `InputSequence.h`. That header
-documents `+pi/2` as "right-of-aim", from `right = (fwd.y, -fwd.x)` annotated "right-hand
-z-up". Every vector reaching it is an Unreal world vector copied component-for-component
-(since og-sim-metres-yup task 8 through `ueFrame::directionToSim`, which is that copy at the shipped knobs),
-and Unreal's right vector is the other perpendicular — `FRotationTranslationMatrix`'s `Y`
+documents `+pi/2` as "right-of-aim", from `right(fwd.y, -fwd.x)` (once annotated "right-hand
+z-up"). Every vector reaching it is an og-simulation world vector (an Unreal one crosses through
+`ueFrame::directionToSim` since og-sim-metres-yup task 8), which the matcher reads as its
+`(forward, right)` pair, `simFrame::forwardRight`. So `fwd` is `(forward, right)`, and
+`(fwd.y, -fwd.x)` turns straight ahead, `(1, 0)`, into `(0, -1)`: right component −1. Unreal
+agrees: its right vector is the other perpendicular — `FRotationTranslationMatrix`'s `Y`
 row, which `USceneComponent::GetRightVector` returns, is `(-sin yaw, cos yaw, 0)`. So
 `(fwd.y, -fwd.x)` is the character's LEFT and `+pi/2` is **left-of-aim**: pressing left
 produced `+pi/2` and the display drew a RIGHT arrow, which is what the user reported. The
@@ -1378,13 +1380,16 @@ when the world holds no other. It takes the feed, not the manager (task 22). The
 (`gatherNearestCandidates`; the manager's until task 22) and the choice is the pure
 header's (`brawlerInputHistoryVisualization::nearestCharacterIdTo`). This function owns neither, and it is the one
 place they are put together. `previousChoice` is last frame's answer. The pure selector's hysteresis
-(`kNearestHysteresisCm`) holds it, so two candidates at nearly equal range do not swap the stack every frame.
-`outDistanceCm` is the range the answer was chosen at, taken off the same candidate list (guard G-05). It is an
+(`kNearestHysteresis`, 0.5 m) holds it, so two candidates at nearly equal range do not swap the stack every frame.
+`outDistance` is the range the answer was chosen at, taken off the same candidate list (guard G-05). It is an
 out-parameter rather than a second call, and it is left untouched when there is no answer.
 
 The gather hands the pure selector each brawler's ground-plane position as `simFrame::planar(position)` of the movement
 state's body position (og-sim-metres-yup task 8): its forward and right components, so the range is a ground-plane range
-in either axis frame. At the shipped knobs that is the `(x, y)` pair the gather read before.
+in either axis frame. In the Y-up frame that is `(−z, x)`; in Unreal's frame it was the `(x, y)` pair the gather
+read before. The positions are og-simulation metres (since og-sim-metres-yup's flip U, task 17), so the range in
+`outDistance` and the margin it is held by are metres too, and the HUD (`OGBrawlerUEHUD.cpp`) passes the range to the
+header's `distanceMeters` unscaled (task 23a).
 
 ### 8.4 The seam reader, and the store's two polls
 

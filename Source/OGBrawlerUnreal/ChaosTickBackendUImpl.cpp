@@ -173,18 +173,16 @@ namespace
 				++tally.nonInertMismatched;
 		}
 
-		const int deltaDecimals = simFrame::lengthDecimals(6);
-		const int valueDecimals = simFrame::lengthDecimals(4);
 		UE_LOG(LogOGResimProbe, Verbose,
 			TEXT("[ResimProbe.PushTarget] pushFrame=%d readFrame=%d simTick=%u id=%u body=%hs bodyId=%u ")
 			TEXT("inert=%d match=%d moved=%d cmp=%hs resimType=%s objState=%s eps=%.6f ")
-			TEXT("dBefore=%.6f dBeforePos=%.*f dBeforeRot=%.6f dBeforeLin=%.*f dBeforeAng=%.6f ")
-			TEXT("dPos=%.*f dRot=%.6f dLin=%.*f dAng=%.6f dXP=%.*f ")
-			TEXT("pushedPos=(%.*f,%.*f,%.*f) livePos=(%.*f,%.*f,%.*f) ")
+			TEXT("dBefore=%.6f dBeforePos=%.8f dBeforeRot=%.6f dBeforeLin=%.8f dBeforeAng=%.6f ")
+			TEXT("dPos=%.8f dRot=%.6f dLin=%.8f dAng=%.6f dXP=%.8f ")
+			TEXT("pushedPos=(%.6f,%.6f,%.6f) livePos=(%.6f,%.6f,%.6f) ")
 			TEXT("pushedRot=(%.4f,%.4f,%.4f,%.4f) liveRot=(%.4f,%.4f,%.4f,%.4f) ")
-			TEXT("pushedLin=(%.*f,%.*f,%.*f) liveLin=(%.*f,%.*f,%.*f) ")
+			TEXT("pushedLin=(%.6f,%.6f,%.6f) liveLin=(%.6f,%.6f,%.6f) ")
 			TEXT("pushedAng=(%.4f,%.4f,%.4f) liveAng=(%.4f,%.4f,%.4f) ")
-			TEXT("beforePos=(%.*f,%.*f,%.*f) beforeLin=(%.*f,%.*f,%.*f)"),
+			TEXT("beforePos=(%.6f,%.6f,%.6f) beforeLin=(%.6f,%.6f,%.6f)"),
 			pushFrame, readFrame, simTick, stashed.simulatableId,
 			stashed.bodyName != nullptr ? stashed.bodyName : "?",
 			static_cast<uint32>(stashed.bodyId.value),
@@ -194,25 +192,25 @@ namespace
 			pushProbeObjectStateText(handle.ObjectState()),
 			kDefaultSimilarityEpsilon,
 			pushProbeWorstDelta   (before, pushed, wire),
-			deltaDecimals, pushProbeVectorDelta  (before.position,        pushed.position),
+			pushProbeVectorDelta  (before.position,        pushed.position),
 			pushProbeRotationDelta(before.rotation,        pushed.rotation),
-			deltaDecimals, pushProbeVectorDelta  (before.linearVelocity,  pushed.linearVelocity),
+			pushProbeVectorDelta  (before.linearVelocity,  pushed.linearVelocity),
 			pushProbeVectorDelta  (before.angularVelocity, pushed.angularVelocity),
-			deltaDecimals, pushProbeVectorDelta  (now.position,        pushed.position),
+			pushProbeVectorDelta  (now.position,        pushed.position),
 			pushProbeRotationDelta(now.rotation,        pushed.rotation),
-			deltaDecimals, pushProbeVectorDelta  (now.linearVelocity,  pushed.linearVelocity),
+			pushProbeVectorDelta  (now.linearVelocity,  pushed.linearVelocity),
 			pushProbeVectorDelta  (now.angularVelocity, pushed.angularVelocity),
-			deltaDecimals, pushProbeVectorDelta  (now.position,        live.solvedP),
-			valueDecimals, pushed.position.x, valueDecimals, pushed.position.y, valueDecimals, pushed.position.z,
-			valueDecimals, now.position.x,    valueDecimals, now.position.y,    valueDecimals, now.position.z,
+			pushProbeVectorDelta  (now.position,        live.solvedP),
+			pushed.position.x, pushed.position.y, pushed.position.z,
+			now.position.x,    now.position.y,    now.position.z,
 			pushed.rotation.x, pushed.rotation.y, pushed.rotation.z, pushed.rotation.w,
 			now.rotation.x,    now.rotation.y,    now.rotation.z,    now.rotation.w,
-			valueDecimals, pushed.linearVelocity.x,  valueDecimals, pushed.linearVelocity.y,  valueDecimals, pushed.linearVelocity.z,
-			valueDecimals, now.linearVelocity.x,     valueDecimals, now.linearVelocity.y,     valueDecimals, now.linearVelocity.z,
+			pushed.linearVelocity.x,  pushed.linearVelocity.y,  pushed.linearVelocity.z,
+			now.linearVelocity.x,     now.linearVelocity.y,     now.linearVelocity.z,
 			pushed.angularVelocity.x, pushed.angularVelocity.y, pushed.angularVelocity.z,
 			now.angularVelocity.x,    now.angularVelocity.y,    now.angularVelocity.z,
-			valueDecimals, before.position.x,       valueDecimals, before.position.y,       valueDecimals, before.position.z,
-			valueDecimals, before.linearVelocity.x, valueDecimals, before.linearVelocity.y, valueDecimals, before.linearVelocity.z);
+			before.position.x,       before.position.y,       before.position.z,
+			before.linearVelocity.x, before.linearVelocity.y, before.linearVelocity.z);
 	}
 }
 

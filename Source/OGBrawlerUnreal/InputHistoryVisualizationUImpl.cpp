@@ -278,7 +278,7 @@ std::optional<unsigned int> firstLocalCharacterId(const UWorld* world)
 std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUImpl* feed,
                                                  unsigned int                        localId,
                                                  std::optional<unsigned int>         previousChoice,
-                                                 float&                              outDistanceCm)
+                                                 float&                              outDistance)
 {
 	if (feed == nullptr)
 		return std::nullopt;
@@ -294,10 +294,10 @@ std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUI
 	{
 		// ⛔G-05  docs/InputHistoryVisualizationUImpl-guards.md
 		if (const std::optional<float> distance =
-				brawlerInputHistoryVisualization::nearestCharacterDistanceCm(
+				brawlerInputHistoryVisualization::nearestCharacterDistance(
 					candidates, localId, *chosen))
 		{
-			outDistanceCm = *distance;
+			outDistance = *distance;
 		}
 	}
 

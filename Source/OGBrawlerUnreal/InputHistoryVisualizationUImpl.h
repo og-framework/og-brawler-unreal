@@ -57,7 +57,7 @@ bool nearestStackEnabled();
 std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUImpl* feed,
                                                  unsigned int                        localId,
                                                  std::optional<unsigned int>         previousChoice,
-                                                 float&                              outDistanceCm);
+                                                 float&                              outDistance);
 
 template <typename SimulatableT, typename ReconciliationT>
 class ReconciliationSlotReader

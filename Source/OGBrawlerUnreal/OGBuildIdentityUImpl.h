@@ -9,7 +9,6 @@
 #include <string_view>
 
 #include "OGBrawler/BrawlerJoinScreen.h"
-#include "OGSimulation/SimulationFrame.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogOGBuildIdentity, Log, All);
 
@@ -206,16 +205,6 @@ constexpr bool refusesWireLogin(WireLoginVerdict verdict)
 	return verdict != WireLoginVerdict::Match;
 }
 
-constexpr std::string_view unitsNameOf(float unitsPerMetre)
-{
-	return unitsPerMetre == 100.f ? "cm" : "m";
-}
-
-constexpr std::string_view axesNameOf(AxisFrame axisFrame)
-{
-	return axisFrame == AxisFrame::UeZUpLeftHanded ? "ZupLH" : "YupRH";
-}
-
 static_assert(wireTokenFor(6, 2, 2).view() == "c6.r2.b2" && wireTokenFor(8, 3, 3).view() == "c8.r3.b3"
                   && wireTokenFor(10, 2, 3).view() == "c10.r2.b3" && wireTokenFor(255, 100, 0).view() == "c255.r100.b0",
               "og-sim-metres-yup task 15 (design section 5): the wire token is c<correction>.r<ring>.b<bundle>, each "
@@ -232,10 +221,6 @@ static_assert(refusesWireLogin(WireLoginVerdict::Missing) && refusesWireLogin(Wi
               "Was the user's ruling Q2 (og-sim-metres-yup, 2026-10-25): a login lacking OGWire, or with a different "
               "token, is refused, because peers of different wire versions cannot play together. See "
               "docs/OGBuildIdentity-rationale.md section 8.");
-static_assert(unitsNameOf(100.f) == "cm" && unitsNameOf(1.f) == "m" && axesNameOf(AxisFrame::UeZUpLeftHanded) == "ZupLH"
-                  && axesNameOf(AxisFrame::YUpRightHanded) == "YupRH",
-              "og-sim-metres-yup task 15 (Q9): the start line's units= and axes= values, which the workspace tool "
-              "capture_units.py reads as each capture's length unit. See docs/OGBuildIdentity-rationale.md section 8.");
 
 struct BuildIdentity
 {

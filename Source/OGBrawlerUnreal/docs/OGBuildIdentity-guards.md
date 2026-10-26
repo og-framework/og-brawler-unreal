@@ -24,8 +24,9 @@ The one way it fails open is a game mode that stops calling the check, a deleted
 
 The wire token and its login check (rationale §8, og-sim-metres-yup task 15) need no entry beyond G-02. The
 token is built at compile time from the three codecs' version constants, so it cannot disagree with them.
-The token's format, the three verdicts, the refusal of `Missing` and `Different` (the user's ruling Q2) and
-the start line's `units=` and `axes=` spellings are `static_assert`s in `OGBuildIdentityUImpl.h`. A client
+The token's format, the three verdicts and the refusal of `Missing` and `Different` (the user's ruling Q2) are
+`static_assert`s in `OGBuildIdentityUImpl.h`; the start line's `units=m axes=YupRH` is a literal in its format
+string. A client
 that sends no token is refused with "the client reports no wire format", so a broken wiring fails closed and
 says why.
 
