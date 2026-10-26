@@ -247,8 +247,8 @@ switch's site by G-26 of `OGBrawlerSimulatableComponent-guards.md`.
   a running session and put two peers on different numbers. ⛔ **Nothing simulated is read
   from this display's files at all**, and the ring-out tunables are nowhere in them.
 
-  > ⛔ **`killPlaneZ` and `respawnDelayTicks` are not console variables at all.** They are
-  > defaulted constructor parameters of `brawlerRingout::StaticData` (`-500.f` and `120u`),
+  > ⛔ **`killPlaneHeight` and `respawnDelayTicks` are not console variables at all.** They are
+  > defaulted constructor parameters of `brawlerRingout::StaticData` (`-5.f` and `120u`),
   > and no console variable in this tree reaches either: the `OGBrawler.*` registrations are
   > input, movement, input-history and scoreboard only. ⛔ **Do not look for a read-once
   > discipline around them, and do not add a console variable believing one is in place.**

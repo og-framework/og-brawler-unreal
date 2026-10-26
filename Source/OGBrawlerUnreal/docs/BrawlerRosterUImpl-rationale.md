@@ -157,6 +157,12 @@ The only protection against origins is that **zero** placements leave the author
 This needs no tag, because the type enforces it: `brawlerRingout::LevelSpawnPoint::name` is a
 `std::string` in an engine-free header that cannot name `FName`.
 
+**Units and axes (og-sim-metres-yup task 8).** Each `APlayerStart` location enters through `ueFrame::vectorToSim`, so the
+seeded table holds og-simulation positions, like the authored one it overwrites. The per-slot `[Ringout.spawnPoints]`
+rows print that table as it is (brawler state, design ruling Q9), each component with `%.*f` and
+`simFrame::lengthDecimals(2)`: two decimals in centimetres, which is the shipped text unchanged, and four in metres. The
+teleport seed of §2 (`teleportPos`, the capsule's location) enters through `ueFrame::vectorToSim` too.
+
 > ⛔ THE FALLBACK IS THE TABLE AS IT STANDS RIGHT NOW, which - because nothing else ever
 > writes it and this runs once - is exactly the authored default. So "fewer player starts than
 > slots leaves the rest authored" is literally "leaves the rest alone", and ZERO player starts

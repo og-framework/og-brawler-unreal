@@ -345,6 +345,12 @@ and §5.
 storage, and runs six visualization passes — radial, aim, projectile, movement (cvar-gated), target and
 block-prediction — then the input-history poll. (This line said "five" before task 25's re-count.)
 
+**The fallbacks are og-simulation axes (og-sim-metres-yup task 8).** `buildAimDirection()` returns the aim in
+og-simulation axes, which is what the visualizations take. With no input collection the aim falls back to
+`simFrame::kForward`, and so does `tmpAimInput` before the input component is bound; the move direction falls back to
+`simFrame::kRight`. They are the og-simulation spellings of the UE +X and +Y literals they replaced, so at the shipped
+knobs they are the same vectors. (The `moveDirectionWorld` local has no reader in `TickComponent`.)
+
 **One input source, resolved once per render frame.** `vizPlayerInput` is computed once and shared by
 every input-carrying visualization site, so the aim indicator and the block-prediction wedge can
 never render two different samples of the same frame.

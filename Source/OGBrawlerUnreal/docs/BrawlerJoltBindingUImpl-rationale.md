@@ -44,13 +44,23 @@ the camera anchor, so a size that disagrees would make them disagree with the si
 (`OGBrawlerUECharacter-guards.md` G-01; design D14). The message is unchanged, including its `tryRegister:` prefix:
 the check runs first in the Jolt host's `createBodies_GameThread`, which `tryRegister`'s first pass calls.
 
+The comparison is in UE units (og-sim-metres-yup task 8): the descriptor's radius and half-height are og-simulation
+lengths, so each is converted with `ueFrame::lengthToUe` and narrowed to the engine's `float` before
+`FMath::IsNearlyEqual` compares it with the pawn's centimetres, as the Chaos factory's adopt-root check does. The
+message prints those converted values, so both pairs read in cm. At the shipped knobs (centimetres) `lengthToUe` is a
+float-to-double copy, so the check and its text are as before; in metres it gives 42 and 96 again. From task 8 until
+task 7b this file did not include `UEFrameConversion.h` and multiplied by `simFrame::kUeCentimetresPerUnit` instead,
+because the header's optimize-off helpers then changed the simulation code this translation unit instantiates
+(`BrawlerJoltBindingUImpl-guards.md` §R, G-01; `UEFrameConversion-guards.md` G-05).
+The pawn's `InitCapsuleSize(42, 96)` stays a UE value (`OGBrawlerUECharacter-guards.md` G-01).
+
 The function sits between `OGSIM_OPTIMIZE_OFF` and `OGSIM_OPTIMIZE_ON`, as the host's function it came from did; the
 table and the mask sat outside that pair in the host and sit outside it here.
 
 ## §4 The park snap
 
-`kParkSnap` is `-0.5f * brawlerProjectileSimulation::kParkZ`: half the projectile pool's park depth, 50,000
-og-simulation lengths (500 m while the simulation runs in centimetres). The Jolt host passes it as the presenter's
+`kParkSnap` is `-0.5f * brawlerProjectileSimulation::kParkHeight`: half the projectile pool's park depth, 500
+og-simulation lengths (500 m; it was 50,000 while the simulation ran in centimetres). The Jolt host passes it as the presenter's
 `PresentControls::parkSnap` every frame: a body whose two bracketing poses lie farther apart than this is a pooled
 projectile being parked or unparked, and is snapped rather than blended (`TickDriverBackendUImpl-rationale.md` §7). It is
 game configuration in og-simulation lengths, so its name carries no unit (design K9); the old name ended in `Cm`.

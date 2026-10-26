@@ -283,6 +283,17 @@ read here would report a stale pre-rewind pose and print a mismatch on every bod
 rewind — a probe that cannot fail is worth nothing, and this one was one line away from being
 that. `dXP=` carries the X-to-P distance so the skew stays visible rather than assumed.
 
+**Units and axes (og-sim-metres-yup task 8).** Every probe read (read 1, the after pass's re-read, read 3, and `solvedP`)
+goes through `readLiveBodyForPushProbe`, which converts the way the adapter's `captureStartOfStepBodyState` converts the
+same X/R/V/W reads: `ueFrame::vectorToSim` for X, P and V, `ueFrame::rotationToSim` for R and `ueFrame::axialToSim` for W
+(`ChaosPhysicsBodyAdapter.h`). So the reads are og-simulation values, in og-simulation units and axes, and compare with `pushed` (og-simulation storage) like for like. At
+the shipped knobs each conversion is the float copy the probe made before. The `[ResimProbe.PushTarget]` line prints its
+length fields with `simFrame::lengthDecimals`: `dBeforePos=`, `dBeforeLin=`, `dPos=`, `dLin=` and `dXP=` with
+`lengthDecimals(6)`, and the `pushedPos`/`livePos`/`beforePos` and `pushedLin`/`liveLin`/`beforeLin` components with
+`lengthDecimals(4)`. In centimetres that is the six and four decimals the line always printed, so its text is unchanged at
+the shipped knobs; in metres it gains two decimals. `eps=`, `dBefore=` (the worst of mixed position, rotation and
+velocity deltas), the rotations and the angular velocities keep their fixed decimals.
+
 ⛔ **The match predicate is the production one.** `isSimilarToField`
 (`SimulationComparisonGlm.h`) at `kDefaultSimilarityEpsilon` (`SimulationTypes.h`) — the same
 test `isSimilarTo` applies to a correction, so "the probe disagrees but the cache does not" is
@@ -492,8 +503,9 @@ uses it for both (a) and (b).
 | `LinearBodyState` (capsule), corrected | `SetX`, `SetV` | `setBodyPose` → `SetX`, `SetR(float(R))`; `setBodyLinearVelocity` → `SetV` |
 | any body equal (in float) to its start-of-step state | written as above | not written (the restore skip) |
 
-Each value goes through the same conversion as before (`uglm::toFVector`, `uglm::toFQuat`) from the same
-`PhysicsBodyState` (the declaration's state, widened). The setters are independent: `SetX` writes X and
+Each value goes through the adapter's conversion to UE (`ueFrame::vectorToUe` for X and V, `ueFrame::rotationToUe` for R,
+`ueFrame::axialToUe` for W, since og-sim-metres-yup task 7; at the shipped knobs the same float-to-double copies as
+before) from the same `PhysicsBodyState` (the declaration's state, widened). The setters are independent: `SetX` writes X and
 P, `SetR` writes R and Q, `SetV` writes V, `SetW` writes W. The only order change is `SetR` before `SetV`
 on a full body. Waking is unaffected by it, because `SetX` comes first in both orders and wakes a
 sleeping body before any other setter runs.

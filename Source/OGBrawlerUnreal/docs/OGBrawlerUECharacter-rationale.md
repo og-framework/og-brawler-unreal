@@ -777,6 +777,14 @@ the pose the previous frame's sync set: the engine's sync in the Chaos configura
 in the Jolt configuration (§1.2). The input component's `updateGameThreadCache`, called from here,
 reads the aim plane from the same pose (og-simulationscheduler-withjolt task 19).
 
+**The humanoid's facing crosses the frame edge (og-sim-metres-yup task 8).** `buildAimDirection()` returns the aim in
+og-simulation axes, and `Tick`'s fallback before the input component is bound is `simFrame::kForward`. The humanoid mesh
+is UE-native data (design ruling Q6): its default forward `(0, 1, 0)` and the rotation built from it are UE-frame maths.
+So `Tick` converts the aim with `ueFrame::directionToUe` (narrowed back to `glm::vec3` by `ueNative::toGlm`) before
+`dMathUtil::getRotationMatrix`, and the rotation reaches the component through `ueNative::toFTransform`. At the shipped
+knobs the conversion is a float-to-double copy and back, so the rotation is computed from the same floats as before; the
+statement sits inside this file's `OGSIM_OPTIMIZE_OFF` span.
+
 ## 12. History — removed code and orientation comments
 
 * **Commented-out code, deleted by the task-25 conversion.** In the header's public section:

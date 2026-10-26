@@ -8,6 +8,7 @@
 #include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGSimulation/CompilerControl.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGBrawler/BrawlerMovementSimulation.h"
 #include "OGBrawler/CollisionCategoryConstants.h"
 #include "Components/CapsuleComponent.h"
@@ -59,15 +60,17 @@ void BrawlerJoltBindingUImpl::checkCapsuleContract(const AOGBrawlerUECharacter& 
 	const CapsuleGeometry* descriptorCapsule = std::get_if<CapsuleGeometry>(
 		&brawlerMovementSimulation::PhysicsDeclaration::descriptor().shapes.front().geometry);
 	checkf(descriptorCapsule != nullptr
-			   && FMath::IsNearlyEqual(capsule->GetUnscaledCapsuleRadius(), descriptorCapsule->radius)
-			   && FMath::IsNearlyEqual(capsule->GetUnscaledCapsuleHalfHeight(), descriptorCapsule->halfHeight),
+			   && FMath::IsNearlyEqual(capsule->GetUnscaledCapsuleRadius(),
+									   static_cast<float>(ueFrame::lengthToUe(descriptorCapsule->radius)))
+			   && FMath::IsNearlyEqual(capsule->GetUnscaledCapsuleHalfHeight(),
+									   static_cast<float>(ueFrame::lengthToUe(descriptorCapsule->halfHeight))),
 		   TEXT("tryRegister: the pawn's capsule (radius %f, half-height %f) disagrees with the movement ")
 		   TEXT("descriptor's CapsuleGeometry (radius %f, half-height %f), id=%u. The Jolt slot body is built ")
 		   TEXT("from the descriptor, while the UE capsule is the aim plane and the camera anchor: change both ")
 		   TEXT("together. Was the Chaos factory's adopt-root check (design D14; OGBrawlerUECharacter G-01)."),
 		   capsule->GetUnscaledCapsuleRadius(), capsule->GetUnscaledCapsuleHalfHeight(),
-		   descriptorCapsule != nullptr ? descriptorCapsule->radius : 0.f,
-		   descriptorCapsule != nullptr ? descriptorCapsule->halfHeight : 0.f, id);
+		   descriptorCapsule != nullptr ? static_cast<float>(ueFrame::lengthToUe(descriptorCapsule->radius)) : 0.f,
+		   descriptorCapsule != nullptr ? static_cast<float>(ueFrame::lengthToUe(descriptorCapsule->halfHeight)) : 0.f, id);
 }
 
 template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;

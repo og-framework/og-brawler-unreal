@@ -4,6 +4,7 @@
 #include "Math/UnrealMathUtility.h"
 #include "Misc/ConfigCacheIni.h"                 // GConfig - the stale-ini sweep reads the raw section
 #include "PhysicsEngine/PhysicsSettings.h"       // UPhysicsSettings::DefaultGravityZ
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 // ⭐ [movement-sim task 16] For LogOGBrawler, FMovementStaticDataCVars and the
 // AOGBrawlerSimulationManager::readMovementStaticDataCVars declaration this TU DEFINES. The read
@@ -407,5 +408,6 @@ AOGBrawlerSimulationManager::readMovementStaticDataCVars()
 		static_cast<int32>(Model), MaxWalkSpeed, StepPeriod, StepSpeed, Gravity, *SweepReport);
 
 	return FMovementStaticDataCVars{
-		Model, MaxWalkSpeed, static_cast<uint32_t>(StepPeriod), StepSpeed, Gravity };
+		Model, ueFrame::lengthToSim(MaxWalkSpeed), static_cast<uint32_t>(StepPeriod), ueFrame::lengthToSim(StepSpeed),
+		ueFrame::lengthToSim(Gravity) };
 }

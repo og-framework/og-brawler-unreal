@@ -83,7 +83,7 @@ the refinement. The table below is the whole of it.
 | `Simulatable` | the simulatable type the world host is instantiated with | `SimulatableBrawler` | `SimulatableBrawler` |
 | `categoryChannels()` | the brawler's six-row category table, in the engine's `CategoryTable` form | a `const std::vector<UEStaticCategoryChannel>&` | an `std::initializer_list<ChaosCategoryMapping>` |
 | `checkCapsuleContract` | only when the engine has a world host: the capsule-to-descriptor contract check, a function whose address converts to `CapsuleContractCheck` | a function | none |
-| `kParkSnap` | only when the engine has a world host: the render park-snap distance, convertible to `float` | `-0.5f * brawlerProjectileSimulation::kParkZ` | none |
+| `kParkSnap` | only when the engine has a world host: the render park-snap distance, convertible to `float` | `-0.5f * brawlerProjectileSimulation::kParkHeight` | none |
 
 When the engine traits have a world host, the binding concept also requires
 `EngineTraitsT::WorldHost<BindingT::Simulatable>` to name a type.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/OGBuildIdentity-rationale.md
+// docs/OGBuildIdentity-rationale.md · docs/OGBuildIdentity-guards.md
 
 #include "OGBrawlerUnreal/OGBrawlerLocalPlayer.h"
 
@@ -7,5 +7,6 @@
 
 FString UOGBrawlerLocalPlayer::GetGameLoginOptions() const
 {
-	return buildIdentityUImpl::backendLoginOption();
+	// ⛔G-02  docs/OGBuildIdentity-guards.md
+	return buildIdentityUImpl::backendLoginOption() + TEXT("?") + buildIdentityUImpl::wireLoginOption();
 }

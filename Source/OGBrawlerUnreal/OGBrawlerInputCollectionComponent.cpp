@@ -14,7 +14,7 @@
 #include "OGBrawler/InputMapping/StickRouting.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
-#include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/BrawlerProjectileSimulation.h"
@@ -108,13 +108,13 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 	if (const APlayerController* pc = Cast<APlayerController>(ch->GetController()))
 	{
 		if (pc->PlayerCameraManager != nullptr)
-			m_camForwardCache = uglm::toGLMVec3(pc->PlayerCameraManager->GetCameraRotation().Vector());
+			m_camForwardCache = ueFrame::directionToSim(pc->PlayerCameraManager->GetCameraRotation().Vector());
 		else
-			m_camForwardCache = uglm::toGLMVec3(ch->GetFollowCamera()->GetForwardVector());
+			m_camForwardCache = ueFrame::directionToSim(ch->GetFollowCamera()->GetForwardVector());
 	}
 	else
 	{
-		m_camForwardCache = uglm::toGLMVec3(ch->GetFollowCamera()->GetForwardVector());
+		m_camForwardCache = ueFrame::directionToSim(ch->GetFollowCamera()->GetForwardVector());
 	}
 
 	// Mouse cursor visibility + mouse-aim resolution.
@@ -173,7 +173,7 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 		m_mouseAimCache = glm::vec3(0.f, 0.f, 0.f);
 		return;
 	}
-	m_mouseAimCache = glm::normalize(uglm::toGLMVec3(aimVec));
+	m_mouseAimCache = glm::normalize(ueFrame::directionToSim(aimVec));
 }
 
 namespace
@@ -223,7 +223,7 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
 		return checkUnitAim(*lookAim);
 
 	const float aimDeadzone = dAttackMachineSimulation::g_aimStickDeadzone.load();
-	const glm::vec3 aimStick3 = glm::vec3(getAimStick(), 0.f);
+	const glm::vec3 aimStick3 = simFrame::fromForwardRight(getAimStick(), 0.f);
 	if (glm::length(aimStick3) > aimDeadzone)
 	{
 		// MoveRelativeAim: aim stick rotates around the current move direction (so
@@ -247,7 +247,7 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
 	// resolve to the same camera-relative move-stick direction. Skipped for WASD-driven
 	// moves so mouse+kbd players keep their mouse aim while moving.
 	const float moveDeadzone = dAttackMachineSimulation::g_moveStickDeadzone.load();
-	const glm::vec3 moveStick3 = glm::vec3(getMoveStick(), 0.f);
+	const glm::vec3 moveStick3 = simFrame::fromForwardRight(getMoveStick(), 0.f);
 	if (dAttackMachineSimulation::g_gamepadMoveStickFeedsAim.load()
 		&& m_lastMoveInputWasGamepad
 		&& glm::length(moveStick3) > moveDeadzone)
@@ -256,14 +256,13 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
 	// Fall back to mouse aim if present, else camera forward.
 	if (glm::length(m_mouseAimCache) > 0.2f)
 		return checkUnitAim(glm::normalize(m_mouseAimCache));
-	glm::vec3 cf = m_camForwardCache;
-	cf.z = 0.f;
+	const glm::vec3 cf = simFrame::flatten(m_camForwardCache);
 	return checkUnitAim(glm::normalize(cf));
 }
 
 glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorldFor(const glm::vec3& referenceForward) const
 {
-	return getInputDirectionInCameraSpace(referenceForward, glm::vec3(getMoveStick(), 0.f));
+	return getInputDirectionInCameraSpace(referenceForward, simFrame::fromForwardRight(getMoveStick(), 0.f));
 }
 
 glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorld() const
@@ -297,16 +296,7 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorld() const
 
 glm::vec3 UOGBrawlerInputCollectionComponent::getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection)
 {
-	glm::vec3 camForwardNormalized = camForward;
-	camForwardNormalized.z = 0.f;
-	camForwardNormalized = glm::normalize(camForwardNormalized);
-
-	glm::mat4 camRotationMatrix;
-	dMathUtil::getRotationMatrix(glm::vec3(0.f, -1.f, 0.f), camForwardNormalized, camRotationMatrix);
-
-	glm::vec3 normalizedDirection = glm::normalize(inputDirection);
-	glm::vec4 direction4(normalizedDirection, 0.f);
-	return glm::vec3(camRotationMatrix * direction4);
+	return dInput::stickRouting::cameraRelativeDirection(camForward, inputDirection);
 }
 
 void UOGBrawlerInputCollectionComponent::onMove(const FInputActionValue& Value)

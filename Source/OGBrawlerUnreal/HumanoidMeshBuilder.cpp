@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "HumanoidMeshBuilder.h"
-#include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -70,12 +70,12 @@ void buildEllipsoidSection(
             const glm::vec3 worldNormal  = rotation * localNormal;
             const glm::vec3 worldTangent = rotation * localTangent;
 
-            outGeometry.vertices.Add(uglm::toFVector(worldPos));
-            outGeometry.normals.Add(uglm::toFVector(worldNormal));
+            outGeometry.vertices.Add(ueNative::toFVector(worldPos));
+            outGeometry.normals.Add(ueNative::toFVector(worldNormal));
             outGeometry.uvs.Add(FVector2D(u, v));
             // V increases with ring (lat π → south); cross(N, T) produces the +V direction
             // already, so no bitangent flip is needed.
-            outGeometry.tangents.Add(FProcMeshTangent(uglm::toFVector(worldTangent), false));
+            outGeometry.tangents.Add(FProcMeshTangent(ueNative::toFVector(worldTangent), false));
         }
     }
 
@@ -174,20 +174,20 @@ void buildConvexHullSection(
 
         const int32 baseIndex = outGeometry.vertices.Num();
 
-        outGeometry.vertices.Add(uglm::toFVector(worldPos0));
-        outGeometry.vertices.Add(uglm::toFVector(worldPos1));
-        outGeometry.vertices.Add(uglm::toFVector(worldPos2));
+        outGeometry.vertices.Add(ueNative::toFVector(worldPos0));
+        outGeometry.vertices.Add(ueNative::toFVector(worldPos1));
+        outGeometry.vertices.Add(ueNative::toFVector(worldPos2));
 
-        outGeometry.normals.Add(uglm::toFVector(worldNormal));
-        outGeometry.normals.Add(uglm::toFVector(worldNormal));
-        outGeometry.normals.Add(uglm::toFVector(worldNormal));
+        outGeometry.normals.Add(ueNative::toFVector(worldNormal));
+        outGeometry.normals.Add(ueNative::toFVector(worldNormal));
+        outGeometry.normals.Add(ueNative::toFVector(worldNormal));
 
         // Per-triangle planar UVs.
         outGeometry.uvs.Add(FVector2D(0.f, 0.f));
         outGeometry.uvs.Add(FVector2D(1.f, 0.f));
         outGeometry.uvs.Add(FVector2D(0.f, 1.f));
 
-        const FProcMeshTangent tan(uglm::toFVector(worldTangent), false);
+        const FProcMeshTangent tan(ueNative::toFVector(worldTangent), false);
         outGeometry.tangents.Add(tan);
         outGeometry.tangents.Add(tan);
         outGeometry.tangents.Add(tan);
@@ -245,10 +245,10 @@ void buildTaperedCylinderSection(
         const glm::vec3 worldNormal = rotation * localNormal;
         const glm::vec3 worldTan    = rotation * localTan;
 
-        outGeometry.vertices.Add(uglm::toFVector(worldPos));
-        outGeometry.normals.Add(uglm::toFVector(worldNormal));
+        outGeometry.vertices.Add(ueNative::toFVector(worldPos));
+        outGeometry.normals.Add(ueNative::toFVector(worldNormal));
         outGeometry.uvs.Add(FVector2D(u, 0.f));
-        outGeometry.tangents.Add(FProcMeshTangent(uglm::toFVector(worldTan), false));
+        outGeometry.tangents.Add(FProcMeshTangent(ueNative::toFVector(worldTan), false));
     }
     const int32 baseSideBot = outGeometry.vertices.Num(); // = ringCount
     // Bottom ring
@@ -270,10 +270,10 @@ void buildTaperedCylinderSection(
         const glm::vec3 worldNormal = rotation * localNormal;
         const glm::vec3 worldTan    = rotation * localTan;
 
-        outGeometry.vertices.Add(uglm::toFVector(worldPos));
-        outGeometry.normals.Add(uglm::toFVector(worldNormal));
+        outGeometry.vertices.Add(ueNative::toFVector(worldPos));
+        outGeometry.normals.Add(ueNative::toFVector(worldNormal));
         outGeometry.uvs.Add(FVector2D(u, 1.f));
-        outGeometry.tangents.Add(FProcMeshTangent(uglm::toFVector(worldTan), false));
+        outGeometry.tangents.Add(FProcMeshTangent(ueNative::toFVector(worldTan), false));
     }
 
     // Side faces: quads between top ring (i, i+1) and bottom ring (i, i+1).
@@ -308,13 +308,13 @@ void buildTaperedCylinderSection(
         const glm::vec3 worldCapNormal = rotation * localCapNormal;
         const glm::vec3 localCapTan(1.f, 0.f, 0.f);
         const glm::vec3 worldCapTan    = rotation * localCapTan;
-        const FProcMeshTangent capTan(uglm::toFVector(worldCapTan), false);
+        const FProcMeshTangent capTan(ueNative::toFVector(worldCapTan), false);
 
         // Center vertex
         const int32 centerIdx = outGeometry.vertices.Num();
         const glm::vec3 localCenter(0.f, 0.f, +halfH);
-        outGeometry.vertices.Add(uglm::toFVector(rotation * localCenter + offset));
-        outGeometry.normals.Add(uglm::toFVector(worldCapNormal));
+        outGeometry.vertices.Add(ueNative::toFVector(rotation * localCenter + offset));
+        outGeometry.normals.Add(ueNative::toFVector(worldCapNormal));
         outGeometry.uvs.Add(FVector2D(0.5f, 0.5f));
         outGeometry.tangents.Add(capTan);
 
@@ -327,8 +327,8 @@ void buildTaperedCylinderSection(
             const float c  = FMath::Cos(th);
             const float s  = FMath::Sin(th);
             const glm::vec3 localPos(topR * c, topR * s, +halfH);
-            outGeometry.vertices.Add(uglm::toFVector(rotation * localPos + offset));
-            outGeometry.normals.Add(uglm::toFVector(worldCapNormal));
+            outGeometry.vertices.Add(ueNative::toFVector(rotation * localPos + offset));
+            outGeometry.normals.Add(ueNative::toFVector(worldCapNormal));
             outGeometry.uvs.Add(FVector2D(0.5f + 0.5f * c, 0.5f + 0.5f * s));
             outGeometry.tangents.Add(capTan);
         }
@@ -352,12 +352,12 @@ void buildTaperedCylinderSection(
         const glm::vec3 worldCapNormal = rotation * localCapNormal;
         const glm::vec3 localCapTan(1.f, 0.f, 0.f);
         const glm::vec3 worldCapTan    = rotation * localCapTan;
-        const FProcMeshTangent capTan(uglm::toFVector(worldCapTan), false);
+        const FProcMeshTangent capTan(ueNative::toFVector(worldCapTan), false);
 
         const int32 centerIdx = outGeometry.vertices.Num();
         const glm::vec3 localCenter(0.f, 0.f, -halfH);
-        outGeometry.vertices.Add(uglm::toFVector(rotation * localCenter + offset));
-        outGeometry.normals.Add(uglm::toFVector(worldCapNormal));
+        outGeometry.vertices.Add(ueNative::toFVector(rotation * localCenter + offset));
+        outGeometry.normals.Add(ueNative::toFVector(worldCapNormal));
         outGeometry.uvs.Add(FVector2D(0.5f, 0.5f));
         outGeometry.tangents.Add(capTan);
 
@@ -369,8 +369,8 @@ void buildTaperedCylinderSection(
             const float c  = FMath::Cos(th);
             const float s  = FMath::Sin(th);
             const glm::vec3 localPos(botR * c, botR * s, -halfH);
-            outGeometry.vertices.Add(uglm::toFVector(rotation * localPos + offset));
-            outGeometry.normals.Add(uglm::toFVector(worldCapNormal));
+            outGeometry.vertices.Add(ueNative::toFVector(rotation * localPos + offset));
+            outGeometry.normals.Add(ueNative::toFVector(worldCapNormal));
             outGeometry.uvs.Add(FVector2D(0.5f + 0.5f * c, 0.5f + 0.5f * s));
             outGeometry.tangents.Add(capTan);
         }

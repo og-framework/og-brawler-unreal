@@ -2,6 +2,7 @@
 
 #include "DShapeUImplementation.h"
 #include "DVolume/DVolumeAsset.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 
 DShapeUImplementation::DShapeUImplementation(const DVolumeAsset* DVolumeAsset, const glm::mat4x4& transform)
 {
@@ -13,7 +14,8 @@ DShapeUImplementation::DShapeUImplementation(const DVolumeAsset* DVolumeAsset, c
 	else if (std::holds_alternative<DBoxAsset>(assetGeometry))
 	{
 		auto& boxGeometry = std::get<DBoxAsset>(assetGeometry);
-		shape = FCollisionShape::MakeBox(FVector(boxGeometry.halfExtentX, boxGeometry.halfExtentY, boxGeometry.halfExtentZ));
+		shape = FCollisionShape::MakeBox(
+			ueNative::toFVector(glm::vec3(boxGeometry.halfExtentX, boxGeometry.halfExtentY, boxGeometry.halfExtentZ)));
 	}
 	else if (std::holds_alternative<DCapsuleAsset>(assetGeometry))
 	{

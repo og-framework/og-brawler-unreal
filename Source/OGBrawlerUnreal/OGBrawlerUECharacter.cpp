@@ -15,7 +15,7 @@
 #include "DVolume/DVolume.h"
 #include "DVolume/DVolumeAsset.h"
 #include "OGBrawlerUnreal/DShapeUImplementation.h"
-#include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
 #include "OGBrawlerUnreal/DAttackCircleUImplementation.h"
 #include "OGBrawlerUnreal/HumanoidMeshBuilder.h"
@@ -481,14 +481,15 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 	{
 		glm::vec3 worldAimDirection = InputCollection->buildAimDirection();
 
-		glm::vec3 tmpAimInput = glm::vec3(1.f, 0.f, 0.f);
+		glm::vec3 tmpAimInput = simFrame::kForward;
 		if (InputCollection->hasInputComponent())
 			tmpAimInput = worldAimDirection;
 
 		glm::mat4 humanoidAimRotationMatrix;
 		const glm::vec3 humanoidDefaultForward(0.f, 1.f, 0.f);
-		dMathUtil::getRotationMatrix(humanoidDefaultForward, tmpAimInput, humanoidAimRotationMatrix);
-		HumanoidMesh->SetWorldRotation(uglm::toFtransform(humanoidAimRotationMatrix).GetRotation());
+		dMathUtil::getRotationMatrix(humanoidDefaultForward, ueNative::toGlm(ueFrame::directionToUe(tmpAimInput)),
+			humanoidAimRotationMatrix);
+		HumanoidMesh->SetWorldRotation(ueNative::toFTransform(humanoidAimRotationMatrix).GetRotation());
 	}
 
 	if(!InputCollection->hasInputComponent())

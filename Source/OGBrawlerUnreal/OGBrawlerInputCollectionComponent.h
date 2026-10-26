@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
+#include "OGSimulation/SimulationFrame.h"
 #include "OGSimulation/SimulationTimeContext.h"
 #include "OGSimulation/Network/LocalInputCache.h"
 #include "OGSimulationUnreal/UELatencyBudgetDiagnostics.h"
@@ -189,7 +190,7 @@ private:
 	// read by buildAimDirection() / buildMoveDirectionWorld() (physics thread).
 	// glm::vec3 is trivially copyable and aligned — same benign-race pattern as the
 	// pre-refactor m_camForward on OGBrawlerSimulatableComponent.
-	glm::vec3 m_camForwardCache = glm::vec3(1.f, 0.f, 0.f);
+	glm::vec3 m_camForwardCache = simFrame::kForward;
 	glm::vec3 m_mouseAimCache   = glm::vec3(0.f, 0.f, 0.f);
 
 #if OG_LATENCY_BUDGET_DIAGNOSTICS

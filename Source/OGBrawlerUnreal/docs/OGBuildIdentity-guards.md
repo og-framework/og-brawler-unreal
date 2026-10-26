@@ -5,7 +5,7 @@
 # Build identity — guards
 
 Prohibitions with a tagged site in `Source/OGBrawlerUnreal/OGBuildIdentityUImpl.cpp`
-(og-brawler-uploadtosteam task 15). Ids are opaque, stable, and retired rather than reused. The
+(og-brawler-uploadtosteam task 15) and `Source/OGBrawlerUnreal/OGBrawlerLocalPlayer.cpp` (og-sim-metres-yup task 15). Ids are opaque, stable, and retired rather than reused. The
 reasoning lives in `OGBuildIdentity-rationale.md`.
 
 The rules the compiler holds need no entry: the `build_info.txt` parse (BOM, CR, missing and invalid
@@ -21,6 +21,13 @@ local-player class does not send the token is refused with "the client reports n
 The one way it fails open is a game mode that stops calling the check, a deleted call in
 `AOGBrawlerUEGameMode::PreLogin`; even then every process names its token on its start line and in
 `[SimHost.Backend]`, so the logs show the mismatch.
+
+The wire token and its login check (rationale §8, og-sim-metres-yup task 15) need no entry beyond G-02. The
+token is built at compile time from the three codecs' version constants, so it cannot disagree with them.
+The token's format, the three verdicts, the refusal of `Missing` and `Different` (the user's ruling Q2) and
+the start line's `units=` and `axes=` spellings are `static_assert`s in `OGBuildIdentityUImpl.h`. A client
+that sends no token is refused with "the client reports no wire format", so a broken wiring fails closed and
+says why.
 
 ---
 
@@ -48,3 +55,24 @@ Editor targets alike.
 engine's start-up. The module's `StartupModule` only calls `registerNetworkVersionHook`; it is the
 first point where the game module can register, and registering there is harmless because nothing runs
 until the delegate fires.
+
+## G-02 — the two login options are joined with `?`, never `&`
+
+**Site:** the `return` statement of `UOGBrawlerLocalPlayer::GetGameLoginOptions`, which joins
+`buildIdentityUImpl::backendLoginOption()` and `buildIdentityUImpl::wireLoginOption()`.
+
+**The prohibition.** ⛔ Do not join the two options with `&`, a space or anything else but `?`, even though
+the engine's own comment on ULocalPlayer::GetGameLoginOptions (LocalPlayer.h:519-527) says that multiple
+options are "concatenated together with an & between each key/value pair".
+
+**The consequence.** The engine adds the returned string to the login URL as one option (LocalPlayer.cpp:287-291,
+PendingNetGame.cpp:335-339). The URL is serialised with `?` before each option (URL.cpp:582-585); the server
+parses it back and splits options at `?` only (URL.cpp:184-214), and UGameplayStatics::ParseOption also
+splits at `?` only (GameplayStatics.cpp:3405-3430). With `&`, the server reads one option `OGBackend` whose
+value is `<backend token>&OGWire=<wire token>`, and no `OGWire` option. Every login is then refused: a Jolt
+server sees the same backend name with a different fingerprint, admits the backend with a misleading
+fingerprint Warning, and refuses the login as "the client reports no wire format"; a Chaos server refuses it
+as a different physics backend whose name contains the wire token. With `?` the two arrive as two options.
+
+**What breaks if the tag moves.** The tag sits on the only statement that writes the separator. If the two
+options are ever built in one function instead, the tag moves with the separator.

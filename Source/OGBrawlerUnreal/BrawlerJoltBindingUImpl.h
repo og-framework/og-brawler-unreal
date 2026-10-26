@@ -16,7 +16,7 @@ struct BrawlerJoltBindingUImpl
 {
 	using Simulatable = SimulatableBrawler;
 
-	static constexpr float kParkSnap = -0.5f * brawlerProjectileSimulation::kParkZ;
+	static constexpr float kParkSnap = -0.5f * brawlerProjectileSimulation::kParkHeight;
 
 	static const std::vector<UEStaticCategoryChannel>& categoryChannels();
 

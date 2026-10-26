@@ -13,9 +13,13 @@
 
 #include <cinttypes>
 #include <cstdio>
+#include <optional>
 
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
+#include "OGSimulation/CorrectionStateBufferCodec.h"
+#include "OGSimulation/InputRedundancyBundleCodec.h"
+#include "OGSimulation/RelayedInputRingCodec.h"
 
 DEFINE_LOG_CATEGORY(LogOGBuildIdentity);
 
@@ -137,6 +141,57 @@ FString backendRefusalText(buildIdentityUImpl::BackendLoginVerdict verdict, cons
 	return FString();
 }
 
+constexpr buildIdentityUImpl::WireToken kWireToken = buildIdentityUImpl::wireTokenFor(
+	correctionStateBuffer::kWireFormatVersion, relayedInputRing::kWireFormatVersion,
+	inputRedundancyBundle::kWireFormatVersion);
+
+#if !UE_BUILD_SHIPPING
+std::optional<FString> wireTokenOverride()
+{
+	const TCHAR* const switchText  = TEXT("-OGWireTokenOverride=");
+	const TCHAR* const commandLine = FCommandLine::Get();
+	const TCHAR* const found       = FCString::Strifind(commandLine, switchText, true);
+	if (found == nullptr)
+		return std::nullopt;
+
+	const TCHAR first = found[FCString::Strlen(switchText)];
+	if (first == TEXT('\0') || FChar::IsWhitespace(first))
+		return FString();
+
+	FString token;
+	FParse::Value(found, switchText, token);
+	return token;
+}
+#endif
+
+FString presentedWireToken()
+{
+#if !UE_BUILD_SHIPPING
+	if (const std::optional<FString> token = wireTokenOverride())
+		return *token;
+#endif
+	return joinScreenUImpl::toFString(kWireToken.view());
+}
+
+FString wireRefusalText(buildIdentityUImpl::WireLoginVerdict verdict, const FString& serverToken,
+	const FString& clientToken)
+{
+	using buildIdentityUImpl::WireLoginVerdict;
+
+	switch (verdict)
+	{
+	case WireLoginVerdict::Missing:
+		return FString::Printf(
+			TEXT("Different build: the client reports no wire format, this server speaks %s."), *serverToken);
+	case WireLoginVerdict::Different:
+		return FString::Printf(TEXT("Different wire format: this server speaks %s, the client %s."), *serverToken,
+			*clientToken);
+	case WireLoginVerdict::Match:
+		break;
+	}
+	return FString();
+}
+
 void applyNetworkVersion()
 {
 	const BuildIdentity& identity = buildIdentityUImpl::buildIdentity();
@@ -146,9 +201,22 @@ void applyNetworkVersion()
 	if (buildIdentityUImpl::overridesNetworkVersion(identity.label))
 		FNetworkVersion::SetProjectVersion(*(FNetworkVersion::GetProjectVersion() + TEXT("+") + label));
 
+	const FString wire  = joinScreenUImpl::toFString(buildIdentityUImpl::wireToken());
+	const FString units = joinScreenUImpl::toFString(buildIdentityUImpl::unitsNameOf(kUnitsPerMetre));
+	const FString axes  = joinScreenUImpl::toFString(buildIdentityUImpl::axesNameOf(kAxisFrame));
+
 	UE_LOG(LogOGBuildIdentity, Display,
-		TEXT("OGBuildIdentity: label=%s source=%s backend=%s networkProjectVersion=%s"), *label,
-		sourceName(identity.source), *backend, *FNetworkVersion::GetProjectVersion());
+		TEXT("OGBuildIdentity: label=%s source=%s backend=%s networkProjectVersion=%s wire=%s units=%s axes=%s"), *label,
+		sourceName(identity.source), *backend, *FNetworkVersion::GetProjectVersion(), *wire, *units, *axes);
+
+#if !UE_BUILD_SHIPPING
+	if (const std::optional<FString> presented = wireTokenOverride())
+	{
+		UE_LOG(LogOGBuildIdentity, Warning,
+			TEXT("OGBuildIdentity: -OGWireTokenOverride: this process presents the wire token '%s' at login instead of %s."),
+			**presented, *wire);
+	}
+#endif
 }
 
 } // namespace
@@ -182,6 +250,16 @@ FString backendLoginOption()
 	return joinScreenUImpl::toFString(kBackendLoginOptionKey) + TEXT("=") + joinScreenUImpl::toFString(backendToken());
 }
 
+std::string_view wireToken()
+{
+	return kWireToken.view();
+}
+
+FString wireLoginOption()
+{
+	return joinScreenUImpl::toFString(kWireLoginOptionKey) + TEXT("=") + presentedWireToken();
+}
+
 bool refuseMismatchedBackendLogin(const FString& loginOptions, FString& errorMessage)
 {
 	const FString clientToken = UGameplayStatics::ParseOption(loginOptions, joinScreenUImpl::toFString(kBackendLoginOptionKey));
@@ -193,10 +271,20 @@ bool refuseMismatchedBackendLogin(const FString& loginOptions, FString& errorMes
 			     "the client runs %s."),
 			*joinScreenUImpl::toFString(backendToken()), *clientToken);
 	}
-	if (!refusesBackendLogin(verdict))
-		return false;
+	if (refusesBackendLogin(verdict))
+	{
+		errorMessage = backendRefusalText(verdict, joinScreenUImpl::toFString(backendToken()), clientToken);
+	}
+	else
+	{
+		const FString clientWire =
+			UGameplayStatics::ParseOption(loginOptions, joinScreenUImpl::toFString(kWireLoginOptionKey));
+		const WireLoginVerdict wireVerdict = classifyWireLogin(wireToken(), joinScreenUImpl::toUtf8(clientWire));
+		if (!refusesWireLogin(wireVerdict))
+			return false;
 
-	errorMessage = backendRefusalText(verdict, joinScreenUImpl::toFString(backendToken()), clientToken);
+		errorMessage = wireRefusalText(wireVerdict, joinScreenUImpl::toFString(wireToken()), clientWire);
+	}
 	UE_LOG(LogOGBuildIdentity, Warning, TEXT("OGBuildIdentity: refused a login: %s"), *errorMessage);
 	return true;
 }

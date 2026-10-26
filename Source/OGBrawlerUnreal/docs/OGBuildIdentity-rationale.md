@@ -31,7 +31,8 @@ source that is present but unusable (an `-OGBuildLabel=` value that is not a lab
 `dev`; it does not fall through to the next source. One rule for "no usable label" keeps the outcome
 predictable: a broken build behaves like an unlabelled one, and the log says why.
 
-The label is used in four places (the physics-backend token beside it, and the login check it feeds, are §7):
+The label is used in four places (the physics-backend token beside it and its login check are §7; the wire token
+and its login check are §8):
 
 * the join screen's `Build: <label>` line, through `joinScreenUImpl::ownBuildLabel()`;
 * the "different build" failure text, which names the client's own label (the client never learns the
@@ -40,7 +41,8 @@ The label is used in four places (the physics-backend token beside it, and the l
 * the dedicated server's `OGBrawlerSession: build label=<label>` line (§5).
 
 At engine start each process logs one line:
-`LogOGBuildIdentity: Display: OGBuildIdentity: label=<label> source=<source> backend=<token> networkProjectVersion=<v>`.
+`LogOGBuildIdentity: Display: OGBuildIdentity: label=<label> source=<source> backend=<token> networkProjectVersion=<v> wire=<token> units=<cm|m> axes=<ZupLH|YupRH>`
+(the last three fields are §8).
 
 ## 2. Reading `build_info.txt`
 
@@ -171,7 +173,7 @@ runs before any world exists. It takes about 2 ms; the runtime's two lines
 game mode's pre-login, before the player is admitted:
 
 * **Client.** `UOGBrawlerLocalPlayer`, the project's local-player class, returns `OGBackend=<token>` as its game login options
-  (`buildIdentityUImpl::backendLoginOption`, key `kBackendLoginOptionKey`). The engine's pending net
+  (`buildIdentityUImpl::backendLoginOption`, key `kBackendLoginOptionKey`), followed by the wire token's option (§8). The engine's pending net
   game appends a local player's game login options to the URL it sends at login, whatever started the
   travel: the join screen, a command-line address, or PIE. `Config/DefaultEngine.ini` sets
   LocalPlayerClassName to it once, in the engine section. The property is a global config property, so
@@ -184,7 +186,8 @@ game mode's pre-login, before the player is admitted:
   backend with a different fingerprint; `static_assert`s pin the four). `refusesBackendLogin` decides
   which verdicts refuse: a different backend and a missing token do, a different fingerprint and a match
   do not (a second `static_assert` pins that). A refusal sets the error, which refuses the login, and logs
-  one `Warning` on `LogOGBuildIdentity`: `OGBuildIdentity: refused a login: <reason>`. A different
+  one `Warning` on `LogOGBuildIdentity`: `OGBuildIdentity: refused a login: <reason>`. When the backend check
+  admits, the same call checks the wire token next (§8). A different
   fingerprint is admitted and logs one `Warning` instead: "OGBuildIdentity: admitted a login with a
   different Jolt determinism fingerprint: this server runs jolt:…, the client runs jolt:…."
 * **The reason names both sides**, server first:
@@ -218,3 +221,68 @@ difference visible in its log. The client logs nothing about it: a successful lo
 text from the server, so it never learns the server's token (it would need a new replicated field). Its
 own start line and `[SimHost.Backend]` still name its fingerprint, so the two logs together show the
 pair.
+
+## 8. The wire format: the `OGWire` token and the login check
+
+og-sim-metres-yup task 15 (the user's ruling Q2, 2026-10-25: a login lacking the token is refused). Each of
+og-simulation's three payloads carries its own version byte: the correction state
+(`correctionStateBuffer::kWireFormatVersion`), the relayed input ring (`relayedInputRing::kWireFormatVersion`)
+and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). While og-simulation moves to
+metres and a Y-up frame, each version is a `constexpr` function of the two knobs in `SimulationFrame.h`
+(`wireFormatVersionFor` in each codec), because a flip changes what the bytes mean without changing their
+layout:
+
+| knobs | correction | ring | bundle | token |
+|---|---|---|---|---|
+| cm, Z-up (shipped today) | 6 | 2 | 2 | c6.r2.b2 |
+| m, Z-up (after flip U) | 7 | 2 | 2 | c7.r2.b2 |
+| m, Y-up (after flip X) | 8 | 3 | 3 | c8.r3.b3 |
+| cm, Y-up (probe only) | 9 | 3 | 3 | c9.r3.b3 |
+
+The ring and the bundle carry the brawler's input, whose world vectors are directions with no length (the aim
+is checked to be a unit vector, the move direction comes from the stick), so only the axis changes them. Each codec's
+`kLegacyFrameWireFormatVersion` is its version at cm, Z-up: the version on main when the knobs landed.
+`WireVersionKnobTest.cpp` in og-simulation-tests checks all four combinations in one build.
+
+**The token.** `buildIdentityUImpl::wireToken()` is `c<correction>.r<ring>.b<bundle>`, each version in
+decimal (`wireTokenFor`; a `static_assert` pins the format). It is built at compile time from the three
+constants, so the token and the compiled codecs cannot disagree.
+
+**The check, at login.** The client's `UOGBrawlerLocalPlayer::GetGameLoginOptions` returns the backend option
+of §7, then `?`, then `OGWire=<token>` (`buildIdentityUImpl::wireLoginOption`, key `kWireLoginOptionKey`;
+the separator is ⛔G-02). `buildIdentityUImpl::refuseMismatchedBackendLogin` runs the backend check of §7
+first. When that admits the login (a match, or a different fingerprint), it reads the `OGWire` option and
+classifies it with `classifyWireLogin` (`WireLoginVerdict`: `Match`; `Missing` for an absent or empty token;
+`Different` for anything else). `refusesWireLogin` refuses `Missing` and `Different`, as ruled;
+`static_assert`s pin both functions. A refusal logs the same Warning as §7,
+`OGBuildIdentity: refused a login: <reason>`, with the server's token first:
+
+* "Different wire format: this server speaks c6.r2.b2, the client c0.r0.b0."
+* "Different build: the client reports no wire format, this server speaks c6.r2.b2." (a build from before
+  this check, or an empty token)
+
+A backend refusal takes precedence: a client of the other backend is told about the backend. The client sees
+the text the way it sees §7's ("Server refused: <text>").
+
+**Why at login, when every payload has a version byte.** The version bytes are compared only when a payload
+arrives, after the player was admitted. A client that receives a correction of another version logs an
+`Error`, shows a build-mismatch message and ignores every later correction
+(`USimulatableNetSyncComponent::OnRep_CorrectionState`); the server drops every redundancy bundle of another
+version (`USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation`). The player is then in a
+session that cannot work. The login check refuses before admission, and its text names both tokens.
+
+**The start line.** The `OGBuildIdentity:` Display line (§1) ends with `wire=<token> units=<cm|m>
+axes=<ZupLH|YupRH>`, from the same three constants and the two knobs (`unitsNameOf`, `axesNameOf`; a
+`static_assert` pins the four spellings). The fields are appended after the earlier ones, so a reader of the
+earlier fields is unaffected. `units=` is each capture's length-unit marker: a log line that reports
+simulation state prints its lengths in that unit, and log tooling reads the marker per capture.
+
+**Testing a mismatch: `-OGWireTokenOverride=<token>`.** In a non-Shipping build, a client started with
+`-OGWireTokenOverride=<token>` presents `<token>` at login instead of its own token. With no value
+(`-OGWireTokenOverride=` followed by a space or the end of the command line) it presents an empty token,
+which the server refuses as `Missing`. The empty case is detected before FParse::Value is called: that
+function skips whitespace after the `=` (engine Parse.cpp:306-308) and would read the next argument as the
+token. The process logs one Warning at start-up, "OGBuildIdentity: -OGWireTokenOverride: this process
+presents the wire token '<token>' at login instead of c6.r2.b2.", and its start line keeps the compiled
+token. The switch is compiled out of Shipping (`#if !UE_BUILD_SHIPPING`). It is read from the command line
+because the login options are built before any console command a test could send to the client.

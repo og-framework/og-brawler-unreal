@@ -34,7 +34,7 @@
 #include "OGSimulation/SimulationTimeContext.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
-#include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGSimulation/SimulationFrame.h"
 #include "OGSimulationUnreal/InputRedundancyBundleBuilder.h"
 #include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGSimulationUnreal/SimulationConnectionRelay.h"
@@ -285,9 +285,9 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 	SimulatableBrawler& simulatable = storage.get<SimulatableBrawler>(ownKey);
 
 	{
-		const glm::vec3 aimDirection = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildAimDirection() : glm::vec3(1.f, 0.f, 0.f);
+		const glm::vec3 aimDirection = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildAimDirection() : simFrame::kForward;
 		const glm::vec2 moveStick = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->getMoveStick() : glm::vec2(0.f);
-		const glm::vec3 moveDirectionWorld = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildMoveDirectionWorld() : glm::vec3(0.f, 1.f, 0.f);
+		const glm::vec3 moveDirectionWorld = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildMoveDirectionWorld() : simFrame::kRight;
 
 		LoggingFunctorUImpl loggingFunctor(DAttackRadialVisualizationCVars::loggingEnabled);
 		DAttackRendererFunctorUImpl rendererFunctorImpl(GetWorld());
@@ -295,7 +295,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 		const simulatableBrawler::AllState& attackSimAllState = simulatable.getVizState();
 		const simulatableBrawler::State* attackSimState = &(attackSimAllState.getState());
 
-		glm::vec3 tmpAimInput = glm::vec3(1.f, 0.f, 0.f);
+		glm::vec3 tmpAimInput = simFrame::kForward;
 		if (m_ownerInputCollection != nullptr && m_ownerInputCollection->hasInputComponent())
 			tmpAimInput = aimDirection;
 

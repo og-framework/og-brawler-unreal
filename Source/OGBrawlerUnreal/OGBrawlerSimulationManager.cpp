@@ -17,7 +17,6 @@
 #include "OGBrawler/DAttackRadialSimulation.h"
 #include "OGBrawler/DAttackGuardSimulation.h"
 #include "OGBrawler/BrawlerProjectileSimulation.h"
-#include "OGSimulationUnreal/UGLMTypeConversion.h"
 #include "Components/CapsuleComponent.h"
 #include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
 

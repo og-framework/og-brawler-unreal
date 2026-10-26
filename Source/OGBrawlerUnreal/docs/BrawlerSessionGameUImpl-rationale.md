@@ -220,6 +220,16 @@ moves to the hooks' doc). R0, task 27b: re-verified: `MovementSchemeCVar.cpp` re
 into the static data's gravity, the hook compares it with the world's `GetGravityZ()` within 1e-3, and the message text is
 unchanged.*
 
+**Units: the check compares in UE units (og-sim-metres-yup task 8).** `UPhysicsSettings::DefaultGravityZ` and
+`UWorld::GetGravityZ()` are UE values in cm/s². `StaticData::gravity` is in og-simulation units, because
+`readMovementStaticDataCVars()` (`MovementSchemeCVar.cpp`) passes the gravity, the walk speed and the step speed through
+`ueFrame::lengthToSim` before they reach `FMovementStaticDataCVars`. Its `[Movement.cvar]` line still echoes the UE values
+it read, since it reports UE settings. So the hook converts the sim's value back, `simGravityZ` =
+`ueFrame::lengthToUe(gravity)` narrowed to `float`, and compares that with `GetGravityZ()` within the same 1e-3. The
+message still prints both values in cm/s². At the shipped knobs (centimetres) both conversions are a float-to-double copy
+and back, so the compared values are the same floats as before. If the sim's value reached `StaticData` unconverted in
+metres, the check would compare -98000 with -980 and fire.
+
 ---
 
 ## §7 The registration hooks (og-ue-simulationcomponentandmanagersplit task 28)

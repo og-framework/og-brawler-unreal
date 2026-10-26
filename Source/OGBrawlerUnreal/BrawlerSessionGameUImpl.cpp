@@ -4,6 +4,7 @@
 #include "OGBrawlerUnreal/BrawlerSessionGameUImpl.h"
 #include "OGBrawlerSimulationManager.h"
 #include "OGSimulation/CompilerControl.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 
 #include "OGBrawler/SimulatableBrawler.h"
@@ -31,7 +32,7 @@ void BrawlerSessionGameUImpl::beforeWorldBuild(UWorld& world, ENetMode netMode, 
 	BrawlerSessionTraitsUImpl::StaticData& staticData)
 {
 	const float engineGravityZ = world.GetGravityZ();
-	const float simGravityZ    = staticData.m_movementStaticData.gravity;
+	const float simGravityZ    = static_cast<float>(ueFrame::lengthToUe(staticData.m_movementStaticData.gravity));
 	checkf(FMath::Abs(simGravityZ - engineGravityZ) < 1e-3f,
 		TEXT("OGBrawlerSimulationManager: the movement simulation's gravity (%f cm/s^2) disagrees with ")
 		TEXT("the engine's (%f cm/s^2). The sim's value is read from UPhysicsSettings::DefaultGravityZ ")

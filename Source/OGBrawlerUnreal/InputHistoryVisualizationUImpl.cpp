@@ -12,6 +12,7 @@
 #include "GameFramework/PlayerController.h"
 
 #include "OGBrawler/BrawlerInputHistoryVisualizationPanel.h"
+#include "OGSimulation/SimulationFrame.h"
 
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
@@ -449,7 +450,8 @@ void BrawlerInputHistoryFeedUImpl::gatherNearestCandidates(
 			const auto& movement = simulatable.getVizState().getState()
 				.template get<brawlerMovementSimulation::State>();
 
+			const glm::vec2 planarPosition = simFrame::planar(movement.bodyState.position);
 			out.add(brawlerInputHistoryVisualization::NearestCharacterCandidate{
-				id, movement.bodyState.position.x, movement.bodyState.position.y });
+				id, planarPosition.x, planarPosition.y });
 		});
 }

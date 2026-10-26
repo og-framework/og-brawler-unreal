@@ -21,6 +21,7 @@ public class OGSimulationTests : TestModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGSimulationJolt" });
+		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "..", "..", "Plugins", "OGSimulation", "Source"));
 
 		// Epic's bundled Catch2 v3.4.0 header (WITH_LOW_LEVEL_TESTS auto-defined by UBT for TestTargetRules)
 		PublicSystemIncludePaths.Add(Path.Combine(

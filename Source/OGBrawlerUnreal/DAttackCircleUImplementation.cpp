@@ -9,6 +9,7 @@
 //C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Math\Color.h
 //C:\dev\UnrealEngine\Engine\Source\Runtime\Core\Public\Math\MathFwd.h
 
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGSimulation/CompilerControl.h"
 OGSIM_OPTIMIZE_OFF
 
@@ -27,7 +28,7 @@ void drawAllSegmentLines(const DAttackCircle& attackCircle, const FTransform& tr
 	for (auto& line : lines)
 	{
 		FVector start = rootPosition;
-		FVector end = rootPosition + rootRotation * FVector(line.x, line.y, line.z);
+		FVector end = rootPosition + rootRotation * ueFrame::vectorToUe(line);
 		DrawDebugLine(world, start, end, FColor::Green, false, -1.f, 0, 1.f);
 	}
 }
@@ -44,13 +45,18 @@ void drawSegment(const std::vector<glm::vec3>& upperVerts, const std::vector<glm
 	TArray<int32> fIndices;
 
 	for(const glm::vec3& vert : upperVerts)
-		fUpperVerts.Add(FVector(vert.x, vert.y, vert.z));
+		fUpperVerts.Add(ueFrame::vectorToUe(vert));
 
 	for(const glm::vec3& vert : lowerVerts)
-		fLowerVerts.Add(FVector(vert.x, vert.y, vert.z));
+		fLowerVerts.Add(ueFrame::vectorToUe(vert));
 
 	for (unsigned int index : indicies)
 		fIndices.Add(index);
+	if constexpr (ueFrame::kReflects)
+	{
+		for (int32 first = 0; first + 2 < fIndices.Num(); first += 3)
+			fIndices.Swap(first + 1, first + 2);
+	}
 
 	DrawDebugMesh(world, fUpperVerts, fIndices, getDAttackRadialSequenceStateColor(segment.state), false, -1.f, 5.f);
 	DrawDebugMesh(world, fLowerVerts, fIndices, getDAttackRadialSequenceStateColor(segment.state), false, -1.f, 4.f);
@@ -79,8 +85,8 @@ void drawAllSegments(const DAttackCircle& attackCircle, const DAttackRadialSeque
 
 
 		auto buildActiveSegment = [&rootPosition, &rootRotation, &upperVerts, &middleVerts, &lowerVerts, &attackCircle, &segmentHeightHalved](float angle) {
-			FVector innerEnd = rootPosition + /*rootRotation * */FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * attackCircle.getInnerRadius();
-			FVector outerEnd = rootPosition + /*rootRotation * */ FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * attackCircle.getOuterRadius();
+			FVector innerEnd = rootPosition + /*rootRotation * */FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * ueFrame::lengthToUe(attackCircle.getInnerRadius());
+			FVector outerEnd = rootPosition + /*rootRotation * */ FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * ueFrame::lengthToUe(attackCircle.getOuterRadius());
 
 			upperVerts.Add(innerEnd + FVector(0.f, 0.f, segmentHeightHalved));
 			upperVerts.Add(outerEnd + FVector(0.f, 0.f, segmentHeightHalved));
@@ -120,7 +126,7 @@ void drawTrace(const DAttackCircle& attackCircle, const DAttackRadialSequence& a
 			const FQuat rootRotation = transform.GetRotation();
 			const float directionAngle = segment.startAngle + (segment.endAngle - segment.startAngle) * 0.5f;
 			const FVector direction = /*rootRotation * */FVector(FMath::Cos(directionAngle), FMath::Sin(directionAngle), 0.f);
-			DrawDebugCircleArc(world, rootPosition, attackCircle.getOuterRadius(), worldMidDirection, (segment.endAngle - segment.startAngle)*0.5f, 10, getDAttackRadialSequenceStateColor(segment.state), false, -1.f, 5, 2.f);
+			DrawDebugCircleArc(world, rootPosition, static_cast<float>(ueFrame::lengthToUe(attackCircle.getOuterRadius())), worldMidDirection, (segment.endAngle - segment.startAngle)*0.5f, 10, getDAttackRadialSequenceStateColor(segment.state), false, -1.f, 5, 2.f);
 		}
 	}
 }

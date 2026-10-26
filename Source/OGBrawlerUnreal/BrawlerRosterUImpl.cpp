@@ -6,7 +6,7 @@
 #include "OGSimulation/CompilerControl.h"
 #include "OGSimulation/OGAssert.h"
 #include "OGSimulationUnreal/UESimulationLogRoutes.h"
-#include "OGSimulationUnreal/UGLMTypeConversion.h"
+#include "OGSimulationUnreal/UEFrameConversion.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 
@@ -67,7 +67,7 @@ void BrawlerRosterUImpl::seedSpawnPointsFromLevel(UWorld& world, ENetMode netMod
 
 		brawlerRingout::LevelSpawnPoint placement;
 		placement.name     = TCHAR_TO_UTF8(*playerStart->GetName());
-		placement.position = uglm::toGLMVec3(playerStart->GetActorLocation());
+		placement.position = ueFrame::vectorToSim(playerStart->GetActorLocation());
 		placements.push_back(std::move(placement));
 	}
 
@@ -94,8 +94,9 @@ void BrawlerRosterUImpl::seedSpawnPointsFromLevel(UWorld& world, ENetMode netMod
 	{
 		const glm::vec3& point = staticData.m_ringoutStaticData.spawnPoints[slot];
 		UE_LOG(LogOGMgmt, Warning,
-			TEXT("[Ringout.spawnPoints]   slot %u -> (%.2f, %.2f, %.2f) [%s]"),
-			slot, point.x, point.y, point.z,
+			TEXT("[Ringout.spawnPoints]   slot %u -> (%.*f, %.*f, %.*f) [%s]"),
+			slot, simFrame::lengthDecimals(2), point.x, simFrame::lengthDecimals(2), point.y,
+			simFrame::lengthDecimals(2), point.z,
 			(slot < placements.size()) ? TEXT("level") : TEXT("authored"));
 	}
 }
@@ -133,7 +134,7 @@ void BrawlerRosterUImpl::onBodiesCreated(SimulatableBrawler& simulatable, AOGBra
         .edit<brawlerMovementSimulation::InitialConditions>();
     movementIC.teleportPending = 1u;
     movementIC.teleportPos     =
-        uglm::toGLMVec3(character.GetCapsuleComponent()->GetComponentLocation());
+        ueFrame::vectorToSim(character.GetCapsuleComponent()->GetComponentLocation());
 
     if (isAuthority)
     {
