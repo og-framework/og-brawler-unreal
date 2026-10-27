@@ -486,9 +486,16 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 			tmpAimInput = worldAimDirection;
 
 		glm::mat4 humanoidAimRotationMatrix;
-		const glm::vec3 humanoidDefaultForward(0.f, 1.f, 0.f);
-		dMathUtil::getRotationMatrix(humanoidDefaultForward, ueNative::toGlm(ueFrame::directionToUe(tmpAimInput)),
-			humanoidAimRotationMatrix);
+		constexpr glm::vec3 humanoidDefaultForward(0.f, 1.f, 0.f);
+		constexpr glm::vec3 humanoidTurnAxis(0.f, 0.f, 1.f);
+		constexpr float kMinHumanoidFacingHorizontalLength = 1e-3f;
+		const glm::vec3 ueAim = ueNative::toGlm(ueFrame::directionToUe(tmpAimInput));
+		const glm::vec3 ueHorizontalAim(ueAim.x, ueAim.y, 0.f);
+		const float ueHorizontalAimLength = glm::length(ueHorizontalAim);
+		const glm::vec3 humanoidFacing = ueHorizontalAimLength > kMinHumanoidFacingHorizontalLength
+			? ueHorizontalAim / ueHorizontalAimLength
+			: humanoidDefaultForward;
+		dMathUtil::getRotationMatrix(humanoidDefaultForward, humanoidFacing, humanoidTurnAxis, humanoidAimRotationMatrix);
 		HumanoidMesh->SetWorldRotation(ueNative::toFTransform(humanoidAimRotationMatrix).GetRotation());
 	}
 

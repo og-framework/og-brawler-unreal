@@ -265,9 +265,9 @@ display calls `Left`. The angles themselves are unchanged;
 `Panel.EveryArrowMirrorsTheAngleTheMatcherTestedAcrossTheAimAxis` sweeps `kNamedDirections`
 and asserts each arrow is `(-sin, -cos)` of the angle the motion matcher actually tested.
 
-⛔ THE SIDE, AND A STALE SENTENCE IN `og-brawler`'s OWN `InputSequence.h`. That header
-documents `+pi/2` as "right-of-aim", from `right(fwd.y, -fwd.x)` (once annotated "right-hand
-z-up"). Every vector reaching it is an og-simulation world vector (an Unreal one crosses through
+⛔ THE SIDE, AND A SENTENCE `og-brawler`'s OWN `InputSequence.h` HAD WRONG. That header
+documented `+pi/2` as "right-of-aim", from `right(fwd.y, -fwd.x)` (once annotated "right-hand
+z-up"), until og-sim-metres-yup task 26 corrected the comment. Every vector reaching it is an og-simulation world vector (an Unreal one crosses through
 `ueFrame::directionToSim` since og-sim-metres-yup task 8), which the matcher reads as its
 `(forward, right)` pair, `simFrame::forwardRight`. So `fwd` is `(forward, right)`, and
 `(fwd.y, -fwd.x)` turns straight ahead, `(1, 0)`, into `(0, -1)`: right component −1. Unreal
@@ -275,10 +275,13 @@ agrees: its right vector is the other perpendicular — `FRotationTranslationMat
 row, which `USceneComponent::GetRightVector` returns, is `(-sin yaw, cos yaw, 0)`. So
 `(fwd.y, -fwd.x)` is the character's LEFT and `+pi/2` is **left-of-aim**: pressing left
 produced `+pi/2` and the display drew a RIGHT arrow, which is what the user reported. The
-display's table was mirrored to match reality. **`InputSequence.h`'s comment is wrong and
-was deliberately left alone** — the motion matcher's behaviour is baked into the shipped
-motion definitions, so correcting the vocabulary there is a gameplay decision, not a
-presentation one.
+display's table was mirrored to match reality. **`InputSequence.h`'s names were
+deliberately left alone** (`angle::Down` is still `+pi/2`, left-of-aim) — the motion matcher's
+behaviour is baked into the shipped motion definitions, so renaming the vocabulary there is a
+gameplay decision, not a presentation one. Its comment, which called the sense clockwise and
+`+pi/2` right-of-aim, was corrected by og-sim-metres-yup task 26 with no change to code.
+The argument above rests on `simFrame::forwardRight`, which task 26's change of the planar
+chart did not touch, so it holds as written.
 
 ---
 

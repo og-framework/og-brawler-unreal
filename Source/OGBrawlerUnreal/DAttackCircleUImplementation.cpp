@@ -64,6 +64,8 @@ void drawSegment(const std::vector<glm::vec3>& upperVerts, const std::vector<glm
 
 ////////////
 
+// Planar angles are the simulation's native chart (forward, left; counter-clockwise about +Y,
+// og-sim-metres-yup task 26), so the Unreal local Y (right) component is -sin(angle).
 void drawAllSegments(const DAttackCircle& attackCircle, const DAttackRadialSequence& attackSequence, const FTransform& transform, UWorld* world)
 {
 	const FVector rootPosition = transform.GetTranslation();
@@ -85,8 +87,8 @@ void drawAllSegments(const DAttackCircle& attackCircle, const DAttackRadialSeque
 
 
 		auto buildActiveSegment = [&rootPosition, &rootRotation, &upperVerts, &middleVerts, &lowerVerts, &attackCircle, &segmentHeightHalved](float angle) {
-			FVector innerEnd = rootPosition + /*rootRotation * */FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * ueFrame::lengthToUe(attackCircle.getInnerRadius());
-			FVector outerEnd = rootPosition + /*rootRotation * */ FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * ueFrame::lengthToUe(attackCircle.getOuterRadius());
+			FVector innerEnd = rootPosition + /*rootRotation * */FVector(FMath::Cos(angle), -FMath::Sin(angle), 0.f) * ueFrame::lengthToUe(attackCircle.getInnerRadius());
+			FVector outerEnd = rootPosition + /*rootRotation * */ FVector(FMath::Cos(angle), -FMath::Sin(angle), 0.f) * ueFrame::lengthToUe(attackCircle.getOuterRadius());
 
 			upperVerts.Add(innerEnd + FVector(0.f, 0.f, segmentHeightHalved));
 			upperVerts.Add(outerEnd + FVector(0.f, 0.f, segmentHeightHalved));
@@ -115,8 +117,8 @@ void drawTrace(const DAttackCircle& attackCircle, const DAttackRadialSequence& a
 		{
 
 			FQuat initialRotationQuat(initialAimAxis, initialAimAngle);
-			const FVector localStartDirection = FVector(std::cos(segment.startAngle), std::sin(segment.startAngle), 0.f);
-			const FVector localEndDirection = FVector(std::cos(segment.endAngle), std::sin(segment.endAngle), 0.f);
+			const FVector localStartDirection = FVector(std::cos(segment.startAngle), -std::sin(segment.startAngle), 0.f);
+			const FVector localEndDirection = FVector(std::cos(segment.endAngle), -std::sin(segment.endAngle), 0.f);
 			FVector localMidDirection = (localStartDirection + localEndDirection) * 0.5f;
 			localMidDirection.Normalize();
 			FVector worldMidDirection = initialRotationQuat * localMidDirection;
@@ -125,7 +127,7 @@ void drawTrace(const DAttackCircle& attackCircle, const DAttackRadialSequence& a
 			const FVector rootPosition = transform.GetTranslation();
 			const FQuat rootRotation = transform.GetRotation();
 			const float directionAngle = segment.startAngle + (segment.endAngle - segment.startAngle) * 0.5f;
-			const FVector direction = /*rootRotation * */FVector(FMath::Cos(directionAngle), FMath::Sin(directionAngle), 0.f);
+			const FVector direction = /*rootRotation * */FVector(FMath::Cos(directionAngle), -FMath::Sin(directionAngle), 0.f);
 			DrawDebugCircleArc(world, rootPosition, static_cast<float>(ueFrame::lengthToUe(attackCircle.getOuterRadius())), worldMidDirection, (segment.endAngle - segment.startAngle)*0.5f, 10, getDAttackRadialSequenceStateColor(segment.state), false, -1.f, 5, 2.f);
 		}
 	}

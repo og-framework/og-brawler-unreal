@@ -783,8 +783,25 @@ is UE-native data (design ruling Q6): its default forward `(0, 1, 0)` and the ro
 So `Tick` converts the aim with `ueFrame::directionToUe` (narrowed back to `glm::vec3` by `ueNative::toGlm`) before
 `dMathUtil::getRotationMatrix`, and the rotation reaches the component through `ueNative::toFTransform`. In the Y-up
 frame `directionToUe` maps the og aim `(x, y, z)` to Unreal's `(−z, x, y)`, exactly (a direction has no length factor),
-so the rotation is computed from the Unreal-frame aim; before og-sim-metres-yup's flip X it was a float-to-double copy
-and back. The statement sits inside this file's `OGSIM_OPTIMIZE_OFF` span.
+so the rotation is computed from the Unreal-frame aim (flattened, below); before og-sim-metres-yup's flip X it was a
+float-to-double copy and back. The statement sits inside this file's `OGSIM_OPTIMIZE_OFF` span.
+
+**The facing is a yaw about Unreal +Z (og-sim-metres-yup task 26b).** `Tick` builds `ueHorizontalAim` from the
+Unreal-frame aim with its Z (vertical) component set to 0, and turns the mesh toward that direction, renormalized. When
+its length is not above `kMinHumanoidFacingHorizontalLength` (1e-3: an aim straight up or down, or a NaN length), the
+facing stays `humanoidDefaultForward` and the rotation is the identity. `humanoidTurnAxis` (Unreal +Z) is passed as
+`getRotationMatrix`'s `antiparallelAxis`, so an aim exactly opposite the default forward turns π about +Z.
+- **Why.** The mouse aim carries float noise in its horizontal and its vertical component alike. At camera yaw exactly 0
+  with the cursor on the character's pixel row, the aim is Unreal ≈ `(−3.0e-7, −1, 2.0e-7)`. Both residuals are the same
+  size, so the shortest-arc rotation from `(0, 1, 0)` turned ≈ π about the tilted axis
+  `normalize(cross((0, 1, 0), aim))` ≈ `(0.547, 0, 0.837)`, and the mesh lay on its side. The code before og-sim-metres-yup
+  gave the same quaternion on that input, so the defect was older than the initiative.
+- **After the flatten** the cross product is `(0, 0, −x)` for a horizontal aim `(x, y, 0)`. The axis is ±Z and the
+  rotation a yaw for every aim. When `x` is 0 the cross is zero and `getRotationMatrix` returns the identity (aim along
+  `(0, 1, 0)`) or the half turn about `humanoidTurnAxis` (aim along `(0, −1, 0)`).
+- **Measured** by task 26b on the 274 distinct aims both clients logged in a recorded session (3,086 frames, nearly all at
+  camera yaw 0): with the new code every quaternion has x = y = +0; the old code tilted 34 of them by more than 1e-3.
+- **Visual only.** No code reads the mesh's rotation back, and the component has no collision.
 
 ## 12. History — removed code and orientation comments
 
