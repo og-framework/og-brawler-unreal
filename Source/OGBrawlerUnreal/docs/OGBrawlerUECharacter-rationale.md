@@ -236,7 +236,7 @@ Trailing and one-line comments removed from the constructor, with their status:
 |---|---|
 | `// Don't rotate when the controller rotates. Let that just affect the camera.` | true (the three `bUseControllerRotation*` are `false`) |
 | `// Create a camera boom (pulls in towards the player if there is a collision)` | describes `USpringArmComponent`'s default collision test; kept as history |
-| `// The camera follows at this distance behind the character` (on `TargetArmLength = 900`) | the default is `dAttackCameraBehaviour::kBoomLengthAtTargetPitch` (900) since task 9; once the pawn is locally controlled, `applyCameraStateToBoom` overwrites it on the seed and on every `Tick` with the orbit camera's length (§14) |
+| `// The camera follows at this distance behind the character` (on `TargetArmLength = 900`) | the default is `dAttackCameraBehaviour::kBoomLengthAtTargetPitch` since task 9 (900; 1200 since og-ground-aligned-attacks task 15, 2500 since its task 18); once the pawn is locally controlled, `applyCameraStateToBoom` overwrites it on the seed and on every `Tick` with the orbit camera's length (§14) |
 | `// Rotate the arm based on the controller` (on `bUsePawnControlRotation = false`) | **false** — the value is `false`, so the arm does NOT follow the controller; the camera is driven by `dAttackCameraBehaviour` in `Tick` (R0, §13) |
 | `// Create a follow camera`, `// Attach the camera to the end of the boom …`, `// Camera does not rotate relative to arm` | true |
 | `// Create a PhysicsComponent` | **false** — no physics component is created (R0, §13) |
@@ -880,7 +880,9 @@ the result onto `CameraBoom`.
 4. Only for a seeded pawn: the settings are read from the console variables (`orbitCameraSettingsFromCVars`);
    the target is `dAttackCameraBehaviour::pitchDegFromUEPitchDegrees` of the iso pitch, every frame, so a
    live og.iso.pitch change moves the target and not the seed; the input is built (guard G-19);
-   `dAttackCameraBehaviour::integrate` returns the next state; `applyCameraStateToBoom` writes it.
+   `dAttackCameraBehaviour::integrate` returns the next state; `applyCameraStateToBoom` writes it;
+   `ASharedIsometricCameraActor::reportCameraSight` prints the sight readout if one of its inputs changed
+   (below, og-ground-aligned-attacks task 17).
 
 **The input.**
 
@@ -910,7 +912,33 @@ the result onto `CameraBoom`.
   put the camera under the floor on the first frame, which no one can miss, so it has no guard.
 * **The length.** `dAttackCameraBehaviour::boomLength` is the one definition of the curve: full length at
   or past the target pitch. The constructor default is `dAttackCameraBehaviour::kBoomLengthAtTargetPitch`.
-  G-18 (task 7's mirrored 900) retired with the mirror.
+  G-18 (task 7's mirrored 900) retired with the mirror. Since og-ground-aligned-attacks task 15 (user
+  request 2026-10-29: the camera further back) the two lengths are settings, tunable live as
+  og.cam.boomTarget and og.cam.boomHorizon: 2500 at the target pitch and 550 at the horizon by default
+  since og-ground-aligned-attacks task 18 (the user's tuned boom; 1200 and 550 from task 15, 900 and 400
+  before).
+
+**The field of view (og-ground-aligned-attacks tasks 15 and 18).** `applyCameraStateToBoom` also writes the follow
+camera's `FieldOfView`, on the seed and on every `Tick`. Since task 18 the angle follows the pitch like
+the boom: `dAttackCameraBehaviour::fovAtPitch` blends from og.cam.fov (40° by default, the user's tuned
+value; 58.72° from task 15) at or past the target pitch to og.cam.fovHorizon (58° by default) at the
+horizon, linearly, with the boom's own factor (og-brawler `DAttackCamera-rationale.md` §17). Both angles
+span the og.cam.fovAxis axis, by default the shorter screen axis, and `dAttackCameraBehaviour::horizontalFovDeg`
+converts the blended angle with the viewport's aspect (`ASharedIsometricCameraActor::viewportAspectRatio`) into a
+horizontal field of view. The constructor makes the engine render `FieldOfView` as exactly that, the
+horizontal angle at every aspect, by setting the follow camera's aspect-ratio axis override to
+MaintainXFOV. Without it the local player's default applies, MaintainYFOV (Engine/Config/BaseEngine.ini,
+section /Script/Engine.LocalPlayer), and the engine's projection (CalculateProjectionMatrixGivenViewRectangle
+in Engine/Source/Runtime/Engine/Private/Camera/CameraStackTypes.cpp) keeps the vertical angle that
+`FieldOfView` gives at the component's reference aspect of 1.777778, so only a 16:9 window would render the
+converted angle. That is how this camera rendered before task 15: a fixed vertical angle, 90° horizontal
+only on 16:9. On 16:9 task 15's default of 58.72° rendered the old 90° horizontal within 0.006° (90.0053°);
+task 18's 40° renders 65.8° at the target pitch and its 58° renders 89.2° at the horizon. A wider window
+shows more to the sides at the same height, and a portrait one more above and below. og.cam.fovAxis 0 puts
+og.cam.fov on the horizontal axis at every aspect: on 16:9 that is the camera before task 15, off 16:9 it
+is not (that camera kept the vertical angle). The aspect is the whole game viewport's, so split-screen
+local players get the window's aspect, not their own view's. The write is skipped while the value is
+unchanged, so a resized window takes effect on the next frame.
 
 **The seed.** `seedCameraBoomAtIsoRotation` reads the iso rotation from `ASharedIsometricCameraActor::resolveIsoRotation`
 (the og.iso.pitch / og.iso.yaw console variables when non-zero, else the iso actor's class defaults,
@@ -921,6 +949,7 @@ pitch outside the limits starts the camera at the nearest limit.
 Measured on 2026-10-04 (headless standalone run of the ThirdPersonMap, boom properties printed at frame
 60): the defaults give a boom world rotation of (pitch −60, yaw 0) and a length of 900. With og.iso.yaw 45,
 og.iso.pitch −45 and og.cam.pitchMin 50 it is (−50, 45) and 900. The absolute-rotation flag reads `True`.
+(That run predates og-ground-aligned-attacks task 15; the default full length is now 2500, since its task 18.)
 
 **Why a one-shot flag in `Tick`, and not `PossessedBy` or `OnRep_Controller`.** `PossessedBy` runs only
 on the server, and `OnRep_Controller` only on a client, and §10 records that a mid-game couch player's
@@ -944,7 +973,7 @@ blend does not re-seed again (the engine also ignores the repeated `SetViewTarge
 not re-seeded: a blend from the pawn to the iso camera that is interrupted before it finishes. The current
 view target is then still the pawn, whose angle was still on screen.
 
-**Console variables (tasks 9 and 10).** Read every `Tick` into the settings. Local presentation only: nothing
+**Console variables (tasks 9 and 10; og-ground-aligned-attacks task 15 added og.cam.boomTarget to og.cam.fovAxis, task 18 og.cam.fovHorizon).** Read every `Tick` into the settings. Local presentation only: nothing
 reaches the simulation or the wire.
 
 | variable | default | effect |
@@ -960,8 +989,13 @@ reaches the simulation or the wire.
 | og.cam.pullMaxDegPerSec | 240 | fastest the pull may move the pitch, in degrees per second; 0 = no pull (task 10) |
 | og.cam.pullHoldoffSec | 0 | seconds the pull pauses after a deliberate vertical look; 0 = no pause, also none during vertical look (task 10; task 8 used 0.6) |
 | og.cam.pullDominanceRatio | 0 | weakens the pull on diagonal look; 0 = full pull on any diagonal, 2 = none past about 27° off horizontal (task 10; task 8 used 2) |
+| og.cam.boomTarget | 2500 | boom length in cm at or past the target pitch; 0 or below = the default (1200 from task 15, 900 before) |
+| og.cam.boomHorizon | 550 | boom length in cm at the horizon; 0 or below = the default (was 400 before task 15) |
+| og.cam.fov | 40 | field of view in degrees on the og.cam.fovAxis axis at or past the target pitch; 0 or below = the default (58.72 from task 15, the old 90° horizontal on 16:9 on the shorter axis) |
+| og.cam.fovAxis | 1 | the screen axis og.cam.fov and og.cam.fovHorizon span: 0 (or below) = horizontal at every aspect, 1 (or above) = the shorter axis |
+| og.cam.fovHorizon | 58 | field of view in degrees on the og.cam.fovAxis axis at the horizon; the angle blends linearly to it from og.cam.fov, like the boom; 0 or below = the default; equal to og.cam.fov = a constant field of view (task 18) |
 
-The defaults of the last six are the og-brawler constants, not copies. The orbit camera sanitizes the
+The defaults of the last eleven are the og-brawler constants, not copies. The orbit camera sanitizes the
 four pull values (og-brawler `DAttackCamera-rationale.md` §13): an e-fold below 1 is raised to 1, a
 negative cap means no pull, and a negative hold-off or ratio means off. The user ruled (task 10) that the
 pull is strong and never switched off by default, and kept the hold-off and the dominance weight as
@@ -983,10 +1017,54 @@ direction is a PIE check.
 **What did not change.** The legacy input scales, the control rotation and `bUsePawnControlRotation`
 (`false`) are untouched: the camera does not go through the controller. Camera-relative movement reads the
 camera one frame old, as before. A faster yaw now turns the move basis faster while moving, but there is
-no wire change. Field of view and distance are not matched to the iso camera.
+no wire change. Since og-ground-aligned-attacks task 17 the iso camera matches this camera's field of view
+and distance, not the other way round (below).
+
+**The iso camera matches this camera, and the sight readout (og-ground-aligned-attacks task 17, user
+request 2026-10-30).** The user tunes only this camera's boom and field of view, and the shared iso camera
+follows: a group of local players sees, around its outermost players, what one player sees around
+themselves. The rules and the math are og-brawler's (`DAttackCamera-rationale.md` §16,
+`dAttackCameraBehaviour::resolveIsoFraming`); this file's part is the one accessor.
+
+* `orbitCameraSettingsFromCVars` is a public static member, the one place the og.cam.* console variables
+  become an `OrbitCameraSettings`. This class's `Tick` and seed call it, and so do the iso actor's `Tick`
+  and its readout (`ASharedIsometricCameraActor::reportCameraSight`), so the two cameras cannot read the
+  solo settings differently. Before task 17 it was a function local to this file.
+* og.iso.matchSolo (an int console variable on the iso actor, default 1; 0 = the iso camera's own settings
+  from task 15): with 1 the iso camera renders this camera's field of view on its axis (og.cam.fov /
+  og.cam.fovAxis) and pads the group by what this camera sees around its player at og.cam.boomTarget,
+  half-width `boom × tan(h / 2)` and half-height `boom × tan(v / 2)` at the live aspect. One local player
+  is then framed from the boom, the same view as this camera at the target pitch; a group is framed so its
+  outermost players keep that reach. og.iso.fov, og.iso.fovAxis, og.iso.marginHCm, og.iso.marginVCm and
+  og.iso.minDistance are ignored in that mode, og.iso.maxDistance still applies. Both cameras read the
+  console variables every frame, so og.cam.boomTarget and og.cam.fov move both live. The iso camera looks
+  at the target pitch, so it uses og.cam.fov and og.cam.boomTarget and never the horizon values
+  (og.cam.fovHorizon, og.cam.boomHorizon; task 18).
+* The readout is a `[Camera.sight]` line on LogOGBrawler at Warning (shown at the default verbosity):
+  `boomM`, `soloFovHDeg`, `soloFovVDeg`, `soloFovHorizonHDeg` (task 18: og.cam.fovHorizon as the
+  horizontal angle at the live aspect), `aspect`, `reachHM`, `reachVM`, `matchSolo`, `isoFovHDeg`,
+  `marginHM`, `marginVM`, `players`, `groupHalfHM`, `groupHalfVM`, `isoDistM` (lengths in metres). The
+  group is the one the shared camera framed last; with no live shared camera it is empty (`players=0`) and
+  `isoDistM` is the distance the iso camera would use for one player. This class's `Tick` and the iso
+  actor's `Tick` call it every frame, and it prints (`trigger=change`) only when one of its inputs differs
+  from the last print: the solo boom, field of view, axis and horizon field of view, og.iso.matchSolo, the iso actor's own
+  settings, or the viewport aspect. A moving group changes only the printed distance, so it does not print
+  every frame. The console command og.cam.printSight prints the line on demand (`trigger=command`). The
+  per-frame calls print nothing in a process that never renders (the engine's CanEverRender, false with
+  -nullrhi), so the headless harness clients, which run -nullrhi, gain no log tag.
+* Measured 2026-10-30 (standalone `-game`, ThirdPersonMap with OGBrawlerUEGameMode, 1280×720 offscreen,
+  `og.cam.boomTarget 1500` and a second local player from the command line, 40 s): exactly one line,
+  `trigger=change boomM=15.000 soloFovHDeg=90.005 soloFovVDeg=58.720 aspect=1.7778 reachHM=15.001
+  reachVM=8.438 matchSolo=1 isoFovHDeg=90.005 marginHM=15.001 marginVM=8.438 players=2 groupHalfHM=2.254
+  groupHalfVM=1.589 isoDistM=17.824`. With -nullrhi and og.cam.printSight, only the `trigger=command` line
+  (aspect 1, no viewport). With task 18's defaults (same run shape, no cvar set): `trigger=change
+  boomM=25.000 soloFovHDeg=65.810 soloFovVDeg=40.000 soloFovHorizonHDeg=89.160 aspect=1.7778 reachHM=16.176
+  reachVM=9.099 matchSolo=1 isoFovHDeg=65.810 marginHM=16.176 marginVM=9.099 players=2 groupHalfHM=2.254
+  groupHalfVM=1.589 isoDistM=29.365`.
 
 **Pawns that are never seeded** skip the camera block, so their boom keeps the constructor defaults
-(absolute rotation zero, length 900). Before task 9 their unseeded state was written every frame (an
+(absolute rotation zero, length `dAttackCameraBehaviour::kBoomLengthAtTargetPitch`, 2500 since og-ground-aligned-attacks
+task 18, and the engine's default 90° field of view). Before task 9 their unseeded state was written every frame (an
 identity relative rotation and a length of 0). Neither is ever a view target. The input component's
 follow-camera fallback is used only by a pawn without a player controller, and that pawn builds no input
 (`buildPlayerInput` returns the zero input when there is no input component).

@@ -139,6 +139,8 @@ public:
 
 	void seedCameraBoomAtIsoRotation();
 
+	static dAttackCameraBehaviour::OrbitCameraSettings orbitCameraSettingsFromCVars();
+
 protected:
 
 	dAttackCameraBehaviour::OrbitCameraState m_cameraState;

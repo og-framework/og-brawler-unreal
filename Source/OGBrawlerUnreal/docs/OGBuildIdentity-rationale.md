@@ -227,18 +227,22 @@ pair.
 og-sim-metres-yup task 15 (the user's ruling Q2, 2026-10-25: a login lacking the token is refused). Each of
 og-simulation's three payloads carries its own version byte: the correction state
 (`correctionStateBuffer::kWireFormatVersion`), the relayed input ring (`relayedInputRing::kWireFormatVersion`)
-and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 9, 3 and 3, so the
-token is c9.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
+and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 10, 3 and 3, so the
+token is c10.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
 mean without changing their layout, so each step bumped the versions it changed. While the move ran, each version
 was a `constexpr` function of `SimulationFrame.h`'s two frame knobs; task 24 deleted the knobs and froze the
-versions at the third row, and task 26 (the native planar chart) bumped the correction version once more:
+versions at the third row, and task 26 (the native planar chart) bumped the correction version once more.
+og-ground-aligned-attacks task 10 bumped it again without moving a byte: from that build on the brawler's swing
+plane and projectile launch follow its ground normal, so on sloped ground the radial and projectile initial
+conditions a peer predicts differ from what a 9 peer predicts for the same input:
 
 | frame | correction | ring | bundle | token |
 |---|---|---|---|---|
 | cm, Z-up (before the move) | 6 | 2 | 2 | c6.r2.b2 |
 | m, Z-up (after flip U) | 7 | 2 | 2 | c7.r2.b2 |
 | m, Y-up (after flip X) | 8 | 3 | 3 | c8.r3.b3 |
-| m, Y-up, native planar chart (after task 26; shipped) | 9 | 3 | 3 | c9.r3.b3 |
+| m, Y-up, native planar chart (after task 26) | 9 | 3 | 3 | c9.r3.b3 |
+| the same, with ground-aligned attacks (after og-ground-aligned-attacks task 10; shipped) | 10 | 3 | 3 | c10.r3.b3 |
 
 The ring and the bundle carry the brawler's input, whose world vectors are directions with no length (the aim
 is checked to be a unit vector, the move direction comes from the stick), so only the axis changed them. The
@@ -259,8 +263,8 @@ classifies it with `classifyWireLogin` (`WireLoginVerdict`: `Match`; `Missing` f
 `static_assert`s pin both functions. A refusal logs the same Warning as §7,
 `OGBuildIdentity: refused a login: <reason>`, with the server's token first:
 
-* "Different wire format: this server speaks c9.r3.b3, the client c0.r0.b0."
-* "Different build: the client reports no wire format, this server speaks c9.r3.b3." (a build from before
+* "Different wire format: this server speaks c10.r3.b3, the client c0.r0.b0."
+* "Different build: the client reports no wire format, this server speaks c10.r3.b3." (a build from before
   this check, or an empty token)
 
 A backend refusal takes precedence: a client of the other backend is told about the backend. The client sees

@@ -352,6 +352,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 					(*attackSimState).get<dAttackRadialSimulation::InitialConditions>(),
 					attackSimAllState.getDerivedState().get<dAttackRadialSimulation::DerivedState>(),
 					m_staticData->m_attackSimulationStaticData,
+					(*attackSimState).get<dAttackGuardSimulation::State>(),
 					m_attackAimVisualizationState.value());
 			}
 		}
@@ -410,7 +411,8 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 				dAttackBlockPredictionVisualization::visualize(blockPredInput,
 					m_attackBlockPredictionVisualizationState.value(),
 					m_staticData->m_attackSimulationStaticData,
-					(*attackSimState).get<dAttackRadialSimulation::State>());
+					(*attackSimState).get<dAttackRadialSimulation::State>(),
+					(*attackSimState).get<dAttackGuardSimulation::State>());
 			}
 		}
 
