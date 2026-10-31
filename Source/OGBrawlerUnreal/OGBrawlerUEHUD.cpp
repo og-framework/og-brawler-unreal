@@ -2,7 +2,9 @@
 
 #include "OGBrawlerUnreal/OGBrawlerUEHUD.h"
 
+#include <algorithm>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -12,6 +14,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 
+#include "OGBrawlerUnreal/ControlsHudUImpl.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
 #include "OGBrawlerUnreal/OGBrawlerJoinSessionSubsystem.h"
@@ -277,13 +280,20 @@ void AOGBrawlerUEHUD::DrawHUD()
 	//   no backdrop is drawn until the CVar reads true. [ringout task 6b]
 	// ⚠ [ringout task 10, user ruling 13, 2026-09-13] THIS SENTENCE USED TO OPEN "DEFAULT
 	//   OFF" AND THAT IS NO LONGER TRUE -- `GScoreboard` now initialises to `true`, making
-	//   this the one viz MASTER in the project that does not default off, because the
-	//   scoreboard is GAME-MODE UI rather than a debug draw. The one-bool-read property is
-	//   unchanged; it is now what turning the board OFF costs. Full argument at
-	//   `GScoreboard`'s initialiser in `ScoreboardVisualizationUImpl.cpp`.
+	//   this a viz MASTER that does not default off, because the scoreboard is GAME-MODE UI
+	//   rather than a debug draw. The one-bool-read property is unchanged; it is now what
+	//   turning the board OFF costs. Full argument at `GScoreboard`'s initialiser in
+	//   `ScoreboardVisualizationUImpl.cpp`. The controls HUD's master below defaults on for
+	//   the same reason [og-brawler-controls-hud task 6].
 	//   ⛔ THE BRANCH ITSELF IS UNTOUCHED -- this is a comment-only correction.
 	if (scoreboardVisualizationUImpl::enabled())
 		drawScoreboard();
+
+	// [og-brawler-controls-hud task 4] Game UI, so ON by default like the scoreboard; off
+	// costs this one bool read. The join-screen return above already keeps it off the
+	// front-end, so it only ever draws in a match.
+	if (controlsHudUImpl::enabled())
+		drawControlsHud();
 
 	drawLocalPlayerLimitNotice();
 }
@@ -1137,6 +1147,131 @@ void AOGBrawlerUEHUD::drawScoreboard()
 				layout.originX + layout.statusRightX - statusWidth, textY, font,
 				layout.textScale);
 		}
+	}
+}
+
+// [og-brawler-controls-hud task 4] THE CONTROLS INDICATOR AND LEGEND.
+// ⛔ THE GATHER IS controlsHudUImpl'S AND EVERY STRING, INK AND POSITION IS THE PURE
+//   HEADER'S (BrawlerControlsHud.h). The only numbers made here are the measured text
+//   widths, and they can only WIDEN a backdrop past the layout's own width, never move a
+//   column. Rationale: Source/OGBrawlerUnreal/docs/ControlsHud-rationale.md.
+void AOGBrawlerUEHUD::drawControlsHud()
+{
+	using namespace brawlerControlsHud;
+
+	if (Canvas == nullptr || GEngine == nullptr)
+		return;
+
+	const UWorld* world = GetWorld();
+
+	// ⛔ ONE LOCAL PLAYER'S HUD DRAWS, NOT EVERY SIBLING'S -- the same guard, through the
+	//   same accessor, as the scoreboard. Co-op shows ONE shared panel (user ruling R1).
+	if (GetOwningPlayerController()
+		!= inputHistoryVisualizationUImpl::firstLocalPlayerController(world))
+	{
+		return;
+	}
+
+	// No brawler yet (spawning, spectating) is an ordinary frame: draw nothing.
+	const std::optional<ControlsHudInput> input = controlsHudUImpl::gatherInput(world);
+	if (!input.has_value())
+		return;
+
+	const dInput::MappingContext&   context = controlsHudUImpl::mappingContext();
+	const std::vector<IndicatorRow> rows    = indicatorRows(context, *input);
+	const std::vector<std::string>  legend  = legendLines(context, *input);
+
+	// The origin stays top-left; every length and the text scale arrive already scaled.
+	const ControlsHudLayout layout =
+		scaledControlsHudLayout(ControlsHudLayout{}, controlsHudUImpl::scale());
+
+	UFont* const font = GEngine->GetSmallFont();
+
+	// ⛔ A FULLY TRANSPARENT BACKDROP IS NOT DRAWN, as on the scoreboard.
+	const float        backgroundAlpha = controlsHudUImpl::backgroundAlpha();
+	const FLinearColor backdropColor(kControlsHudBackdropInk.r, kControlsHudBackdropInk.g,
+		kControlsHudBackdropInk.b, backgroundAlpha);
+
+	// The model's strings are 7-bit ASCII (pinned by the controls-HUD tests).
+	const auto toText = [](const std::string& text) { return FString(ANSI_TO_TCHAR(text.c_str())); };
+	const auto inkColor = [](const ControlsHudInk& ink) { return FLinearColor(ink.r, ink.g, ink.b, 1.f); };
+
+	// ⛔ `layout.textScale` REACHES EVERY DrawText AND EVERY GetTextSize BELOW -- the small
+	//   font is fixed-size, so a measure without it would size the backdrop for tiny text.
+	// The right edge of `text` drawn at `x`, plus the layout's inner padding.
+	const auto paddedRightEdge = [&](const FString& text, float x)
+	{
+		float width = 0.f;
+		float height = 0.f;
+		GetTextSize(text, width, height, font, layout.textScale);
+		return x + width + layout.padding;
+	};
+
+	// --- The indicator: measure every column first, so the backdrop goes under the text.
+	// [og-brawler-controls-hud task 6] Collapsed (help closed, the default) the model leaves
+	// every label and state empty, so only the keys column is measured and drawn and the
+	// backdrop starts from the compact width; expanded it starts from the full panel width.
+	std::vector<FString> keysTexts;
+	std::vector<FString> labelTexts;
+	std::vector<FString> stateTexts;
+	float indicatorRight = layout.originX + indicatorPanelWidth(layout, input->legendOpen);
+	for (const IndicatorRow& row : rows)
+	{
+		keysTexts.push_back(toText(row.keys));
+		labelTexts.push_back(toText(row.label));
+		stateTexts.push_back(toText(row.state));
+		indicatorRight = std::max(indicatorRight, paddedRightEdge(keysTexts.back(), indicatorKeysX(layout)));
+		if (!row.label.empty())
+			indicatorRight = std::max(indicatorRight, paddedRightEdge(labelTexts.back(), indicatorLabelX(layout)));
+		if (!row.state.empty())
+			indicatorRight = std::max(indicatorRight, paddedRightEdge(stateTexts.back(), indicatorStateX(layout)));
+	}
+
+	if (backgroundAlpha > 0.f)
+	{
+		DrawRect(backdropColor, layout.originX, layout.originY,
+			indicatorRight - layout.originX, indicatorHeight(layout, rows.size()));
+	}
+
+	for (std::size_t index = 0u; index < rows.size(); ++index)
+	{
+		const FLinearColor color = inkColor(controlsHudRowInk(rows[index].ink));
+		const float        topY  = indicatorRowTopY(layout, index);
+
+		DrawText(keysTexts[index], color, indicatorKeysX(layout), topY, font, layout.textScale);
+		if (!rows[index].label.empty())
+			DrawText(labelTexts[index], color, indicatorLabelX(layout), topY, font, layout.textScale);
+		if (!rows[index].state.empty())
+			DrawText(stateTexts[index], color, indicatorStateX(layout), topY, font, layout.textScale);
+	}
+
+	// --- The legend, below the indicator, only while it is open (an empty list = closed).
+	if (legend.empty())
+		return;
+
+	std::vector<FString> legendTexts;
+	float legendRight = layout.originX + layout.legendWidth;
+	for (const std::string& line : legend)
+	{
+		legendTexts.push_back(toText(line));
+		if (!line.empty())
+			legendRight = std::max(legendRight, paddedRightEdge(legendTexts.back(), legendTextX(layout)));
+	}
+
+	if (backgroundAlpha > 0.f)
+	{
+		DrawRect(backdropColor, layout.originX, legendTopY(layout, rows.size()),
+			legendRight - layout.originX, legendHeight(layout, legend.size()));
+	}
+
+	// An empty line is the model's section break: it keeps its slot and draws nothing.
+	const FLinearColor legendColor = inkColor(kControlsHudNormalInk);
+	for (std::size_t index = 0u; index < legend.size(); ++index)
+	{
+		if (legend[index].empty())
+			continue;
+		DrawText(legendTexts[index], legendColor, legendTextX(layout),
+			legendLineTopY(layout, rows.size(), index), font, layout.textScale);
 	}
 }
 

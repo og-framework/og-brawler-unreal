@@ -248,4 +248,5 @@ private:
 	void onSetSchemeAimRelative(const FInputActionValue& Value);
 	void onSetSchemeMoveRelativeAim(const FInputActionValue& Value);
 	void onSetSchemeAimRelativeSwapped(const FInputActionValue& Value);
+	void onToggleControlsLegend(const FInputActionValue& Value);
 };

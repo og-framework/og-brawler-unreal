@@ -299,8 +299,10 @@ next site that states the ruling or stops stating it.
 > `GInputHistoryPauseIdle` — but they are child bools folded through `GInputHistory`, which
 > is `false`, so nothing of that display draws until its master is on.
 
-Every other visualization **master** in this tree defaults off, and the reason is written at
-several of those sites: a debug draw nobody asked for should cost nothing. ⛔ **The
+Every debug visualization **master** in this tree defaults off, and the reason is written at
+several of those sites: a debug draw nobody asked for should cost nothing. (The controls HUD's
+master, `OGBrawler.ControlsHud`, defaults on for the reason this board does: it is game UI, see
+`ControlsHud-rationale.md` §2.) ⛔ **The
 scoreboard is not a debug visualization.** It is game-mode UI. A ring-out match whose score
 is invisible is not a playable match — it is a match in which nobody can tell they are
 winning — so a feature the mode does not work without has the opposite natural default to

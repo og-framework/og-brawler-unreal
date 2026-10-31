@@ -12,8 +12,9 @@
 //
 // Every layout number, colour and endpoint comes from pure og-brawler code, which is
 // the part a Catch2 case can reach; this class holds only the canvas calls.
-// ⛔ MINIMAL ON PURPOSE. It draws the two input-history displays, the scoreboard and,
-// while the front-end is up, the join screen -- nothing else.
+// ⛔ MINIMAL ON PURPOSE. It draws the two input-history displays, the scoreboard, the
+// controls indicator and legend, the local-player-limit notice and, while the front-end
+// is up, the join screen -- nothing else.
 //
 // READS ONLY. It borrows the row ring through a pointer to const and touches no
 // simulation state; nothing it reads is written back anywhere.
@@ -190,6 +191,17 @@ private:
 	// ⛔ EVERY LAYOUT NUMBER, THE ORDERING AND BOTH CLAMPS COME FROM PURE CODE. This holds
 	//   the canvas calls and the gather, and decides no geometry of its own.
 	void drawScoreboard();
+
+	// The controls indicator and its legend [og-brawler-controls-hud task 4]: one row per
+	// camera and control-mode hotkey, top-left. Collapsed (the default, task 6) a row is only
+	// its keys in the row's ink; with help open each row also shows its mode name and state,
+	// and the help text for the active scheme and the camera opens below. Silently draws
+	// nothing when this is not the first local player's HUD or when that player has no
+	// brawler yet.
+	// ⛔ EVERY STRING, INK AND POSITION COMES FROM THE PURE HEADER (BrawlerControlsHud.h).
+	//   This holds the canvas calls and measures text for the backdrops, nothing more.
+	// Rationale: Source/OGBrawlerUnreal/docs/ControlsHud-rationale.md.
+	void drawControlsHud();
 
 	// The join screen [og-brawler-uploadtosteam task 12], drawn INSTEAD of every display
 	// above while the front-end is up. The model, its texts and every rectangle come from

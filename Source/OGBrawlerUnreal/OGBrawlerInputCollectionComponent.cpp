@@ -10,8 +10,10 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "OGBrawler/InputMapping/ControlModeTexts.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGBrawler/InputMapping/StickRouting.h"
+#include "OGBrawlerUnreal/ControlsHudUImpl.h"
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGSimulationUnreal/UEFrameConversion.h"
@@ -66,6 +68,7 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	UInputAction* SetSchemeAimRelativeAction     = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeAimRelative);
 	UInputAction* SetSchemeMoveRelativeAimAction = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeMoveRelativeAim);
 	UInputAction* SetSchemeAimRelativeSwappedAction = m_inputTranslator.getAction(dInput::gameMapping::SetSchemeAimRelativeSwapped);
+	UInputAction* ToggleControlsLegendAction = m_inputTranslator.getAction(dInput::gameMapping::ToggleControlsLegend);
 
 	ic->BindAction(MoveAction,        ETriggerEvent::Triggered,  this, &UOGBrawlerInputCollectionComponent::onMove);
 	ic->BindAction(MoveAction,        ETriggerEvent::Completed,  this, &UOGBrawlerInputCollectionComponent::onMove);
@@ -91,6 +94,9 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	ic->BindAction(SetSchemeAimRelativeAction,     ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onSetSchemeAimRelative);
 	ic->BindAction(SetSchemeMoveRelativeAimAction, ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onSetSchemeMoveRelativeAim);
 	ic->BindAction(SetSchemeAimRelativeSwappedAction, ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onSetSchemeAimRelativeSwapped);
+	// Controls-help legend (og-brawler-controls-hud task 4): a toggle, Started only like BlockLook.
+	// It flips the HUD's OGBrawler.ControlsLegend console variable and nothing else; no PlayerInput reads it.
+	ic->BindAction(ToggleControlsLegendAction, ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onToggleControlsLegend);
 }
 
 void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
@@ -385,24 +391,44 @@ void UOGBrawlerInputCollectionComponent::onHoldGuard(const FInputActionValue& Va
 	m_holdGuard = Value.Get<bool>();
 }
 
+namespace
+{
+	// The scheme a shortcut selects is its own entry in the control-mode table, the same entry the
+	// controls HUD lights (og-brawler-controls-hud task 4), so a key and its row cannot disagree.
+	// A test pins the table: each shortcut has its entry, with today's scheme
+	// (BrawlerControlsHudTextsTest). A missing entry trips the ensure outside Shipping and
+	// leaves the scheme unchanged.
+	void setMovementSchemeFromTable(const dInput::ActionDescriptor& action)
+	{
+		const dInput::controlModeTexts::ControlModeEntry* entry = dInput::controlModeTexts::findControlModeEntry(&action);
+		if (ensure(entry != nullptr && entry->kind == dInput::controlModeTexts::ControlModeKind::MovementScheme))
+			dAttackMachineSimulation::g_movementScheme = entry->scheme;
+	}
+} // namespace
+
 void UOGBrawlerInputCollectionComponent::onSetSchemeCameraRelative(const FInputActionValue& /*Value*/)
 {
-	dAttackMachineSimulation::g_movementScheme = dAttackMachineSimulation::MovementScheme::CameraRelative;
+	setMovementSchemeFromTable(dInput::gameMapping::SetSchemeCameraRelative);
 }
 
 void UOGBrawlerInputCollectionComponent::onSetSchemeAimRelative(const FInputActionValue& /*Value*/)
 {
-	dAttackMachineSimulation::g_movementScheme = dAttackMachineSimulation::MovementScheme::AimRelative;
+	setMovementSchemeFromTable(dInput::gameMapping::SetSchemeAimRelative);
 }
 
 void UOGBrawlerInputCollectionComponent::onSetSchemeMoveRelativeAim(const FInputActionValue& /*Value*/)
 {
-	dAttackMachineSimulation::g_movementScheme = dAttackMachineSimulation::MovementScheme::MoveRelativeAim;
+	setMovementSchemeFromTable(dInput::gameMapping::SetSchemeMoveRelativeAim);
 }
 
 void UOGBrawlerInputCollectionComponent::onSetSchemeAimRelativeSwapped(const FInputActionValue& /*Value*/)
 {
-	dAttackMachineSimulation::g_movementScheme = dAttackMachineSimulation::MovementScheme::AimRelativeSwapped;
+	setMovementSchemeFromTable(dInput::gameMapping::SetSchemeAimRelativeSwapped);
+}
+
+void UOGBrawlerInputCollectionComponent::onToggleControlsLegend(const FInputActionValue& /*Value*/)
+{
+	controlsHudUImpl::toggleLegend();
 }
 
 void UOGBrawlerInputCollectionComponent::onLeftAttack(const FInputActionValue& Value)
