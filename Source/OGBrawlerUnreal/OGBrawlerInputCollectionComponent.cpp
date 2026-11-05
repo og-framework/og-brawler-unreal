@@ -10,6 +10,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "OGBrawler/InputMapping/AimPlane.h"
 #include "OGBrawler/InputMapping/ControlModeTexts.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGBrawler/InputMapping/StickRouting.h"
@@ -99,6 +100,23 @@ void UOGBrawlerInputCollectionComponent::setupBindings(UEnhancedInputComponent* 
 	ic->BindAction(ToggleControlsLegendAction, ETriggerEvent::Started, this, &UOGBrawlerInputCollectionComponent::onToggleControlsLegend);
 }
 
+namespace
+{
+	// The mouse-aim plane's inputs as the engine-free helper takes them: the same doubles, in
+	// Unreal axes and centimetres, so the intersection runs on the values it always did.
+	glm::dvec3 toAimPlaneVector(const FVector& v)
+	{
+		return glm::dvec3(v.X, v.Y, v.Z);
+	}
+
+	// The helper's offset back to og-simulation axes through ueFrame, before it normalizes:
+	// the order today's statement used (normalize(directionToSim(aimVec))).
+	glm::vec3 aimOffsetToSim(const glm::dvec3& offset)
+	{
+		return ueFrame::directionToSim(FVector(offset.x, offset.y, offset.z));
+	}
+}
+
 void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 {
 	AOGBrawlerUECharacter* ch = Cast<AOGBrawlerUECharacter>(GetOwner());
@@ -156,30 +174,28 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 		m_cursorLatchAnchor       = latch.anchor;
 	}
 
-	// Line-plane intersection: project mouse onto z=0 plane through the capsule center.
+	// Line-plane intersection: project the mouse onto the character's ground plane through the
+	// capsule center (og-ground-aligned-attacks task 12). The plane's normal is the guard body's up
+	// (UOGBrawlerSimulatableComponent::vizGround), the ground normal the swing and the guard use,
+	// so on a slope the aim lies in the slope plane and the swing passes under the cursor. On flat
+	// ground, and without a bound character, the normal is today's world-up literal. The arithmetic
+	// and its two rejects (a near-parallel ray, a zero aim) are og-brawler's engine-free
+	// dInput::aimPlane (AimPlane.h); a reject still writes a zero aim.
 	// Previously in AOGBrawlerUECharacter::Tick:310-325.
 	FVector worldLocation;
 	FVector worldDirection;
 	pc->DeprojectMousePositionToWorld(worldLocation, worldDirection);
 
-	const FVector planeNormal = FVector(0.f, 0.f, 1.f);
+	const UOGBrawlerSimulatableComponent* const simulatable = ch->getBrawlerSimulatable();
+	const std::optional<BrawlerVizGround> ground =
+		simulatable != nullptr ? simulatable->vizGround() : std::optional<BrawlerVizGround>();
+	const std::optional<glm::vec3> tiltedUp =
+		ground.has_value() ? dInput::aimPlane::tiltedPlaneUp(ground->guardUp) : std::optional<glm::vec3>();
+	const FVector planeNormal = tiltedUp.has_value() ? ueFrame::directionToUe(*tiltedUp) : FVector(0.f, 0.f, 1.f);
 	const FVector planePoint  = ch->GetCapsuleComponent()->GetComponentTransform().GetTranslation();
-	const FVector planePointToLinePoint = worldLocation - planePoint;
-	const float dotProduct = FVector::DotProduct(planeNormal, worldDirection);
-	if (FMath::Abs(dotProduct) < KINDA_SMALL_NUMBER)
-	{
-		m_mouseAimCache = glm::vec3(0.f, 0.f, 0.f);
-		return;
-	}
-	const float distance = FVector::DotProduct(planeNormal, planePointToLinePoint) / dotProduct;
-	const FVector intersectionPoint = worldLocation - distance * worldDirection;
-	const FVector aimVec = intersectionPoint - planePoint;
-	if (aimVec.IsNearlyZero())
-	{
-		m_mouseAimCache = glm::vec3(0.f, 0.f, 0.f);
-		return;
-	}
-	m_mouseAimCache = glm::normalize(ueFrame::directionToSim(aimVec));
+	const std::optional<glm::vec3> aim = dInput::aimPlane::unitAim(toAimPlaneVector(worldLocation),
+		toAimPlaneVector(worldDirection), toAimPlaneVector(planePoint), toAimPlaneVector(planeNormal), &aimOffsetToSim);
+	m_mouseAimCache = aim.value_or(glm::vec3(0.f, 0.f, 0.f));
 }
 
 namespace

@@ -227,8 +227,8 @@ pair.
 og-sim-metres-yup task 15 (the user's ruling Q2, 2026-10-25: a login lacking the token is refused). Each of
 og-simulation's three payloads carries its own version byte: the correction state
 (`correctionStateBuffer::kWireFormatVersion`), the relayed input ring (`relayedInputRing::kWireFormatVersion`)
-and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 12, 3 and 3, so the
-token is c12.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
+and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 15, 3 and 3, so the
+token is c15.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
 mean without changing their layout, so each step bumped the versions it changed. While the move ran, each version
 was a `constexpr` function of `SimulationFrame.h`'s two frame knobs; task 24 deleted the knobs and froze the
 versions at the third row, and task 26 (the native planar chart) bumped the correction version once more.
@@ -240,7 +240,16 @@ tangent frame, so where the frame's second tangent is not horizontal (a slope th
 or a rim's tilted normal) a peer predicts a different velocity from a 10 peer. og-ground-aligned-attacks task 14b
 bumped it once more, again without moving a byte: on flat ground the brawler's swing initial conditions now take the
 quaternion round trip the slope path takes, so a peer's stored angle and axis differ from an 11 peer's by rounding,
-and on an aim exactly along forward or back in the axis's sign:
+and on an aim exactly along forward or back in the axis's sign. og-ground-aligned-attacks task 20 bumped it once
+more, again without moving a byte: a melee swing now hits when its attack band overlaps the target's movement
+capsule, not only when the capsule's centre is inside the band, so a peer registers hits a 12 peer misses.
+og-ground-aligned-attacks task 20b bumped it once more, again without moving a byte: a projectile's block is now
+decided by the struck character's guard even when the report lists that character's body first, and every guard
+measures the incoming shot in its own plane, so a peer blocks shots a 13 peer lets through.
+og-ground-aligned-attacks task 36 bumped it once more, again without moving a byte: the brawler movement's support
+law v2 became the default, so a character takes its ground from the exact face, an edge contact and a centre probe,
+changes support only on events, writes a knockback once and redirects a velocity into a face along it, and a peer
+predicts different movement from a 14 peer on slopes, rims and creases and after every knockback:
 
 | frame | correction | ring | bundle | token |
 |---|---|---|---|---|
@@ -250,7 +259,10 @@ and on an aim exactly along forward or back in the axis's sign:
 | m, Y-up, native planar chart (after task 26) | 9 | 3 | 3 | c9.r3.b3 |
 | the same, with ground-aligned attacks (after og-ground-aligned-attacks task 10) | 10 | 3 | 3 | c10.r3.b3 |
 | the same, with the exact velocity decomposition (after og-ground-aligned-attacks task 30) | 11 | 3 | 3 | c11.r3.b3 |
-| the same, with the flat swing frame through the general expression (after og-ground-aligned-attacks task 14b; shipped) | 12 | 3 | 3 | c12.r3.b3 |
+| the same, with the flat swing frame through the general expression (after og-ground-aligned-attacks task 14b) | 12 | 3 | 3 | c12.r3.b3 |
+| the same, with the melee capsule hit test (after og-ground-aligned-attacks task 20) | 13 | 3 | 3 | c13.r3.b3 |
+| the same, with the projectile guard rule (after og-ground-aligned-attacks task 20b) | 14 | 3 | 3 | c14.r3.b3 |
+| the same, with the movement's support law v2 (after og-ground-aligned-attacks task 36; shipped) | 15 | 3 | 3 | c15.r3.b3 |
 
 The ring and the bundle carry the brawler's input, whose world vectors are directions with no length (the aim
 is checked to be a unit vector, the move direction comes from the stick), so only the axis changed them. The
@@ -271,8 +283,8 @@ classifies it with `classifyWireLogin` (`WireLoginVerdict`: `Match`; `Missing` f
 `static_assert`s pin both functions. A refusal logs the same Warning as §7,
 `OGBuildIdentity: refused a login: <reason>`, with the server's token first:
 
-* "Different wire format: this server speaks c12.r3.b3, the client c0.r0.b0."
-* "Different build: the client reports no wire format, this server speaks c12.r3.b3." (a build from before
+* "Different wire format: this server speaks c15.r3.b3, the client c0.r0.b0."
+* "Different build: the client reports no wire format, this server speaks c15.r3.b3." (a build from before
   this check, or an empty token)
 
 A backend refusal takes precedence: a client of the other backend is told about the backend. The client sees

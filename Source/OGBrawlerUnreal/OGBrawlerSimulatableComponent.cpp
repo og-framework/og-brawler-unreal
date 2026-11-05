@@ -9,6 +9,8 @@
 #include "OGBrawler/BrawlerProjectileVisualization.h"
 #include "OGBrawler/BrawlerMovementVisualization.h"
 #include "OGBrawler/DAttackAimVisualization.h"
+#include "OGBrawler/DAttackVisualizationUtils.h"
+#include "OGBrawler/BrawlerMovementSimulation.h"
 #include "OGBrawler/BrawlerVisualizationInputSource.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
@@ -470,6 +472,24 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 
 
 
+}
+
+std::optional<BrawlerVizGround> UOGBrawlerSimulatableComponent::vizGround() const
+{
+	const AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
+	if (vizManager == nullptr)
+		return std::nullopt;
+	const unsigned int ownKey = toStorageKey(simCharacterId());
+	const std::optional<dAttackGuardSimulation::State> guard =
+		vizManager->session().getVizSlice<dAttackGuardSimulation::State>(ownKey);
+	const std::optional<brawlerMovementSimulation::State> movement =
+		vizManager->session().getVizSlice<brawlerMovementSimulation::State>(ownKey);
+	if (!guard.has_value() || !movement.has_value())
+		return std::nullopt;
+	const uint8_t supportBits = static_cast<uint8_t>(
+		(movement->flags & brawlerMovementSimulation::kFlagSupportMask) >> brawlerMovementSimulation::kFlagSupportShift);
+	return BrawlerVizGround{ dAttackVisualizationUtils::guardBodyUp(*guard),
+		supportBits != static_cast<uint8_t>(brawlerMovementSimulation::SupportState::Unsupported) };
 }
 
 // ⛔G-35  docs/OGBrawlerSimulatableComponent-guards.md

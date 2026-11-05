@@ -20,6 +20,7 @@
 #include "OGBrawler/DAttackAimVisualization.h"
 #include "OGBrawler/DAttackBlockPredictionVisualization.h"
 #include "OGBrawler/SimCharacterId.h"
+#include "OGSimulation/SimulationFrame.h"
 
 #include <functional>
 #include <optional>
@@ -48,6 +49,12 @@ class AOGBrawlerSimulationManager;
 
 extern template class UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>;
 
+struct BrawlerVizGround
+{
+	glm::vec3 guardUp = simFrame::kUp;
+	bool supported = false;
+};
+
 UCLASS(ClassGroup = DPhysics, BlueprintType, Blueprintable, EditInlineNew, meta = (BlueprintSpawnableComponent))
 class UOGBrawlerSimulatableComponent : public UActorComponent, public UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>
 {
@@ -62,6 +69,8 @@ public:
 	const simulatableBrawler::StaticData& getStaticData() const { return *m_staticData; }
 
 	const UOGBrawlerInputCollectionComponent* getOwnerInputCollection() const { return m_ownerInputCollection; }
+
+	std::optional<BrawlerVizGround> vizGround() const;
 
 
 protected:

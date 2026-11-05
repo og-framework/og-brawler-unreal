@@ -55,6 +55,8 @@ namespace
 	bool g_camInvertStickY = false;
 	float g_camPitchMinDeg = dAttackCameraBehaviour::kPitchMinDeg;
 	float g_camPitchMaxDeg = dAttackCameraBehaviour::kPitchMaxDeg;
+	float g_camSlopePitchMinDeg = dAttackCameraBehaviour::kSlopePitchMinDeg;
+	float g_camSlopePitchMaxDeg = dAttackCameraBehaviour::kSlopePitchMaxDeg;
 	float g_camPullEFoldDeg = dAttackCameraBehaviour::kPullYawDegreesPerEFold;
 	float g_camPullMaxDegPerSec = dAttackCameraBehaviour::kPullMaxDegPerSec;
 	float g_camPullHoldoffSec = dAttackCameraBehaviour::kVerticalHoldoffSeconds;
@@ -64,6 +66,11 @@ namespace
 	float g_camFovDeg = dAttackCameraBehaviour::kFovDeg;
 	int32 g_camFovAxis = static_cast<int32>(dAttackCameraBehaviour::kFovAxis);
 	float g_camFovHorizonDeg = dAttackCameraBehaviour::kFovDegAtHorizon;
+	float g_camReturnDegPerSec = dAttackCameraBehaviour::kReturnDegPerSec;
+	float g_camSlopeYawDegPerSec = dAttackCameraBehaviour::kSlopeYawDegPerSec;
+	float g_camSlopeYawDwellSec = dAttackCameraBehaviour::kSlopeYawDwellSeconds;
+	float g_camSlopeYawEaseSec = dAttackCameraBehaviour::kSlopeYawEaseSeconds;
+	float g_camSlopeYawAccelDegPerSec2 = dAttackCameraBehaviour::kSlopeYawAccelDegPerSec2;
 
 	FAutoConsoleVariableRef CVarCamMouseSens(TEXT("og.cam.mouseSens"), g_camMouseSens,
 		TEXT("Solo camera: mouse look sensitivity multiplier (1 = the og-brawler default)"));
@@ -79,6 +86,10 @@ namespace
 		TEXT("Solo camera: smallest pitch in degrees below the horizon (sanitized into [1, 89])"));
 	FAutoConsoleVariableRef CVarCamPitchMax(TEXT("og.cam.pitchMax"), g_camPitchMaxDeg,
 		TEXT("Solo camera: largest pitch in degrees below the horizon (sanitized into [pitchMin, 89])"));
+	FAutoConsoleVariableRef CVarCamSlopePitchMin(TEXT("og.cam.slopePitchMin"), g_camSlopePitchMinDeg,
+		TEXT("Solo camera on a followed slope: smallest world pitch in degrees below the horizon that the ground's rise along the view lowers the pitch to; a pitch already below it is kept (sanitized into [1, slopePitchMax])"));
+	FAutoConsoleVariableRef CVarCamSlopePitchMax(TEXT("og.cam.slopePitchMax"), g_camSlopePitchMaxDeg,
+		TEXT("Solo camera on a followed slope: largest world pitch in degrees below the horizon that the ground's fall along the view raises the pitch to; a pitch already above it is kept (sanitized into [1, 89])"));
 	FAutoConsoleVariableRef CVarCamPullEFoldDeg(TEXT("og.cam.pullEFoldDeg"), g_camPullEFoldDeg,
 		TEXT("Solo camera: degrees of yaw per e-fold of the pull toward the iso pitch; smaller is stronger (raised to at least 1)"));
 	FAutoConsoleVariableRef CVarCamPullMaxDegPerSec(TEXT("og.cam.pullMaxDegPerSec"), g_camPullMaxDegPerSec,
@@ -97,6 +108,16 @@ namespace
 		TEXT("Solo camera: FOV in degrees on the og.cam.fovAxis axis at the horizon; the FOV blends linearly to it from og.cam.fov at the target pitch, like the boom (0 or below = the og-brawler default, 58)"));
 	FAutoConsoleVariableRef CVarCamFovAxis(TEXT("og.cam.fovAxis"), g_camFovAxis,
 		TEXT("Solo camera: the screen axis og.cam.fov spans; 0 = horizontal at every aspect, 1 = the shorter axis (default)"));
+	FAutoConsoleVariableRef CVarCamReturnDegPerSec(TEXT("og.cam.returnDegPerSec"), g_camReturnDegPerSec,
+		TEXT("Solo camera: with look mode off, degrees per second the camera returns to world up and the iso pitch (0 or below = it holds still, the camera before og-ground-aligned-attacks task 21)"));
+	FAutoConsoleVariableRef CVarCamSlopeYawDegPerSec(TEXT("og.cam.slopeYawDegPerSec"), g_camSlopeYawDegPerSec,
+		TEXT("Solo camera: with look mode off on a followed slope of 15 to 30.1 degrees, degrees per second the camera turns to face up the slope (0 or below = it keeps its heading)"));
+	FAutoConsoleVariableRef CVarCamSlopeYawDwellSec(TEXT("og.cam.slopeYawDwellSec"), g_camSlopeYawDwellSec,
+		TEXT("Solo camera: with look mode off, seconds the slope under the brawler must hold steady (its up-slope heading within 10 degrees) before og.cam.slopeYawDegPerSec turns the camera (0 or below = it turns from the first slope frame)"));
+	FAutoConsoleVariableRef CVarCamSlopeYawEaseSec(TEXT("og.cam.slopeYawEaseSec"), g_camSlopeYawEaseSec,
+		TEXT("Solo camera: with look mode off, the slope turn's ease-out in seconds: it turns at most the remaining angle divided by this per second, up to og.cam.slopeYawDegPerSec (0 or below = no ease-out)"));
+	FAutoConsoleVariableRef CVarCamSlopeYawAccelDegPerSec2(TEXT("og.cam.slopeYawAccelDegPerSec2"), g_camSlopeYawAccelDegPerSec2,
+		TEXT("Solo camera: with look mode off, degrees per second squared the slope turn speeds up by, from rest (0 or below = it starts at full speed; with og.cam.slopeYawEaseSec 0 too, the constant-rate turn of task 21d)"));
 }
 
 dAttackCameraBehaviour::OrbitCameraSettings AOGBrawlerUECharacter::orbitCameraSettingsFromCVars()
@@ -108,6 +129,8 @@ dAttackCameraBehaviour::OrbitCameraSettings AOGBrawlerUECharacter::orbitCameraSe
 	settings.invertStickY = g_camInvertStickY;
 	settings.pitchMinDeg = g_camPitchMinDeg;
 	settings.pitchMaxDeg = g_camPitchMaxDeg;
+	settings.slopePitchMinDeg = g_camSlopePitchMinDeg;
+	settings.slopePitchMaxDeg = g_camSlopePitchMaxDeg;
 	settings.pullYawDegreesPerEFold = g_camPullEFoldDeg;
 	settings.pullMaxDegPerSec = g_camPullMaxDegPerSec;
 	settings.verticalHoldoffSeconds = g_camPullHoldoffSec;
@@ -121,6 +144,11 @@ dAttackCameraBehaviour::OrbitCameraSettings AOGBrawlerUECharacter::orbitCameraSe
 	settings.fovAxis = dAttackCameraBehaviour::fovAxisFromConsoleValue(g_camFovAxis);
 	if (g_camFovHorizonDeg > 0.f)
 		settings.fovDegAtHorizon = g_camFovHorizonDeg;
+	settings.returnDegPerSec = g_camReturnDegPerSec;
+	settings.slopeYawDegPerSec = g_camSlopeYawDegPerSec;
+	settings.slopeYawDwellSeconds = g_camSlopeYawDwellSec;
+	settings.slopeYawEaseSeconds = g_camSlopeYawEaseSec;
+	settings.slopeYawAccelDegPerSec2 = g_camSlopeYawAccelDegPerSec2;
 	return settings;
 }
 
@@ -473,7 +501,8 @@ void AOGBrawlerUECharacter::seedCameraBoomAtIsoRotation()
 void AOGBrawlerUECharacter::applyCameraStateToBoom(
 	float targetPitchDeg, const dAttackCameraBehaviour::OrbitCameraSettings& settings)
 {
-	CameraBoom->SetWorldRotation(FRotator(-m_cameraState.pitchDeg, m_cameraState.yawDeg, 0.f));
+	const dAttackCameraBehaviour::WorldView view = dAttackCameraBehaviour::worldView(m_cameraState, settings);
+	CameraBoom->SetWorldRotation(FRotator(-view.pitchDeg, view.yawDeg, 0.f));
 	CameraBoom->TargetArmLength = dAttackCameraBehaviour::boomLength(m_cameraState.pitchDeg, targetPitchDeg, settings);
 	const float renderedFovDeg = dAttackCameraBehaviour::horizontalFovDeg(
 		dAttackCameraBehaviour::fovAtPitch(m_cameraState.pitchDeg, targetPitchDeg, settings), settings.fovAxis,
@@ -502,9 +531,13 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 			ASharedIsometricCameraActor::resolveIsoRotation().Pitch, settings);
 		const float mouseXSign = g_camInvertMouseX ? -1.f : 1.f;
 		const glm::vec2 aimStick = InputCollection->getAimStick();
+		const std::optional<BrawlerVizGround> ground = BrawlerSimulatable->vizGround();
+		const glm::vec3 targetUp = ground.has_value()
+			? dAttackCameraBehaviour::cameraTargetUp(ueNative::toGlm(ueFrame::directionToUe(ground->guardUp)), ground->supported)
+			: dAttackCameraBehaviour::kCameraUp;
 		// ⛔G-19  docs/OGBrawlerUECharacter-guards.md
 		const dAttackCameraBehaviour::OrbitCameraInput input{ InputCollection->getBlockLook(),
-			glm::vec2(mouseXSign * lookUnits.x, lookUnits.y), glm::vec2(aimStick.x, -aimStick.y), targetPitchDeg };
+			glm::vec2(mouseXSign * lookUnits.x, lookUnits.y), glm::vec2(aimStick.x, -aimStick.y), targetPitchDeg, targetUp };
 		m_cameraState = dAttackCameraBehaviour::integrate(DeltaSeconds, input, settings, m_cameraState);
 		applyCameraStateToBoom(targetPitchDeg, settings);
 		ASharedIsometricCameraActor::reportCameraSight(false);

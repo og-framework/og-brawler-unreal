@@ -104,6 +104,7 @@ BeginPlay -> beginRegistration     (the binding) loop one on the next tick
                                    decision, spawn (or find) the relay host, and -- authority only --
                                    register the id -> component route
 TickComponent                      visualization only, both roles
+vizGround                          a by-value read of the visualization snapshot, for the local camera and mouse aim (§20)
 EndPlay
   -> unregister, then the sibling's detachInputRelayHost (the authority destroys the relay host, a
      client unbinds it), then unbindNetSync
@@ -886,3 +887,52 @@ Development (lead ruling F1); none of its statements is floating-point. The hook
 
 **The teardown is unchanged** (G-38): `EndPlay` unregisters, then detaches the relay host through the sibling, then
 unbinds; the delivery route's erase stays inside the session's unregistration.
+
+---
+
+## §20 `vizGround` — the ground under the character, from the visualization snapshot (og-ground-aligned-attacks task 21, 2026-11-03)
+
+**What it answers.** `UOGBrawlerSimulatableComponent::vizGround` returns a `BrawlerVizGround`: `guardUp`, the guard
+body's up, and `supported`, the movement's support state as a flag. It is a read accessor and nothing else: `const`,
+returning by value, no side effect, no log line. Its first reader is the solo camera in `AOGBrawlerUECharacter::Tick`,
+which follows the ground's up in look mode (`OGBrawlerUECharacter-rationale.md` §14, og-brawler
+`DAttackCamera-rationale.md` §18). Its second reader is the mouse aim (og-ground-aligned-attacks task 12): the input
+component's `updateGameThreadCache` intersects the cursor's ray with the plane through the capsule whose normal is
+`guardUp` (og-brawler `AimPlane-rationale.md`). So the two fields are the general "which way is up under this character, and is it standing on
+something" and carry no camera policy: the camera's own cut-off (30° + 0.1°) and its airborne rule are applied by
+`dAttackCameraBehaviour::cameraTargetUp`, and the aim's flat test by `dInput::aimPlane::tiltedPlaneUp`, not here.
+
+**The two fields.** Both have default member initializers, world up and not supported (the review note on task 21),
+so a `BrawlerVizGround` built without them means "nothing known"; `vizGround` always sets both.
+
+* `guardUp` is `dAttackVisualizationUtils::guardBodyUp` of the guard slice: the guard body's pose column for up, in
+  **og-simulation axes** (convert with `ueFrame::directionToUe` for Unreal space, which is exact: a permutation and sign
+  flips, widened to double). `dAttackGuardSimulation::integrate` poses the guard in the ground frame every tick
+  (og-ground-aligned-attacks task 6) from the attack ground sample: the exact face normal Jolt reports on walkable
+  ground, otherwise world up (task 13b's `brawlerMovementSimulation::attackGroundNormal`). It is the same vector the aim, attack-circle
+  and guard indicators draw with (task 11), so the camera and the indicators cannot disagree about the ground. It is
+  unit up to the rotation's rounding; a reader that needs exactly unit normalizes it (`cameraTargetUp` does).
+* `supported` is true unless the movement State's support bits read `Unsupported`. The decoder is the inline one the
+  movement itself and the golden-trace tests use: `(flags & kFlagSupportMask) >> kFlagSupportShift`, compared with
+  `brawlerMovementSimulation::SupportState::Unsupported`. `SupportedSteep` (never produced today) counts as supported,
+  so a reader that cares about steepness tests the normal, as the camera's cut-off does.
+
+**Empty means "nothing known".** The answer is empty when the role's manager does not exist yet, or when this
+character is not in its storage (before registration, after unregistration, an id still `None`). A reader treats
+empty as world up and supported-unknown; the camera and the mouse aim take world up.
+
+**Which state, and why it is not a new crossing.** Both slices come from `UESimulationSession::getVizSlice`, the
+session's by-value read of the **visualization snapshot** (`getVizState`), never the live state: that is the
+session's guard G-02 (`UESimulationSession-guards.md`), and the accessor offers no route to the live state. The
+snapshot is taken on the game thread once per post-physics pass, so a game-thread reader such as the character's
+`Tick` reads a copy no other thread writes, the same state `TickComponent` draws from. The two slices are read one
+after the other in the same game-thread call, with no snapshot update between them, so they belong to the same tick. On
+the Jolt host the presenter writes the rendered body poses into the snapshot's body states, so `guardUp` is the
+presented guard pose; on one face that is the face's normal to rounding.
+
+**Role.** The manager is picked with `GetNetMode() != NM_Client`, the predicate `TickComponent` uses (§1): a client
+reads its predicted snapshot, the authority (a listen-server host, standalone) its own.
+
+**The support law v2 (tasks 33-36) needs no change here.** It replaces the attack ground sample with the support
+estimate's face normal (GroundSupport's faceNormal), and the guard is posed from it, so the guard body's up stays the
+quantity this accessor returns. Only the source behind the guard pose changes.

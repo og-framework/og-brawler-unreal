@@ -867,8 +867,8 @@ facing stays `humanoidDefaultForward` and the rotation is the identity. `humanoi
 **What it is.** The solo third-person camera's logic is og-brawler's pure orbit camera,
 `dAttackCameraBehaviour::integrate` in `DAttackCamera.h`. Its rules, constants and sign conventions are
 in og-brawler `OGBrawler/docs/DAttackCamera-rationale.md`. This class holds the state, `m_cameraState`:
-world yaw, pitch in degrees below the horizon, and the vertical hold-off. It builds the input, and writes
-the result onto `CameraBoom`.
+yaw, pitch in degrees below the horizon, the vertical hold-off, and (since og-ground-aligned-attacks task 21) the
+frame up the yaw and pitch are measured about. It builds the input, and writes the result onto `CameraBoom`.
 
 **Per `Tick`, in this order:**
 
@@ -879,7 +879,8 @@ the result onto `CameraBoom`.
 3. The seed, once, on the first `Tick` where the pawn is locally controlled (below).
 4. Only for a seeded pawn: the settings are read from the console variables (`orbitCameraSettingsFromCVars`);
    the target is `dAttackCameraBehaviour::pitchDegFromUEPitchDegrees` of the iso pitch, every frame, so a
-   live og.iso.pitch change moves the target and not the seed; the input is built (guard G-19);
+   live og.iso.pitch change moves the target and not the seed; the target up is read (below, task 21); the input
+   is built (guard G-19);
    `dAttackCameraBehaviour::integrate` returns the next state; `applyCameraStateToBoom` writes it;
    `ASharedIsometricCameraActor::reportCameraSight` prints the sight readout if one of its inputs changed
    (below, og-ground-aligned-attacks task 17).
@@ -897,9 +898,35 @@ the result onto `CameraBoom`.
   With one evaluation per frame, the normal case, nothing changes.
 * The stick is `getAimStick`, the scheme-routed aim stick (user decision): the right stick, or the left
   stick in AimRelativeSwapped. Its Y is negated (G-19).
+* The target up (og-ground-aligned-attacks task 21, user request 2026-11-01: look mode corrects its 60° against the
+  slope's normal up to 30°, toward world up on steeper ground and in the air). `BrawlerSimulatable->vizGround()`
+  reads the guard body's up and the support flag from this character's visualization snapshot
+  (`OGBrawlerSimulatableComponent-rationale.md` §20). The up is converted with `ueFrame::directionToUe` (exact) and
+  `ueNative::toGlm`, and `dAttackCameraBehaviour::cameraTargetUp` applies the camera's cut-off (30° + 0.1°) and its
+  airborne rule; an empty read (no manager, not registered yet) gives world up, `dAttackCameraBehaviour::kCameraUp`.
+  On flat ground the target is world up exactly, so the camera stays on its branch from before task 21. The camera
+  then follows it only through the look-mode pull, and returns to world up when look mode is turned off (og-brawler
+  `DAttackCamera-rationale.md` §18). With look mode off the same target up also turns the camera to face up a followed
+  slope of 15° or more (task 21c, the user's request at G7; og-brawler §20), once that slope has held steady for
+  og.cam.slopeYawDwellSec (task 21d: the guard body's up follows each tick's ground face, so at a crease or a rim it
+  can change from tick to tick, which made the turn twitch). Since task 21e the turn aims at the heading that wait
+  started on, not at each tick's, and it eases in and out (the user's G7 re-check: a twitch on the hull's edge facets
+  at the slope-to-flat crease, and a snap when a small offset was closed at the full rate).
 
 **The boom.** The constructor calls `SetUsingAbsoluteRotation(true)`. `applyCameraStateToBoom` writes
-`SetWorldRotation(FRotator(-pitchDeg, yawDeg, 0))` and `TargetArmLength` from `dAttackCameraBehaviour::boomLength`.
+`SetWorldRotation(FRotator(-view.pitchDeg, view.yawDeg, 0))` with
+`view = dAttackCameraBehaviour::worldView(m_cameraState, settings)` and `TargetArmLength` from
+`dAttackCameraBehaviour::boomLength`. While the frame up is world up, `worldView` returns the state's yaw and pitch with
+the same bits, so that is the rotator written before og-ground-aligned-attacks task 21. On a followed slope (task 21b)
+the yaw is still the state's yaw, and the pitch moves by the ground's rise along the view, inside og.cam.slopePitchMin
+and og.cam.slopePitchMax, with no roll (og-brawler `DAttackCamera-rationale.md` §19; task 21 orbited about the frame up,
+§18). The boom length and the field of view still read the state's pitch. Camera-relative movement and the aim
+fallbacks read the rendered camera's forward flattened to the ground (`UOGBrawlerInputCollectionComponent`'s camera
+forward), which is the world yaw: since task 21b they follow the player's heading on a slope too, without task 21's bend
+toward the fall line. The mouse aim deprojects the cursor through the rendered camera, and is read only with look mode
+off. With look mode off on a followed slope of 15° or more the camera turns, eased, to face up the slope once the slope
+has held steady for og.cam.slopeYawDwellSec (tasks 21c, 21d and 21e), so while it
+turns, a held camera-relative move direction and the world point under a still cursor turn with it.
 
 * **Why absolute rotation.** The state is in world space. With absolute rotation the boom's rotation IS
   the state, whatever the actor's rotation (for example a spawn yaw from a player start), so the seed needs
@@ -943,7 +970,7 @@ unchanged, so a resized window takes effect on the next frame.
 **The seed.** `seedCameraBoomAtIsoRotation` reads the iso rotation from `ASharedIsometricCameraActor::resolveIsoRotation`
 (the og.iso.pitch / og.iso.yaw console variables when non-zero, else the iso actor's class defaults,
 pitch −60°, yaw 0°), sets the state with `dAttackCameraBehaviour::seedFromUERotation`, sets `m_cameraBoomSeeded`
-and writes the boom at once. The seed clamps the pitch into og.cam.pitchMin / og.cam.pitchMax, so an iso
+and writes the boom at once. The seed's frame up is world up, so a seed and a re-seed (below) start level. The seed clamps the pitch into og.cam.pitchMin / og.cam.pitchMax, so an iso
 pitch outside the limits starts the camera at the nearest limit.
 
 Measured on 2026-10-04 (headless standalone run of the ThirdPersonMap, boom properties printed at frame
@@ -973,7 +1000,7 @@ blend does not re-seed again (the engine also ignores the repeated `SetViewTarge
 not re-seeded: a blend from the pawn to the iso camera that is interrupted before it finishes. The current
 view target is then still the pawn, whose angle was still on screen.
 
-**Console variables (tasks 9 and 10; og-ground-aligned-attacks task 15 added og.cam.boomTarget to og.cam.fovAxis, task 18 og.cam.fovHorizon).** Read every `Tick` into the settings. Local presentation only: nothing
+**Console variables (tasks 9 and 10; og-ground-aligned-attacks task 15 added og.cam.boomTarget to og.cam.fovAxis, task 18 og.cam.fovHorizon, task 21 og.cam.returnDegPerSec, task 21b og.cam.slopePitchMin and og.cam.slopePitchMax, task 21c og.cam.slopeYawDegPerSec, task 21d og.cam.slopeYawDwellSec, task 21e og.cam.slopeYawEaseSec and og.cam.slopeYawAccelDegPerSec2).** Read every `Tick` into the settings. Local presentation only: nothing
 reaches the simulation or the wire.
 
 | variable | default | effect |
@@ -985,6 +1012,8 @@ reaches the simulation or the wire.
 | og.cam.invertStickY | 0 | 1 = stick up looks down |
 | og.cam.pitchMin | 10 | smallest pitch below the horizon, in degrees |
 | og.cam.pitchMax | 80 | largest pitch below the horizon, in degrees |
+| og.cam.slopePitchMin | 35 | on a followed slope, the smallest world pitch the ground's rise along the view lowers the pitch to; a pitch already below it is kept (task 21b) |
+| og.cam.slopePitchMax | 75 | on a followed slope, the largest world pitch the ground's fall along the view raises the pitch to; a pitch already above it is kept (task 21b) |
 | og.cam.pullEFoldDeg | 20 | degrees of yaw per e-fold of the pull toward the iso pitch; smaller is stronger (task 10) |
 | og.cam.pullMaxDegPerSec | 240 | fastest the pull may move the pitch, in degrees per second; 0 = no pull (task 10) |
 | og.cam.pullHoldoffSec | 0 | seconds the pull pauses after a deliberate vertical look; 0 = no pause, also none during vertical look (task 10; task 8 used 0.6) |
@@ -994,13 +1023,20 @@ reaches the simulation or the wire.
 | og.cam.fov | 40 | field of view in degrees on the og.cam.fovAxis axis at or past the target pitch; 0 or below = the default (58.72 from task 15, the old 90° horizontal on 16:9 on the shorter axis) |
 | og.cam.fovAxis | 1 | the screen axis og.cam.fov and og.cam.fovHorizon span: 0 (or below) = horizontal at every aspect, 1 (or above) = the shorter axis |
 | og.cam.fovHorizon | 58 | field of view in degrees on the og.cam.fovAxis axis at the horizon; the angle blends linearly to it from og.cam.fov, like the boom; 0 or below = the default; equal to og.cam.fov = a constant field of view (task 18) |
+| og.cam.returnDegPerSec | 90 | with look mode off, the degrees per second at which the camera returns to world up and the iso pitch (the yaw stays, except as og.cam.slopeYawDegPerSec turns it); 0 or below = it holds still, the camera before task 21 (task 21) |
+| og.cam.slopeYawDegPerSec | 90 | with look mode off on a followed slope of 15° to 30.1°, the degrees per second at which the camera turns to face up the slope (the heading stays when the slope is left); 0 or below = it keeps its heading (task 21c) |
+| og.cam.slopeYawDwellSec | 0.2 | with look mode off, the seconds the slope under the brawler must hold steady (its up-slope heading within 10° of the one the wait started on) before og.cam.slopeYawDegPerSec turns the camera; a flat or airborne tick, or a heading more than 10° off, starts the wait again; 0 or below = it turns from the first slope frame, the camera of task 21c (task 21d) |
+| og.cam.slopeYawEaseSec | 0.3 | with look mode off, the slope turn's ease-out time constant in seconds: its speed is at most the remaining angle closed at this time constant, up to og.cam.slopeYawDegPerSec, so it slows over the last degrees and takes the goal exactly within 0.01°; 0 or below = no ease-out (task 21e) |
+| og.cam.slopeYawAccelDegPerSec2 | 360 | with look mode off, the degrees per second squared by which the slope turn speeds up from rest; 0 or below = it starts at full speed; with og.cam.slopeYawEaseSec 0 too, the constant-rate turn of task 21d, aimed at the heading the wait started on (task 21e) |
 
-The defaults of the last eleven are the og-brawler constants, not copies. The orbit camera sanitizes the
+The defaults of the last eighteen are the og-brawler constants, not copies. The orbit camera sanitizes the
 four pull values (og-brawler `DAttackCamera-rationale.md` §13): an e-fold below 1 is raised to 1, a
 negative cap means no pull, and a negative hold-off or ratio means off. The user ruled (task 10) that the
 pull is strong and never switched off by default, and kept the hold-off and the dominance weight as
 switches to try again. The pitch limits are sanitized into
-[1°, 89°]. og.cam.invertMouseX is applied in this file, to the consumed mouse x, because the
+[1°, 89°], and so are the slope pitch limits, with a minimum above the maximum taking the maximum. A slope turn rate
+of 0 or below holds the yaw, a slope dwell of 0 or below starts the turn on the first slope frame, and a slope ease or
+acceleration of 0 or below (or NaN) switches that part of the easing off. og.cam.invertMouseX is applied in this file, to the consumed mouse x, because the
 og-brawler settings have no mouse-X invert.
 
 **Directions compared with the camera before task 8.** Mouse right now turns right (before: left;

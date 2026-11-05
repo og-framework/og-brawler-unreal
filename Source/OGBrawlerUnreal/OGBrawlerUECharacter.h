@@ -169,6 +169,7 @@ public:
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	FORCEINLINE UOGBrawlerInputCollectionComponent* getInputCollection() const { return InputCollection; }
+	FORCEINLINE const UOGBrawlerSimulatableComponent* getBrawlerSimulatable() const { return BrawlerSimulatable; }
 	FORCEINLINE class UCapsuleComponent* GetCapsuleComponent() const { return CapsuleComponent; }
 
 	FORCEINLINE int32 GetRingoutScore() const { return RingoutScore; }
