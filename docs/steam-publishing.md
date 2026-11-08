@@ -7,17 +7,21 @@ a checkbox), section 6 is day-to-day publishing, section 7 holds the one-page
 guides for playtesters, and section 8 lists what this pipeline does not do.
 
 What we ship: a Win64 **client** (Shipping) and a Win64 **dedicated server**
-(Shipping, built with logging and checks kept). The game itself contains no
-Steam SDK code — Steam is used only to distribute the files. Measured upload
-sizes of one build (debug symbols excluded): client about **434 MB**, server
-about **344 MB**.
+(Shipping, built with logging and checks kept). Both go into the game app: the
+client at the root of the install folder and the server in its `Server` folder,
+so every player can also host. The same server can also go into a separate
+Dedicated Server tool app (section 2). Each upload chooses its destinations
+(section 6.3). The game itself contains no Steam SDK code — Steam is used only
+to distribute the files. Measured upload sizes of one build (debug symbols
+excluded): client about **435 MB**, server about **345 MB**.
 
 Conventions in this document:
 
 - **⏳ WAIT** marks a step with a waiting period. Start those early.
 - **Verify in the UI** marks a detail that no public Steamworks page confirms.
   Check it on the Steamworks site and fix this document if it differs.
-- Every other claim links to the Valve page it comes from (checked 2026-09-26).
+- Every other claim links to the Valve page it comes from (checked 2026-09-26;
+  the depot and launch-option quotes of sections 2 and 3 on 2026-11-04).
   Where two Valve pages disagree, both are cited.
 
 ---
@@ -82,17 +86,16 @@ now; you invite it into Steamworks after section 2.
 
 ## 2. Create the apps
 
-Recommended layout: **two apps**.
+The server can go to two places, and each upload chooses where (section 6.3):
 
-| App | Type | Depot | What it holds |
-|---|---|---|---|
-| OGBrawler | Game | client-win64 | The Shipping client that players install |
-| OGBrawler Dedicated Server | Tool (linked to the game) | server-win64 | The Shipping dedicated server (logging and checks kept) that hosts run |
+| Layout | Apps and depots (config names) | Status |
+|---|---|---|
+| **Bundled** | Game app OGBrawler with two depots: game-client (the client, at the root of the install folder) and game-server (the server, in the install's `Server` folder) | **Use this now.** Every player gets the server and can host from Steam's Play menu (section 7). Cost: every player also downloads the server, about 345 MB. |
+| **Tool** | Additionally a Dedicated Server tool app with one depot, tool-server, holding the same server | Optional. For hosts who do not own the game. The tool can also be offered through **anonymous** steamcmd downloads, without a copy of the game ([Distributing Your Dedicated Game Server](https://partner.steamgames.com/doc/sdk/uploading/distributing_gs)). |
+| **Shared depot** | The tool lists the game's server depot as a shared depot instead of having its own | **Only after the game is released.** Valve: "You currently cannot share a depot from an unreleased application." and "Shared depots are still a work-in-progress, and should only be used when the base application has been released." ([Depots](https://partner.steamgames.com/doc/store/application/depots)). |
 
-Why two apps: players who install the game never download the server. The
-server can also be offered to hosts through **anonymous** steamcmd downloads,
-without a copy of the game
-([Distributing Your Dedicated Game Server](https://partner.steamgames.com/doc/sdk/uploading/distributing_gs)).
+Until a shared depot is possible, an upload that fills both game-server and
+tool-server uploads the server twice, once per app (section 6.3).
 
 - [ ] **Create the game app.** On the Steamworks landing page, under "Create A
   New Application", click "Create new app..."
@@ -102,10 +105,12 @@ without a copy of the game
   Write it down; it goes into section 5.
 - [ ] **Set the app type to Game** in General Application Settings
   ([Applications](https://partner.steamgames.com/doc/store/application)).
-- [ ] **Create the Dedicated Server tool app.** On the game app, open "All
+- [ ] **Optional — create the Dedicated Server tool app** (the Tool layout).
+  On the game app, open "All
   Associated Packages, DLC, Demos and Tools" and click "Create new Tool"
   ([Distributing Your Dedicated Game Server](https://partner.steamgames.com/doc/sdk/uploading/distributing_gs)).
-  Write down the tool's App ID too.
+  Write down the tool's App ID too. Without a tool, its config entries stay 0
+  and you use only the profiles without tool-server (section 6.3).
   Whether a tool needs its own Steam Direct fee is not stated publicly. The fee
   is charged "for each product"
   ([Steam Direct](https://partner.steamgames.com/steamdirect)). **Verify in the
@@ -118,18 +123,12 @@ without a copy of the game
   ([Distributing Your Dedicated Game Server](https://partner.steamgames.com/doc/sdk/uploading/distributing_gs)).
   Skip this for private playtests.
 
-**Alternative: one app, two depots.** You can put the server depot inside the
-game app instead, but then every player downloads the server unless you split
-the depots into separate packages. In section 5 this means a single app entry
-holding both depots (**verify in the UI** how to stop the server depot from
-installing for players).
-
 ---
 
 ## 3. Configure each app
 
-Do this for **both** apps. Every change here stays hidden until the Publish step
-at the end.
+Do this for the game app, and for the tool app if you created one. Every change
+here stays hidden until the Publish step at the end.
 
 ### 3.1 Depots
 
@@ -137,25 +136,69 @@ at the end.
   "Windows Content"), set **Language** to "[All languages]" and **OS** to
   "[All OSes]", then click "Save Changes"
   ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)).
-  The game app gets one depot for the client, and the tool app gets one depot
-  for the server.
-- [ ] **Write down each Depot ID** from the Depots page. Valve's docs do not say
-  how depot IDs are numbered, so read them off the page. **Verify in the UI.**
+- [ ] **Game app: add a second depot** for the server, with the same Language
+  and OS. All of a game's content depots "are configured on the Depots page in
+  App Admin" ([Depots](https://partner.steamgames.com/doc/store/application/depots));
+  the exact button name is not on the public page: **verify in the UI.** The
+  game app then has one depot for the client (config name game-client) and one
+  for the server (game-server). A tool app has one depot, for the server
+  (tool-server).
+- [ ] **Write down each Depot ID** from the Depots page, and which one is the
+  client and which the server. Valve's docs do not say how depot IDs are
+  numbered, so read them off the page. **Verify in the UI.**
 - [ ] Make sure each depot is in a package: "Your newly defined depots will need
   to be included in a package to grant you ownership of them"
+  ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)). Put **both**
+  game depots in the package players get: "all owned depots are mounted by
+  default in the order listed"
+  ([Depots](https://partner.steamgames.com/doc/store/application/depots)), so a
+  player who owns both gets the client and the server.
+
+**How the server lands in `Server`.** Our upload scripts place it: each
+depot's upload script maps the local build folder to a path inside the install
+folder, the way Valve's example maps a local bin folder into an executables
+folder of the depot
+([Uploading](https://partner.steamgames.com/doc/sdk/uploading)). Our config
+gives only game-server the path `Server` (section 5), so a player's install
+folder looks like this (measured in a simulated install of a real build):
+
+```text
+OGBrawlerUnrealClient.exe          game-client: the game
+Engine\  OGBrawlerUnreal\          game-client: the game's files
+build_info.txt                     game-client
+Server\OGBrawlerUnrealServer.exe   game-server: the server
+Server\Host Local Playtest.bat     game-server: the host files (section 7)
+Server\Host Online Playtest.bat
+Server\host_server.ps1, Server\host_server.settings.psd1, Server\run_server.bat
+Server\Engine\  Server\OGBrawlerUnreal\  Server\build_info.txt
+```
+
+The tool app's depot has no path, so the tool's install folder holds the same
+server files at its root.
+
+### 3.2 Launch options
+
+- [ ] Under **Installation → General Installation Settings**, add launch
+  options. Each has the executable path, relative to the install folder, plus
+  any arguments ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)).
+  Valve: "If your executable is in a sub-folder of the main installation folder,
+  add the sub-folder name in the Executable field." and "Don't use leading
+  slashes or dots."
   ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)).
+  The two programs are the small launchers at the top of each build, which
+  start the real program inside its OGBrawlerUnreal folder (measured on a real
+  Shipping package). Point Steam at the launcher, not at the inner program.
+  - **Game app: three launch options**, none with arguments, the game first:
 
-### 3.2 Launch option
+    | Executable | What it starts |
+    |---|---|
+    | `OGBrawlerUnrealClient.exe` | The game. Without an address it opens its join screen (section 7.3). |
+    | `Server\Host Online Playtest.bat` | Hosting for players on the internet (section 7.2). |
+    | `Server\Host Local Playtest.bat` | Hosting for players on this PC (section 7.1). |
 
-- [ ] Under **Installation → General Installation Settings**, add a launch
-  option with the executable path, relative to the depot root, plus any
-  arguments ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)).
-  Both paths below were measured on a real Shipping package. Each is the small
-  launcher at the top of the depot, which starts the real program inside the
-  depot's OGBrawlerUnreal folder. Point Steam at the launcher, not at the inner
-  program.
-  - Game app, client: executable `OGBrawlerUnrealClient.exe`, no arguments.
-    Without an address the game opens its join screen (section 7).
+    Whether Steam then offers the three as a choice when a player clicks Play,
+    and whether it accepts a `.bat` as a launch target, is not on Valve's
+    public pages: check both on the first upload (section 6.8).
   - Tool app, server: executable `OGBrawlerUnrealServer.exe`, no arguments.
     Hosts normally start the server with the "Host … Playtest" files instead
     (section 7), so this option is only a fallback. Whether a tool fetched only
@@ -166,10 +209,12 @@ at the end.
 - [ ] Game app: open **Installation → Redistributables** and tick the Visual C++
   2015–2022 x64 runtime
   ([Common Redistributables](https://partner.steamgames.com/doc/features/common_redist)).
-  The packaged client and server both need this runtime. See the prerequisites in
+  The packaged client and server both need this runtime; the bundled server
+  installs with the game, so this one setting covers both. See the prerequisites in
   [PLAYTEST_PORTABLE_README.md](../PLAYTEST_PORTABLE_README.md). The exact
   checkbox label is not on the public page: **verify in the UI.**
-- [ ] Tool app: in the same place, enable "Dedicated Server Redistributables"
+- [ ] Tool app (if you have one): in the same place, enable "Dedicated Server
+  Redistributables"
   ([Distributing Your Dedicated Game Server](https://partner.steamgames.com/doc/sdk/uploading/distributing_gs)).
   Also tick the VC++ x64 runtime if hosts install through Steam. Our server does
   not use the Steam SDK, so whether it needs the Dedicated Server
@@ -182,7 +227,8 @@ at the end.
   be required to put in the password before they have access to the branch,
   including its name"
   ([Branches](https://partner.steamgames.com/doc/store/application/branches)).
-  Do this on both apps.
+  Do this on the game app, and on the tool app if you have one: an upload sets
+  its branch live on every app it uploads (section 6.5).
 - Uploads may put a build live on playtest automatically, and ours do: the
   config's branch is `playtest` (section 5). The **default**
   branch never gets a build automatically: "you can not set the build live on
@@ -218,8 +264,9 @@ the owner account's credentials out of the pipeline.
   confirmation within 7 days"
   ([Managing Users](https://partner.steamgames.com/doc/gettingstarted/managing_users)).
   **⏳ WAIT** for the invitee to accept, then approve promptly.
-- [ ] **Limit its permissions.** Create a group that holds only the two OGBrawler
-  apps and the builder account. The default "Everyone" group covers every app
+- [ ] **Limit its permissions.** Create a group that holds only the OGBrawler
+  apps (the game, and the tool if you have one) and the builder account. The
+  default "Everyone" group covers every app
   ([Managing Users](https://partner.steamgames.com/doc/gettingstarted/managing_users)).
   Grant only:
   - **Edit App Metadata**: needed to upload depots
@@ -249,29 +296,49 @@ the owner account's credentials out of the pipeline.
 
 Copy the IDs from sections 2–4 into `tools/steam/steam-publish.psd1`. The ID
 fields ship as `0`, which means "not created yet". A local run without upload
-accepts 0, but any real upload with a 0 ID is refused.
+accepts 0. An upload refuses a 0 ID only for the apps and depots it uploads, so
+the tool's entries can stay 0 while you have no tool and use only profiles
+without tool-server (section 6.3).
 
 <!-- lint-anchor-ignore-begin: .psd1 keys and values are not indexed by the lint (it scans .h/.cpp/.ini/.cs/.md) -->
 | Where the value comes from | Config key | Notes |
 |---|---|---|
-| Section 2: game app's App ID | `AppId` of the app named `client` | Integer. |
-| Section 3.1: game app's depot ID | `DepotId` of the depot named `client-win64` | Integer. |
-| Section 2: tool app's App ID | `AppId` of the app named `server` | Integer. |
-| Section 3.1: tool app's depot ID | `DepotId` of the depot named `server-win64` | Integer. |
+| Section 2: game app's App ID | `AppId` of the app named `game` | Integer. |
+| Section 3.1: game app's client depot ID | `DepotId` of the depot named `game-client` | Integer. |
+| Section 3.1: game app's server depot ID | `DepotId` of the depot named `game-server` | Integer. Keep its `DepotPath = 'Server'`. |
+| Section 2: tool app's App ID | `AppId` of the app named `server-tool` | Integer. Leave 0 without a tool. |
+| Section 3.1: tool app's depot ID | `DepotId` of the depot named `tool-server` | Integer. Leave 0 without a tool. |
 | Section 4: builder account's Steam login name | `BuilderAccount` | Login name only. The password never goes in this file. |
 | Section 3.4: branch name | `Branch` | `playtest`. `default` is always rejected, because setting the default branch live is done by hand in Steamworks. |
 <!-- lint-anchor-ignore-end -->
 
-- [ ] All four IDs and the builder account are filled in.
-- [ ] If you used the one-app alternative from section 2: move the server depot
-  entry into the client app's depot list and delete the server app entry.
-- [ ] Check that each depot's executable matches the launch option from section
-  3.2: `OGBrawlerUnrealClient.exe` for the client, `OGBrawlerUnrealServer.exe`
-  for the server. The config already holds these values.
-- Once the client App ID is filled in, the next publish also teaches the host
-  files to start the game (they launch `steam://rungameid/<client App ID>`).
-  While it is still 0, publishing prints a warning and the host files tell the
-  host to start the game by hand.
+The config (schema version 2) separates **what is packaged** from **where it
+goes**. Its keys, as this project uses them:
+
+<!-- lint-anchor-ignore-begin: .psd1 keys and values are not indexed by the lint (it scans .h/.cpp/.ini/.cs/.md) -->
+| Key | In our config |
+|---|---|
+| `SchemaVersion` | `2`. |
+| `ProjectFile`, `EngineRoot`, `Platform`, `OutputRoot`, `KeepLast` | The project, the engine (`''` = the one the project is registered with), `Win64`, where builds go (`Saved\Steam\Builds`), and how many build folders to keep (3). |
+| `BuilderAccount`, `Branch` | See the table above. The branch is set live on every app an upload touches. |
+| `Builds` | What is packaged, each build **once** per publish however many depots use it: `client` (Client, Shipping) and `server` (Server, Shipping). Each build has its `ExpectedExecutable` (the launcher of section 3.2), its `FileExclusions` (files kept out of the upload: debug symbols, manifests, and on the server the files a running server writes) and its `ExtraFiles` (the server gets `run_server.bat`). |
+| `ServerLauncher` (on the `server` build) | The host files of section 7: map and log arguments, UDP port `7777`, the log lines that mean "ready" and "player joined/left", and the window title. `LocalHint` is the controls line the host window prints (Tab adds a local player, End removes one). |
+| `ClientLaunch` (in `ServerLauncher`) | Which game the host window starts, first usable entry wins: `..\OGBrawlerUnrealClient.exe` (the game next to the bundled `Server` folder), else `steam://rungameid/{AppId:game}` (through Steam, for the tool; usable once the game's App ID is filled in). |
+| `Apps` → `Depots` | Where builds go. Each depot has a `Name` (the names above), a `DepotId`, the `Build` it receives and an optional `DepotPath`: the folder inside the install folder (default: the root). Only game-server has `DepotPath = 'Server'`. |
+| `Profiles` | Named sets of depots for `-Profile` (section 6.3). `Default` names the profile used when a publish names none: `playtest`. A profile name with a `-` is quoted (`'playtest-tool' = ...`). |
+<!-- lint-anchor-ignore-end -->
+
+- [ ] The game's App ID and both game depot IDs, and the builder account, are
+  filled in. With a tool: its App ID and depot ID too.
+- [ ] Check that each build's executable matches the launch options from
+  section 3.2: `OGBrawlerUnrealClient.exe` for the client,
+  `OGBrawlerUnrealServer.exe` for the server. The config already holds these
+  values.
+- The host files in the game's `Server` folder start the game next to them, so
+  they work before any ID is filled in. In the tool they start the game through
+  Steam (`steam://rungameid/<game App ID>`), which the next publish writes in
+  once the game's App ID is filled in. While it is still 0, the tool's host
+  files say so and ask the host to start the game by hand.
 
 ---
 
@@ -287,7 +354,7 @@ lists every parameter.
 - [ ] Run `Install-OgSteamCmd`. It downloads Valve's steamcmd into
   `%LOCALAPPDATA%\og-tools\steamcmd` and lets it update itself. Running it again
   does nothing unless you add `-Force`.
-- [ ] The first upload (6.4) logs the builder account in. steamcmd asks for the
+- [ ] The first upload (6.5) logs the builder account in. steamcmd asks for the
   password and the Steam Guard code itself and caches the login afterwards
   (section 4). Valve notes that the cached login token lives in steamcmd's
   `config\config.vdf`; keep that folder, or you type the password and code again
@@ -299,48 +366,118 @@ lists every parameter.
 Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -NoUpload
 ```
 
-- Packages both depots (client and server, both Shipping) into
-  `Saved\Steam\Builds\<label>\`, writes the Steam upload scripts and the host
-  files, and contacts no Steam server. IDs that are still 0 are accepted here.
+- Packages the builds that the default profile, playtest, needs (section 6.3):
+  the client and the server, both Shipping, each once, into
+  `Saved\Steam\Builds\<label>\client\` and `Saved\Steam\Builds\<label>\server\`.
+  It writes the Steam upload scripts (one per app and one per depot, in
+  `<label>\_steam\`) and the host files (into the server build), and contacts no
+  Steam server. IDs that are still 0 are accepted here.
 - The label is the date, time and short git commit, for example
-  `20260929-133933-3937eeb`. It is written into `build_info.txt` in both depots,
+  `20260929-133933-3937eeb`. It is written into `build_info.txt` in every build,
   shown on the game's join screen and printed by the server.
 - The tree must be committed. With uncommitted changes the run stops; add
   `-AllowDirty` for a local test build (its label ends in `-dirty`).
-- The result lists each depot's **UploadBytes** (what Steam will receive) and
-  **SizeBytes** (the whole folder, including the debug symbols that are not
-  uploaded). Measured: client 433,882,483 and server 344,062,178 upload bytes.
+- The result lists every destination of the run (**Destinations**: app,
+  depot, build, depot path and **UploadBytes**, what Steam will receive) and,
+  per depot, **SizeBytes** (the whole build folder, including the debug symbols
+  that are not uploaded). Measured: client 435,059,184 and server 344,603,700
+  upload bytes.
 - The editor must be closed while packaging; the run refuses to start otherwise.
 - `-SkipPackage -BuildLabel <label>` reuses an existing build and only rewrites
   the upload scripts, `build_info.txt` and the host files (under a second).
+  With `-Profile` or `-Depots` it writes them for other destinations of the
+  same build (6.3).
 
-### 6.3 Steam-side dry run
+### 6.3 Choosing destinations: profiles
+
+One publish packages each build once, and every destination it fills gets the
+same build label. Which depots it fills is chosen per run:
+
+| Passed | Depots filled |
+|---|---|
+| neither option | the depots of the default profile, playtest |
+| `-Profile <name>` | the depots of that profile |
+| `-Depots <name>, <name>` | exactly those depots; cannot be combined with `-Profile` |
+
+The profiles in our config:
+
+| Profile | Depots | Use it when |
+|---|---|---|
+| playtest (default) | game-client, game-server | Every normal playtest upload: the game with its server in `Server`. |
+| playtest-tool | game-client, game-server, tool-server | The Dedicated Server tool should get the same build too. This uploads the server **twice**, once into each app (about 345 MB each), because the tool cannot share the game's depot before release (section 2). |
+| game-only | game-client | Only the client should change. Partial: needs `-AllowPartialApp` (below). |
+| release | game-client, tool-server | The server should live only in the tool. Partial: needs `-AllowPartialApp` (below). |
+
+**The partial-app guard.** If a run fills only some of an app's depots, the
+publish stops before packaging and names the depots it leaves out. The reason:
+Valve does not document what Steam does with a depot that an upload leaves out.
+Its previous build could stay installed, for example an old server in the
+game's `Server` folder whose build label no longer matches the game. The guard
+also stops `-NoUpload` and `-Preview` runs, so a dry run shows it.
+`-AllowPartialApp` uploads anyway:
+
+```powershell
+Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -Profile game-only -AllowPartialApp
+```
+
+- **game-only** and **release** both fill the game app without game-server, so
+  the guard stops both. Until the first real uploads show what Steam does with
+  the left-out depot (6.8), release is a **deliberate partial upload**.
+- Once the server lives only in the tool, the clean end state is to delete
+  game-server from the game app: in Steamworks (the depot) and in the config
+  (its depot entry, and the profiles that list it). Then release fills every
+  depot of the game app and is no longer partial.
+
+**More destinations from one build.** Package once, then write the upload
+scripts for another profile, or upload the tool later from the same build:
+
+```powershell
+Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -SkipPackage -BuildLabel <label> -Profile playtest-tool
+Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -SkipPackage -BuildLabel <label> -Depots tool-server
+```
+
+The second line fills the tool's only depot, so the guard does not stop it.
+Add `-NoUpload` to either line for a local check. Upload scripts that an earlier
+run with another profile wrote stay in the build's `_steam` folder; each app's
+script lists only the depot scripts of its own run, and only those are uploaded.
+
+### 6.4 Steam-side dry run
 
 ```powershell
 Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -Preview
 ```
 
-- Needs the real IDs and builder account from section 5. steamcmd logs in and
-  makes a preview build only. Valve: "This type of build only outputs logs and
-  a file manifest into the build output folder."
+- Needs the real IDs and builder account from section 5 for every app the run
+  uploads. steamcmd logs in and makes a preview build only. Valve: "This type
+  of build only outputs logs and a file manifest into the build output folder."
   ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)). The logs land
   in `Saved\Steam\Builds\<label>\_steam\output\`.
-- Check the manifest: no `.pdb` files, nothing from HostLogs, no
-  `join_info.txt`, no `Saved` folder in the server depot, and `build_info.txt`
-  present in both depots.
+- Check the manifests: no `.pdb` files, nothing from HostLogs, no
+  `join_info.txt`, no `Saved` folder in a server depot, `build_info.txt`
+  present in every depot, and the game app's server files under `Server`.
+  Our exclusions name files by their path in the local build folder. Valve's
+  example does the same (it excludes a file in its local bin folder although
+  that folder is mapped to executables in the depot,
+  [Uploading](https://partner.steamgames.com/doc/sdk/uploading)), but the page
+  does not say it outright, so check that the exclusions also worked for the
+  server under `Server`: no manifest text files there either.
 
-### 6.4 Real upload to `playtest`
+### 6.5 Real upload to `playtest`
 
 ```powershell
 Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1
 ```
 
-- Packages, uploads both apps and sets the build live on the `playtest` branch.
-  The build then appears on the app's builds page
+- Packages, uploads every app of the profile (playtest: the game app with both
+  depots) and sets the build live on the `playtest` branch of each. The build
+  then appears on the app's builds page
   ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)).
-- Always publish **both apps from the same run** (the command does this). The
-  server checks the client's build label; a client from one publish cannot join
-  a server from another ("different build", section 7.3).
+- **Players and hosts need builds from the same run.** The server checks the
+  client's build label; a client from one publish cannot join a server from
+  another ("different build", section 7.3). The game and its bundled server
+  always come from one run. Give the tool the same build: in the same run
+  (playtest-tool), or later with `-SkipPackage -BuildLabel <label> -Depots
+  tool-server` (6.3).
 - `-Description 'Playtest 3'` sets the text shown in Steamworks (default: the
   label). `-Branch <name>` overrides the config's branch for one run.
 - **The default branch** (what every owner gets) is set live **only in the
@@ -351,16 +488,18 @@ Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1
   ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)), and our tool
   refuses `default` as a branch name.
 
-### 6.5 Good habits
+### 6.6 Good habits
 
 - **Publish from a fresh build.** Running the server straight out of
   `Saved\Steam\Builds\<label>\` writes log and settings files into the server
-  depot. The config excludes those files from the upload (the HostLogs
+  build. The config excludes those files from the upload (the HostLogs
   folder, `join_info.txt` and the two `Saved` folders), but a fresh build is the
   safer habit.
-- **Filling in the App IDs regenerates the game start.** After section 5, the
-  next publish writes `steam://rungameid/<client App ID>` into the host files,
-  so "Start the game on this PC now?" works (section 7.1).
+- **How the host files find the game.** In the game's `Server` folder they start
+  the game next to them, with no Steam ID needed. In the tool there is no game
+  next to them, so they start it through Steam, with
+  `steam://rungameid/<game App ID>`; the first publish after section 5 writes
+  that ID in.
 - **Disk:** one build folder holds about 4.2 GB, because the debug symbols stay
   on disk. The config keeps the newest 3 build folders and deletes older ones.
   Keep the symbols of any build you hand out: they are the only way to read a
@@ -369,17 +508,43 @@ Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1
   firewall rule the first time its server runs. Old ones are harmless; delete
   them in Windows Defender Firewall if the list gets long.
 
-### 6.6 Measured timings (this dev PC)
+### 6.7 Measured timings (this dev PC)
 
 | Run | Time |
 |---|---|
-| Incremental publish with `-NoUpload`, both depots | 2 min 26 s |
+| Incremental publish with `-NoUpload`, client and server | 2 min 26 s |
+| Publish with `-NoUpload` after about a month of code changes (full client cook) | 17 min |
 | First publish with a Shipping server (its first build compiles the engine for it) | about 21 min, of which the server about 20 min |
-| `-SkipPackage` rerun | under 1 s |
+| `-SkipPackage` rerun, any profile | under 1 s |
 | Upload | not measured yet; after the first upload SteamPipe sends only the changed parts of files ([Uploading](https://partner.steamgames.com/doc/sdk/uploading)) |
 
 A fresh machine, or a switch to another build configuration, pays the long
 first build once.
+
+### 6.8 Check on the first real uploads
+
+Three things no Valve page answers. Check them on the first uploads and fix this
+document (and the config, if needed) with what you find:
+
+- [ ] **Launch-option choice.** Click Play on the game: does Steam offer the
+  three launch options of section 3.2 to choose from? **Verify in the UI.**
+- [ ] **A `.bat` as a launch target.** Does the Host Online Playtest or Host
+  Local Playtest option start the host window? **Verify in the UI.** If Steam
+  refuses a `.bat`, the follow-up is a small `.exe` per host file, generated by
+  the publish tooling; until then hosts double-click the files in the `Server`
+  folder (section 7.1).
+- [ ] **What a partial upload leaves installed.** On a throwaway branch (made
+  like `playtest` in section 3.4, for example `partialtest`), upload playtest,
+  install it on a test PC, then upload game-only:
+
+  ```powershell
+  Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -Branch partialtest
+  Publish-OgSteamBuild -ConfigPath tools\steam\steam-publish.psd1 -Profile game-only -AllowPartialApp -Branch partialtest
+  ```
+
+  Once Steam has updated the test PC, is the `Server` folder still there, and
+  with which `build_info.txt` label? This decides what "leave the server out"
+  means, and so whether release may stay partial (6.3).
 
 ---
 
@@ -397,23 +562,31 @@ player 2, and so on.
 ### 7.1 Local playtest — everyone on one PC
 
 You need: one Windows PC with OGBrawler installed and opted into the playtest
-(7.3 steps 1–2), and the **OGBrawler Dedicated Server** tool installed from
-Steam.
+(7.3 steps 1–2). The server comes with the game, in its `Server` folder.
 
-1. Find the Dedicated Server tool in your Steam Library and open its install
-   folder (**verify in the UI** where Steam offers "Browse local files" for a
-   tool). If the tool is not in the list, Steam is hiding tools: tick **Tools**
-   in the Library's filter (**verify in the UI** where the filter is).
-2. Double-click **Host Local Playtest**. A console window opens.
+1. In your Steam Library, click **Play** on OGBrawler and choose **Host Local
+   Playtest** (how Steam shows the choice: **verify in the UI**). If Steam
+   starts the game straight away instead, close it and use the file: right-click
+   OGBrawler → **Manage** → **Browse local files**, open the **Server** folder
+   and double-click **Host Local Playtest** (menu names: **verify in the UI**).
+   With the separate Dedicated Server tool (section 2), the same file is at the
+   top of the tool's install folder; if the tool is not in your Library list,
+   Steam is hiding tools: tick **Tools** in the Library's filter (**verify in
+   the UI** where the filter is).
+2. A console window opens.
 3. The first time only, Windows asks for permission to add a firewall rule.
    Click **Yes**. If you click No, play on this PC still works.
 4. Wait for **Server is ready on UDP 7777.**
-5. The window asks **Start the game on this PC now? [Y/n]**. Press Enter. If it
-   instead prints **Not starting the game automatically: … Start it yourself.**
-   (this happens while the Steam app IDs are not filled in yet, section 5), or
-   says it could not start the game, start OGBrawler from Steam yourself.
-6. In the game, **This PC** is already selected. Press **Enter** (or **A** on a
-   gamepad).
+5. The window asks **Start the game on this PC now? [Y/n]**. Press Enter; the
+   window starts the game that is installed next to the `Server` folder. With
+   the tool, it starts the game through Steam instead. If it prints **Not
+   starting the game automatically: … Start it yourself.** (with the tool while
+   the Steam app IDs are not filled in yet, section 5), or says it could not
+   start the game, start OGBrawler from Steam yourself.
+6. In the game, pick **This PC**, the top line of the list, and press **Enter**
+   (or **A** on a gamepad). The first time it is already selected. After you
+   have joined another server, that server's address is in the field instead:
+   press **Up** (or D-pad up) until This PC is highlighted.
 7. Press **Tab** to add a player; the console prints a "Player joined" line.
    **End** removes the most recently added player; player 1 always stays.
 8. To stop: close the game, then press **Ctrl+C** in the console window.
@@ -431,10 +604,13 @@ Good to know:
 
 ### 7.2 Hosting — online and on your network
 
-You need: a Windows PC on the internet with the **OGBrawler Dedicated Server**
-tool installed. The host needs the game only to play as well.
+You need: a Windows PC on the internet with OGBrawler installed (the server
+comes with it), or with the separate **OGBrawler Dedicated Server** tool (section
+2), which needs no copy of the game.
 
-1. In the tool's install folder, double-click **Host Online Playtest**.
+1. Click **Play** on OGBrawler and choose **Host Online Playtest**, or
+   double-click **Host Online Playtest** in the game's **Server** folder or at
+   the top of the tool's install folder (finding them: 7.1 step 1).
 2. **Firewall:** the first time, Windows asks for permission once. Click **Yes**.
 3. **Router:** the window tries to open UDP port **7777** on your router
    automatically (UPnP).
@@ -507,7 +683,8 @@ the join address from the host.
    ([Branches](https://partner.steamgames.com/doc/store/application/branches);
    the exact button names: **verify in the UI**). Steam downloads the playtest
    build.
-3. Click **Play**. The join screen opens.
+3. Click **Play**. If Steam asks which to start, pick the game itself, not one
+   of the Host options. The join screen opens.
 4. **Paste the address** (Ctrl+V) or type it, for example `203.0.113.7:7777`.
    Leaving out `:7777` is fine. Or pick a recent address from the list (Up/Down,
    or the gamepad D-pad). **This PC** means a server on your own PC.
@@ -547,6 +724,6 @@ without the join screen. Where Steam lets you set launch options for a game:
   The waits before a public release are in section 1.
 - **Crash reporting and symbol upload.** Nothing is sent to Steam. The debug
   symbols (`.pdb`) stay on the dev PC in `Saved\Steam\Builds\<label>\`, for the
-  newest 3 builds only (section 6.5).
+  newest 3 builds only (section 6.6).
 - **The 9th character.** A server has respawn places for 8 characters. A 9th
   simultaneous character still has no place and keeps dying on respawn.

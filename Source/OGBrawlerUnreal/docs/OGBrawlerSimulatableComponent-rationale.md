@@ -909,7 +909,8 @@ so a `BrawlerVizGround` built without them means "nothing known"; `vizGround` al
   **og-simulation axes** (convert with `ueFrame::directionToUe` for Unreal space, which is exact: a permutation and sign
   flips, widened to double). `dAttackGuardSimulation::integrate` poses the guard in the ground frame every tick
   (og-ground-aligned-attacks task 6) from the attack ground sample: the exact face normal Jolt reports on walkable
-  ground, otherwise world up (task 13b's `brawlerMovementSimulation::attackGroundNormal`). It is the same vector the aim, attack-circle
+  ground, otherwise world up (task 13b's rule, until og-ground-aligned-attacks task 36; since then the support estimate's
+  face, `brawlerMovementSimulation::sampleAttackGround`, which at an edge is the face under the centre probe). It is the same vector the aim, attack-circle
   and guard indicators draw with (task 11), so the camera and the indicators cannot disagree about the ground. It is
   unit up to the rotation's rounding; a reader that needs exactly unit normalizes it (`cameraTargetUp` does).
 * `supported` is true unless the movement State's support bits read `Unsupported`. The decoder is the inline one the
