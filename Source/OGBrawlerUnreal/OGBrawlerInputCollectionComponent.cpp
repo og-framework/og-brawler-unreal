@@ -208,7 +208,8 @@ namespace
 			dAttackMachineSimulation::g_movementScheme.load(),
 			dAttackMachineSimulation::g_swapMoveAndAimSticks.load(),
 			dAttackMachineSimulation::g_gamepadMoveStickFeedsAim.load(),
-			dAttackMachineSimulation::g_moveStickDeadzone.load());
+			dAttackMachineSimulation::g_moveStickDeadzone.load(),
+			dAttackMachineSimulation::g_backStopMaxMagnitude.load());
 	}
 
 	// Development-only check (compiled out of Shipping): every buildAimDirection branch must
@@ -492,8 +493,10 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	// move-stick-feeds-aim fallback off) or the actual routed move is shorter than the move
 	// deadzone. So guard + moving walks, guard alone roots, and in AimRelativeSwapped guard +
 	// left stick only (the single-stick fallback, which does route the left stick to move)
-	// roots while the left stick still aims. The sim cannot tell a fallback move from a real
-	// one, so this is decided here. The four globals are loaded once each below, so both
+	// roots while the left stick still aims. A light back pull inside AimRelativeSwapped's
+	// back-stick stop zone (og-ground-aligned-attacks task 40) routes to a zero move, so guard
+	// plus it roots too. The sim cannot tell a fallback move from a real
+	// one, so this is decided here. The five globals are loaded once each below, so both
 	// routings inside the decision and the matcher's deadzone see one set of values.
 	// readContinuousInputFields above loads them on its own, so a scheme/cvar change landing
 	// between the two reads can make this tick's freeze and move disagree for that one tick.
@@ -501,10 +504,11 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	const bool legacySwap   = dAttackMachineSimulation::g_swapMoveAndAimSticks.load();
 	const bool feedsAim     = dAttackMachineSimulation::g_gamepadMoveStickFeedsAim.load();
 	const float moveDeadzone = dAttackMachineSimulation::g_moveStickDeadzone.load();
+	const float backStopMaxMagnitude = dAttackMachineSimulation::g_backStopMaxMagnitude.load();
 	const bool holdGuard   = dInput::stickRouting::guardFreezeRequested(
 		getHoldGuard(),
 		dInput::stickRouting::StickSources{ m_moveKeys, m_leftStick, m_rightStick },
-		scheme, legacySwap, feedsAim, moveDeadzone);
+		scheme, legacySwap, feedsAim, moveDeadzone, backStopMaxMagnitude);
 
 	// --- Motion-sequence matching (predicting client only) ---
 	// Runs over the client's RAW CAPTURE history and produces a triggeredActionId carried on

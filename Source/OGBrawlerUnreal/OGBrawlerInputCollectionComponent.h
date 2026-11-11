@@ -153,8 +153,9 @@ public:
 
 	// Logical stick accessors. Both return the matching half of
 	// dInput::stickRouting::routeSticks({m_moveKeys, m_leftStick, m_rightStick}, ...),
-	// fed with g_movementScheme, g_swapMoveAndAimSticks, g_gamepadMoveStickFeedsAim and
-	// g_moveStickDeadzone; which raw source feeds which logical stick per scheme is decided
+	// fed with g_movementScheme, g_swapMoveAndAimSticks, g_gamepadMoveStickFeedsAim,
+	// g_moveStickDeadzone and g_backStopMaxMagnitude (AimRelativeSwapped's back-stick stop zone);
+	// which raw source feeds which logical stick per scheme is decided
 	// there and nowhere else. All three raw members are stored in the same "stick-up = -Y"
 	// convention (see the handlers), so routing needs no sign flips. All consumers
 	// (buildMoveDirectionWorld, buildAimDirection, buildPlayerInput, the character's camera

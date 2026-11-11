@@ -527,17 +527,20 @@ void AOGBrawlerUECharacter::Tick(float DeltaSeconds)
 	if (m_cameraBoomSeeded)
 	{
 		const dAttackCameraBehaviour::OrbitCameraSettings settings = orbitCameraSettingsFromCVars();
-		const float targetPitchDeg = dAttackCameraBehaviour::pitchDegFromUEPitchDegrees(
-			ASharedIsometricCameraActor::resolveIsoRotation().Pitch, settings);
+		const FRotator isoRotation = ASharedIsometricCameraActor::resolveIsoRotation();
+		const float targetPitchDeg = dAttackCameraBehaviour::pitchDegFromUEPitchDegrees(isoRotation.Pitch, settings);
 		const float mouseXSign = g_camInvertMouseX ? -1.f : 1.f;
 		const glm::vec2 aimStick = InputCollection->getAimStick();
 		const std::optional<BrawlerVizGround> ground = BrawlerSimulatable->vizGround();
-		const glm::vec3 targetUp = ground.has_value()
-			? dAttackCameraBehaviour::cameraTargetUp(ueNative::toGlm(ueFrame::directionToUe(ground->guardUp)), ground->supported)
+		const glm::vec3 groundUp = ground.has_value()
+			? ueNative::toGlm(ueFrame::directionToUe(ground->guardUp))
 			: dAttackCameraBehaviour::kCameraUp;
+		const bool groundSupported = ground.has_value() && ground->supported;
+		const glm::vec3 targetUp = dAttackCameraBehaviour::cameraTargetUp(groundUp, groundSupported);
 		// ⛔G-19  docs/OGBrawlerUECharacter-guards.md
 		const dAttackCameraBehaviour::OrbitCameraInput input{ InputCollection->getBlockLook(),
-			glm::vec2(mouseXSign * lookUnits.x, lookUnits.y), glm::vec2(aimStick.x, -aimStick.y), targetPitchDeg, targetUp };
+			glm::vec2(mouseXSign * lookUnits.x, lookUnits.y), glm::vec2(aimStick.x, -aimStick.y), targetPitchDeg, targetUp,
+			groundUp, groundSupported, dAttackCameraBehaviour::yawDegFromUEYawDegrees(isoRotation.Yaw) };
 		m_cameraState = dAttackCameraBehaviour::integrate(DeltaSeconds, input, settings, m_cameraState);
 		applyCameraStateToBoom(targetPitchDeg, settings);
 		ASharedIsometricCameraActor::reportCameraSight(false);

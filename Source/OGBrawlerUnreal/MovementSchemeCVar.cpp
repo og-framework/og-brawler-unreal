@@ -50,6 +50,7 @@ namespace
 	// Stick deadzones — UE CVars mirror the sim-side tweakables. Clamped to [0, 1].
 	float GMoveStickDeadzone = 0.15f;
 	float GAimStickDeadzone  = 0.2f;
+	float GBackStopMaxMagnitude = dAttackMachineSimulation::kDefaultBackStopMaxMagnitude;
 
 	void OnMoveStickDeadzoneChanged(IConsoleVariable* Var)
 	{
@@ -59,6 +60,11 @@ namespace
 	void OnAimStickDeadzoneChanged(IConsoleVariable* Var)
 	{
 		dAttackMachineSimulation::g_aimStickDeadzone = FMath::Clamp(Var->GetFloat(), 0.f, 1.f);
+	}
+
+	void OnBackStopMaxMagnitudeChanged(IConsoleVariable* Var)
+	{
+		dAttackMachineSimulation::g_backStopMaxMagnitude = FMath::Clamp(Var->GetFloat(), 0.f, 1.f);
 	}
 
 	static FAutoConsoleVariableRef CVarMoveStickDeadzone(
@@ -73,6 +79,17 @@ namespace
 		GAimStickDeadzone,
 		TEXT("Magnitude threshold below which the aim stick is treated as neutral (falls back to mouse aim). [0, 1], default 0.2."),
 		FConsoleVariableDelegate::CreateStatic(&OnAimStickDeadzoneChanged),
+		ECVF_Default);
+
+	static_assert(dAttackMachineSimulation::kDefaultBackStopMaxMagnitude == 0.45f,
+		"The OGBrawler.BackStopMaxMagnitude help string below says `default 0.45`, and so does "
+		"DAttackMachineSimulationRuntimeTweakables-rationale.md section 11.");
+
+	static FAutoConsoleVariableRef CVarBackStopMaxMagnitude(
+		TEXT("OGBrawler.BackStopMaxMagnitude"),
+		GBackStopMaxMagnitude,
+		TEXT("AimRelativeSwapped (scheme 0) with the right stick moving: a move stick longer than OGBrawler.MoveStickDeadzone but shorter than this, within kBackShortcutStep's angle window of straight back (the hold-back + right-attack projectile), reads as centred, so a light back pull does not trigger the back-stick attacks. At or below the move deadzone disables it. [0, 1], default 0.45."),
+		FConsoleVariableDelegate::CreateStatic(&OnBackStopMaxMagnitudeChanged),
 		ECVF_Default);
 
 	// Swap which physical stick feeds which logic.
