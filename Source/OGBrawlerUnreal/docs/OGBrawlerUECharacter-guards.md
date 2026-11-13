@@ -165,17 +165,6 @@ the rationale §4.
 
 ---
 
-## G-08 — `BrawlerColor` replicates with a plain `DOREPLIFETIME`, never `COND_OwnerOnly`
-
-**Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);`.
-
-> ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
-
-**Consequence.** Under `COND_OwnerOnly` every other machine's brawlers stay white on this machine,
-in the world and in the scoreboard's swatch column.
-
----
-
 ## G-09 — `RingoutScore` replicates with a plain `DOREPLIFETIME`, never `COND_OwnerOnly`
 
 **Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, RingoutScore);`.
@@ -239,42 +228,20 @@ substituting the pawn's id here still compiles.
 > only duplicate the diagnostic line on the host and make the log lie about which side
 > received what.
 
+**Correction (og-input-latency P7-4).** The tint's self-call is no longer in `PossessedBy`: it is the
+last statement of `SetAuthoritativeSimCharacterId` (G-22), for the same reason. The prohibition here is
+unchanged.
+
 ---
 
 ## G-13 — the material parameter is named `Color`, once, at this write site
 
-**Site:** `HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), BrawlerColor);` in
-`ApplyBrawlerColor`.
+**Site:** `HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), GetBrawlerColor());` in
+`ApplyBrawlerColor` (the value was the `BrawlerColor` member until og-input-latency P7-4).
 
 > `Color` is BasicShapeMaterial's vector parameter. A wrong name here fails
 > SILENTLY — the mesh renders in the base tint and nothing logs — so it is
 > named once, at this single write site, rather than being spread around.
-
----
-
-## G-14 — the colour counter advances on the authority only
-
-**Site:** `if (HasAuthority())` in `PossessedBy`.
-
-> ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
-> diverge from the authority's and hand two brawlers the same tint.
-
-> Authority only: PossessedBy does not run on clients, but HasAuthority() is
-> stated rather than assumed because the counter must never advance twice.
-
-**What breaks if the tag moves.** The counter `gNextBrawlerColorIndex` is declared at file scope,
-where a tag would not stand on the line a wrong read or write is typed. This branch holds its
-only read and its only write.
-
----
-
-## G-15 — `PossessedBy` applies the tint itself: the listen-server host's pawn gets no OnRep
-
-**Site:** `ApplyBrawlerColor();` inside `PossessedBy`'s `HasAuthority()` branch.
-
-> The listen-server's own pawn gets no OnRep, so apply here too.
-
-**Consequence.** Without it the host's own brawlers render in the base tint on the host.
 
 ---
 
@@ -398,9 +365,74 @@ it on an existing character, 5 s after it started. Rationale §15.
 
 ---
 
+## G-22 — `SetAuthoritativeSimCharacterId` applies the tint itself: the authority's pawn gets no OnRep
+
+**Site:** `ApplyBrawlerColor();`, the last statement of `SetAuthoritativeSimCharacterId`.
+
+**Moved from** G-15 (og-input-latency P7-4, 2026-11-12), with its reason. The colour is derived from
+the sim id since that task (rationale §5), so it is applied where the id is written, not in
+`PossessedBy`. G-15's text, the shipped comment:
+
+> The listen-server's own pawn gets no OnRep, so apply here too.
+
+**Prohibition.** Keep the call. A client tints a brawler in `OnRep_SimCharacterIdValue`, when the id
+replicates in. The authority writes `SimCharacterIdValue` here, and the engine runs no RepNotify for a
+C++ write on the authority, so this call is the only one that tints the authority's pawns once their
+id exists.
+
+**Consequence.** Without it, on a listen server or in standalone, every brawler renders in white on
+the authority. `RebuildHumanoidMesh`'s call (G-07) runs in `PostInitializeComponents`, before the id
+is assigned, when `GetBrawlerColor()` still returns `FLinearColor::White`. The scoreboard is not
+affected: it calls `GetBrawlerColor()` when it draws, so its swatch shows the palette colour while
+the mesh beside it stays white.
+
+**What breaks if the tag moves.** Nothing mechanical. The low-level test targets do not link this
+module, and a dedicated server renders nothing. Only a rendered run on a listen server or in
+standalone shows it.
+
+---
+
 ## §R — Retired ids
 
 ⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.
+
+### G-08 — RETIRED (og-input-latency P7-4, 2026-11-12): the property it guarded was deleted
+
+**Was:** *`BrawlerColor` replicates with a plain `DOREPLIFETIME`, never `COND_OwnerOnly`*. The site
+was `DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);`, and the shipped comment read:
+
+> ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
+
+**Why it retired.** The `BrawlerColor` property, its `OnRep_BrawlerColor` and its registration are
+gone. Every peer derives the colour from the sim id through `GetBrawlerColor()` (rationale §5). The
+fact it protected, that every client needs every brawler's colour, now rests on
+`SimCharacterIdValue`'s plain `DOREPLIFETIME`, which G-10 already guards: under `COND_OwnerOnly` a
+proxy's id, and so its colour, would never arrive.
+
+### G-14 — RETIRED (og-input-latency P7-4, 2026-11-12): the counter was deleted
+
+**Was:** *the colour counter advances on the authority only*. The site was `if (HasAuthority())` in
+`PossessedBy`, and the shipped comments read:
+
+> ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
+> diverge from the authority's and hand two brawlers the same tint.
+
+> Authority only: PossessedBy does not run on clients, but HasAuthority() is
+> stated rather than assumed because the counter must never advance twice.
+
+**Why it retired.** The file-scope counter `gNextBrawlerColorIndex` and the branch are gone, and
+nothing counts any more. `paletteIndexFor` is a pure function of the sim id, with `static_assert`s on
+ids 1, 10 and 11. The id itself is allocated once, on the authority (`SimCharacterId-guards.md`
+G-01). A client cannot diverge from the authority, because both compute from the same replicated
+byte.
+
+### G-15 — RETIRED (og-input-latency P7-4, 2026-11-12): moved to G-22
+
+**Was:** *`PossessedBy` applies the tint itself: the listen-server host's pawn gets no OnRep*. The
+site was `ApplyBrawlerColor();` inside `PossessedBy`'s `HasAuthority()` branch.
+
+**Why it retired.** The colour is known once the id is written, not at possession, so the self-apply
+moved to the end of `SetAuthoritativeSimCharacterId`, with its reason. **Successor:** G-22.
 
 ### G-18 — RETIRED (og-attackstatetransition-cleanup task 9, 2026-10-04): the mirrored length was deleted
 

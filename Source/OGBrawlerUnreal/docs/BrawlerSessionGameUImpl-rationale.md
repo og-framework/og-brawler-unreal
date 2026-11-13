@@ -161,7 +161,7 @@ the position of the brawler statements that sat there in the actor's `BeginPlay`
 | hook | brawler statements | when, which thread |
 |---|---|---|
 | `beforeWorldBuild(world, netMode, compositionExists, staticData)`, a member | the gravity cross-check (§6.1), then `m_roster.seedSpawnPointsFromLevel(world, netMode, compositionExists, staticData)` (`BrawlerRosterUImpl-rationale.md` §1) | once per session, first after the world check, before the composition is emplaced; game thread |
-| `static emplaceSystems(systemsExec, bodyAdapter, queryAdapter)` | the systems executor's emplace: the hit detector over the two adapters, then the hit routing and the ring-out score systems | once per session, in the role's branch, after the integration layer, before the manager; game thread |
+| `static emplaceSystems(systemsExec, bodyAdapter, queryAdapter)` | the systems executor's emplace: the hit detector over the two adapters, then the hit routing, the ring-out score and (since og-input-latency task 2d) the ring-out respawn-slot systems | once per session, in the role's branch, after the integration layer, before the manager; game thread |
 | `static neutralInput()` | `simulatableBrawler::getZeroPlayerInput()`, the value of `setNeutralInput` | once per session, in the role's branch; game thread |
 | `static installGameLoggers(isAuthority)` | the `ogblog` sink lambda (`LogOGBrawler`, its verbosity from a leading `[Verbose]` / `[Warning]`), then `ogblog::setGlobal` | once per session, in the role's branch, after `simlog::setGlobal`; game thread |
 | `afterSessionConfigured(netMode)`, a member | `m_roster.checkSeeded(netMode)` (`BrawlerRosterUImpl-rationale.md` §1) | once per session, after the resim policy, before the backend line; game thread |

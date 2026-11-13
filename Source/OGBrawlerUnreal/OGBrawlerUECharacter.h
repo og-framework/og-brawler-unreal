@@ -77,20 +77,17 @@ class AOGBrawlerUECharacter : public APawn
 	UPROPERTY()
 	class UPhysicalMaterial* CapsulePhysicalMaterial = nullptr;
 
-	UPROPERTY(ReplicatedUsing = OnRep_BrawlerColor)
-	FLinearColor BrawlerColor = FLinearColor::White;
-
-	UFUNCTION()
-	void OnRep_BrawlerColor();
-
 	UPROPERTY(ReplicatedUsing = OnRep_RingoutScore)
 	int32 RingoutScore = 0;
 
 	UFUNCTION()
 	void OnRep_RingoutScore();
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_SimCharacterIdValue)
 	uint8 SimCharacterIdValue = 0;
+
+	UFUNCTION()
+	void OnRep_SimCharacterIdValue();
 
 	UPROPERTY(Replicated)
 	uint8 PhysicsSlotValue = 0;
@@ -174,7 +171,7 @@ public:
 
 	FORCEINLINE int32 GetRingoutScore() const { return RingoutScore; }
 
-	FORCEINLINE FLinearColor GetBrawlerColor() const { return BrawlerColor; }
+	FLinearColor GetBrawlerColor() const;
 
 	SimCharacterId GetSimCharacterId() const;
 

@@ -326,15 +326,36 @@ namespace
 		"the brawler palette must carry at least one distinct tint per drawable scoreboard "
 		"row, or two rows of the ring-out scoreboard can show the same swatch");
 
-	int32 gNextBrawlerColorIndex = 0;
+	constexpr int32 paletteIndexFor(SimCharacterId id)
+	{
+		return static_cast<int32>((toStorageKey(id) - 1u) % static_cast<unsigned int>(kBrawlerPaletteCount));
+	}
+
+	static_assert(paletteIndexFor(static_cast<SimCharacterId>(1u)) == 0,
+		"sim id 1, the first character the authority registers, wears palette entry 0. Was the possession counter "
+		"gNextBrawlerColorIndex, whose first value 0 gave the first possessed brawler entry 0.");
+	static_assert(paletteIndexFor(static_cast<SimCharacterId>(10u)) == 9,
+		"sim id 10 wears the 10-entry palette's last entry, 9: the colour is (id - 1) mod kBrawlerPaletteCount, "
+		"derived on every peer from the replicated sim id. Was the replicated BrawlerColor property.");
+	static_assert(paletteIndexFor(static_cast<SimCharacterId>(11u)) == 0,
+		"sim id 11 wraps to entry 0 of the 10-entry palette, the tint of id 1. Was the counter's "
+		"'% kBrawlerPaletteCount' wrap in PossessedBy.");
+}
+
+FLinearColor AOGBrawlerUECharacter::GetBrawlerColor() const
+{
+	const SimCharacterId id = GetSimCharacterId();
+	if (id == SimCharacterId::None)
+		return FLinearColor::White;
+	checkf(id != SimCharacterId::None,
+		TEXT("GetBrawlerColor: paletteIndexFor has no entry for SimCharacterId::None (0 - 1 wraps to a real ")
+		TEXT("palette entry), so a character without an id must take the White branch above, never this call."));
+	return kBrawlerPalette[paletteIndexFor(id)];
 }
 
 void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	// ⛔G-08  docs/OGBrawlerUECharacter-guards.md
-	DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);
 
 	// ⛔G-09  docs/OGBrawlerUECharacter-guards.md
 	DOREPLIFETIME(AOGBrawlerUECharacter, RingoutScore);
@@ -346,7 +367,7 @@ void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);
 }
 
-void AOGBrawlerUECharacter::OnRep_BrawlerColor()
+void AOGBrawlerUECharacter::OnRep_SimCharacterIdValue()
 {
 	ApplyBrawlerColor();
 }
@@ -380,6 +401,8 @@ void AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId(SimCharacterId NewId)
 		TEXT("A character's simulation id is assigned once and never changes (SimCharacterId G-01)."),
 		static_cast<unsigned int>(SimCharacterIdValue), toStorageKey(NewId));
 	SimCharacterIdValue = static_cast<uint8>(NewId);
+	// ⛔G-22  docs/OGBrawlerUECharacter-guards.md
+	ApplyBrawlerColor();
 }
 
 std::optional<uint32> AOGBrawlerUECharacter::GetPhysicsSlot() const
@@ -438,7 +461,7 @@ void AOGBrawlerUECharacter::ApplyBrawlerColor()
 	}
 
 	// ⛔G-13  docs/OGBrawlerUECharacter-guards.md
-	HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), BrawlerColor);
+	HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), GetBrawlerColor());
 
 	const int32 sectionCount = HumanoidMesh->GetNumSections();
 	for (int32 section = 0; section < sectionCount; ++section)
@@ -450,16 +473,6 @@ void AOGBrawlerUECharacter::ApplyBrawlerColor()
 void AOGBrawlerUECharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
-
-	// ⛔G-14  docs/OGBrawlerUECharacter-guards.md
-	if (HasAuthority())
-	{
-		BrawlerColor = kBrawlerPalette[gNextBrawlerColorIndex % kBrawlerPaletteCount];
-		++gNextBrawlerColorIndex;
-
-		// ⛔G-15  docs/OGBrawlerUECharacter-guards.md
-		ApplyBrawlerColor();
-	}
 
 	InputCollection->addInputMappingContextForController(NewController);
 }

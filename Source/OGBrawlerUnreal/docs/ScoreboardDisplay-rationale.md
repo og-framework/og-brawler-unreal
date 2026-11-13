@@ -431,10 +431,10 @@ column now draws that tint and the player reads the row the way they read the fi
 ⛔ **The id did not leave the row, and only the DISPLAYED column changed.** `characterId`
 is still what `gatherScoreboardRows` joins each row's other facts on, and still what
 `scoreboardRowPrecedes` orders the board by, so two peers continue to show the same player
-in the same row. Nothing on this board is ordered by, keyed on or compared by colour — a
-future edit that sorted by the swatch would put two peers back out of step the moment one
-of them assigned tints in a different order, because the assignment order is a
-possession-counter artefact and not a shared fact.
+in the same row. Nothing on this board is ordered by, keyed on or compared by colour. Since
+og-input-latency P7-4 every peer derives the tint from the same sim id, so a sort by swatch
+would no longer split two peers, but the tint is not unique: the 10-entry palette wraps, and
+id 11 wears id 1's tint, so two rows could tie where `characterId` never does.
 
 #### ⛔ The swatch does not change while a fighter is counting down. That is a choice.
 
@@ -467,18 +467,18 @@ beside the tint — an outline, a strike — never a transform applied to it.**
 
 #### Two brawlers never share a swatch in a session this mode is built for
 
-The palette holds ten hand-picked entries and `PossessedBy` hands them out round-robin, one
-per possession, on the authority only. ⭐ A `static_assert` at the palette's own declaration
+The palette holds ten hand-picked entries, and `GetBrawlerColor()` gives the brawler with
+sim id n entry (n - 1) mod 10, on every peer (og-input-latency P7-4). ⭐ A `static_assert` at the palette's own declaration
 now pins its cardinality against `kScoreboardMaxRows`, so shrinking it below the number of
 rows the board can draw is a **compile error** — and the compiler is one of only three
 mechanisms that reach a `Source/OGBrawlerUnreal` file at all.
 
-⚠ **The honest bound is per-possession, not per-concurrent-fighter.** The counter never
-reclaims a leaver's index, so what is guaranteed is "the first ten possessions of a run get
-distinct tints", not "no two live brawlers ever share one". A run with enough joins and
-rejoins to wrap past ten can hand a newcomer the tint of a fighter who never left. That is
-pre-existing palette behaviour, unchanged by this task, and far outside the four-player
-session the mode targets — but it is what the assert actually promises.
+⚠ **The honest bound is per-registration, not per-concurrent-fighter.** The authority never
+reuses a sim id, so what is guaranteed is "the first ten ids of a session get distinct
+tints", not "no two live brawlers ever share one". A session with enough joins and rejoins
+to wrap past ten can hand a newcomer the tint of a fighter who never left. The possession
+counter the id replaced wrapped the same way, per possession. It is far outside the
+four-player session the mode targets — but it is what the assert actually promises.
 
 ### 6.1 The status column says a word, and that is not decoration
 
@@ -500,12 +500,12 @@ checks: exactly the stale table that lint exists to prevent.
 ⭐⭐ **And task 10's swatch did not become one either — stated explicitly rather than left
 to be inferred, because it is the first colour on this board that is not a constant.**
 `scoreboardRowSwatch` is a **per-character runtime tint**: it returns a value carried in on
-the row, assigned at possession time from a palette that lives in a different module, and
+the row, picked by the sim id from a palette that lives in a different module, and
 this display neither names an entry of that palette nor selects between entries. The lint's
 subject is *a function that switches on an enumerator*, because that is the shape whose arms
 can silently fall out of step with a table listing those enumerator names. A function with
 no arms at all has nothing to list — a legend for this column would have to enumerate
-`kBrawlerPalette`, which is indexed by a possession counter rather than by any named state,
+`kBrawlerPalette`, which is indexed by the sim id rather than by any named state,
 and would go stale the day somebody appends an eleventh colour. **No legend table is owed,
 and none was added.**
 

@@ -31,10 +31,13 @@ task 13). The host launcher that ships in the server depot parses them. Prohibit
   client's connection, so both sides are compared by that root connection.
 * `label` = the build label (`OGBuildIdentity-rationale.md` §1): the published build's label, or `dev`.
 * `tested` = `og::brawler::session::maxPlayersPerServer` (3). It is information only. ⛔ Nothing rejects
-  a player for being over it (NO HARD PLAYER CAP, user ruling 2026-09-26); the session keeps running
+  a player for being over it (NO HARD PLAYER CAP at the tested size, user ruling 2026-09-26; the hard
+  ceiling of 8 below is user ruling Q3, 2026-11-12); the session keeps running
   and the launcher says "above the tested 3, expect degraded performance".
-* The engine's own limits are separate and unchanged: 4 local players per client, refused on the
-  client (the join screen's notice, `JoinScreen-rationale.md` §14), and 16 players per server.
+* The admission caps are separate: 4 local players per client, refused on the client (the join
+  screen's notice, `JoinScreen-rationale.md` §14), and 8 players per server, refused at the login.
+  Both come from `SessionConstants.h` since og-input-latency P7-5 (user ruling Q3, 2026-11-12;
+  `JoinScreen-rationale.md` §15); before it they were the engine's defaults, 4 and 16.
 * Only a **dedicated** server logs (`NM_DedicatedServer`). A client and the front-end are standalone
   or client worlds and log nothing. The user's PIE server is a dedicated server too, so PIE logs these
   lines; that is harmless.

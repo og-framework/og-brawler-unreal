@@ -139,6 +139,14 @@ brawlerRingout::ScoreSystem>`, and `SystemsExec` is `apply_t<SystemsExecFor, Sys
 (`UESimulationSession-rationale.md` §14, in OGSimulationUnreal's docs), so a game hands the session its list, not an
 executor.
 
+**The fourth system (og-input-latency task 2d, 2026-11-11).** `Systems` ends with `brawlerRingout::RespawnSlotSystem`
+(`BrawlerRingoutRespawnSystem.h`, og-brawler): `SystemList<HitDetectionSystem, brawlerHitRouting::System,
+brawlerRingout::ScoreSystem, brawlerRingout::RespawnSlotSystem>`. It is `AuthorityOnly`. It moves a respawn off a spawn
+point another character occupies, by rewriting the wire-carried `brawlerRingout::InitialConditions::spawnSlot` in its
+`preIntegrate` (the respawn tick) and `postIntegrate` (the death tick). Its position in the list is free: no other
+system reads or writes `spawnSlot`, and the score system reads only the ring-out `State` and `DerivedState`, which it does
+not write. The golden harness (`GoldenTraceScene.h`, og-brawler-tests) carries the same four systems in the same order.
+
 **Why og-simulation's `SystemList`, not `SimulatableList`.** `SimulatableList` is the simulatable pack: the systems
 executor takes the simulatables through it, and its `IsSimulatableList` concept gates each system's
 `RequiredSimulatables`. A list of systems spelled as a `SimulatableList` would model that concept and read as a list of

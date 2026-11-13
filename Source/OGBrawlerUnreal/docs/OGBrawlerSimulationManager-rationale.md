@@ -634,7 +634,7 @@ They are not routed and have no row; the rule that gives each probe family its o
 **Which rows are og-simulation's** was decided by the emitters: every string literal in a non-comment line
 under `Plugins/` and `Source/`, with a leading `[Verbose]` or `[Warning]` token removed as `RouteOGMessage`
 removes it, assigned to the row that routed it.
-- og-simulation only (25 rows, now in `kSimulationLogRoutes`): every row not listed below. Their emitting
+- og-simulation only (25 rows, now in `kSimulationLogRoutes`; 26 since og-input-latency task 5b added `[InputArrival.Window]`; 27 since P3-1 added `[InputArrival.BackDate]`): every row not listed below. Their emitting
   files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
 - Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp`, this
   module's `.cpp`, and since task 26b the session header's PROBE A client line, instantiated only in this module),
@@ -3083,6 +3083,7 @@ thread (a task-graph worker on a client, the game thread on a dedicated server).
 | `H5` | `stampStepEnd_Internal`, at each step's end (below), per character, for `currentIntegratedTick` (PT; inline on a dedicated server) | as `H3c` start | `noEnd` counts the ticks a character's state was not written: the correction rotation (`CorrectionRotationK`) skips a character on purpose, so on a rotation of 2 about half the ticks have no end. |
 | `H6` | `UESimulatableOwnerBinding.h` · `noteRelayedRingArrived`, which the sibling's `onRelayedInputRingArrived` calls after its owner-skip check (task 20b), once per capture tick in the ring, first arrival wins (GT, from the ring's OnRep) | `stampAfterStep_Internal`: the relayed-read observation for the step's tick names the applied capture tick, stamped with the step's start time (PT) | The bytes arrived up to one client frame before the OnRep. Only reads that applied a relayed capture stamp an end; a miss stamps nothing and the capture finalizes as `noEnd`. |
 | `H6c` | `UESimulatableOwnerBinding.h` · `onCorrectionStateAccepted`, called from the sibling's `OnRep_CorrectionState` (task 20a), for the peeked tick (GT) | `stampAfterStep_Internal`: a pending stamp at the start of the first client step after receipt (PT) | Measures when the correction is available to the next step, not when a resimulation applies it. |
+| `H6L` | as `H6` | the first of: `UELatencyBudgetDiagnostics.h` · `postRelayedReads_Internal`, a prediction `Hit` for the step's tick or a resimulation's `Hit` found in the observation ring, stamped with the step's start time (PT); or `stampCorrectionReceived`, from `onCorrectionStateAccepted`, for every pending capture `≤ X − dA` (GT) | A resimulation's use is late by at most the replay's length. `dA` is the newest relayed capture's delay stamp. og-input-latency task 6; `UELatencyBudgetDiagnostics-rationale.md` §11. |
 | `H7` | `stampStepEnd_Internal` (PT) | `tick_GameThread`, after the visualization pass: the newest pending tick per character only (GT) | Not the photon. The engine interpolates the render poses behind the simulation on the game thread, and the render thread and GPU add one or two frames more. A step that ends between the mailbox drain and this stamp is stamped one frame late. On a dedicated server it measures the per-frame visualization pass, which draws nothing. |
 | `WIRE` | client: `onTimingInfoReceived`, the raw round trip the timing relay hands `NetworkTimeEstimator::updateRTT`, halved (GT) | — | Half of a round trip assumes symmetric paths. Server: `receiveRemoteMoveBundle`, `readRoundTripMs` of the root connection, halved, once per bundle (GT). The two roles' values come from different estimators. |
 
@@ -3097,7 +3098,7 @@ authority), every game-thread site is unchanged, and the step-side sites are the
 
 | stamp | Chaos configuration (`ChaosTickBackendUImpl.cpp`, through the host's `editDiagnostics()`) | Jolt configuration (`BrawlerTickDriverGameUImpl.h`) |
 |---|---|---|
-| step-start time for `H4`, `H6`, `H6c` and the clock counts | `OnPreSimulate_Internal`, immediately before `onGameSimulation` | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03); on a client early only by the Jolt scratch save |
+| step-start time for `H4`, `H6`, `H6c`, `H6L`'s use and the clock counts | `OnPreSimulate_Internal`, immediately before `onGameSimulation` | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03); on a client early only by the Jolt scratch save |
 | `stampAfterStep_Internal(start)` | `OnPreSimulate_Internal`, after `onGameSimulation`, when not resimulating | `onStepStarted`, from `beforePhysics`, after `onGameSimulation`, before the physics step |
 | `stampStepEnd_Internal` (`H5`, `H7` starts) | `OnPostSolve_Internal`, when not resimulating | `onStepEnded`, from `afterTick`, after the post-step pass and the ring save: microseconds later |
 

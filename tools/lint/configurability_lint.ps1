@@ -176,11 +176,14 @@ $Blacklist = @(
         Field   = 'correctionRotationK'
         # og-netcode-v2-input-relay T39: how many characters' correction-state
         # buffers SimulationNetSync::sendCorrectionAll writes per tick, round-robin
-        # (design_task38_input_first_replication.md §5.4). Ships at 2 — every-frame
-        # at two characters, 20 Hz at six — and is exactly the shape R-P1 exists to
-        # keep out of call sites: a cadence number that a future "just write two of
-        # them here" edit would re-declare locally.
-        # Field-anchored, so only a NON-member `correctionRotationK = 2` is flagged;
+        # (design_task38_input_first_replication.md §5.4). Ships at 1 since T34, which
+        # lowered it from 2 for the pre-diet window: with un-dieted states, K = 2 at
+        # four characters lands the second state's batch failure inside the
+        # adapter's blocking split window on about a third of frames, and K = 1 does
+        # not (TimeConfig-rationale.md §8; the wire diet restores 2). It is exactly
+        # the shape R-P1 exists to keep out of call sites: a cadence number that a
+        # future "just write one of them here" edit would re-declare locally.
+        # Field-anchored, so only a NON-member `correctionRotationK = 1` is flagged;
         # every consumer reads it as cfg.correctionRotationK / m_timeConfig
         # .correctionRotationK (member access, auto-excluded by the (?<![\w.>])
         # lookbehind), and the composition root's ini override writes it through
@@ -190,9 +193,50 @@ $Blacklist = @(
         # intentionally not guarded here — R-P1 guards tuning values, not the
         # guard rails around them, the same call already made for
         # relayedInputRing::kMaxDepth.
-        Pattern = '(?<![\w.>])correctionRotationK\s*=\s*2\b'
+        Pattern = '(?<![\w.>])correctionRotationK\s*=\s*1\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
-        Message = 'correctionRotationK default (2 — every-frame at two characters, the archived-baseline-preserving choice) must live only in TimeConfig; read config.correctionRotationK instead of re-declaring it (R-P1)'
+        Message = 'correctionRotationK default (1 — since T34, the pre-diet cadence floor that keeps the state batch out of the blocking split window; the wire diet restores 2) must live only in TimeConfig; read config.correctionRotationK instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # Latency knobs (og-input-latency task 4). Both ship at 0, which means
+    # "behave exactly as today", and both are exactly the shape R-P1 exists to
+    # keep out of call sites: a tuning number a future "just send three frames
+    # here" edit would re-declare locally.
+    # Field-anchored, so only a NON-member assignment of the default is flagged;
+    # every consumer reads them as cfg.<field> / m_timeConfig.<field> (member
+    # access, auto-excluded by the (?<![\w.>]) lookbehind), and the composition
+    # root's ini override writes them through SimulationManager::
+    # setRedundancyFrames / setRelayResendEntries rather than re-declaring a
+    # default.
+    # The CLAMP BOUNDS (latencyKnobs::kMinRedundancyFrames/kMaxRedundancyFrames
+    # = 0/8, kMinRelayResendEntries/kMaxRelayResendEntries = 0/2) are
+    # intentionally not guarded here — R-P1 guards tuning values, not the guard
+    # rails around them, the same call made for correctionRotationK above.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'redundancyFrames'
+        Pattern = '(?<![\w.>])redundancyFrames\s*=\s*0\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'redundancyFrames default (0 — use today''s redundancyDepthTicks) must live only in TimeConfig; read config.redundancyFrames instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'relayResendEntries'
+        Pattern = '(?<![\w.>])relayResendEntries\s*=\s*0\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'relayResendEntries default (0 — today''s flush, nothing re-sent) must live only in TimeConfig; read config.relayResendEntries instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # Back-dating detection (og-input-latency P3-1). The m0 p50 threshold below
+    # which a wire's window counts toward a back-dating episode; detect only.
+    # Its detector (P3-6) reads it as cfg.backDateM0P50ThresholdTicks, so a
+    # local `backDateM0P50ThresholdTicks = -5` would be a second source of truth
+    # for the threshold. Field-anchored, in the redundancyFrames shape above.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'backDateM0P50ThresholdTicks'
+        Pattern = '(?<![\w.>])backDateM0P50ThresholdTicks\s*=\s*-5\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'backDateM0P50ThresholdTicks default (-5 — the m0 p50 back-dating threshold, detect only) must live only in TimeConfig; read config.backDateM0P50ThresholdTicks instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'resimTriggerPolicy'
@@ -241,7 +285,8 @@ $Blacklist = @(
     #
     # NOT TimeConfig fields — these live in the og-brawler core header
     # SessionConstants.h (namespace og::brawler::session) and define the ratified
-    # player-count envelope (Tier 1 = 3, Tier 2 = 6, up to 3 LPs/client). Same
+    # player-count envelope (Tier 1 = 3, Tier 2 = 6, up to 4 LPs/client, and the
+    # hard ceiling of 8 players per server). Same
     # "single source of truth" rule as the TimeConfig entries above: the magic
     # 3/6 player-count literals must be read from SessionConstants.h, never
     # re-declared in game/UE/test code. Member-access reads
@@ -250,6 +295,10 @@ $Blacklist = @(
     # the magic literal is flagged. CONTRACT: a future server-session gate that
     # legitimately re-houses one of these values adds its file leaf to Allowed in
     # the same change. A test fixture that exercises a literal cap adds itself too.
+    # og-input-latency P7-5 (user ruling Q3, 2026-11-12): maxLocalPlayersPerClient
+    # rose 3 -> 4 and hardPlayerCeiling = 8 was added; AOGBrawlerUEGameMode::
+    # InitGame and UOGBrawlerGameViewportClient read them qualified, so neither
+    # file is in Allowed.
     # -----------------------------------------------------------------------
     @{
         Field   = 'maxPlayersPerServer'
@@ -265,9 +314,15 @@ $Blacklist = @(
     },
     @{
         Field   = 'maxLocalPlayersPerClient'
-        Pattern = '(?<![\w.>])maxLocalPlayersPerClient\s*=\s*3\b'
+        Pattern = '(?<![\w.>])maxLocalPlayersPerClient\s*=\s*4\b'
         Allowed = @('SessionConstants.h')
-        Message = 'maxLocalPlayersPerClient (3 LPs/client) must live only in SessionConstants.h; read og::brawler::session::maxLocalPlayersPerClient instead of re-declaring it (R-P1 / Phase 2a)'
+        Message = 'maxLocalPlayersPerClient (4 LPs/client, user ruling Q3) must live only in SessionConstants.h; read og::brawler::session::maxLocalPlayersPerClient instead of re-declaring it (R-P1 / Phase 2a)'
+    },
+    @{
+        Field   = 'hardPlayerCeiling'
+        Pattern = '(?<![\w.>])hardPlayerCeiling\s*=\s*8\b'
+        Allowed = @('SessionConstants.h')
+        Message = 'hardPlayerCeiling (8 players per server, user ruling Q3) must live only in SessionConstants.h; read og::brawler::session::hardPlayerCeiling instead of re-declaring it (R-P1 / og-input-latency P7-5)'
     },
     @{
         # Generic catch for hardcoded player-count caps that DON'T use the

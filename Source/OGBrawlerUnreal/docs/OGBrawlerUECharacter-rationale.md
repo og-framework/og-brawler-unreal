@@ -317,7 +317,51 @@ Guard G-13.
 > RebuildHumanoidMesh() re-applies the BASE material to every section, so the
 > MID must be re-applied after any rebuild, not just once at possession.
 
-## 5. Brawler colour — a distinct tint per brawler, server-assigned, replicated
+Since og-input-latency P7-4 the tint is first applied when the sim id is known, not at possession
+(§5). The point about rebuilds is unchanged.
+
+## 5. Brawler colour — derived from the sim id on every peer (og-input-latency P7-4)
+
+A brawler's tint is `kBrawlerPalette[paletteIndexFor(id)]` for its `SimCharacterId`, where
+`paletteIndexFor` returns `(toStorageKey(id) - 1) % kBrawlerPaletteCount`. `GetBrawlerColor()`
+computes it on every peer from the replicated `SimCharacterIdValue`. Nothing about the colour
+replicates: the engine lane carries only the 1 B id it already carried. The `FLinearColor`
+property this replaced was four floats, 16 B per pawn. While the id is `SimCharacterId::None` the tint is
+`FLinearColor::White`: on the authority before registration assigns the id, on a client before it
+replicates in. A `checkf` at the call keeps `None` out of `paletteIndexFor`, where `0 - 1` would wrap
+to entry 5, a real colour.
+
+`ApplyBrawlerColor()` reads `GetBrawlerColor()`, and runs in three places:
+* at the end of `RebuildHumanoidMesh` (G-07), which `PostInitializeComponents` calls. No id exists yet,
+  so this applies white on every peer;
+* on the authority, at the end of `SetAuthoritativeSimCharacterId` (G-22), because the engine runs no
+  RepNotify for the authority's own write;
+* on a client, in `OnRep_SimCharacterIdValue`, when the id replicates in. The id keeps its plain
+  `DOREPLIFETIME` (G-10), so every client learns every brawler's id, and from it the colour.
+
+What the derivation gives, each checked against the tree:
+* **The same colour on every peer.** Every peer computes from the same byte. The authority assigns
+  it once, and it never changes: `SetAuthoritativeSimCharacterId`'s assign-once `checkf`, and
+  `SimCharacterId-guards.md` G-01.
+* **One colour per brawler, so split-screen siblings differ.** Each local player's pawn registers on
+  its own and gets its own id.
+* **A re-joining player gets the next colour.** `SimCharacterIdAllocator::allocate` counts up from 1
+  and never reuses an id, so a re-join's new pawn gets the next id and the next palette entry.
+* **Per session, not per process.** The allocator is a member of the authority manager's
+  `BrawlerRosterUImpl`, one per world, so each session's first brawler (id 1) gets entry 0. The
+  counter it replaced was a file-scope variable, shared by every PIE world in one editor process and
+  never reset.
+* **The wrap.** The palette has 10 entries: ids 1 to 10 get distinct tints, and id 11 gets id 1's.
+  The `static_assert`s pin ids 1 → 0, 10 → 9 and 11 → 0. The bound below ("the first
+  `kBrawlerPaletteCount` possessions of a run get distinct tints") now reads "the first 10 ids of a
+  session".
+* **When the tint appears.** On the authority it appears at registration, not at possession. The
+  id is assigned at least two frames after the component's `BeginPlay` (§6.2), so a new brawler is
+  white for those frames. Before P7-4 the authority tinted in `PossessedBy`.
+
+**History: the possession counter, until P7-4.** The comments below are the shipped bytes from
+before P7-4. They describe a server-assigned, replicated colour taken from a possession counter.
+Where a quote no longer holds, a correction follows it.
 
 > BRAWLER COLOUR — a distinct tint per brawler, server-assigned, replicated.
 >
@@ -332,7 +376,8 @@ Guard G-13.
 > than their old one.
 
 Verified: `AOGBrawlerPlayerController::JoinLocalPlayer` calls
-`UGameplayStatics::CreatePlayer(world, /*ControllerId=*/-1, …)`.
+`UGameplayStatics::CreatePlayer(world, /*ControllerId=*/-1, …)`. Since P7-4 the key is the sim id,
+which is also per brawler, and a re-join still gets the next colour (above).
 
 > Hand-picked so neighbours stay distinguishable for a colour-blind reader and
 > against the level's grey; 10 entries for a 6-brawler target, so the wrap below
@@ -372,7 +417,9 @@ the block below says "≤ 4-player session"); recorded as stale (§13).
 
 Verified: `kScoreboardMaxRows = 8u`, `kPreDietCharacterCap = 4`, `kMaxSpawnPoints = 8u` (4u until og-brawler-uploadtosteam T18, 2026-09-29), and
 `BrawlerScoreboardVisualization-rationale.md` §8 is the `kScoreboardMaxRows` section. The
-`static_assert` enforces the bound, so it has no guard.
+`static_assert` enforces the bound, so it has no guard. Since P7-4 the index is the sim id, not a
+possession counter. The honest bound is unchanged in shape: a session with more than ten
+registrations (joins and re-joins) can give a newcomer the tint of a brawler who is still playing.
 
 > ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
 > diverge from the authority's and hand two brawlers the same tint.
@@ -382,16 +429,19 @@ Verified: `kScoreboardMaxRows = 8u`, `kPreDietCharacterCap = 4`, `kMaxSpawnPoint
 
 > The listen-server's own pawn gets no OnRep, so apply here too.
 
-`gNextBrawlerColorIndex` has one reader and one writer, both inside `PossessedBy`'s
-`HasAuthority()` branch; that branch is guard G-14 and the host's self-apply is guard G-15. The
-counter is a file-scope variable, so it is per process and never reset: it keeps counting
-across PIE sessions in one editor process, which only moves which colour comes first.
+Until P7-4, `gNextBrawlerColorIndex` had one reader and one writer, both inside `PossessedBy`'s
+`HasAuthority()` branch. That branch was guard G-14, and the host's self-apply was guard G-15. Both
+are retired: the counter and the branch are deleted, and G-15's reason moved to G-22. The counter
+was a file-scope variable, so it was per process and never reset: it kept counting across PIE
+sessions in one editor process, which only moved which colour came first.
 
 ## 6. Replicated state on this class
 
-Four properties replicate: `BrawlerColor`, `RingoutScore`, since task 25
-`SimCharacterIdValue`, and since og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1).
-All four use a plain `DOREPLIFETIME` (guards G-08, G-09, G-10, G-20).
+Three properties replicate: `RingoutScore`, since task 25 `SimCharacterIdValue`, and since
+og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1). All three use a plain
+`DOREPLIFETIME` (guards G-09, G-10, G-20). Since og-input-latency P7-4, `SimCharacterIdValue` has a
+RepNotify, `OnRep_SimCharacterIdValue`, which applies the tint (§5). `BrawlerColor` was a fourth
+until P7-4 deleted it, together with its guard G-08.
 
 One of the character's components replicates as well: `USimulatableNetSyncComponent`, the
 `SimulatableNetSync` subobject, which carries the correction state and the input RPC (§15). Before
@@ -406,8 +456,8 @@ og-ue-simulationcomponentandmanagersplit task 20a that was `UOGBrawlerSimulatabl
 cosmetic: `SimCharacterIdValue` is the simulation character id. It never enters a composite or
 the correction wire (it rides pawn replication only, so it costs the correction wire 0 B), but
 it is the value every peer registers the character under, so a wrong or missing value
-changes which storage entry the peer simulates. The "safe because cosmetic" argument applies to
-`BrawlerColor` and `RingoutScore` only. `PhysicsSlotValue` (task 66, §9.1) is not cosmetic either: it
+changes which storage entry the peer simulates. The "safe because cosmetic" argument applied to
+`BrawlerColor` and `RingoutScore` only, and since P7-4 to `RingoutScore` alone. `PhysicsSlotValue` (task 66, §9.1) is not cosmetic either: it
 picks the Jolt bodies a character is simulated with, and it too stays off the correction wire.
 
 ### 6.1 `RingoutScore` never reaches the simulation core
@@ -439,7 +489,8 @@ picks the Jolt bodies a character is simulated with, and it too stays off the co
 >   Both commands, with their output, are in `impl_notes_ringout_5.md` §3.
 
 Re-run 2026-09-26 over the `.h`/`.cpp` files of both core trees: part 1 (identifier form) has 0
-hits, and part 2 has 0 non-comment hits. `impl_notes_ringout_5.md` is in the private
+hits, and part 2 has 0 non-comment hits. "The claim `BrawlerColor` above makes" refers to a
+property P7-4 deleted (§6); the claim stands for the score. `impl_notes_ringout_5.md` is in the private
 `brawler-ringout-gamemode` workspace, not in this repository.
 
 > ⚠ SIGNEDNESS: `brawlerRingout::ScoreSystem` holds the score as `uint32_t`. This is
@@ -453,6 +504,9 @@ correction `BrawlerRingoutScoreSystem-rationale.md` §9 pairs with.
 ### 6.2 Replication conditions, and couch co-op
 
 > ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
+
+That was `BrawlerColor`'s registration (guard G-08). P7-4 retired it with the property. The colour
+now reaches every client through `SimCharacterIdValue`'s plain registration, G-10.
 
 > ⛔⛔ [ringout task 5] NOT COND_OwnerOnly EITHER, AND HERE IT IS LOAD-BEARING RATHER
 > THAN MERELY CORRECT. A scoreboard shows EVERYONE's score to EVERYONE: a viewer needs
@@ -539,6 +593,13 @@ which can be after the first bunch.
 argument was at `RingoutScore`'s registration, and §6.2 corrects it. `ScoreboardInk` is three
 floats (`r`, `g`, `b`): verified.
 
+**Correction (og-input-latency P7-4).** "`BrawlerColor` is assigned server-side in `PossessedBy`" and
+the plain `DOREPLIFETIME` no longer hold. `GetBrawlerColor()` derives the tint from the sim id (§5),
+and the colour reaches a client's scoreboard through `SimCharacterIdValue`'s plain registration
+(G-10). The rest stands: the colour is on every peer, it is cosmetic, and the swatch drops the alpha.
+The function is no longer a `FORCEINLINE` member in the header; it is defined in the `.cpp`, beside
+the palette. Its one caller, the scoreboard's gather, needed no edit.
+
 `SetAuthoritativeRingoutScore()`:
 
 > ⛔ AUTHORITY ONLY, AND IT IS A NO-OP WHEN THE VALUE IS UNCHANGED.
@@ -588,7 +649,8 @@ load-bearing for bandwidth, so it carries no guard.
 > only duplicate the diagnostic line on the host and make the log lie about which side
 > received what.
 
-Guard G-12 (an absence tag at the end of the function).
+Guard G-12 (an absence tag at the end of the function). Since P7-4 the tint's self-call is the
+last statement of `SetAuthoritativeSimCharacterId` (G-22), not in `PossessedBy`.
 
 ## 8. `OnRep_RingoutScore` — the client-side arrival line
 
@@ -843,6 +905,11 @@ facing stays `humanoidDefaultForward` and the rotation is the identity. `humanoi
   > explicit pair instead of an implicit "off to EOF".
 * "To add mapping context" sat above `BeginPlay`'s declaration, and "APawn interface" above
   `SetupPlayerInputComponent`'s.
+* **The replicated colour and the possession counter, removed** (og-input-latency P7-4,
+  2026-11-12). Deleted: the `BrawlerColor` property, `OnRep_BrawlerColor`, its `DOREPLIFETIME`, the
+  file-scope `gNextBrawlerColorIndex`, and `PossessedBy`'s `HasAuthority()` branch, which wrote the
+  colour and applied it. Guards G-08, G-14 and G-15 are retired; G-15's reason moved to G-22. The
+  colour is derived from the sim id (§5).
 
 ## 13. Corrections found before the move (R0), task-25 conversion, 2026-09-26
 

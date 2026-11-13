@@ -48,7 +48,7 @@ void BrawlerSessionGameUImpl::emplaceSystems(std::optional<BrawlerCompositionUIm
 {
 	systemsExec.emplace(std::piecewise_construct,
 		BrawlerHitDetectionSystem(bodyAdapter, queryAdapter),
-		brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{});
+		brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{}, brawlerRingout::RespawnSlotSystem{});
 }
 
 void BrawlerSessionGameUImpl::installGameLoggers(bool isAuthority)

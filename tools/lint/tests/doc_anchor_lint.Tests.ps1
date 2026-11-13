@@ -588,12 +588,12 @@ retired: `Engine.SomeRetiredCase`
                 $r = Invoke-Lint -Root $root
                 $r.Code | Should -Be 0
                 $r.Out  | Should -Match 'docs linted\s+: 2'
-                # SIX tiers are configured since the og-brawler plugin tier, the
-                # og-simulation-unreal tier, the og-simulation-jolt tier and then
-                # the og-simulation-jolt-unreal tier joined -DefaultDocDirs; this
-                # fixture builds two, so the other four report ABSENT and still
-                # count as reported tiers.
-                $r.Out  | Should -Match 'default doc tiers\s+: 6'
+                # EIGHT tiers are configured since the og-brawler plugin tier, the
+                # og-simulation-unreal tier, the og-simulation-jolt tier, the
+                # og-simulation-jolt-unreal tier, the og-net tier and then the
+                # og-net-unreal tier joined -DefaultDocDirs; this fixture builds two,
+                # so the other six report ABSENT and still count as reported tiers.
+                $r.Out  | Should -Match 'default doc tiers\s+: 8'
             } finally { Remove-Item -LiteralPath $root -Recurse -Force }
         }
 

@@ -16,6 +16,8 @@ class UOGBrawlerGameViewportClient : public UGameViewportClient
 	GENERATED_BODY()
 
 public:
+	virtual void PostInitProperties() override;
+
 	virtual bool InputKey(const FInputKeyEventArgs& eventArgs) override;
 
 	virtual bool InputChar(FViewport* viewport, int32 controllerId, TCHAR character) override;

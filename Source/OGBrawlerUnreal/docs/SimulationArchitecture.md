@@ -116,8 +116,8 @@ complete actor and `LogOGBrawler`), so the `.cpp` includes `OGBrawlerSimulationM
    registers the connection and input listeners and starts the reception coordinator; the client starts the tier
    consumer, registers the same two listeners and replays the relay values that arrived before it. Both then call
    `Game::installGameLoggers`.
-4. The resim trigger policy, then `m_game.afterSessionConfigured` (the roster checks it was seeded), then the backend log
-   line with `Game::backendFingerprint`, then the backend starts stepping.
+4. The resim trigger policy, then the latency knobs (`applyLatencyKnobs`), then `m_game.afterSessionConfigured` (the
+   roster checks it was seeded), then the backend log line with `Game::backendFingerprint`, then the backend starts stepping.
 
 **Registration.** Every character on every peer registers, on the instance its own world selects:
 

@@ -7,6 +7,8 @@
 <!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root -->
 <!-- lint-external-ref: USimmableUpdateComponent::tryRegisterWithNewFramework -- RETIRED by og-ue-simulationcomponentandmanagersplit task 29: the registration loop is UESimulatableOwnerBinding's skeleton since then; §2 and §3 quote the shipped comments verbatim. It must NOT resolve -->
 <!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (§2): the record field deleted with the two-source tripwire. It must NOT resolve -->
+<!-- lint-external-ref: PlayerStart5 -- ThirdPersonMap actor label (level content, an external-actor package), not code (§1a) -->
+<!-- lint-external-ref: PlayerStart6 -- ThirdPersonMap actor label (level content, an external-actor package), not code (§1a) -->
 # `BrawlerRosterUImpl` — rationale
 
 `BrawlerRosterUImpl.h` and `.cpp` (BUSL-1.1, `Source/OGBrawlerUnreal/`). The guards are in `BrawlerRosterUImpl-guards.md`;
@@ -212,6 +214,24 @@ At the call site in `BeginPlay`:
   call sits above both role branches, `LevelSpawnPoint::name` is a `std::string`, and zero placements leave the
   authored table whole.
 
+### 1a. Starts at or below the kill plane are rejected (og-input-latency task 2d, 2026-11-11)
+
+- `seedSpawnPointsFromLevel` calls `brawlerRingout::seedFromLevelPlacements` with the table's own `killPlaneHeight`. It
+  drops every start whose height is at or below the kill plane plus `brawlerRingout::kSpawnPointKillPlaneMargin` (1 m),
+  then merges the rest exactly as `spawnPointsFromLevelPlacements` did. The rejection is engine-free like the merge, and
+  `Ringout.SpawnPoints.AStartAtOrBelowTheKillPlanePlusTheMarginIsRejected` asserts it. The margin's reasoning is in
+  `BrawlerRingoutSimulation-rationale.md` §5e.
+- Each rejected actor gets one `LogOGMgmt` Warning, `[Ringout.spawnPoints] REJECTED <name> at (x, y, z), height <h> m`,
+  with the kill plane, the margin and the height to move it above. The rejected list is in the merge's key order, so
+  every peer prints the same lines in the same order. They come before the summary line.
+- The summary line gained `<n> rejected`. Its `slot(s) filled` and the per-slot `[level]` / `[authored]` labels now count
+  the accepted starts (`LevelSpawnSeed::levelSlotCount`), not every start found.
+- The engine's own spawn skips the same starts: `AOGBrawlerUEGameMode::ChoosePlayerStart_Implementation` asks
+  `brawlerPlayerStartUImpl::choosePlayerStart` first (`BrawlerPlayerStartUImpl-rationale.md`). Without it a pawn could
+  still be spawned on a rejected start and ring out at once.
+- Why the level still carries such starts: ThirdPersonMap's `PlayerStart5` and `PlayerStart6`, added in `1d89c37`, stand
+  at -55.66 m and -141.03 m (og-input-latency task 2c). Moving them is level content, the user's to do in the editor.
+
 ---
 
 ## 2. The per-character init after the bodies
@@ -301,6 +321,12 @@ is 16 B. `drivesBody` defaults to `true`. The teleport arm calls `setBodyTransfo
 `unregisterFromNewFramework`, after which no further `tryRegister` call for that id occurs
 (ids are authority-assigned `SimCharacterId`s and never reused, §15). A re-seed per call would therefore just return the same
 slot. The contract of seeding once is still right; the failure described cannot happen.
+
+⚠ **og-input-latency task 2d (2026-11-11): "written ONCE per character" is no longer true of the value.** This seed is still
+written once, at registration. After it, the authority's `brawlerRingout::RespawnSlotSystem` may rewrite `spawnSlot` on a
+death tick or a respawn tick, when another character occupies the slot's point (`BrawlerRingoutSimulation-rationale.md`
+§11d). It never rewrites an out-of-range value: `chooseRespawnSlot` returns `kNoFreeSlot` unchanged, so the over-capacity
+answer `⛔G-03` protects is still written through. Nothing consumes or clears the value, as before.
 
 > ⛔⛔ AUTHORITY ONLY, AND THIS IS NOT HasAuthority(). `bReplicates = false` makes
 > `GetLocalRole()` report authority on this actor in every role, which is why this file uses
@@ -397,7 +423,7 @@ is the binding's member now; the coupling is unchanged.
 > both driven from `tryRegister` / `unregisterFromNewFramework`, both GAME THREAD. The award
 > itself reaches an EXISTING entry, so it writes one naturally-aligned four-byte word and
 > cannot rehash. Worst case: a scoreboard number one tick stale, on a display that decides
-> nothing — which is the same bound `BrawlerColor` and this property both rest on.
+> nothing — which is the same bound `BrawlerColor` [since og-input-latency P7-4: `GetBrawlerColor()`, derived from the sim id] and this property both rest on.
 >
 > ⭐ THAT ARGUMENT HAS A PRECONDITION, AND THE PRECONDITION IS MACHINE-CHECKED BELOW rather
 > than asserted in prose. `postIntegrate` awards through `operator[]`, which INSERTS — and
