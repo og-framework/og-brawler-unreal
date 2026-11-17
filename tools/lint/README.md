@@ -297,6 +297,7 @@ With no arguments it lints **every docs tier** against `Plugins`, `Source`,
 | `Plugins/OGSimulation/…/OGSimulationJoltUnreal/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule |
 | `Plugins/OGSimulation/…/og-net/OGNet/docs` | MPL-2.0 | the `og-net` submodule |
 | `Plugins/OGSimulation/…/OGNetUnreal/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule |
+| `Plugins/OGSimulation/…/og-sim-net/OGSimNet/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule (og-sim-net is a plain folder in it) |
 
 Decision **D9** (2026-08-23) ruled the second tier in: `OGBrawlerUnreal`
 documentation cannot live in the MPL-2.0 tier, because that tier ships with a

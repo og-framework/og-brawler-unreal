@@ -634,7 +634,7 @@ They are not routed and have no row; the rule that gives each probe family its o
 **Which rows are og-simulation's** was decided by the emitters: every string literal in a non-comment line
 under `Plugins/` and `Source/`, with a leading `[Verbose]` or `[Warning]` token removed as `RouteOGMessage`
 removes it, assigned to the row that routed it.
-- og-simulation only (25 rows, now in `kSimulationLogRoutes`; 26 since og-input-latency task 5b added `[InputArrival.Window]`; 27 since P3-1 added `[InputArrival.BackDate]`): every row not listed below. Their emitting
+- og-simulation only (25 rows, now in `kSimulationLogRoutes`; 26 since og-input-latency task 5b added `[InputArrival.Window]`; 27 since P3-1 added `[InputArrival.BackDate]`; 28 since P2-5 added `[RelayFlush]`): every row not listed below. Their emitting
   files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
 - Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp`, this
   module's `.cpp`, and since task 26b the session header's PROBE A client line, instantiated only in this module),

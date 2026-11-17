@@ -132,7 +132,8 @@ param(
         'Plugins/OGSimulation/Source/OGSimulationJolt/og-simulation-jolt/OGSimulationJolt/docs',
         'Plugins/OGSimulation/Source/OGSimulationJoltUnreal/docs',
         'Plugins/OGSimulation/Source/OGNet/og-net/OGNet/docs',
-        'Plugins/OGSimulation/Source/OGNetUnreal/docs'
+        'Plugins/OGSimulation/Source/OGNetUnreal/docs',
+        'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/docs'
     ),
     [string[]]$SourceExtensions = @('.h', '.cpp', '.hpp', '.inl'),
     [ValidateSet('None', 'UnresolvedTag', 'Orphan', 'Duplicate', 'RetiredReuse',
