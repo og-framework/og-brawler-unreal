@@ -19,6 +19,8 @@ public class OGSimulationTests : TestModuleRules
 	public OGSimulationTests(ReadOnlyTargetRules Target) : base(Target, true)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		FPSemantics = FPSemanticsMode.Precise;
+		PrivatePCHHeaderFile = EngineDirectory + "/Source/Runtime/Core/Public/CoreSharedPCH.h";
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGSimulationJolt", "OGNet", "OGSimulationNet" });
 		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "..", "..", "Plugins", "OGSimulation", "Source"));

@@ -508,10 +508,10 @@ void ChaosTickBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSt
 
 	m_owner.onFrameStepsDue_GameThread(firstUpcomingSimTick, NumSteps);
 
-	if (m_owner.m_receptionCoordinator.has_value())
+	if (m_owner.hasServerTierWiring())
 	{
 		m_owner.releaseDelayedInputsForStep(firstUpcomingSimTick, NumSteps);
-		m_owner.m_receptionCoordinator->reapConnections(firstUpcomingSimTick);
+		m_owner.afterAuthorityBatch(firstUpcomingSimTick);
 	}
 }
 

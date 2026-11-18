@@ -559,7 +559,7 @@ pwsh tools/lint/measure_bandwidth.ps1 -MaxClientRate 100000 -Topology 1x3 `
 
 | Parameter        | Required | Default              | Purpose |
 | ---------------- | -------- | -------------------- | ------- |
-| `-MaxClientRate` | yes      | —                    | Per-client server-side cap (B/s) written ephemerally to `[/Script/OnlineSubsystemUtils.IpNetDriver]` (the project's concrete net-driver class — see binding-section note). |
+| `-MaxClientRate` | yes      | —                    | Per-client server-side cap (B/s) written ephemerally into the section of the live net-driver class, the class the project's `GameNetDriver` definition names: `[/Script/OGNetUnreal.OGNetDriver]` since og-input-latency task P4-8 (see binding-section note). |
 | `-Topology`      | yes      | —                    | One of `1x3`, `3x1`, `2x3`, `6x1` (validated set). See matrix below. |
 | `-OutputPath`    | yes      | —                    | File the run capture is written to (parent dir must exist). |
 | `-NetworkProfile`| no       | `none`               | `none` = no link emulation (T19 behaviour). `cellular` = prepend UE net-emulation to the client `-ExecCmds` (see "Cellular profile" below). |
@@ -637,6 +637,11 @@ R-A2 = 30 ms jitter, R-A3 = 5 % packet loss).
 >    broadcast), so a 4th knob `PktIncomingLoss 5` degrades the **downlink** by 5 % too. Lag
 >    is kept one-way (RTT ≈ 150 ms per R-A1, not doubled); loss is applied to **both**
 >    directions at 5 % each (R-A3) — one bad cellular link modelled entirely client-side.
+>
+> Since og-input-latency task P4-8 the client's driver is og-net's `OGNetDriver`: it reads
+> the same engine settings (the persistent ones included) when it starts, maps them into
+> og-net's emulator and turns the engine's own emulation off, so the profile still shapes
+> the link, through og-net. T19/T20's numbers were measured on IpNetDriver.
 
 Because emulation runs **client-side**, the client CSV's `Replication/InPacketsLost` /
 `InLostPacketsFoundPerFrame` counters become meaningful (they read ~0 on the lossless LAN
@@ -660,16 +665,20 @@ and reverts it before returning:
    variable **and** the verbatim original bytes are written to
    `Config/DefaultEngine.ini.measure_bandwidth.bak`. The backup is itself
    hash-checked against the original before proceeding.
-2. The `[/Script/OnlineSubsystemUtils.IpNetDriver]` section is **appended** with the
-   cap (the project ships no such section — see
-   `research/spike_max_client_rate_ceiling.md` §4). If a section already exists the
-   script aborts rather than guess at merge semantics.
-   **⚠ Binding-section correction (T19):** the cap MUST go in the `IpNetDriver`
-   class section, NOT the `[/Script/Engine.GameNetDriver]` *DefName* section the
+2. The **live driver class's** section gets the cap: `Set-MeasureBandwidthCap` reads
+   the class from the project's `+NetDriverDefinitions=(DefName="GameNetDriver",…)`
+   line (BaseEngine.ini's IpNetDriver when the project defines none) and replaces that
+   section's `MaxClientRate` and `MaxInternetClientRate` lines in place, under a
+   one-line `EPHEMERAL EDIT` marker. Since og-input-latency task P4-8 that is
+   `[/Script/OGNetUnreal.OGNetDriver]`; the `IpNetDriver` section, which the project
+   keeps equal to it for the beacon definition and the switch back, is left alone. A
+   missing section, or a rate key that is not there exactly once, aborts the run
+   rather than guess at merge semantics.
+   **⚠ Binding-section correction (T19):** the cap MUST go in the driver's
+   *class* section, NOT the `[/Script/Engine.GameNetDriver]` *DefName* section the
    Backlog literal named — the latter is inert (there is no `UGameNetDriver` class),
    so a cap written there does not bind (proven: a 15000-cap run still pushed
-   ~40 KB/s). The concrete driver is `UIpNetDriver`, which reads `MaxClientRate`
-   from its own class section.
+   ~40 KB/s). A net driver reads `MaxClientRate` from its own class section.
 3. The run happens inside a `try`.
 4. A `finally` block (runs on success, PIE crash, Ctrl-C, or any throw) copies the
    `.bak` back over the INI and recomputes the SHA256:

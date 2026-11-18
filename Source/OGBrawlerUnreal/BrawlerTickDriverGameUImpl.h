@@ -47,11 +47,7 @@ public:
 		m_session.onFrameStepsDue_GameThread(firstUpcomingSimTick, numSteps);
 	}
 
-	void afterInlineBatch(int32_t firstUpcomingSimTick)
-	{
-		if (typename SessionT::ReceptionCoordinator* coordinator = m_session.getReceptionCoordinator())
-			coordinator->reapConnections(firstUpcomingSimTick);
-	}
+	void afterInlineBatch(int32_t firstUpcomingSimTick) { m_session.afterAuthorityBatch(firstUpcomingSimTick); }
 
 	void releaseInputsForAuthorityTick(SimTick authorityTick)
 	{
@@ -70,15 +66,15 @@ public:
 	template <typename SlotCallF, typename CharacterT = Character>
 	static decltype(auto) callWithSlotRequest(SessionT& session, AActor& owner, uint64_t key, SlotCallF&& slotCall)
 	{
-		CharacterT* const character = Cast<CharacterT>(&owner);
-		checkf(character != nullptr,
+		checkf(Cast<CharacterT>(&owner) != nullptr,
 			TEXT("callWithSlotRequest: '%s' is not an AOGBrawlerUECharacter. The slot the authority chooses reaches the ")
 			TEXT("clients on that class's replicated PhysicsSlotValue, so only that class can hold a Jolt slot. Was the ")
 			TEXT("class checkf of tryAcquireJoltSlot."),
 			*owner.GetName());
 		const FTCHARToUTF8 name(*owner.GetName());
-		return slotCall(key, name.Get(), session.owner().GetNetMode() != NM_Client, character->GetPhysicsSlot(),
-			[character](uint32_t slot) { character->SetAuthoritativePhysicsSlot(slot); });
+		return slotCall(key, name.Get(), session.owner().GetNetMode() != NM_Client,
+			session.physicsSlotFor(owner, key),
+			[&session, &owner, key](uint32_t slot) { session.recordAuthoritativeSlot(owner, key, slot); });
 	}
 
 private:

@@ -17,8 +17,11 @@
       1. BEFORE any edit, the original file's SHA256 is captured into a
          script-local variable AND the verbatim original bytes are written to
          Config/DefaultEngine.ini.measure_bandwidth.bak.
-      2. The `[/Script/OnlineSubsystemUtils.IpNetDriver]` section is written ephemerally with
-         the requested cap (appended — the project ships no such section).
+      2. The section of the LIVE driver class, the class the project's GameNetDriver
+         NetDriverDefinitions line names (`[/Script/OGNetUnreal.OGNetDriver]` since
+         og-input-latency task P4-8; BaseEngine.ini's IpNetDriver when the project defines
+         none), gets the requested cap in place of its MaxClientRate and
+         MaxInternetClientRate values (Set-MeasureBandwidthCap).
       3. The PIE session runs for -DurationSec seconds.
       4. In a `finally` block (so it runs on success, PIE crash, Ctrl-C, or any
          throw): the .bak is copied back over the INI, the restored file's SHA256
@@ -45,12 +48,13 @@
       "Bandwidth measurement" for the full rationale + the per-tier metric mapping.
 
 .PARAMETER MaxClientRate
-    The per-client server-side bandwidth cap (bytes/sec) to set ephemerally in
-    [/Script/OnlineSubsystemUtils.IpNetDriver].MaxClientRate (+ MaxInternetClientRate)
-    for this run. The project default-inherits 100000 from BaseEngine.ini (T18 §4).
-    NOTE: this is the IpNetDriver class section (the project's concrete net driver),
-    NOT the inert [/Script/Engine.GameNetDriver] DefName section the Backlog literal
-    named — see the binding-section correction comment in the ephemeral-edit block.
+    The per-client server-side bandwidth cap (bytes/sec) to set ephemerally as the live
+    driver class's MaxClientRate (+ MaxInternetClientRate) for this run. The project
+    ships 250000 in both driver sections (Config/DefaultEngine.ini).
+    NOTE: this is the driver CLASS section (`[/Script/OGNetUnreal.OGNetDriver]` while
+    og-net is the GameNetDriver), NOT the inert [/Script/Engine.GameNetDriver] DefName
+    section the Backlog literal named — see the binding-section correction comment in
+    the ephemeral-edit block.
 
 .PARAMETER Topology
     One of the four T18-locked scenarios: 1x3, 3x1, 2x3, 6x1 (clients x LPs).
@@ -109,6 +113,40 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ---------------------------------------------------------------------------
+# The ephemeral cap edit, as a pure text function (og-input-latency task P4-8).
+# The engine reads MaxClientRate per driver CLASS, so the cap must go into the
+# section of the class the GameNetDriver definition names: the project's own
+# `+NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="...")` line, or
+# BaseEngine.ini's IpNetDriver when the project defines none. Both of that
+# section's rate lines are replaced in place; a missing section, or a rate key
+# that is not there exactly once, throws (the caller's finally still restores).
+# Returns the edited text and the class whose section it edited.
+# ---------------------------------------------------------------------------
+function Set-MeasureBandwidthCap([string] $Content, [int] $Cap, [string] $Stamp) {
+    $def = [regex]::Match($Content, '(?m)^\+NetDriverDefinitions=\(DefName="GameNetDriver",\s*DriverClassName="(?<cls>[^"]+)"')
+    $driverClass = if ($def.Success) { $def.Groups['cls'].Value } else { '/Script/OnlineSubsystemUtils.IpNetDriver' }
+    $header = [regex]::Match($Content, '(?m)^\[' + [regex]::Escape($driverClass) + '\]\r?\n')
+    if (-not $header.Success) {
+        throw "DefaultEngine.ini has no [$driverClass] section (the GameNetDriver class); refusing to guess where the cap binds."
+    }
+    $bodyStart = $header.Index + $header.Length
+    $next = [regex]::Match($Content.Substring($bodyStart), '(?m)^\[')
+    $bodyEnd = if ($next.Success) { $bodyStart + $next.Index } else { $Content.Length }
+    $body = $Content.Substring($bodyStart, $bodyEnd - $bodyStart)
+    foreach ($key in 'MaxClientRate', 'MaxInternetClientRate') {
+        $n = [regex]::Matches($body, "(?m)^$key=[^\r\n]*").Count
+        if ($n -ne 1) { throw "[$driverClass] has $n '$key=' lines (expected 1); refusing to guess merge semantics." }
+        $body = [regex]::Replace($body, "(?m)^$key=[^\r\n]*", "$key=$Cap")
+    }
+    $eol = if ($header.Value.EndsWith("`r`n")) { "`r`n" } else { "`n" }
+    $marker = "; === measure_bandwidth.ps1 EPHEMERAL EDIT ($Stamp, cap=$Cap) — DO NOT COMMIT; reverted at end of script ===$eol"
+    [pscustomobject]@{
+        Content     = $Content.Substring(0, $bodyStart) + $marker + $body + $Content.Substring($bodyEnd)
+        DriverClass = $driverClass
+    }
+}
 
 # ---------------------------------------------------------------------------
 # Resolve + validate paths up front (exit 2 on any missing prerequisite — no
@@ -227,36 +265,31 @@ if (Test-Path -LiteralPath $csvDir) {
 $runError = $null
 try {
     # -----------------------------------------------------------------------
-    # Ephemeral edit: append a [/Script/OnlineSubsystemUtils.IpNetDriver] section
-    # carrying the cap.
+    # Ephemeral edit: the live driver class's section carries the cap
+    # (Set-MeasureBandwidthCap).
     #
     # ⚠ BINDING-SECTION CORRECTION (T19 full pass, 2026-06-24): the Backlog/
     # dispatch literal said edit [/Script/Engine.GameNetDriver], and the baseline
     # phase wrote that section — but it is INERT. There is no UGameNetDriver class;
     # "GameNetDriver" is only a NetDriverDefinitions *DefName*. The project's
-    # concrete driver is UIpNetDriver, whose MaxClientRate UPROPERTY(Config) is read
+    # concrete driver was UIpNetDriver, whose MaxClientRate UPROPERTY(Config) is read
     # from [/Script/OnlineSubsystemUtils.IpNetDriver] (T18 §4 documented this as the
     # effective-settings section). Empirical proof the old section did not bind: a
     # cap=15000 1x3 run still delivered ~40 KB/s downstream (8x over the supposed
-    # cap). Writing the IpNetDriver section makes the cap actually bind. The project
-    # ships NO such section (T18 §4), so we append; if one is ever found we ABORT
-    # rather than guess at merge semantics (the finally block still restores).
+    # cap). Writing the IpNetDriver section made the cap actually bind, while
+    # IpNetDriver was the GameNetDriver. Since og-input-latency task P4-8 the
+    # GameNetDriver is og-net's OGNetDriver, whose class section
+    # [/Script/OGNetUnreal.OGNetDriver] is the one that binds; the project ships
+    # both driver sections with equal values (OGNet.Unreal.Driver.ConfigMatchesIpNetDriver),
+    # so the edit replaces the live class's two rate lines in place and leaves the
+    # other section alone. NetEmulation.* (the cellular profile below) still applies
+    # on OGNetDriver: it maps the engine's packet-simulation settings, persistent
+    # ones included, into og-net's emulator when the client's driver starts.
     # -----------------------------------------------------------------------
-    if ($originalContent -match '(?m)^\s*\[/Script/OnlineSubsystemUtils\.IpNetDriver\]') {
-        throw "DefaultEngine.ini already has a [/Script/OnlineSubsystemUtils.IpNetDriver] section; refusing to guess merge semantics. Edit the script's edit logic deliberately before re-running."
-    }
-
-    $section = @"
-
-; === measure_bandwidth.ps1 EPHEMERAL EDIT — DO NOT COMMIT ===
-; Written $runStamp for a Phase 2a T19 cap-ramp run; reverted at end of script.
-[/Script/OnlineSubsystemUtils.IpNetDriver]
-MaxClientRate=$MaxClientRate
-MaxInternetClientRate=$MaxClientRate
-; === end ephemeral edit ===
-"@
-    [System.IO.File]::WriteAllText($iniPath, $originalContent + $section)
-    Write-Host ("[measure_bandwidth] ephemeral [/Script/OnlineSubsystemUtils.IpNetDriver] MaxClientRate={0} appended." -f $MaxClientRate)
+    $capEdit = Set-MeasureBandwidthCap -Content $originalContent -Cap $MaxClientRate -Stamp $runStamp
+    $driverClass = $capEdit.DriverClass
+    [System.IO.File]::WriteAllText($iniPath, $capEdit.Content)
+    Write-Host ("[measure_bandwidth] ephemeral [{0}] MaxClientRate=MaxInternetClientRate={1} written." -f $driverClass, $MaxClientRate)
 
     # -----------------------------------------------------------------------
     # Launch the dedicated server (headless: -nullrhi -nosound -unattended).
@@ -405,7 +438,7 @@ MaxInternetClientRate=$MaxClientRate
 # Phase 2a T19 bandwidth measurement capture
 # ===========================================================================
 # Generated      : $runStamp
-# MaxClientRate  : $MaxClientRate B/s  (ephemeral [/Script/OnlineSubsystemUtils.IpNetDriver])
+# MaxClientRate  : $MaxClientRate B/s  (ephemeral [$driverClass])
 # Topology       : $Topology  ($nClients client[s] x $nLps LP[s], $($topo.Tier) $($topo.Axis))
 # NetworkProfile : $NetworkProfile$(if ($netEmuPrefix) { "  (client NetEmulation.PktLag 150 / PktLagVariance 30 / PktLoss 5 / PktIncomingLoss 5 — C.2 tier-3 cellular, both-way 5% loss, ~150ms RTT)" })
 # DurationSec    : $DurationSec

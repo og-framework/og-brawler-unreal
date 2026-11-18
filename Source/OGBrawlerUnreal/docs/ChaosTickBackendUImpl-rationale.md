@@ -566,7 +566,9 @@ first parameter and `m_owner`. Every statement kept its order; the text changed 
   session; it is `m_owner.onFrameStepsDue_GameThread` since, under the session's friend line for its backend, and the
   actor's friend line for this class covered no call any more (task 27b deleted it). The reception coordinator test, its reap and `releaseDelayedInputsForStep` went through `owner()` too until
   og-ue-simulationcomponentandmanagersplit task 26a moved them into the session; they read `m_owner.m_receptionCoordinator`
-  and call `m_owner.releaseDelayedInputsForStep` since, under the session's friend line for its backend.
+  and call `m_owner.releaseDelayedInputsForStep` since, under the session's friend line for its backend. Since og-input-latency
+  task P5-5 the test is `m_owner.hasServerTierWiring()` and the reap `m_owner.afterAuthorityBatch(firstUpcomingSimTick)`, so
+  no file but the session's header names the coordinator (`UESimulationSession-rationale.md` §15).
 * **The four forwarders call the session** since task 24b: `getServerClock`, `getClientClock`, `runsPrediction` and
   `editStorage` return `m_owner.getServerClock()` and the like, the session's public composition reads, which task 24b
   moved there from the actor (`UESimulationSession-rationale.md` §8). Until then they called the actor's reads of the

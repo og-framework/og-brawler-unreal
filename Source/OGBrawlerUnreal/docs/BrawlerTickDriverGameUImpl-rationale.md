@@ -13,8 +13,9 @@ Prohibitions: `BrawlerTickDriverGameUImpl-guards.md`.
 The brawler's `TickDriverGame` for og-simulation's `SimulationTickDriver`: the seven game hooks the driver and its
 step hooks call, each forwarded to the session, plus the manager and the storage the driver's step driver runs on.
 The session is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationcomponentandmanagersplit task 24a (`AOGBrawlerSimulationManager`
-before); the hooks that still forward to the actor reach it through the session's `owner()` (§6). It owns nothing and adds no logic of its own; the one decision it makes is the
-reap's null check (§2).
+before); the hooks that still forward to the actor reach it through the session's `owner()` (§6). It owns nothing and adds
+no logic of its own. The one decision it made, the reap's null check, is the session's own since og-input-latency task P5-5
+(§2, §7).
 
 **Why a class template over the session.** `TickDriverBackendUImpl.h` names the driver type, and the session's header
 includes `TickDriverBackendUImpl.h` (and, since og-tickdriver task 15e, this header beside it) before the session class
@@ -46,7 +47,7 @@ friendship any more and lost its line.
 | `manager()`, `storage()` | the driver's constructor (the step driver runs on the manager) | `*m_session.m_manager`, `m_session.m_storage` |
 | `beforePump(hostNow, rate)` | once per frame, on the game thread, before the pump | nothing: the brawler changes no rate in the MVP |
 | `onFrameStepsDue(first, n)` | once per frame with steps, game thread, before the steps (`SimulationTickDriver-guards.md` G-02) | the session's `onFrameStepsDue_GameThread(first, n)` (the actor's, through `owner()`, until task 26b): PROBE A on both roles, and on the authority PROBE 6 and the one-shot `[PacketBudget]` line (`UESimulationSession-rationale.md` §9.9, OGSimulationUnreal) |
-| `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06) | the reception coordinator's `reapConnections(first)`, when the session has one (`getReceptionCoordinator()`; the actor's, through `owner()`, until task 26a): only the authority does, so an inline client reaps nothing |
+| `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06) | the session's `afterAuthorityBatch(first)` (since og-input-latency task P5-5, §7), which reaps (the coordinator's `reapConnections(first)`) when the session has a coordinator: only the authority does, so an inline client reaps nothing. Before P5-5 the binding made that test itself, through `getReceptionCoordinator()` (the actor's, through `owner()`, until task 26a) |
 | `releaseInputsForAuthorityTick(tick)` | each authority step's `beforeTick`, on the game thread (`TickDriverStepHooks-guards.md` G-01) | the session's `releaseDelayedInputsForStep(tick, 1)` (`⛔G-01`; the actor's, through `owner()`, until task 26a): one `[ReleaseBatch]` with `numSteps=1` per step |
 | `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `UELatencyBudgetDiagnostics-rationale.md` §3, OGSimulationUnreal) |
 | `onStepEnded()` | each step's `afterTick`, before the render and shadow publishes | `editLatencyBudgetDiagnostics().stampStepEnd_Internal()` |
@@ -63,7 +64,8 @@ friendship any more and lost its line.
   The details are `OGBrawlerSimulationManager-rationale.md` §7.
 * **The reap's null check.** Before og-tickdriver task 8 the frame host made the call only when
   `getReceptionCoordinator()` returned one; the driver now calls `afterInlineBatch` on every inline frame with
-  steps, an inline client's included, so the check moved here unchanged.
+  steps, an inline client's included, so the check moved here unchanged. og-input-latency task P5-5 moved it on into the
+  session's `afterAuthorityBatch` (§7).
 * **The latency stamps** (design D9, D18; og-simulationscheduler-withjolt task 49). The Chaos configuration took
   the step-start time immediately before `onGameSimulation` and stamped after it. og-simulation's
   `beforeSimulate` takes `t1` at that instant on both roles (`TickDriverStepHooks-guards.md` G-03); on a client it is
@@ -99,7 +101,7 @@ host used to name (lead ruling L1).
 | `Character` | `AOGBrawlerUECharacter` | the character parameter, and the cast in `onRegistered_GameThread` |
 | `StaticData` | `simulatableBrawler::StaticData` | the static data's type in `createBodies_GameThread` |
 | `gravity(session)` | the session's movement gravity, `m_staticData.m_movementStaticData.gravity` | the same read in `buildWorld` |
-| `callWithSlotRequest(session, owner, key, slotCall)` | the cast and `checkf` of the owner, its name in UTF-8, the role from the actor's net mode (`session.owner().GetNetMode()` since task 24a), the replicated slot and the slot publish, handed to `slotCall` with the host's key | the body of the host's `callWithSlotRequest`, the same statements and message in the same order |
+| `callWithSlotRequest(session, owner, key, slotCall)` | the cast and `checkf` of the owner, its name in UTF-8, the role from the actor's net mode (`session.owner().GetNetMode()` since task 24a), the replicated slot and the slot publish, handed to `slotCall` with the host's key; since og-input-latency task P5-5 the slot and the publish are the session's `physicsSlotFor` and `recordAuthoritativeSlot` (§7) | the body of the host's `callWithSlotRequest`, the same statements and message in the same order |
 
 * **The character type is a defaulted template parameter of `callWithSlotRequest`** (`CharacterT = Character`). The
   character is incomplete in this header, which the session's header includes, and a non-dependent cast or member call
@@ -132,3 +134,20 @@ it only through `SessionT`, so its text changed in five statements and the alias
 
 The calls are inline forwards. Task 24a read the disassembly of the Jolt Editor's per-step release and step stamps: the
 release and the step-start stamp are direct calls, and the step-end stamp is inlined, as before the task (its notes).
+
+---
+
+## §7 The session seams (og-input-latency task P5-5)
+
+og-input-latency task P5-5 moved two of the binding's statements into the session, so that the switch to og-net (its task
+P5-7) changes the session and not this binding (`UESimulationSession-rationale.md` §15, in OGSimulationUnreal's docs):
+
+* **`afterInlineBatch`** calls the session's `afterAuthorityBatch(first)`, which holds the coordinator test and the reap that
+  were here.
+* **`callWithSlotRequest`** keeps its `checkf` of the cast, with the same message, and hands `slotCall` the session's
+  `physicsSlotFor(owner, key)` and a setter that calls `recordAuthoritativeSlot(owner, key, slot)`. Both read and write the
+  character's `PhysicsSlotValue`, as the binding's `GetPhysicsSlot()` and `SetAuthoritativePhysicsSlot()` calls did; the
+  setter captures the session, the owner and the key where it captured the character. The `checkf` tests the cast's result
+  directly, since nothing else here uses the character. The defaulted `CharacterT` stays for that cast (§5).
+
+Both doors are the session's private members, reached through its friend line for this binding (§1).

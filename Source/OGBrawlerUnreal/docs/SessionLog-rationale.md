@@ -90,8 +90,11 @@ comment: the flag is the one edit that would make the counts silently wrong.
 The engine calls `UWorld::Listen` in `UEngine::LoadMap` **before** the world's `BeginPlay`, so the
 GameMode's `BeginPlay` is the first point where the net driver is listening, and the line is written
 there. The port is the net driver's local address port; if the driver has no address, the world URL's
-port is used. The engine also writes `IpNetDriver listening on port 7777`, but its wording is the
-engine's and can change with an engine upgrade. Task 17's `ReadyLinePattern` uses this line instead.
+port is used. The engine also writes the driver's own listen line, which names the driver class:
+`OGNetDriver listening on port 7777` with the project's default driver (og-net's), and
+`IpNetDriver listening on port 7777` after a switch back to IpNetDriver. Its wording is the engine's
+and changes with the driver and with an engine upgrade. Task 17's `ReadyLinePattern` uses the
+GameMode's line instead.
 
 ## 6. The patterns the host launcher uses (for task 17)
 

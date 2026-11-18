@@ -21,7 +21,7 @@ public class OGNetTests : TestModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGNet" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGNet", "OGSimulation", "OGSimulationNet" });
 
 		PublicSystemIncludePaths.Add(Path.Combine(
 			Target.UEThirdPartySourceDirectory, "Catch2", "v3.4.0", "extras"));
