@@ -59,9 +59,6 @@ class AOGBrawlerUECharacter : public APawn
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
 		
-	UPROPERTY(VisibleAnywhere)
-	USimulatableNetSyncComponent* SimulatableNetSync;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UOGBrawlerSimulatableComponent* BrawlerSimulatable;
 
@@ -88,9 +85,6 @@ class AOGBrawlerUECharacter : public APawn
 
 	UFUNCTION()
 	void OnRep_SimCharacterIdValue();
-
-	UPROPERTY(Replicated)
-	uint8 PhysicsSlotValue = 0;
 
 	UPROPERTY(Transient)
 	UMaterialInstanceDynamic* HumanoidColorMID = nullptr;
@@ -176,10 +170,6 @@ public:
 	SimCharacterId GetSimCharacterId() const;
 
 	void SetAuthoritativeSimCharacterId(SimCharacterId NewId);
-
-	std::optional<uint32> GetPhysicsSlot() const;
-
-	void SetAuthoritativePhysicsSlot(uint32 Slot);
 
 	void SetAuthoritativeRingoutScore(int32 NewScore);
 };

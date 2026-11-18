@@ -130,7 +130,7 @@ provider on the client branch, and a listen host's local players have no client 
 
 | hook | brawler statements | when, which thread |
 |---|---|---|
-| `static afterVisualization(session)` | on the authority (a manager that does not predict) with its systems executor built: `BrawlerRosterUImpl::pushRingoutScores` with the executor's `brawlerRingout::ScoreSystem` and the session's delayed-input map, the route table of the authority's characters | once per frame, from the session's `onPostPhysicsStep`, after the backend's visualization update and before the latency tick, on the game thread |
+| `static afterVisualization(session)` | on the authority (a manager that does not predict) with its systems executor built: `BrawlerRosterUImpl::pushRingoutScores` with the executor's `brawlerRingout::ScoreSystem` and the session's registered-component map (`getRegisteredComponentsById`, the authority's registered characters; its delayed-input map, the route table, until og-input-latency task P5-7) | once per frame, from the session's `onPostPhysicsStep`, after the backend's visualization update and before the latency tick, on the game thread |
 
 * **The statements are the actor's, in its order.** Until task 27a they sat in the actor's `OnPostPhysicsStep` at the
   same position: the gate (`m_manager.has_value() && m_systemsExec.has_value() && !m_manager->runsPrediction()`), then
@@ -138,9 +138,10 @@ provider on the client branch, and a listen host's local players have no client 
   (`UESimulationSession-rationale.md` §10, in OGSimulationUnreal's docs). The latency tick that followed it is the
   session's own statement.
 * **What it reads, and how.** The session passes itself, `const`. The hook reads the manager through `getManager()` and
-  the two const reads task 27a added to the session, `getSystemsExec()` and `getDelayedInputComponentsById()`: each
-  returns a const reference to the member the actor read (`m_session.m_manager`, `m_session.m_systemsExec`,
-  `m_session.m_delayedInputComponentsById`). The score system is reached through the executor's const `get`, the same
+  the two const reads task 27a added to the session, `getSystemsExec()` and the component map's read (since og-input-latency
+  task P5-7 `getRegisteredComponentsById()`, over the map the session's `tryRegister` writes; the delayed-input map's read
+  before): each returns a const reference to the session's member (the actor read the manager, the executor and the map
+  through `m_session` before task 27a). The score system is reached through the executor's const `get`, the same
   system the actor reached through the non-const one, and `pushRingoutScores` takes both by const reference, as before.
   The push is a static member of the roster (task 23), so the hook needs no roster.
 * **The crossing is unchanged.** The push reads the score table on the game thread while the step writes it on the physics

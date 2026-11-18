@@ -23,7 +23,8 @@ The one way it fails open is a game mode that stops calling the check, a deleted
 `[SimHost.Backend]`, so the logs show the mismatch.
 
 The wire token and its login check (rationale §8, og-sim-metres-yup task 15) need no entry beyond G-02. The
-token is built at compile time from the three codecs' version constants, so it cannot disagree with them.
+token is built at compile time from the three codecs' version constants, the sim envelope's and the og-sim-net
+roster's, so it cannot disagree with them.
 The token's format, the three verdicts and the refusal of `Missing` and `Different` (the user's ruling Q2) are
 `static_assert`s in `OGBuildIdentityUImpl.h`; the start line's `units=m axes=YupRH` is a literal in its format
 string. A client

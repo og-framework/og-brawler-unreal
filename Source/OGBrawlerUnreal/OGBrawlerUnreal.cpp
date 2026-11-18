@@ -4,6 +4,9 @@
 #include "OGBrawlerUnreal.h"
 #include "OGBrawlerUnreal/OGBuildIdentityUImpl.h"
 #include "Modules/ModuleManager.h"
+#include "OGNetUnreal/OGNetDriver.h"
+#include "OGNetUnreal/OGNetSimLanes.h"
+#include "Templates/UniquePtr.h"
 #include <OGBrawler/ConsoleCommandsNamedPipeServer.h>
 
 #if PLATFORM_WINDOWS
@@ -13,12 +16,15 @@
 #include "OGSimulation/CompilerControl.h"
 OGSIM_OPTIMIZE_OFF
 
+TUniquePtr<IOGNetSimLanes> makeBrawlerSimNetLanes(UOGNetDriver& driver, bool bIsServer);
+
 class FOGBrawlerUEModule : public FDefaultGameModuleImpl
 {
 public:
     virtual void StartupModule() override
     {
         buildIdentityUImpl::registerNetworkVersionHook();
+        UOGNetDriver::SetSimLanesFactory(&makeBrawlerSimNetLanes);
 
 #if PLATFORM_WINDOWS
         std::thread(DAttackPipeServer::NamedPipeServer).detach();

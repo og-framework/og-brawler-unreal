@@ -8,6 +8,7 @@
 #include "Templates/Casts.h"
 
 #include "OGSimulation/TickDriverConcepts.h"
+#include "OGBrawler/SimCharacterId.h"
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 
 #include <cstdint>
@@ -66,14 +67,16 @@ public:
 	template <typename SlotCallF, typename CharacterT = Character>
 	static decltype(auto) callWithSlotRequest(SessionT& session, AActor& owner, uint64_t key, SlotCallF&& slotCall)
 	{
-		checkf(Cast<CharacterT>(&owner) != nullptr,
-			TEXT("callWithSlotRequest: '%s' is not an AOGBrawlerUECharacter. The slot the authority chooses reaches the ")
-			TEXT("clients on that class's replicated PhysicsSlotValue, so only that class can hold a Jolt slot. Was the ")
-			TEXT("class checkf of tryAcquireJoltSlot."),
+		const CharacterT* const character = Cast<CharacterT>(&owner);
+		checkf(character != nullptr,
+			TEXT("callWithSlotRequest: '%s' is not an AOGBrawlerUECharacter. Only that class's pawns register: the session's ")
+			TEXT("first registration pass builds the bodies from its root capsule, and the slot the authority chooses reaches ")
+			TEXT("the clients on that character's og-sim-net roster entry. Was the class checkf of tryAcquireJoltSlot (the ")
+			TEXT("slot rode a replicated property of that class until og-input-latency task P5-7)."),
 			*owner.GetName());
 		const FTCHARToUTF8 name(*owner.GetName());
 		return slotCall(key, name.Get(), session.owner().GetNetMode() != NM_Client,
-			session.physicsSlotFor(owner, key),
+			session.physicsSlotFor(owner, key, toStorageKey(character != nullptr ? character->GetSimCharacterId() : SimCharacterId::None)),
 			[&session, &owner, key](uint32_t slot) { session.recordAuthoritativeSlot(owner, key, slot); });
 	}
 

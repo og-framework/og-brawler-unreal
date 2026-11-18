@@ -28,11 +28,8 @@
 #include "InputActionValue.h"
 
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
-#include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
-#include "OGSimulationUnreal/SimulatableNetSyncComponent.h"
 #include "OGSimulationUnreal/UESimulatableOwnerBinding.h"
 #include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
-#include "OGSimulationUnreal/RelayedInputRing.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"
 #include "OGBrawler/InputMapping/GameInputMapping.h"
 #include "OGSimulation/SimulationQueues.h"
@@ -44,7 +41,6 @@ class UInputAction;
 class UEnhancedInputComponent;
 class UOGBrawlerSimulatableComponent;
 class UOGBrawlerInputCollectionComponent;
-class ASimulationInputRelay;
 class AOGBrawlerSimulationManager;
 
 extern template class UESimulatableOwnerBinding<UOGBrawlerSimulatableComponent, BrawlerSessionTraitsUImpl>;

@@ -14,7 +14,6 @@
 #include "OGBrawler/BrawlerVisualizationInputSource.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
-#include "OGSimulationUnreal/SimulationInputRelay.h"
 
 #include "Logging/LogMacros.h"
 
@@ -37,9 +36,6 @@
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 #include "OGSimulation/SimulationFrame.h"
-#include "OGSimulationUnreal/InputRedundancyBundleBuilder.h"
-#include "OGSimulationUnreal/UEConnectionHandle.h"
-#include "OGSimulationUnreal/SimulationConnectionRelay.h"
 
 #include "glm/ext/matrix_transform.hpp"
 #include "glm/mat4x4.hpp"
@@ -228,6 +224,20 @@ ueSimulatableOwnerRegistration::ResolvedKey UOGBrawlerSimulatableComponent::reso
 	if (simId == SimCharacterId::None)
 		return ueSimulatableOwnerRegistration::ResolvedKey::retry();
 
+	if (!isAuthority)
+	{
+		// ⛔G-39  docs/OGBrawlerSimulatableComponent-guards.md
+		switch (manager.session().clientBindStep(toStorageKey(simId), character->GetLocalRole() == ROLE_AutonomousProxy))
+		{
+		case ClientBindStep::Wait:
+			return ueSimulatableOwnerRegistration::ResolvedKey::retry();
+		case ClientBindStep::Abandon:
+			return ueSimulatableOwnerRegistration::ResolvedKey::abandon();
+		case ClientBindStep::Ready:
+			break;
+		}
+	}
+
 	return ueSimulatableOwnerRegistration::ResolvedKey::ready(toStorageKey(simId));
 }
 
@@ -253,12 +263,6 @@ void UOGBrawlerSimulatableComponent::EndPlay(const EEndPlayReason::Type EndPlayR
 	AOGBrawlerSimulationManager* manager = AOGBrawlerSimulationManager::instanceFor(isAuthority);
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework(simCharacterId(), *this, isAuthority);
-
-	// ⛔G-38  docs/OGBrawlerSimulatableComponent-guards.md
-	if (isNetSyncBound())
-		netSync().detachInputRelayHost(isAuthority);
-
-	unbindNetSync();
 
 	UActorComponent::EndPlay(EndPlayReason);
 }

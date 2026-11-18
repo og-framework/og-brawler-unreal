@@ -145,9 +145,17 @@ P5-7) changes the session and not this binding (`UESimulationSession-rationale.m
 * **`afterInlineBatch`** calls the session's `afterAuthorityBatch(first)`, which holds the coordinator test and the reap that
   were here.
 * **`callWithSlotRequest`** keeps its `checkf` of the cast, with the same message, and hands `slotCall` the session's
-  `physicsSlotFor(owner, key)` and a setter that calls `recordAuthoritativeSlot(owner, key, slot)`. Both read and write the
-  character's `PhysicsSlotValue`, as the binding's `GetPhysicsSlot()` and `SetAuthoritativePhysicsSlot()` calls did; the
+  `physicsSlotFor(owner, key)` and a setter that calls `recordAuthoritativeSlot(owner, key, slot)`. At P5-5 both read and
+  wrote the character's `PhysicsSlotValue`, as the binding's `GetPhysicsSlot()` and `SetAuthoritativePhysicsSlot()` calls did; the
   setter captures the session, the owner and the key where it captured the character. The `checkf` tests the cast's result
   directly, since nothing else here uses the character. The defaulted `CharacterT` stays for that cast (§5).
+
+**Since og-input-latency task P5-7** the doors no longer touch the character's slot property: on the authority they read and
+write the session's slot map, keyed by the pawn actor, and on a client `physicsSlotFor` reads the character's og-sim-net roster
+entry for the storage key this binding now passes as a third argument, `toStorageKey(character->GetSimCharacterId())` (0 while
+the id has not replicated, which the session answers with "no slot yet") (`UESimulationSession-rationale.md` §16.4). This
+binding is the one place that may read the brawler character's id for the session: the session is game-neutral. The `checkf` keeps its role and gets a true reason: only the brawler character's
+pawns register (the session builds the bodies from its root capsule), and the slot reaches the clients on that character's
+roster entry. Its message says so, and names the property the slot rode until P5-7.
 
 Both doors are the session's private members, reached through its friend line for this binding (§1).

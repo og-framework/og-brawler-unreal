@@ -212,7 +212,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	m_cameraAxis->SetVisibility(true);
 	m_cameraAxis->SetEnableGravity(false);
 
-	SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"));
 	BrawlerSimulatable = CreateDefaultSubobject<UOGBrawlerSimulatableComponent>(TEXT("BrawlerSimulatable"));
 	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
@@ -250,8 +249,6 @@ void AOGBrawlerUECharacter::PostInitializeComponents()
 	Super::PostInitializeComponents();
 	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
 	RebuildHumanoidMesh();
-	// ⛔G-21  docs/OGBrawlerUECharacter-guards.md
-	BrawlerSimulatable->bindNetSync(*SimulatableNetSync);
 }
 
 void AOGBrawlerUECharacter::RebuildHumanoidMesh()
@@ -362,9 +359,6 @@ void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	// ⛔G-10  docs/OGBrawlerUECharacter-guards.md
 	DOREPLIFETIME(AOGBrawlerUECharacter, SimCharacterIdValue);
-
-	// ⛔G-20  docs/OGBrawlerUECharacter-guards.md
-	DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);
 }
 
 void AOGBrawlerUECharacter::OnRep_SimCharacterIdValue()
@@ -403,32 +397,6 @@ void AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId(SimCharacterId NewId)
 	SimCharacterIdValue = static_cast<uint8>(NewId);
 	// ⛔G-22  docs/OGBrawlerUECharacter-guards.md
 	ApplyBrawlerColor();
-}
-
-std::optional<uint32> AOGBrawlerUECharacter::GetPhysicsSlot() const
-{
-	if (PhysicsSlotValue == 0u)
-		return std::nullopt;
-	return static_cast<uint32>(PhysicsSlotValue) - 1u;
-}
-
-void AOGBrawlerUECharacter::SetAuthoritativePhysicsSlot(uint32 Slot)
-{
-	static_assert(kMaxSimulatableSlots < 255u,
-		"PhysicsSlotValue carries slot + 1 in one byte, with 0 meaning 'no slot yet'; a slot count of 255 or more "
-		"does not fit.");
-	checkf(HasAuthority(),
-		TEXT("SetAuthoritativePhysicsSlot called on a non-authority peer. Only the authority chooses a Jolt slot ")
-		TEXT("(og-simulation-jolt's JoltTickWorldHost::acquire, through TickDriverBackendUImpl::callWithSlotRequest); a client ")
-		TEXT("binds the slot it receives through replication of PhysicsSlotValue."));
-	checkf(Slot < kMaxSimulatableSlots,
-		TEXT("SetAuthoritativePhysicsSlot: slot %u is not a slot of the Jolt world (kMaxSimulatableSlots = %u)."),
-		Slot, kMaxSimulatableSlots);
-	checkf(PhysicsSlotValue == 0u,
-		TEXT("SetAuthoritativePhysicsSlot: this character already holds slot %u and was handed slot %u. A ")
-		TEXT("character's physics slot is chosen once and never changes while it lives."),
-		static_cast<unsigned int>(PhysicsSlotValue) - 1u, Slot);
-	PhysicsSlotValue = static_cast<uint8>(Slot + 1u);
 }
 
 void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)

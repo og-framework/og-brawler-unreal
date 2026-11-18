@@ -1,4 +1,6 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: USimulatableNetSyncComponent -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: bindNetSync -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
 <!-- lint-external-ref: FBodyInstance::UpdatePhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: FBodyInstance::UpdateMassProperties -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: GetSimplePhysicalMaterial -- Unreal Engine body-instance method, outside every scan root -->
@@ -324,47 +326,6 @@ this statement.
 
 ---
 
-## G-20 — `PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`
-
-**Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);`.
-
-**Prohibition (og-simulationscheduler-withjolt task 66, new).** Keep the plain form, for the same two
-reasons as G-10.
-* `COND_OwnerOnly`: a client binds every character's Jolt bodies, remote proxies included, and binds each
-  one in the slot the authority chose for it, so it needs every character's slot, not just its own. Under
-  `COND_OwnerOnly` a proxy's slot never arrives, and the client's acquire waits
-  (`[SimHost.Slot] wait=WaitForReplication`) until the component's 600-attempt `checkf` fires.
-* `COND_InitialOnly`: the authority writes the slot in `UOGBrawlerSimulatableComponent::initializeWithManager` (a registration
-  hook the binding's `tryInitializeWithManager` calls, since og-ue-simulationcomponentandmanagersplit task 29)
-  (through `UESimulationSession::registerVizVolume`, the manager's until og-ue-simulationcomponentandmanagersplit task 24b), one or more frames after the component's
-  `BeginPlay`. That can be after the pawn's first bunch, so the initial-only send would carry 0 and the
-  slot would never be sent.
-
-**What breaks if the tag moves.** Nothing mechanical checks the condition, and the LLT targets cannot
-reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot. The
-Chaos configuration never reads the property, so there the failure is silent.
-
----
-
-## G-21 — the NetSync bind stays in `PostInitializeComponents`, never in a `BeginPlay`
-
-**Site:** `BrawlerSimulatable->bindNetSync(*SimulatableNetSync);`, the last statement of `PostInitializeComponents`.
-
-New guard (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21). It replaced no comment, so it has no `>`
-block.
-
-⛔ **DO NOT MOVE THE BIND INTO `BeginPlay`** — the character's or either component's — and do not defer it to a timer.
-On an Iris client a replicated character is spawned with `PostInitializeComponents` run and `BeginPlay` held back, and
-the initial state's notifications fire in between, so a character that arrives with a written correction buffer — every
-existing character, for a client that joins or rejoins a running session — gets its first `OnRep_CorrectionState`
-before any `BeginPlay`. Unbound, `USimulatableNetSyncComponent` stops on its `checkf` ("no binding attached").
-
-**Seen failing (task 20a).** With the bind moved into `UOGBrawlerSimulatableComponent::BeginPlay`, a harness session's first
-client hit that `checkf` at its first join; with the move applied to the rejoining process only, the rejoining client hit
-it on an existing character, 5 s after it started. Rationale §15.
-
----
-
 ## G-22 — `SetAuthoritativeSimCharacterId` applies the tint itself: the authority's pawn gets no OnRep
 
 **Site:** `ApplyBrawlerColor();`, the last statement of `SetAuthoritativeSimCharacterId`.
@@ -395,6 +356,59 @@ standalone shows it.
 ## §R — Retired ids
 
 ⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.
+
+### G-20 — RETIRED (og-input-latency P5-8, 2026-11-18): the property it guarded was deleted
+
+**Was:** *`PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`*.
+
+**Why it retired.** Task P5-8 deleted `PhysicsSlotValue`, its accessors and its registration. Since task P5-7 the slot
+the authority chose reaches every client on that character's og-sim-net roster entry, which og-sim-net's server sends to
+every attached connection, and in its snapshot to a connection that attaches later, so no condition on an engine property
+can starve a client of it (rationale §9.1).
+
+**The entry as it stood:**
+
+**Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);`.
+
+**Prohibition (og-simulationscheduler-withjolt task 66, new).** Keep the plain form, for the same two
+reasons as G-10.
+* `COND_OwnerOnly`: a client binds every character's Jolt bodies, remote proxies included, and binds each
+  one in the slot the authority chose for it, so it needs every character's slot, not just its own. Under
+  `COND_OwnerOnly` a proxy's slot never arrives, and the client's acquire waits
+  (`[SimHost.Slot] wait=WaitForReplication`) until the component's 600-attempt `checkf` fires.
+* `COND_InitialOnly`: the authority writes the slot in `UOGBrawlerSimulatableComponent::initializeWithManager` (a registration
+  hook the binding's `tryInitializeWithManager` calls, since og-ue-simulationcomponentandmanagersplit task 29)
+  (through `UESimulationSession::registerVizVolume`, the manager's until og-ue-simulationcomponentandmanagersplit task 24b), one or more frames after the component's
+  `BeginPlay`. That can be after the pawn's first bunch, so the initial-only send would carry 0 and the
+  slot would never be sent.
+
+**What breaks if the tag moves.** Nothing mechanical checks the condition, and the LLT targets cannot
+reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot. The
+Chaos configuration never reads the property, so there the failure is silent.
+
+### G-21 — RETIRED (og-input-latency P5-8, 2026-11-18): the statement it guarded was deleted
+
+**Was:** *the NetSync bind stays in `PostInitializeComponents`, never in a `BeginPlay`*.
+
+**Why it retired.** Task P5-8 deleted the sibling component, its subobject on this pawn and the bind. Nothing on the pawn
+receives a replication notification before `BeginPlay` that needs a bound component any more (rationale §15).
+
+**The entry as it stood:**
+
+**Site:** `BrawlerSimulatable->bindNetSync(*SimulatableNetSync);`, the last statement of `PostInitializeComponents`.
+
+New guard (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21). It replaced no comment, so it has no `>`
+block.
+
+⛔ **DO NOT MOVE THE BIND INTO `BeginPlay`** — the character's or either component's — and do not defer it to a timer.
+On an Iris client a replicated character is spawned with `PostInitializeComponents` run and `BeginPlay` held back, and
+the initial state's notifications fire in between, so a character that arrives with a written correction buffer — every
+existing character, for a client that joins or rejoins a running session — gets its first `OnRep_CorrectionState`
+before any `BeginPlay`. Unbound, `USimulatableNetSyncComponent` stops on its `checkf` ("no binding attached").
+
+**Seen failing (task 20a).** With the bind moved into `UOGBrawlerSimulatableComponent::BeginPlay`, a harness session's first
+client hit that `checkf` at its first join; with the move applied to the rejoining process only, the rejoining client hit
+it on an existing character, 5 s after it started. Rationale §15.
 
 ### G-08 — RETIRED (og-input-latency P7-4, 2026-11-12): the property it guarded was deleted
 

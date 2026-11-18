@@ -1,4 +1,9 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: ISimulatableOwnerBinding -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: SimulatableNetSync -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: SimulatableNetSyncComponent-rationale.md -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: bindNetSync -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
 <!-- lint-external-ref: ASimulationManagerUImpl -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager; kept in the verbatim carried comments of §7 -->
 <!-- lint-external-ref: ASimulationManagerUImpl::OnPostPhysicsStep -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager (the post-physics pass is UESimulationSession::onPostPhysicsStep since task 27a); kept in the verbatim carried comments of §7 -->
 <!-- lint-external-ref: ASimulationManagerUImpl::BeginPlay -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager::BeginPlay; kept in the verbatim carried comments of §8 -->
@@ -437,15 +442,16 @@ sessions in one editor process, which only moved which colour came first.
 
 ## 6. Replicated state on this class
 
-Three properties replicate: `RingoutScore`, since task 25 `SimCharacterIdValue`, and since
-og-simulationscheduler-withjolt task 66 `PhysicsSlotValue` (§9.1). All three use a plain
-`DOREPLIFETIME` (guards G-09, G-10, G-20). Since og-input-latency P7-4, `SimCharacterIdValue` has a
-RepNotify, `OnRep_SimCharacterIdValue`, which applies the tint (§5). `BrawlerColor` was a fourth
-until P7-4 deleted it, together with its guard G-08.
+Two properties replicate: `RingoutScore` and, since task 25, `SimCharacterIdValue`. Both use a plain
+`DOREPLIFETIME` (guards G-09, G-10). Since og-input-latency P7-4, `SimCharacterIdValue` has a
+RepNotify, `OnRep_SimCharacterIdValue`, which applies the tint (§5). `BrawlerColor` was a third
+until P7-4 deleted it, together with its guard G-08. og-simulationscheduler-withjolt task 66's
+`PhysicsSlotValue` was a fourth until og-input-latency task P5-8 deleted it, together with its guard G-20
+(§9.1): since task P5-7 a client binds the slot its og-sim-net roster entry carries.
 
-One of the character's components replicates as well: `USimulatableNetSyncComponent`, the
-`SimulatableNetSync` subobject, which carries the correction state and the input RPC (§15). Before
-og-ue-simulationcomponentandmanagersplit task 20a that was `UOGBrawlerSimulatableComponent`.
+No component of the character replicates since og-input-latency task P5-8, which deleted the
+`SimulatableNetSync` subobject (§15). From og-ue-simulationcomponentandmanagersplit task 20a until then that
+subobject carried the correction state and the input RPC; before task 20a `UOGBrawlerSimulatableComponent` did.
 
 > ⛔ REPLICATED. Purely cosmetic: it never reaches the engine-free simulation
 > core, so it cannot affect determinism or the correction path.
@@ -457,8 +463,9 @@ cosmetic: `SimCharacterIdValue` is the simulation character id. It never enters 
 the correction wire (it rides pawn replication only, so it costs the correction wire 0 B), but
 it is the value every peer registers the character under, so a wrong or missing value
 changes which storage entry the peer simulates. The "safe because cosmetic" argument applied to
-`BrawlerColor` and `RingoutScore` only, and since P7-4 to `RingoutScore` alone. `PhysicsSlotValue` (task 66, §9.1) is not cosmetic either: it
-picks the Jolt bodies a character is simulated with, and it too stays off the correction wire.
+`BrawlerColor` and `RingoutScore` only, and since P7-4 to `RingoutScore` alone. `PhysicsSlotValue` (task 66, §9.1, deleted by
+og-input-latency task P5-8) was not cosmetic either: it picked the Jolt bodies a character is simulated with, and it too
+stayed off the correction wire.
 
 ### 6.1 `RingoutScore` never reaches the simulation core
 
@@ -546,11 +553,11 @@ writes (§7).
   normally lands after the pawn's first replication bunch has gone out. `COND_InitialOnly` would never send the id, and the
   client would wait until the 600-attempt `checkf`.
 
-**`PhysicsSlotValue`** (og-simulationscheduler-withjolt task 66) uses the plain form for the same two
+**`PhysicsSlotValue`** (og-simulationscheduler-withjolt task 66) used the plain form for the same two
 reasons, guard G-20: every client binds every character, proxies included, in the slot the authority chose,
-so it needs every character's slot; and the authority writes the slot one frame after the component's
+so it needs every character's slot; and the authority wrote the slot one frame after the component's
 `BeginPlay` at the earliest (in the hook `initializeWithManager`, which the binding's `tryInitializeWithManager` calls),
-which can be after the first bunch.
+which can be after the first bunch. og-input-latency task P5-8 deleted the property and retired G-20 (§9.1).
 
 ## 7. The score's two doors — one in, one out
 
@@ -745,6 +752,13 @@ true today:
   byte of `SimCharacterId`.
 
 ### 9.1 The Jolt physics slot (og-simulationscheduler-withjolt task 66)
+
+> **History.** og-input-latency task P5-8 deleted `PhysicsSlotValue`, its two accessors and its `DOREPLIFETIME`, and
+> retired its guard G-20. Since task P5-7 the authority records the slot it chose in the session
+> (`UESimulationSession::recordAuthoritativeSlot`, which carries the three `checkf`s the write site had), og-sim-net's
+> roster carries it to every client, and a client binds the slot its roster entry carries
+> (`UESimulationSession::physicsSlotFor`, through `BrawlerTickDriverGameUImpl::callWithSlotRequest`). Why a slot travels at
+> all, the first bullet below, is unchanged. The text below describes the property as it stood until P5-8.
 
 `PhysicsSlotValue` is a replicated `uint8` carrying the Jolt world slot the authority chose for this
 character: 0 means "no slot yet", any other value is the slot plus one. `GetPhysicsSlot()` returns it as
@@ -1199,6 +1213,13 @@ camera with the orbit camera in og-brawler (the PID was unstable above about 98.
 file's build on purpose. Task 9 wired it in, as described above.
 
 ## 15. The NetSync sibling: `SimulatableNetSync`, and the bind (og-ue-simulationcomponentandmanagersplit task 20a, 2026-10-21)
+
+> **History.** og-input-latency task P5-8 deleted the subobject, its pointer, its creation and the bind in
+> `PostInitializeComponents`, and retired the bind's guard G-21, together with the sibling's class. Since task P5-7 the
+> character's sim traffic rides og-net, through its og-sim-net channel, so the sibling carried nothing. The character has no
+> replicated component since: `OGBrawler.Replication.CharacterReplicatedComponents` (`BrawlerReplicatedComponentsTest.cpp`)
+> expects the empty list `{}`. P5-8's builds and earlier ones differ in the pawn's replicated layout (one default subobject
+> and one property fewer). The text below describes the sibling as it stood until P5-8.
 
 The constructor creates a second simulation component, **before** `BrawlerSimulatable`:
 `SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"))`, held by a

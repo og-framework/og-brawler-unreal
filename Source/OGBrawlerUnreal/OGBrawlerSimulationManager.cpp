@@ -11,7 +11,6 @@
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
 #include "OGBrawlerUnreal/BrawlerSessionGameUImpl.h"
 #include "GameFramework/PlayerController.h"
-#include "OGSimulationUnreal/SimulationInputRelay.h"
 
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/DAttackRadialSimulation.h"
@@ -52,8 +51,6 @@ void AOGBrawlerSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReas
 	Super::EndPlay(EndPlayReason);
 
 }
-
-template void UESimulationSession<BrawlerSessionTraitsUImpl>::onInputRelayHostReady(ASimulationInputRelay& host);
 
 void AOGBrawlerSimulationManager::unregisterFromNewFramework(
     SimCharacterId simId, UOGBrawlerSimulatableComponent& owner, bool isAuthority)

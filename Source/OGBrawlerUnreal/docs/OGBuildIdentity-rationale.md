@@ -1,4 +1,6 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: USimulatableNetSyncComponent::OnRep_CorrectionState -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
 <!-- lint-external-ref: FCoreDelegates::OnPostEngineInit -- Unreal Engine delegate (CoreDelegates.h), outside every scan root -->
 <!-- lint-external-ref: FNetworkVersion::GetLocalNetworkVersion -- Unreal Engine function (NetworkVersion.cpp), outside every scan root -->
 <!-- lint-external-ref: FNetworkVersion::GetLocalNetworkVersionOverride -- Unreal Engine delegate (NetworkVersion.h), outside every scan root -->
@@ -228,7 +230,8 @@ og-sim-metres-yup task 15 (the user's ruling Q2, 2026-10-25: a login lacking the
 og-simulation's three payloads carries its own version byte: the correction state
 (`correctionStateBuffer::kWireFormatVersion`), the relayed input ring (`relayedInputRing::kWireFormatVersion`)
 and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 15, 3 and 3, so the
-token is c15.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
+token's first three fields are c15.r3.b3 (the last two are the envelope's and the roster's, below).
+og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
 mean without changing their layout, so each step bumped the versions it changed. While the move ran, each version
 was a `constexpr` function of `SimulationFrame.h`'s two frame knobs; task 24 deleted the knobs and froze the
 versions at the third row, and task 26 (the native planar chart) bumped the correction version once more.
@@ -270,9 +273,23 @@ chart change left them alone too: the stick and the world vectors are not chart 
 correction state only, where the brawler movement's `committedStepDir` is a planar chart value and mirrors.
 `WireVersionKnobTest.cpp` in og-simulation-tests pins the three shipped numbers.
 
-**The token.** `buildIdentityUImpl::wireToken()` is `c<correction>.r<ring>.b<bundle>`, each version in
-decimal (`wireTokenFor`; a `static_assert` pins the format). It is built at compile time from the three
-constants, so the token and the compiled codecs cannot disagree.
+**The envelope and the roster (og-input-latency P5-6).** Two more versions follow the three. The sim envelope's
+(`kSimEnvelopeVersion`, `OGSimulation/Network/SimEnvelope.h`) is the first byte of every og-sim message sent over
+og-net; the og-sim-net roster's (`ogsimnet::kRosterWireVersion`, `OGSimNet/SimNetRoster.h`) is the first byte of
+every roster body. Both are 1, so the token is c15.r3.b3.e1.ro1. Neither describes a payload, so the three
+codec versions cannot stand in for them. A peer whose envelope version differs has every message refused by
+`simEnvelope::decode` (`DecodeRefusal::Version`), which `ogsimnet::SimNetServer` and `ogsimnet::SimNetClient`
+count as bad decodes and drop. A roster of another version is refused (`RosterRefusal::Version`), and the client
+then ignores all sim traffic and asks to be disconnected. Either way the player would be admitted into a session
+that cannot work, the case the login check exists for (below). A build from before P5-6 presents the three-field
+token, which the server classifies as `Different`. `SimEnvelopeTest.cpp` in og-simulation-tests refuses the
+envelope version bytes 0 and 2, and `SimNetRosterTest.cpp` in og-sim-net's tests pins the roster's 1.
+
+**The token.** `buildIdentityUImpl::wireToken()` is `c<correction>.r<ring>.b<bundle>.e<envelope>.ro<roster>`,
+each version in decimal (`wireTokenFor`; a `static_assert` pins the format). It is built at compile time from the
+five constants, so the token cannot disagree with the compiled codecs, envelope and roster. Its buffer holds the
+longest token, `c255.r255.b255.e255.ro255` (25 characters); a row of the same `static_assert` writes that token, so
+a buffer too small for it fails the build.
 
 **The check, at login.** The client's `UOGBrawlerLocalPlayer::GetGameLoginOptions` returns the backend option
 of §7, then `?`, then `OGWire=<token>` (`buildIdentityUImpl::wireLoginOption`, key `kWireLoginOptionKey`;
@@ -283,22 +300,26 @@ classifies it with `classifyWireLogin` (`WireLoginVerdict`: `Match`; `Missing` f
 `static_assert`s pin both functions. A refusal logs the same Warning as §7,
 `OGBuildIdentity: refused a login: <reason>`, with the server's token first:
 
-* "Different wire format: this server speaks c15.r3.b3, the client c0.r0.b0."
-* "Different build: the client reports no wire format, this server speaks c15.r3.b3." (a build from before
-  this check, or an empty token)
+* "Different wire format: this server speaks c15.r3.b3.e1.ro1, the client c15.r3.b3." (a build from before
+  P5-6)
+* "Different build: the client reports no wire format, this server speaks c15.r3.b3.e1.ro1." (a build from
+  before this check, or an empty token)
 
 A backend refusal takes precedence: a client of the other backend is told about the backend. The client sees
 the text the way it sees §7's ("Server refused: <text>").
 
 **Why at login, when every payload has a version byte.** The version bytes are compared only when a payload
 arrives, after the player was admitted. A client that receives a correction of another version logs an
-`Error`, shows a build-mismatch message and ignores every later correction
-(`USimulatableNetSyncComponent::OnRep_CorrectionState`); the server drops every redundancy bundle of another
-version (`USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation`). The player is then in a
-session that cannot work. The login check refuses before admission, and its text names both tokens.
+`Error`, shows a build-mismatch message and ignores every later correction (og-sim-net's `SimNetClient`, through
+the Unreal client host's `onWireMismatch`, `UESimNetHost-rationale.md` §8). The server counts every sim message
+whose envelope version differs as a bad decode and drops it (`SimNetServer`'s `onMessage`, through
+`simEnvelope::decode`). Until og-input-latency task P5-7 the two paths were the net-sync component's
+(`USimulatableNetSyncComponent::OnRep_CorrectionState`, and the input RPC
+`USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation`, which dropped every redundancy bundle of
+another version). The player is then in a session that cannot work. The login check refuses before admission, and its text names both tokens.
 
 **The start line.** The `OGBuildIdentity:` Display line (§1) ends with `wire=<token> units=m axes=YupRH`: the
-token from the same three constants, then the simulation's length unit and axes as literals in the format string.
+token from the same five constants, then the simulation's length unit and axes as literals in the format string.
 The fields are appended after the earlier ones, so a reader of the earlier fields is unaffected. `units=` is each
 capture's length-unit marker: a log line that reports simulation state prints its lengths in that unit, and log
 tooling reads the marker per capture (a capture with no marker predates it and is in centimetres). While the frame
@@ -311,6 +332,6 @@ knobs existed (og-sim-metres-yup tasks 15 to 23) the two values came from them, 
 which the server refuses as `Missing`. The empty case is detected before FParse::Value is called: that
 function skips whitespace after the `=` (engine Parse.cpp:306-308) and would read the next argument as the
 token. The process logs one Warning at start-up, "OGBuildIdentity: -OGWireTokenOverride: this process
-presents the wire token '<token>' at login instead of c6.r2.b2.", and its start line keeps the compiled
+presents the wire token '<token>' at login instead of c15.r3.b3.e1.ro1.", and its start line keeps the compiled
 token. The switch is compiled out of Shipping (`#if !UE_BUILD_SHIPPING`). It is read from the command line
 because the login options are built before any console command a test could send to the client.

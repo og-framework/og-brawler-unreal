@@ -58,7 +58,7 @@ Two things the dump does not see, both measured on the first real run:
 The fence's manifest spells keys the way C++ source does, so the dump does too:
 
 - **Class:** the C++ prefix plus the class name (`GetPrefixCPP()` then `GetName()`): `AOGBrawlerUECharacter`,
-  `USimulatableNetSyncComponent`. A Blueprint's generated class gets the same treatment, so the
+  `AOGBrawlerPlayerController`. A Blueprint's generated class gets the same treatment, so the
   ThirdPerson character Blueprint prints as `ABP_ThirdPersonCharacter_C`.
 - **Property type:** the property's `GetCPPType` with its extended text appended, so a `TArray` property prints
   `TArray<…>` rather than a bare `TArray`.

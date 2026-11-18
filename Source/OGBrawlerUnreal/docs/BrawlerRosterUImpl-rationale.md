@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 <!-- lint-external-ref: OnPhysScenePreTick -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in og-simulationscheduler-withjolt task 51 (§1 quotes the old source) -->
 <!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in og-simulationscheduler-withjolt task 51 (§1 quotes the old source) -->
 <!-- lint-external-ref: FastLess -- Unreal Engine FName comparator, outside every scan root -->
@@ -50,7 +51,7 @@ own parameters through; the session's `beginPlay` computes those at the same sta
 | `onBodiesCreated(simulatable, character, id, isAuthority, netMode)` | `*record.simulatable`, `*character`, `id`, `record.isAuthority`, `GetNetMode()` | the same record fields and character; `GetNetMode()` in the authority `checkf` |
 | `onRegistered(id, isAuthority)` | `id`, `record.isAuthority` | the same |
 | `forgetCharacter(id)` | `id` | the same |
-| `pushRingoutScores(scoreSystem, routes)` | `m_systemsExec->get<brawlerRingout::ScoreSystem>()` and `m_delayedInputComponentsById` (both the session's; the map since task 26a), both by `const&` | the same two references, handed to the file-local function |
+| `pushRingoutScores(scoreSystem, routes)` | `m_systemsExec->get<brawlerRingout::ScoreSystem>()` and `m_registeredComponentsById` (both the session's; the session's delayed-input map from task 26a, its registered-component map since og-input-latency task P5-7), both by `const&` | the same two references, handed to the file-local function |
 
 Two arguments are now evaluated where they used to be read lazily: `GetNetMode()` at the `seedSpawnPointsFromLevel` and
 `onBodiesCreated` calls is evaluated before the call, also in Shipping, where the `checkf` that read it compiles out, and

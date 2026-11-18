@@ -1,4 +1,11 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: OnRep -- Unreal Engine replication hook name, outside every scan root -->
+<!-- lint-external-ref: registerInstance -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: noteDelayedInputComponent -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: replayLatchedClientValues -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_relayWriteProbe -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: beginReceptionCoordinator -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 <!-- lint-external-ref: BrawlerInputProviderFn -- retired alias: removed with the callerless wrappers by og-ue-simulationcomponentandmanagersplit task 36; named in the census and in retired G-01's entry and quoted last text -->
 <!-- lint-external-ref: SimulationManagerUImpl.h -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager.h; kept in retired G-18's quoted last text -->
 <!-- lint-external-ref: writesThisFrame -- a term in the stated ceiling formula (G-17), not a declared identifier -->

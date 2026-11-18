@@ -86,7 +86,7 @@ void BrawlerSessionGameUImpl::afterVisualization(const UESimulationSession<Brawl
 	if (session.getManager().has_value() && session.getSystemsExec().has_value() && !session.getManager()->runsPrediction())
 	{
 		BrawlerRosterUImpl::pushRingoutScores(session.getSystemsExec()->get<brawlerRingout::ScoreSystem>(),
-			session.getDelayedInputComponentsById());
+			session.getRegisteredComponentsById());
 	}
 }
 

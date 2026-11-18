@@ -138,6 +138,7 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(TEXT("[SimNet.Window] role=client p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[SimNet.Host] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+	AddExpectedMessagePlain(TEXT("[Roster.Refused] reason=Truncated p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	rttHost.log("[Warning][SimNet.Window] role=client p54probe");
 	rttHost.log("[Warning][SimNet.Host] role=server p54probe");
 	rttHost.log("[Warning][Roster.Refused] role=server p54probe");
@@ -152,7 +153,8 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 		{
 			TestTrue(*FString::Printf(TEXT("'%s' is logged to LogOGNet"), *line.Text), line.Category == FName(TEXT("LogOGNet")));
 		}
-		TestTrue(TEXT("a token-less [Roster. line takes the row's Log"), lines[3].Verbosity == ELogVerbosity::Log);
+		TestTrue(TEXT("a token-less [Roster. line is routed with a [Warning] token"),
+			lines[3].Text.Contains(TEXT("[Warning][Roster.Refused] reason=Truncated p54probe")));
 	}
 
 	ServerHost serverHost(nullptr, serverLanes->endpoint(), nullptr);

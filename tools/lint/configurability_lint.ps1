@@ -404,6 +404,12 @@ $Blacklist = @(
         Message = 'minTicksBeforeDriftCheck default (60) must live only in TimeConfig; read config.minTicksBeforeDriftCheck instead of re-declaring it (R-P1)'
     },
     @{
+        Field   = 'recentreSettleSamples'
+        Pattern = '(?<![\w.>])recentreSettleSamples\s*=\s*30\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'recentreSettleSamples default (30 - the one-shot re-centre''s settle window, og-input-latency task 27) must live only in TimeConfig; read config.recentreSettleSamples instead of re-declaring it (R-P1)'
+    },
+    @{
         Field   = 'harnessMode'
         Pattern = '(?<![\w.>])harnessMode\s*=\s*(TimeConfig::)?HarnessMode::'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'DeterminismHarness.h')

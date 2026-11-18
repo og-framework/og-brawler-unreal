@@ -163,10 +163,11 @@ promise made in a comment: the `static_assert` on the instantiation's signature 
 `ScoreboardVisualizationUImpl.cpp`, beside the call (since task 22; after the manager class before; on the session's
 member since task 24b).
 
-⚠ `m_delayedInputComponentsById` — the map the score push walks, the session's since
-og-ue-simulationcomponentandmanagersplit task 26a — is private and
-authority-only, so it is **not** this layer's route. A gather built on it would work
-perfectly on a listen server and return nothing on a client.
+⚠ `m_registeredComponentsById` — the map the score push walks, the session's (its delayed-input
+map from og-ue-simulationcomponentandmanagersplit task 26a, the registered-component map since
+og-input-latency task P5-7) — is private and is not this layer's route. Until P5-7 it was also
+authority-only, so a gather built on it would have worked on a listen server and returned
+nothing on a client.
 
 ### 2.5 The read-only guarantee holds by argument, not by the shape of the file
 

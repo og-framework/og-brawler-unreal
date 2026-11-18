@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 <#
 .SYNOPSIS
-    Clang header probe - every og-simulation header compiles on its own under
+    Clang header probe - every og-simulation and og-sim-net header compiles on its own under
     clang-cl, and under the Android NDK's clang with libc++, so a clang-only or
     libc++-only error in a header is caught on Win64.
 
@@ -27,6 +27,12 @@
       `OptionalVec3Result` concept rejects `void` first
       (TickDriverConcepts-rationale.md section 5).
 
+    og-input-latency task P5-10 added og-sim-net's headers (<SimNetRoot>/OGSimNet).
+    Their TUs also get og-sim-net's include root (-SimNetRoot) and og-net's
+    (-NetRoot, for their `OGNet/` includes). og-simulation's TUs keep only
+    og-simulation's roots, so an og-simulation header that includes an og-net or
+    og-sim-net header fails here too.
+
     ------------------------------------------------------------------------
     WHAT IT RUNS
     ------------------------------------------------------------------------
@@ -36,12 +42,16 @@
     clang-cl:
         clang-cl /nologo /std:c++20 /DOG_STANDALONE_BUILD /Zs
                  /clang:-fno-delayed-template-parsing
-                 [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm  <tu>.cpp
+                 [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm
+                 [-I<SimNetRoot> -I<NetRoot>]  <tu>.cpp
 
     libc++ (the NDK's clang++):
         clang++ --target=<AndroidTarget> -std=c++20 -stdlib=libc++ -fsyntax-only
                 -DOG_STANDALONE_BUILD
-                [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm  <tu>.cpp
+                [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm
+                [-I<SimNetRoot> -I<NetRoot>]  <tu>.cpp
+
+    The bracketed -I<SimNetRoot> -I<NetRoot> are passed for og-sim-net headers only.
 
     `/Zs` and `-fsyntax-only` are syntax-only modes: templates are instantiated
     and `static_assert`s are evaluated, nothing is code-generated.
@@ -86,10 +96,12 @@
     Per failing header, `[clang-probe] FAIL <header> rc=<n>` (clang-cl) or
     `[clang-probe] libc++ FAIL <header> rc=<n>` (libc++), followed by its first
     -MaxErrorLines `error:` / `note:` lines, indented. Then, per arm that ran,
-        [clang-probe] headers=N failed=F clang=<version> elapsed=S s
-        [clang-probe] libc++ headers=N failed=F known=K clang=<version> ndk=<rev> target=<t> elapsed=S s
-    (elapsed is the whole probe's). A seen-failing run on an old copy of a header:
-    put the copy at <dir>/OGSimulation/<Header>.h and pass `-IncludeOverlay <dir>`;
+        [clang-probe] headers=N simnet=M failed=F clang=<version> elapsed=S s
+        [clang-probe] libc++ headers=N simnet=M failed=F known=K clang=<version> ndk=<rev> target=<t> elapsed=S s
+    (N counts every header, M the og-sim-net ones among them; elapsed is the whole
+    probe's). A seen-failing run on an old copy of a header:
+    put the copy at <dir>/OGSimulation/<Header>.h (an og-sim-net header at
+    <dir>/OGSimNet/<Header>.h) and pass `-IncludeOverlay <dir>`;
     the overlay is searched first by both arms, so every TU that includes that
     header sees the copy.
 
@@ -101,10 +113,24 @@
     `glm/`), relative to -RepoRoot or absolute. Default:
     Plugins/OGSimulation/Source/OGSimulation/og-simulation.
 
+.PARAMETER SimNetRoot
+    og-sim-net's include root (the directory that holds `OGSimNet/`), relative to
+    -RepoRoot or absolute. Default:
+    Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net. '' leaves og-sim-net
+    out: no og-sim-net header is probed by default, and one named in -Headers is
+    an exit 2.
+
+.PARAMETER NetRoot
+    og-net's include root (the directory that holds `OGNet/`), for og-sim-net's
+    TUs, relative to -RepoRoot or absolute. Default:
+    Plugins/OGSimulation/Source/OGNet/og-net. Not read when -SimNetRoot is ''.
+
 .PARAMETER Headers
     Headers to probe, as include paths under -SimRoot
-    (e.g. `OGSimulation/SimulationFrame.h`). Default: every `*.h` under
-    <SimRoot>/OGSimulation. A header that does not exist is an exit 2.
+    (e.g. `OGSimulation/SimulationFrame.h`), or under -SimNetRoot for a path that
+    starts with `OGSimNet/` (e.g. `OGSimNet/SimNetChannel.h`). Default: every `*.h`
+    under <SimRoot>/OGSimulation, then every `*.h` under <SimNetRoot>/OGSimNet.
+    A header that does not exist is an exit 2.
 
 .PARAMETER Arms
     The arms to run: `clang-cl`, `libc++` or both (the default). Anything else
@@ -136,13 +162,16 @@
     Exit 0 = every arm that ran passed, or every arm skipped.
     Exit 1 = one or more headers fail an arm (a stale known failure included).
     Exit 2 = usage or IO, one message line on stderr: a missing -RepoRoot,
-             -SimRoot, header, known-failure header or -IncludeOverlay, an
+             -SimRoot, -SimNetRoot, -NetRoot, header, known-failure header or
+             -IncludeOverlay, an
              unknown arm, or an empty header list.
 #>
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path,
     [string]$SimRoot = 'Plugins/OGSimulation/Source/OGSimulation/og-simulation',
+    [string]$SimNetRoot = 'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net',
+    [string]$NetRoot = 'Plugins/OGSimulation/Source/OGNet/og-net',
     [string[]]$Headers = @(),
     [string[]]$Arms = @('clang-cl', 'libc++'),
     [string]$ClangCl = '',
@@ -175,6 +204,31 @@ $simDir = if ([IO.Path]::IsPathRooted($SimRoot)) { $SimRoot } else { Join-Path $
 if (-not (Test-Path -LiteralPath (Join-Path $simDir 'OGSimulation') -PathType Container)) { Exit-Usage "SimRoot has no OGSimulation/ directory: $simDir" }
 $simDir = (Resolve-Path -LiteralPath $simDir).Path
 
+$simNetDir = ''
+$netDir = ''
+if ($SimNetRoot -ne '') {
+    $simNetDir = if ([IO.Path]::IsPathRooted($SimNetRoot)) { $SimNetRoot } else { Join-Path $RepoRoot $SimNetRoot }
+    if (-not (Test-Path -LiteralPath (Join-Path $simNetDir 'OGSimNet') -PathType Container)) { Exit-Usage "SimNetRoot has no OGSimNet/ directory: $simNetDir" }
+    $simNetDir = (Resolve-Path -LiteralPath $simNetDir).Path
+    $netDir = if ([IO.Path]::IsPathRooted($NetRoot)) { $NetRoot } else { Join-Path $RepoRoot $NetRoot }
+    if (-not (Test-Path -LiteralPath (Join-Path $netDir 'OGNet') -PathType Container)) { Exit-Usage "NetRoot has no OGNet/ directory: $netDir" }
+    $netDir = (Resolve-Path -LiteralPath $netDir).Path
+}
+
+function Test-SimNetHeader {
+    param([string]$Header)
+    return $Header.StartsWith('OGSimNet/')
+}
+
+function Resolve-HeaderPath {
+    param([string]$Header)
+    if (Test-SimNetHeader $Header) {
+        if ($simNetDir -eq '') { return '' }
+        return (Join-Path $simNetDir $Header)
+    }
+    return (Join-Path $simDir $Header)
+}
+
 $overlayDir = ''
 if ($IncludeOverlay -ne '') {
     if (-not (Test-Path -LiteralPath $IncludeOverlay -PathType Container)) { Exit-Usage "IncludeOverlay not found: $IncludeOverlay" }
@@ -184,13 +238,19 @@ if ($IncludeOverlay -ne '') {
 if ($Headers.Count -eq 0) {
     $Headers = @(Get-ChildItem -LiteralPath (Join-Path $simDir 'OGSimulation') -Recurse -File -Filter '*.h' |
         ForEach-Object { [IO.Path]::GetRelativePath($simDir, $_.FullName).Replace('\', '/') } | Sort-Object)
+    if ($simNetDir -ne '') {
+        $Headers += @(Get-ChildItem -LiteralPath (Join-Path $simNetDir 'OGSimNet') -Recurse -File -Filter '*.h' |
+            ForEach-Object { [IO.Path]::GetRelativePath($simNetDir, $_.FullName).Replace('\', '/') } | Sort-Object)
+    }
 }
 if ($Headers.Count -eq 0) { Exit-Usage "no headers to probe under $simDir" }
 foreach ($h in $Headers) {
-    if (-not (Test-Path -LiteralPath (Join-Path $simDir $h) -PathType Leaf)) { Exit-Usage "header not found under SimRoot: $h" }
+    $path = Resolve-HeaderPath $h
+    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "header not found under SimRoot or SimNetRoot: $h" }
 }
 foreach ($k in $LibcxxKnownFailures.Keys) {
-    if (-not (Test-Path -LiteralPath (Join-Path $simDir $k) -PathType Leaf)) { Exit-Usage "LibcxxKnownFailures header not found under SimRoot: $k" }
+    $path = Resolve-HeaderPath $k
+    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "LibcxxKnownFailures header not found under SimRoot or SimNetRoot: $k" }
 }
 
 $compilers = [ordered]@{}
@@ -246,6 +306,8 @@ if ($compilers.Count -eq 0) { exit 0 }
 $includes = @()
 if ($overlayDir -ne '') { $includes += "-I$overlayDir" }
 $includes += @("-I$simDir", ("-I" + (Join-Path $simDir 'glm')))
+$simNetIncludes = if ($simNetDir -ne '') { @("-I$simNetDir", "-I$netDir") } else { @() }
+$simNetCount = @($Headers | Where-Object { Test-SimNetHeader $_ }).Count
 $versions = @{}
 foreach ($arm in $compilers.Keys) {
     $versions[$arm] = (& $compilers[$arm].Exe --version 2>&1 | Select-Object -First 1).ToString().Trim()
@@ -265,12 +327,13 @@ try {
     $tus = for ($i = 0; $i -lt $Headers.Count; $i++) {
         $tu = Join-Path $scratch ("tu{0:d4}.cpp" -f $i)
         [IO.File]::WriteAllText($tu, "#include `"$($Headers[$i])`"`n")
-        [pscustomobject]@{ Header = $Headers[$i]; Tu = $tu }
+        $extra = if (Test-SimNetHeader $Headers[$i]) { $simNetIncludes } else { @() }
+        [pscustomobject]@{ Header = $Headers[$i]; Tu = $tu; Includes = @($includes + $extra) }
     }
     $jobs = foreach ($arm in $compilers.Keys) {
         foreach ($t in $tus) {
             [pscustomobject]@{ Arm = $arm; Header = $t.Header; Tu = $t.Tu
-                Exe = $compilers[$arm].Exe; Args = @($compilers[$arm].Flags + $includes + $t.Tu) }
+                Exe = $compilers[$arm].Exe; Args = @($compilers[$arm].Flags + $t.Includes + $t.Tu) }
         }
     }
 
@@ -313,10 +376,10 @@ try {
             }
         }
         if ($arm -eq 'clang-cl') {
-            Write-Host ('{0} headers={1} failed={2} clang={3} elapsed={4} s' -f $prefix, $armResults.Count, $failed, $versions[$arm], $elapsed)
+            Write-Host ('{0} headers={1} simnet={2} failed={3} clang={4} elapsed={5} s' -f $prefix, $armResults.Count, $simNetCount, $failed, $versions[$arm], $elapsed)
         } else {
-            Write-Host ('{0} headers={1} failed={2} known={3} clang={4} target={5} elapsed={6} s' -f `
-                $prefix, $armResults.Count, $failed, $known, $versions[$arm], $AndroidTarget, $elapsed)
+            Write-Host ('{0} headers={1} simnet={2} failed={3} known={4} clang={5} target={6} elapsed={7} s' -f `
+                $prefix, $armResults.Count, $simNetCount, $failed, $known, $versions[$arm], $AndroidTarget, $elapsed)
         }
         if ($armResults.Count -ne $Headers.Count) {
             [Console]::Error.WriteLine("[clang-probe] exit 2: $arm has $($armResults.Count) results for $($Headers.Count) headers")

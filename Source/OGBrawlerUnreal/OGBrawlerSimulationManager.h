@@ -3,10 +3,6 @@
 
 #pragma once
 
-#include "OGSimulationUnreal/ISimulationTimingRelayListener.h"
-#include "OGSimulationUnreal/ISimulationConnectionRelayListener.h"
-#include "OGSimulationUnreal/ISimulationInputRelayListener.h"
-
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include <unordered_map>
@@ -44,7 +40,6 @@
 #include "OGSimulationUnreal/UESimulationSession.h"
 #include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
 #include "OGBrawlerUnreal/BrawlerSessionGameUImpl.h"
-#include "OGSimulationUnreal/UEConnectionHandle.h"
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/BrawlerHitDetectionSystem.h"
@@ -55,7 +50,6 @@
 
 #include "OGSimulationUnreal/OGSimulationUnreal.h"
 #include "OGSimulationUnreal/UESimulationLogRoutes.h"
-#include "OGSimulationUnreal/SyncedSimulationStateBuffer.h"
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
@@ -77,11 +71,7 @@ struct FMovementStaticDataCVars
 
 class UOGBrawlerSimulatableComponent;
 class AOGBrawlerSimulationManager;
-class ASimulationTimingRelay;
-class ASimulationConnectionRelay;
 class AOGBrawlerUECharacter;
-
-extern template void UESimulationSession<BrawlerSessionTraitsUImpl>::onInputRelayHostReady(ASimulationInputRelay& host);
 
 UCLASS()
 class AOGBrawlerSimulationManager : public AActor

@@ -537,6 +537,20 @@ pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/palette_legend_lint.Tes
 
 ---
 
+# Sim trigonometry lint (`sim_trig_lint.ps1`)
+
+`sim_trig_lint.ps1` checks that the engine-free simulation trees (og-simulation, og-simulation-jolt's own sources,
+og-sim-net, og-brawler) call no libm trigonometry, so every platform computes the same angles and rotations
+(og-input-latency task 22). The sim uses og-simulation's `simTrig` (`SimTrig.h`) instead. The script's header lists
+what it flags and the presentation-only files it allows. Implementers and reviewers run it with the other lints.
+
+```pwsh
+pwsh -NoProfile -File tools/lint/sim_trig_lint.ps1
+pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/sim_trig_lint.Tests.ps1 -Output Detailed"
+```
+
+---
+
 # Bandwidth measurement (`measure_bandwidth.ps1`)
 
 `measure_bandwidth.ps1` is the Phase 2a (`og-netcode-v1-impl` Task 19) measurement

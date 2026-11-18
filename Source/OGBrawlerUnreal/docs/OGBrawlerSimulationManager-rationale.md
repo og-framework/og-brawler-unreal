@@ -1,4 +1,29 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: payForIncrease -- removed by og-input-latency task P5-10 (lead line F2: the always-true parameter of applyReplicatedRelayDelayFloor); kept in the quoted header lines -->
+<!-- lint-external-ref: ASimulationInputRelay::m_relayedInputRing -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: onConnectionTierReplayed -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: onInputRelayHostReady -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: onRelayDelayFloorReplayed -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: ASimulationInputRelay::PreReplication -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: SimulatableNetSyncComponent-guards.md -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: SimulatableNetSyncComponent-rationale.md -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent::OnRep_CorrectionState -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: attachInputRelayHost -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: m_detachedRelayRing -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: m_detachedRelayStagingRing -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: makeRingFlushedCallback -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: noteRelayedRingArrived -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: onCorrectionStateAccepted -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: onRelayedInputRingArrived -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: receiveRemoteMoveBundle -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: sendInputBundleToAuthority -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: m_timingRelay -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: noteDelayedInputComponent -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: beginReceptionCoordinator -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: forgetReceptionOwner -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_relayWriteProbe -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 <!-- lint-external-ref: m_backendWorlds -- RENAMED by og-ue-simulationcomponentandmanagersplit task 35 to m_physicsBackendWorlds (the session's member); kept in the task-83 history of "What the arms hold" -->
 <!-- lint-external-ref: ASimulationManagerUImpl -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager (this actor); kept in the history sections §0, §4 "History", §11 and §12, and named in their markers -->
 <!-- lint-external-ref: ASimulationManagerUImpl::readMovementStaticDataCVars -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to AOGBrawlerSimulationManager::readMovementStaticDataCVars; kept in the §12 history -->
@@ -272,8 +297,8 @@ since og-ue-simulationcomponentandmanagersplit task 25 (this file's G-16 until t
 | | runs on | what it is |
 |---|---|---|
 | `BeginPlay` / `EndPlay` | GAME | the composition root; since og-ue-simulationcomponentandmanagersplit task 27a `EndPlay` is `m_session.endPlay()`, then `Super` (the session's teardown, `UESimulationSession-rationale.md` §10, in OGSimulationUnreal's docs), and since task 27b `BeginPlay` is `Super`, then `m_session.beginPlay()` (the session's start-up, its §11) |
-| `onConnectionTierReceived` / `Replayed`, `onRelayDelayFloorReceived` / `Replayed`, `onInputRelayHostReady`, `onTimingInfoReceived` | GAME | the relay listeners: members of the session `m_session` since task 25 (`UESimulationSession-rationale.md` §9, in OGSimulationUnreal's docs). *R0, task 25: the row said "the four replication listeners"; there are six entry points over three interfaces, and the timing callback was not listed* |
-| `deliverRemoteInput`, `relayRemoteInput`, `noteDelayedInputComponent` | GAME | the reception sinks, driven from the RPC receipt path, and the route's registration: the session's since og-ue-simulationcomponentandmanagersplit task 26a (`UESimulationSession-rationale.md` §9.7, in OGSimulationUnreal's docs); this class kept the registration's `SimCharacterId` wrapper until task 36, which removed it (it had no caller since task 29) |
+| `onConnectionTierReceived` / `Replayed`, `onRelayDelayFloorReceived` / `Replayed`, `onTimingInfoReceived` | GAME | the session's tier, floor and clock entry points (`m_session`'s since task 25): the relay listeners until og-input-latency task P5-7, called since by the og-net client host from the driver's `PostTickDispatch` (`UESimulationSession-rationale.md` §9, §16, in OGSimulationUnreal's docs). *R0, task 25: the row said "the four replication listeners"; there were six entry points over three interfaces, and the timing callback was not listed* |
+| og-sim-net's server: its drain and flush, `releaseForStep`, `afterBatch` | GAME | the reception since og-input-latency task P5-7: og-sim-net's `SimNetServer`, which the session holds on the authority and which drains at the og-net driver's `PostTickDispatch` and flushes at its `TickFlush` (`UESimulationSession-rationale.md` §16). From task 26a until P5-7 the session's own sinks, driven from the net-sync RPC's receipt path, and the route's registration; this class kept the registration's `SimCharacterId` wrapper until task 36 |
 | `InjectInputs_External` → `onFrameStepsDue_GameThread`, `releaseDelayedInputsForStep`, `reapConnections` (Chaos configuration, §18; a `ChaosTickBackendUImpl` member since task 82) | GAME | PROBE A and PROBE 6 once per physics frame, then the drain and the reap (§7; the probes' function is the session's since task 26b, the drain since task 26a) |
 | `onPostPhysicsStep` (the session's since task 27a, `UESimulationSession-rationale.md` §10; this class's `OnPostPhysicsStep` before) | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, `TickDriverBackendUImpl-rationale.md` §6), the render interpolation and apply and the shadow overwrite (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §5, §7), visualization snapshot (with the rendered poses in the Jolt configuration), timing buffer, score push (the brawler's hook `BrawlerSessionGameUImpl::afterVisualization` since task 27a), latency probe; bound to the scene's post-tick delegate in the Chaos configuration, called by the frame host's `TG_EndPhysics` tick function in the Jolt configuration |
 | the frame host's two tick functions → the tick driver → `onFrameStepsDue_GameThread`, the reap (authority), `onPostPhysicsStep`, through `BrawlerTickDriverGameUImpl` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | GAME | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`UETickDriverHost-rationale.md`; `SimulationTickDriver-rationale.md` §3) |
@@ -471,15 +496,16 @@ until task 28, are the session's since (`UESimulationSession-rationale.md` §2, 
   (`UESimulationSession-rationale.md` §8).
 * **The timing callback and the timing relay pointer** sat between the worlds and the adapters until task 24a, before
   the session from task 24a, and since task 25 are the session's members `m_onTimingInfoReceivedCallback` and
-  `m_timingRelay`, after its backend, with the tier consumer and the published-delay mark. Neither construction nor
+  `m_timingRelay` (og-input-latency task P5-7 removed the relay pointer), after its backend, with the tier consumer and the published-delay mark. Neither construction nor
   destruction of any of them is observable: the callback is a `std::function` that nothing in the tree sets (its setter
-  is og-simulation's owner concept), so it is empty; the relay is a raw pointer; the tier consumer and the mark are
+  is og-simulation's owner concept), so it is empty; the relay was a raw pointer; the tier consumer and the mark are
   emplaced and written only after `BeginPlay` builds the manager, and the consumer is reset in the teardown (this
   class's `EndPlay` until task 27a, the session's `endPlay` since; `UESimulationSession-rationale.md` §9, §10).
 * **The start-up builds the session's state** (the actor's `BeginPlay` until task 27b; since then the session's `beginPlay`,
   which `BeginPlay` calls after `Super`): the adapters, then per role branch the integration layer, the systems executor
   (the brawler's hook `emplaceSystems`) and the manager, then the tier consumer and, on the authority, the reception
-  coordinator. The order and why it holds moved to `UESimulationSession-rationale.md` §11, in OGSimulationUnreal's docs;
+  coordinator (since og-input-latency task P5-7 og-sim-net's server holds the coordinator, and the session emplaces the
+  server before the tier consumer). The order and why it holds moved to `UESimulationSession-rationale.md` §11, in OGSimulationUnreal's docs;
   the brawler's six start-up hooks are `BrawlerSessionGameUImpl-rationale.md` §6. The teardown unwinds the last two before
   the manager (`UESimulationSession-guards.md` G-21).
 
@@ -570,10 +596,10 @@ the authority's start-up prints `[RelayDelayFloor] session floor = 6 ticks (ini 
 so the proof line says `OnDisagreement (ini override)`. The same file runs `LogOGNet` at `Warning`, the level the proof
 lines are written for.
 
-**The timing relay is spawned first.** The floor's publish needs the session's timing relay to exist when `BeginPlay`
-runs. The brawler's composition root, `USimulationManagerSubsystem::OnWorldBeginPlay`, spawns the relay before this actor
-on every non-client world, which is why the failure line (`no timing relay at manager BeginPlay`) does not appear in a
-healthy run.
+**The floor's publish has a server by construction.** Since og-input-latency task P5-7 the session publishes the floor
+through og-sim-net's server, which its `beginPlay` emplaces just before the knobs; the brawler's composition root,
+`USimulationManagerSubsystem::OnWorldBeginPlay`, spawns only this actor. Until P5-7 it spawned the session's timing relay
+first on every non-client world, because the floor was written onto that relay.
 
 ---
 
@@ -651,6 +677,11 @@ removes it, assigned to the row that routed it.
 - No emitter (kept here; deleting them was out of scope): `[SendRemoteInputToClients]`,
   `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]`, `[DrainOutOfOrder]`.
 
+*Since og-input-latency task P5-8* the record above is history for three of its attributions:
+`OGBrawlerSimulatableComponent.cpp` logs nothing, the binding's `[ServerReceive]` line was deleted with its net half,
+and `[ReceiveCorrectionState]` is og-sim-net's client session's line (`SimNetClient.h`), which the Unreal client host
+routes through `RouteOGMessage` (`UESimNetHost-rationale.md` §9).
+
 ### This module's direct log sites (og-simulationscheduler-withjolt task 80)
 
 **Direct log sites read the same table: `OG_LOG_ROUTED`.** Six per-tick or per-packet lines in this
@@ -664,11 +695,14 @@ level is set in one place for routed and direct lines alike. The sites:
 |---|---|---|
 | `[ReleaseBatch]` | `releaseDelayedInputsForStep`, the session's since og-ue-simulationcomponentandmanagersplit task 26a | `UESimulationSession.h` (OGSimulationUnreal; `OGBrawlerSimulationManager.cpp` before) |
 | `[ResimCheck.TriggerRewind]` | `TriggerRewindIfNeeded_Internal`, the two `rewind=0` lines (Chaos only) | `ChaosTickBackendUImpl.cpp` |
-| `[ServerReceive]` | `receiveRemoteMoveBundle` (the RPC tail since og-ue-simulationcomponentandmanagersplit task 20a), the no-coordinator path | `UESimulatableOwnerBinding.h` (since task 21; was `OGBrawlerSimulatableComponent.cpp`) |
-| `[ReceiveCorrectionState]` | `onCorrectionStateAccepted`, called from `USimulatableNetSyncComponent::OnRep_CorrectionState` since task 20a | `UESimulatableOwnerBinding.h` (since task 21; was `OGBrawlerSimulatableComponent.cpp`) |
 | `[ClientPrediction]` | `buildPlayerInput` | `OGBrawlerInputCollectionComponent.cpp` |
 
-The category stays at the site. Nothing checks that it is the row's category; all six agree today.
+The category stays at the site. Nothing checks that it is the row's category; all four sites agree today. Until
+og-input-latency task P5-8 the table had two more rows, both in `UESimulatableOwnerBinding.h` since task 21 (in
+`OGBrawlerSimulatableComponent.cpp` before): `[ServerReceive]`, from `receiveRemoteMoveBundle`'s no-coordinator path
+(the RPC tail since og-ue-simulationcomponentandmanagersplit task 20a), and `[ReceiveCorrectionState]`, from
+`onCorrectionStateAccepted`, which `USimulatableNetSyncComponent::OnRep_CorrectionState` called since task 20a. P5-8
+deleted both with the binding's net half; the `[ReceiveCorrectionState]` line is og-sim-net's client session's since P5-7.
 
 **Direct sites that stay at a fixed `Log`:**
 
@@ -801,9 +835,10 @@ no reset-order hazard remains because the single routing pass *is* the system's 
 
 ### The host boundary: moved to the session (task 25)
 
-Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit task 25). `onInputRelayHostReady` is the
-session's, and it attaches the relay host to the character's `USimulatableNetSyncComponent` (the brawler component's
-binding forwarded there before). The bridge argument (no map, idempotent) moved with it to `UESimulationSession-rationale.md` §9.5.
+Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit task 25), where the session attached each
+relay host to the character's `USimulatableNetSyncComponent` until og-input-latency task P5-7 retired the relay host
+(`UESimulationSession-rationale.md` §9.5). This class's explicit instantiation of that member, and the `extern template` that
+matched it in the header, went with it.
 
 ### The relay tap: moved to the session (task 26a)
 
@@ -1145,17 +1180,18 @@ use (`SimulationManagerUImpl.h` initialises `m_relayWriteProbe` with it), and st
 > *"into that character's replicated relay ring (`FRelayedInputRing` on
 > `USimmableUpdateComponent`, `DOREPLIFETIME` with **NO** `COND_`)"*.
 
-Both halves are false in the current tree:
+Both halves were false in the tree of that audit (og-input-latency task P5-9 later deleted the relay actor and its
+ring; since P5-7 relayed inputs ride og-net):
 
-- the replicated ring is **`ASimulationInputRelay::m_relayedInputRing`**. `USimmableUpdateComponent`
+- the replicated ring was **`ASimulationInputRelay::m_relayedInputRing`**. `USimmableUpdateComponent`
   held `m_detachedRelayRing`, the *no-host read fallback* (since og-ue-simulationcomponentandmanagersplit
-  task 20b the sibling `USimulatableNetSyncComponent` holds it). A server write with no host lands in
+  task 20b the sibling `USimulatableNetSyncComponent` held it). A server write with no host landed in
   `m_detachedRelayStagingRing` instead (`SimulatableNetSyncComponent-rationale.md` §10,
   `UESimulatableOwnerBinding-rationale.md` §6 since og-ue-simulationcomponentandmanagersplit task 21,
   `SimmableUpdateComponent-rationale.md` §12; the
   header comment this line used to quote was removed in task 25's conversion and was itself false,
   F-25-5);
-- the registration is **`DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing,
+- the registration was **`DOREPLIFETIME_CONDITION(ASimulationInputRelay, m_relayedInputRing,
   COND_SkipOwner)`**. The old `DOREPLIFETIME(USimmableUpdateComponent, m_relayedInputRing)` stood
   on the component and was replaced; its absence is fenced by G-09 of
   `SimulatableNetSyncComponent-guards.md` (G-33 of `SimmableUpdateComponent-guards.md` until
@@ -2837,7 +2873,7 @@ observed. The file was then restored and its hash checked.
 |---|---|---|
 | the request is counted after the tick conversion | data dependency: `noteResimRequest` takes the converted tick | hoisted above it ⇒ `C2065` |
 | a stale route is skipped, never erased, in the score push | the route table arrives by `const&` | `routes.erase(id)` ⇒ `C2663` |
-| no depth is passed to the relay stage | `stageRelayedInput` has no depth parameter; `RelayRedundancyDepthTest.cpp` | not re-poisoned here |
+| no depth is passed to the relay stage | `stageRelayedInput` had no depth parameter (og-input-latency task P5-8 deleted it); `RelayRedundancyDepthTest.cpp` | not re-poisoned here |
 | a client must not push scores | `SetAuthoritativeRingoutScore`'s `checkf` on `HasAuthority()` (the pawn replicates) | not re-poisoned here |
 | `isRoot` must not be removed | `static_assert` on `kCharacterCapsuleBody` in `BrawlerMovementSimulation.h` | not re-poisoned here |
 | spawn points must not be ordered by `FName` | `LevelSpawnPoint::name` is a `std::string` in an engine-free header | not poisoned here |
@@ -3058,8 +3094,9 @@ members and `LogOGChaosDilation` do not exist and its view's four members are in
 component's input-sample time and its view do not exist, so `BrawlerSessionGameUImpl::inputSampledSeconds` is not
 declared either. **What still runs at 0, deliberately:** the Chaos async callback still reads `FPlatformTime::Seconds`
 before `onGameSimulation`, because the step-start time must be taken before the step and it is a production local beside
-production statements; and the authority's relay-host flush callback is still bound (the sibling's `attachInputRelayHost`
-binds `makeRingFlushedCallback`'s result), with a body that is a single `withInstance` call, a no-op at 0.
+production statements. Until og-input-latency task P5-8 the authority's relay-host flush callback was also still
+bound (the sibling's `attachInputRelayHost` bound `makeRingFlushedCallback`'s result), with a body that was a single
+`withInstance` call, a no-op at 0; P5-8 deleted both.
 
 **The fence test** (the template's rationale §5) forces the macro in this module's `OGBrawlerUnreal.Build.cs` through a
 `PublicDefinitions` entry. The harness's two Chaos client checks for the latency lines (`[ChaosDilation]` present with
@@ -3067,6 +3104,15 @@ binds `makeRingFlushedCallback`'s result), with a body that is a single `withIns
 task 18's lead ruling).
 
 ### The hop table: stamp sites and known measurement error
+
+> **History for the network hops.** Since og-input-latency task P5-7 the receipt and hand-off stamps of `H2`, `H3`, `H4`,
+> `H4r`, `H6`, `H6c` and `H6L` are taken by og-sim-net through the Unreal sim-net hosts (`UESimNetHost.h`:
+> `stampServerReceived`, `stampHanded`, `stampClientReceived`; `UESimNetHost-rationale.md` §4), and `WIRE`'s server
+> sample is taken in the server host's `rttMs`, which og-sim-net's server calls once per bundle. P5-8 deleted the binding's stamp sites the table names
+> (`sendLocalInputToAuthority`, `receiveRemoteMoveBundle`, `noteRelayedRingArrived`, `onCorrectionStateAccepted`, the
+> flush callback from `makeRingFlushedCallback`) and P5-9 the relay actor (`ASimulationInputRelay::PreReplication`) and
+> the timing relay. The rows below give those sites as they stood until P5-7; the step-side and game-thread sites
+> (`H1`, `H5`, `H7`, the ends in `UELatencyBudgetDiagnostics.h`) are unchanged.
 
 Times are `FPlatformTime::Seconds` (one monotonic clock per process). "GT" is the game thread and "PT" the step's
 thread (a task-graph worker on a client, the game thread on a dedicated server).
@@ -3439,6 +3485,20 @@ module silently keeps the other arm.
 After gate 22, task 21 deletes the Chaos arms, the macro, the constant and the traits header's Chaos
 branch, and retires the guards listed above. Since task 83 that is deleting `ChaosTickBackendUImpl.h` and `.cpp` with
 their two documents, the Chaos branches of the traits header and the selector, and the config flip.
+
+---
+
+## §19 The switch to og-net (og-input-latency task P5-7)
+
+The sim traffic rides og-net's sim lanes since P5-7 (`UESimulationSession-rationale.md` §16). What changed in this class's two
+files and in the composition root:
+- **The header** no longer includes the three relay listener interfaces (the session implements none), and no longer forward
+  declares the timing and connection relays or declares the `extern template` of the session's input-relay listener member.
+  It still includes `SimulatableBrawlerOwnerTraits.h`, which now names og-sim-net's channel as both owners.
+- **The `.cpp`** no longer includes the input relay's header or explicitly instantiates that listener member.
+- **The composition root** (`SimulationManagerSubsystem.cpp`) spawns only this actor; the timing relay's spawn went (§3).
+- **The lanes factory** is the game module's: `BrawlerSimNetLanesUImpl.cpp` defines it, and the module's `StartupModule`
+  registers it with the og-net driver (`BrawlerSimNetLanesUImpl-rationale.md`).
 
 ---
 
