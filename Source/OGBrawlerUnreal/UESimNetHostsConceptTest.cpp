@@ -130,6 +130,53 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 		EAutomationExpectedMessageFlags::Contains, 1);
 	TestEqual(TEXT("rttMs of an unknown og-net id is the no-reading sentinel"), rttHost.rttMs(4242u), kNoRttReadingMs);
 	TestEqual(TEXT("rttMs of a second unknown og-net id is the sentinel too"), rttHost.rttMs(4243u), kNoRttReadingMs);
+	{
+		FServerRttWarnings warnings;
+		const bool firstNoConnection = warnings.first(EServerRttUnavailable::NoConnection);
+		const bool secondNoConnection = warnings.first(EServerRttUnavailable::NoConnection);
+		const bool firstNoNetPing = warnings.first(EServerRttUnavailable::NoNetPing);
+		const bool secondNoNetPing = warnings.first(EServerRttUnavailable::NoNetPing);
+		TestTrue(TEXT("the server's RTT warning fires once per cause: a later cause still warns after an earlier one"),
+			firstNoConnection && !secondNoConnection && firstNoNetPing && !secondNoNetPing);
+	}
+	{
+		FServerConnectionLookup lookup;
+		FServerRttWarnings warnings;
+		constexpr double joinedSeconds = 100.0;
+		constexpr double leftSeconds = 100.1;
+		lookup.noteFound(*driver, 5001u, joinedSeconds);
+		const FServerConnectionFound leftMiss = lookup.find(driver, 5001u, leftSeconds);
+		const FServerConnectionFound unknownMiss = lookup.find(driver, 5002u, leftSeconds);
+		const bool leaveWarned = leftMiss.missingCause != EServerRttUnavailable::None && warnings.first(leftMiss.missingCause);
+		const bool outageWarned = unknownMiss.missingCause != EServerRttUnavailable::None && warnings.first(unknownMiss.missingCause);
+		TestTrue(TEXT("a graceful leave's miss spends no NoConnection warning, so a later unknown og-net id still warns"),
+			leftMiss.connection == nullptr && unknownMiss.connection == nullptr && !leaveWarned && outageWarned);
+		TestTrue(TEXT("the leaver's later bundles in its drained close are still a leave"),
+			lookup.find(driver, 5001u, leftSeconds + ognetunreal::kDrainedCloseSeconds).missingCause == EServerRttUnavailable::None);
+		lookup.noteFound(*driver, 5003u, joinedSeconds);
+		lookup.noteFound(*driver, 5004u, leftSeconds);
+		TestTrue(TEXT("a found og-net id that the driver dropped before any miss is a leave too"),
+			lookup.find(driver, 5003u, leftSeconds + 1.0).missingCause == EServerRttUnavailable::None);
+		const double forgetSeconds = leftSeconds + kServerGoneConnectionForgetSeconds + 1.0;
+		lookup.noteFound(*driver, 5005u, forgetSeconds);
+		TestTrue(TEXT("a closed og-net id is forgotten once its forget window has passed"),
+			lookup.find(driver, 5001u, forgetSeconds).missingCause == EServerRttUnavailable::NoConnection);
+		TestTrue(TEXT("the connection lookup with no driver reports NoDriver"),
+			lookup.find(nullptr, 5001u, forgetSeconds).missingCause == EServerRttUnavailable::NoDriver);
+	}
+	{
+		FClientRttWarnings warnings;
+		for (uint32 causeIndex = 1u; causeIndex < static_cast<uint32>(EClientRttUnavailable::Count); ++causeIndex)
+		{
+			const EClientRttUnavailable cause = static_cast<EClientRttUnavailable>(causeIndex);
+			AddExpectedMessagePlain(
+				FString::Printf(TEXT("[RttSample] CLIENT prediction-offset RTT source unavailable (%s). NetworkTimeEstimator"),
+					clientRttUnavailableText(cause)),
+				ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
+			warnClientRttUnavailableOnce(warnings, cause);
+			warnClientRttUnavailableOnce(warnings, cause);
+		}
+	}
 
 	FRouteCapture capture;
 	const ELogVerbosity::Type configuredNetVerbosity = LogOGNet.GetVerbosity();

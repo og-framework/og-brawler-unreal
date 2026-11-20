@@ -9,7 +9,9 @@ Ids are opaque, stable, and retired rather than reused. The reasoning lives in
 
 The binding's shape is checked by the compiler, not here: the tick driver's template parameter is constrained by
 og-simulation's `TickDriverGame` concept, so a missing hook, a wrong return type or a manager by value does not
-compile where `TickDriverBackendUImpl` names the driver.
+compile where `TickDriverBackendUImpl` names the driver. The one optional hook, `sampleInput` (og-input-latency task
+P5-15), which the concept does not require, is held by a `static_assert` on `TickDriverSampleGame` at the end of the
+header (rationale §8).
 
 ---
 

@@ -234,7 +234,7 @@ entry. They are carried as they stood.
 **Site:** `const int32 firstUpcomingSimTick =` in `ChaosTickBackendUImpl::InjectInputs_External`, the Chaos
 configuration's input hook (`ChaosTickBackendUImpl-rationale.md` §2). Re-sited there from
 `releaseDelayedInputsForStep` by og-simulationscheduler-withjolt task 51, id kept: the computation is the
-same, and it feeds the session's `onFrameStepsDue_GameThread`, the drain and the reap with one value, as it
+same, and it feeds the session's `onFrameStepsDue_Step`, the drain and the reap with one value, as it
 did before the split. It retires with the Chaos configuration in task 21.
 
 **The prohibition, as it stood in the source:**

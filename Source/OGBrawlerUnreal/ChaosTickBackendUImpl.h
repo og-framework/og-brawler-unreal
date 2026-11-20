@@ -227,7 +227,7 @@ public:
 	void onEndPlayBegin() {}
 	void onEndPlayWorld(UWorld& world);
 	void beforePresent_GameThread() {}
-	void updateVisualization_GameThread();
+	void overlayRenderPoses_GameThread(unsigned int, simulatableBrawler::AllState&) {}
 
 	ChaosEngineTraitsUImpl::VizQuery&        editVizQuery();
 	const ChaosEngineTraitsUImpl::VizReader& getVizReader() const;

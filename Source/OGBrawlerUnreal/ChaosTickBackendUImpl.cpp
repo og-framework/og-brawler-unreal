@@ -506,7 +506,7 @@ void ChaosTickBackendUImpl::InjectInputs_External(int32 PhysicsStep, int32 NumSt
 	const int32 firstUpcomingSimTick =
 		static_cast<int32>(m_chaosTickMapper.toSimulationTick(static_cast<int32_t>(PhysicsStep))) + 1;
 
-	m_owner.onFrameStepsDue_GameThread(firstUpcomingSimTick, NumSteps);
+	m_owner.onFrameStepsDue_Step(firstUpcomingSimTick, NumSteps);
 
 	if (m_owner.hasServerTierWiring())
 	{
@@ -641,11 +641,6 @@ void ChaosTickBackendUImpl::onEndPlayWorld(UWorld& world)
 			}
 		}
 	}
-}
-
-void ChaosTickBackendUImpl::updateVisualization_GameThread()
-{
-	updateVisualizationAll(m_owner.m_storage);
 }
 
 ChaosEngineTraitsUImpl::VizQuery& ChaosTickBackendUImpl::editVizQuery()

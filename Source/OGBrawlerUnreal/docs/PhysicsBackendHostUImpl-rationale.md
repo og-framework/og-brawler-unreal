@@ -58,6 +58,12 @@ points, `bool` for `createBodies_GameThread` (`false` means `TryRegisterStatus::
 references (`EngineTraits::VizQuery&`, and `const EngineTraits::VizReader&` from a `const` backend) and
 `std::optional<QueryVolumeId>` for the three visualization doors.
 
+Since og-input-latency task P5-16 the frame entry point that followed the present is
+`overlayRenderPoses_GameThread(id, vizState)`, on a `simulatableBrawler::AllState&` the session owns, in place of
+`updateVisualization_GameThread()`, which copied the storage's state on the game thread
+(`UESimulationSession-rationale.md` §17.3, in OGSimulationUnreal's docs). The Jolt host writes the rendered poses there;
+the Chaos host's is empty, because its refresh only copied.
+
 It is asserted twice, on the configuration being built only (the other host's header is not included): once here,
 after the selector, for the composition the arm picked; and once in `BrawlerSessionTraitsUImpl.h`, on the
 traits' `PhysicsBackend<UESimulationSession<BrawlerSessionTraitsUImpl>>`, the type the session holds (in the actor's

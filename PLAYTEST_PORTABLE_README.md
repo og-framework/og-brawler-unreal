@@ -260,12 +260,15 @@ What does *not* work:
   Re-cook all three sides whenever assets or replicated code change.
 - Mixing pre-Stage-1 and post-Stage-1 builds (any pair where one side has the
   `og-netcode-v1-impl` Stage 1 wire-format change and the other doesn't) —
-  clients refuse to connect with a build-mismatch error. The wire-format version
-  byte (`FInputRedundancyBundle::kWireFormatVersion`,
-  `FSimulationStateSyncBuffer::kWireFormatVersion`) is checked on the server's
-  `ServerReceiveRemoteMove` and the client's `OnRep_CorrectionState`. A mismatch
-  surfaces as a clear log error on the server and an on-screen
-  "Build mismatch — please get the latest archive" message on the client.
+  clients refuse to connect with a build-mismatch error. The wire-format
+  versions travel in the build identity's wire token, which the server checks
+  at login: a mismatched client is refused before it joins, with a message
+  naming both tokens (`Source/OGBrawlerUnreal/docs/OGBuildIdentity-rationale.md`
+  §8). A correction of another version that still arrives makes the client log
+  an error and show an on-screen "Build mismatch — please get the latest
+  archive" message. (Until og-input-latency tasks P5-6 and P5-7 the version
+  bytes were checked on the server's `ServerReceiveRemoteMove` and the
+  client's `OnRep_CorrectionState`.)
   Unlike the generic revision-mismatch row above, this one is *explicitly
   detected* — it fails loudly instead of silently. See
   `OGBrawlerNetworkModelResearch/arch/risks_and_plan.md` §5.2 for the

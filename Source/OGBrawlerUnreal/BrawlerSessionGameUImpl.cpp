@@ -90,6 +90,27 @@ void BrawlerSessionGameUImpl::afterVisualization(const UESimulationSession<Brawl
 	}
 }
 
+BrawlerSessionGameUImpl::AuthorityPresentationSlice BrawlerSessionGameUImpl::authorityPresentationSlice_Step(
+	const BrawlerCompositionUImpl::SystemsExec& systems, unsigned int id)
+{
+	const brawlerRingout::ScoreSystem& scoreSystem = systems.get<brawlerRingout::ScoreSystem>();
+	return AuthorityPresentationSlice{ scoreSystem.scoreOf(id), scoreSystem.hasScoreEntry(id) };
+}
+
+void BrawlerSessionGameUImpl::presentAuthoritySlice(const UESimulationSession<BrawlerSessionTraitsUImpl>& session,
+	unsigned int id, const AuthorityPresentationSlice& slice)
+{
+	if (!slice.hasScoreEntry)
+		return;
+	const auto found = session.getRegisteredComponentsById().find(id);
+	if (found == session.getRegisteredComponentsById().end())
+		return;
+	UOGBrawlerSimulatableComponent* const component = found->second.Get();
+	AOGBrawlerUECharacter* const character = component != nullptr ? Cast<AOGBrawlerUECharacter>(component->GetOwner()) : nullptr;
+	if (character != nullptr)
+		character->SetAuthoritativeRingoutScore(static_cast<int32>(slice.ringoutScore));
+}
+
 BodyId BrawlerSessionGameUImpl::rootBodyId(const SimulatableBrawler& simulatable)
 {
     return simulatable.getPhysicsComposite()

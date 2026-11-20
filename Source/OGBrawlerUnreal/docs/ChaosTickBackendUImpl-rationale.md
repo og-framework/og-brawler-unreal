@@ -95,6 +95,12 @@ trivial: the callback object is freed by the engine in `onEndPlayWorld`, never b
 starts as `nullptr`. When it was the owner's member it had no initializer and read as null only because the engine
 zero-fills a `UObject`'s memory before construction; the initializer states that.
 
+**The visualization overlay is empty.** Since og-input-latency task P5-16 the session copies the state it draws out of its
+display snapshot and asks the backend to overlay the rendered poses on that copy (`overlayRenderPoses_GameThread`). This host
+has no render poses, so its overlay is an empty inline member; before the task its `updateVisualization_GameThread` called
+`updateVisualizationAll` on the session's storage, the plain copy the session now takes from the snapshot. Not built or run
+this initiative (EQ12): the edit is mechanical.
+
 **The delegates keep their lifetime.** `startStepping` binds the physics scene's post-tick delegate and the rewind
 callback's `InjectInputsExternal` delegate with `AddWeakLambda(&owner, …)`. The post-tick binding was already a weak
 lambda on the owner. The input hook was bound with `AddUObject` to the owner's own member function of the same name; both
@@ -107,7 +113,7 @@ because the seam passes the world, not the solver. Nothing changes them between 
 
 **The input hook.** `InjectInputs_External` fills the callback's producer input with the world and this backend,
 computes `firstUpcomingSimTick` from the mapper (`⛔G-07`, the `+ 1` of §4), and calls the session's
-`onFrameStepsDue_GameThread` (the actor's until og-ue-simulationcomponentandmanagersplit task 26b), then its drain and
+`onFrameStepsDue_Step` (the actor's until og-ue-simulationcomponentandmanagersplit task 26b), then its drain and
 reap when the session has a reception coordinator (the actor's until task 26a). The order of those calls is unchanged.
 
 **`buildWorld` moved two pieces, and nothing else in the order changed.**
@@ -382,7 +388,7 @@ to a single drain.
 In the Chaos configuration the caller is `ChaosTickBackendUImpl::InjectInputs_External`, bound to the rewind callback's
 `InjectInputsExternal` delegate (`FNetworkPhysicsCallback`). Chaos broadcasts it on the game thread,
 once per physics frame, as it hands the frame's steps to the solver. It computes
-`firstUpcomingSimTick` (`⛔G-07`) and passes the same value to `onFrameStepsDue_GameThread`, the drain
+`firstUpcomingSimTick` (`⛔G-07`) and passes the same value to `onFrameStepsDue_Step`, the drain
 and the reap (`OGBrawlerSimulationManager-rationale.md` §7). The drain is a no-op on a client and on a server with nothing parked; the
 frame-health probe is **not** a no-op on either role (`OGBrawlerSimulationManager-rationale.md` §11 C20).
 
@@ -564,7 +570,7 @@ first parameter and `m_owner`. Every statement kept its order; the text changed 
   `m_owner.onPostPhysicsStep()` since, under the session's friend line for its backend, and its weak object is still the
   actor, `&m_owner.owner()`); and the diagnostics view's three `GetWorld()` calls. All of them are public. `InjectInputs_External`'s `onFrameStepsDue_GameThread` went through
   `owner()` too, the one private member, until og-ue-simulationcomponentandmanagersplit task 26b moved it into the
-  session; it is `m_owner.onFrameStepsDue_GameThread` since, under the session's friend line for its backend, and the
+  session; it is `m_owner.onFrameStepsDue_Step` since, under the session's friend line for its backend, and the
   actor's friend line for this class covered no call any more (task 27b deleted it). The reception coordinator test, its reap and `releaseDelayedInputsForStep` went through `owner()` too until
   og-ue-simulationcomponentandmanagersplit task 26a moved them into the session; they read `m_owner.m_receptionCoordinator`
   and call `m_owner.releaseDelayedInputsForStep` since, under the session's friend line for its backend. Since og-input-latency

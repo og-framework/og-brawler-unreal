@@ -173,7 +173,7 @@ complete actor and `LogOGBrawler`), so the `.cpp` includes `OGBrawlerSimulationM
 The component's fifth hook, `storageKeyOfOwner`, is the key the binding names the owner by when the session owner never
 spawns. Both it and the component's `EndPlay` read the replicated id through the component's helper `simCharacterId`.
 
-**Each frame.** The backend calls the session before the steps (`onFrameStepsDue_GameThread`, and the authority's
+**Each frame.** The backend calls the session before the steps (`onFrameStepsDue_Step`, and the authority's
 release of delayed inputs) and after physics (`onPostPhysicsStep`): on Chaos from the physics scene's post-tick event in
 `ChaosTickBackendUImpl.cpp`, on the tick driver from `BrawlerTickDriverGameUImpl::onPostPhysics` (the driver's brawler
 side). The post-physics pass runs the backend's pre-present step, the core's post-simulation pass, the authority's

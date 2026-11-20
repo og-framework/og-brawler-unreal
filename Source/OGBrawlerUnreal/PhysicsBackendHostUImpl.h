@@ -31,14 +31,14 @@ namespace physicsBackendUImpl
 template <typename BackendT>
 concept PhysicsBackendHost = requires(BackendT& backend, const BackendT& constBackend, UWorld& world, float dt,
 	bool flag, UOGBrawlerSimulatableComponent& component, AOGBrawlerUECharacter& character, SimulatableBrawler& simulatable,
-	unsigned int id, const QueryVolumeDescriptor& descriptor, AActor& actor)
+	unsigned int id, const QueryVolumeDescriptor& descriptor, AActor& actor, simulatableBrawler::AllState& vizState)
 {
 	{ backend.buildWorld(world, dt, flag) } -> std::same_as<void>;
 	{ backend.startStepping(world, dt, flag) } -> std::same_as<void>;
 	{ backend.onEndPlayBegin() } -> std::same_as<void>;
 	{ backend.onEndPlayWorld(world) } -> std::same_as<void>;
 	{ backend.beforePresent_GameThread() } -> std::same_as<void>;
-	{ backend.updateVisualization_GameThread() } -> std::same_as<void>;
+	{ backend.overlayRenderPoses_GameThread(id, vizState) } -> std::same_as<void>;
 	{ backend.editVizQuery() } -> std::same_as<EngineTraits::VizQuery&>;
 	{ constBackend.getVizReader() } -> std::same_as<const EngineTraits::VizReader&>;
 	{ backend.registerVizVolume(descriptor, actor) } -> std::same_as<std::optional<QueryVolumeId>>;

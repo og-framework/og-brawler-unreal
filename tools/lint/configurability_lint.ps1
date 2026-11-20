@@ -144,9 +144,10 @@ $Blacklist = @(
         Field   = 'redundancyDepthTicks'
         # Catch the field and any sibling redundancyDepth* spelling assigned 3 or 5.
         Pattern = '(?<![\w.>])redundancyDepth\w*\s*=\s*[35]\b'
-        # T7 adds the FInputRedundancyBundle header; allow both candidate basenames
-        # (a dedicated header vs. SyncedSimulationStateBuffer.h) until T7 fixes the name.
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'InputRedundancyBundle.h', 'FInputRedundancyBundle.h')
+        # og-input-latency P5-33 (P3-10 A F3): SimNetClientSendAtCaptureTest.cpp's sendConfig()
+        # takes the depth as a PARAMETER default and writes it into a TimeConfig
+        # (config.redundancyDepthTicks = ...): a test input, not a second home for the default.
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'SimNetClientSendAtCaptureTest.cpp')
         Message = 'redundancyDepthTicks default (5 @100Hz interim / 3 @60Hz target) must live only in TimeConfig; read config.redundancyDepthTicks instead of re-declaring it (R-P1)'
     },
     # ⛔ RETIRED (item 63 / RN-13, 2026-08-16): the relay-ring retention-depth
@@ -169,7 +170,10 @@ $Blacklist = @(
         # is intentionally not guarded here: it is derived from two other config
         # quantities at the clamp site, not written as a tuning literal anywhere.
         Pattern = '(?<![\w.>])relayDelayFloorTicks\s*=\s*0\b'
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        # og-input-latency P5-33 (P3-10 A F3): SimulationDisplaySnapshot.h's DisplayTierReading
+        # holds a COPY of the floor the client received, for the game thread's display; its
+        # member initialiser is the empty reading, not the lever's default.
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'SimulationDisplaySnapshot.h')
         Message = 'relayDelayFloorTicks default (0 — degenerate, the floor lever ships off) must live only in TimeConfig; read config.relayDelayFloorTicks instead of re-declaring it (R-P1)'
     },
     @{
@@ -216,7 +220,8 @@ $Blacklist = @(
     @{
         Field   = 'redundancyFrames'
         Pattern = '(?<![\w.>])redundancyFrames\s*=\s*0\b'
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        # og-input-latency P5-33: the same sendConfig() parameter default as redundancyDepthTicks.
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'SimNetClientSendAtCaptureTest.cpp')
         Message = 'redundancyFrames default (0 — use today''s redundancyDepthTicks) must live only in TimeConfig; read config.redundancyFrames instead of re-declaring it (R-P1)'
     },
     @{
@@ -386,6 +391,12 @@ $Blacklist = @(
         Message = 'jitterMultiplier default (2.0) must live only in TimeConfig; read config.jitterMultiplier instead of re-declaring it (R-P1)'
     },
     @{
+        Field   = 'simClockJitterMultiplier'
+        Pattern = '(?<![\w.>])simClockJitterMultiplier\s*=\s*0\.5\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'simClockJitterMultiplier default (0.5 - the SimClock source''s jitter multiplier, measured by og-input-latency P3-13) must live only in TimeConfig; read config.simClockJitterMultiplier instead of re-declaring it (R-P1)'
+    },
+    @{
         Field   = 'softDriftThresholdTicks'
         Pattern = '(?<![\w.>])softDriftThresholdTicks\s*=\s*3\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
@@ -408,6 +419,12 @@ $Blacklist = @(
         Pattern = '(?<![\w.>])recentreSettleSamples\s*=\s*30\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
         Message = 'recentreSettleSamples default (30 - the one-shot re-centre''s settle window, og-input-latency task 27) must live only in TimeConfig; read config.recentreSettleSamples instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'clockRttSource'
+        Pattern = '(?<![\w.>])clockRttSource\s*=\s*(TimeConfig::)?ClockRttSource::'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'clockRttSource default (ClockRttSource::SimClock - the client clock''s RTT source since P3-10''s flip, Engine before it, og-input-latency P3-10) must live only in TimeConfig; read config.clockRttSource instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'harnessMode'

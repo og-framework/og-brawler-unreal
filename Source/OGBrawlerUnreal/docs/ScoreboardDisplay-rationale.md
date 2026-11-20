@@ -155,6 +155,11 @@ pass, on the line immediately above the score push, and that copy is the sanctio
 physics→game handoff. A HUD calling `getAllState` would be a fresh, unargued cross-thread
 read of live simulation state, so the accessor deliberately offers no route to one.
 
+**Since og-input-latency task P5-16** `getVizSlice` answers from the session's display copy: the state as of the end of
+the last step batch, which the session copies out of its display snapshot once per post-physics pass
+(`UESimulationSession-rationale.md` §17, in OGSimulationUnreal's docs). The storage's `m_vizState` is no longer refreshed,
+and the guard now forbids the storage in both forms. The handoff argument above is the record of the copy it replaced.
+
 ⛔ The accessor returns **by value and `const`**. The slice is five bytes of plain data;
 returning a reference would hand a drawing surface a pointer into live storage for as long
 as it cared to keep it. Together with the `const AOGBrawlerSimulationManager*` the HUD holds, whose `session()` is then
@@ -220,6 +225,12 @@ therefore gates on `runsPrediction` before reading `getPredictionTick`, and take
 `getServerClock` otherwise. This is the same guard `pollInputHistoryLanes` makes at the
 same accessor, and it is not defensive coding: without it, turning the board on during a
 listen-server session would close the editor.
+
+*Since og-input-latency task P5-16* `displayTick` reads neither clock: it answers the held display snapshot's
+`clock.predictionTick`, which the session fills from the prediction step on a predicting role and from the simulation step
+on an authority, the same two ticks as before, as of the last post-physics pass. With no snapshot yet it answers
+`nullopt`, and then `getVizSlice` answers nothing either, so no row has a countdown. The hazard above is the session's now:
+its publish reads `getClientClock` only on a predicting role.
 
 **2. The display tick moves BACKWARDS.** A hard resync rewinds the prediction clock. Both
 ticks are `uint32_t`, so an unguarded subtraction wraps to roughly four billion and the

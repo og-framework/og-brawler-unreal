@@ -1,4 +1,11 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: getLocalInputCache -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
+<!-- lint-external-ref: getRelayedReadObservations -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
+<!-- lint-external-ref: getRelayedInputArrivals -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
+<!-- lint-external-ref: getStorage -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
+<!-- lint-external-ref: makeReconciliationSlotReader -- deleted by og-input-latency task P5-16 (the lanes poll reads the display snapshot's applied window); kept in the history -->
+<!-- lint-external-ref: ReconciliationSlotReader::hasCorrectionCache -- deleted by og-input-latency task P5-16 (the lanes poll reads the display snapshot's applied window); kept in the history -->
+<!-- lint-external-ref: predictionClock -- a local of pollInputHistoryLanes until og-input-latency task P5-16 (the clock reading comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: AHUD::DrawText -- the engine's own HUD draw call; owned by the host engine, not by this repository, and must not resolve here -->
 <!-- lint-external-ref: AHUD::GetTextSize -- the engine's own HUD text measure; owned by the host engine, not by this repository, and must not resolve here -->
 <!-- lint-external-ref: FRotationTranslationMatrix -- the engine's own rotation matrix, whose Y row IS the right vector; owned by the host engine, not by this repository, and must not resolve here -->
@@ -777,6 +784,11 @@ that one entry point does, not the set of entry points. *(Since og-ue-simulation
 `pollInputHistoryLanes` is a member of the feed, `BrawlerInputHistoryFeedUImpl`, and off that list: the feed's `const`
 reference to the manager does the list's job, §8.6.)*
 
+⚠ **History since og-input-latency task P5-16 (§8.7).** The lanes poll reads the tier, the floor and the published delay
+from the display snapshot's tier reading, so the argument below is the record of the reads it argued. Since og-input-latency
+task P5-7 the "OnRep listeners" are og-sim-net's tier and floor arrivals, on the client session's drain thread (the step's
+thread on an immediate client), so the writers it names are no longer all on the game thread.
+
 **The same-thread argument, stated once rather than per field.** `ReplicatedTierConsumer`'s
 tier is GAME-THREAD-written (`applyReplicatedConnectionTier`, §5 of the manager rationale);
 the shared `TimeConfig` is GAME-THREAD-bound at `BeginPlay` and mutated only by the OnRep
@@ -1396,6 +1408,10 @@ header's `distanceMeters` unscaled (task 23a).
 
 ### 8.4 The seam reader, and the store's two polls
 
+> ⚠ **History since og-input-latency task P5-16 (§8.7).** `ReconciliationSlotReader` and `makeReconciliationSlotReader`
+> are deleted: the lanes poll reads the display snapshot's applied window, which answers the same three questions. The
+> store's row poll no longer takes a `LocalInputCache` and its `static_assert` is gone. The text below is the record.
+
 `ReconciliationSlotReader` puts two diagnostic seams behind one reader: `getAppliedCaptureTickRef` and
 `slotStateProvenance`. The pure poll asks both at the **same** simulation tick (`observation.appliedTick` in
 `rebuildAppliedCaptureInversion`). Same-tick is the load-bearing part: it is what licenses the join's rule that an
@@ -1498,6 +1514,11 @@ template, compiled with the instantiating translation unit's end state, which is
 changed.
 
 #### The read crossing — `pollInputHistory`, and why its tear is accepted
+
+> ⚠ **History since og-input-latency task P5-16 (§8.7).** No read below crosses a thread any more: the feed reads the
+> session's display snapshot, a copy filled after the step batch. The paragraphs are the record of the reads they argued,
+> and of the doors (`getLocalInputCache`, the two relayed-ring doors, the const `editReconciliation`, `getStorage`) that
+> P5-16 deleted.
 
 `getLocalInputCache` opens a game-thread door onto `m_localInputCaches`, whose *contents* are
 written on the physics thread by `SimulationInputResolution::collectInputAll` (`LocalInputCache::push`)
@@ -1685,3 +1706,90 @@ reading.
 | C22-8 | §8.4: `InputHistoryStore::poll`'s "two `static_assert`s carry the accepted-tear argument" | There is one, and its message names the two it replaced (og-syncedInput-rework task 3). Corrected in §8.4. |
 | C22-9 | the stall debt is "physics-written" | It is written on both threads (added by the game thread's request, decremented by the step). The accepted-tear conclusion is unchanged. |
 | C22-10 | §7.12: "A FRESH COUNT BESIDE A STALE TICK IS THEREFORE IMPOSSIBLE" | The same overclaim `OGBrawlerSimulationManager-rationale.md` §11 C14 records: non-atomic data, so unlikely, not impossible. Annotated in §7.12. |
+
+### 8.7 The display snapshot (og-input-latency task P5-16)
+
+Since og-input-latency task P5-16 the feed reads the session's display snapshot, and nothing else of the client's
+simulation: not the storage, not the input resolution's diagnostics, not the reconciliation, not the clock or the
+estimator. The snapshot is filled once per frame after the step batch, on the thread that runs the post-physics pass, while
+nothing steps; the feed reads the copy the session holds for the frame (`UESimulationSession-rationale.md` §17, in
+OGSimulationUnreal's docs). So the read crossings §8.4 and §8.6 argue (the accepted tear of a capture slot, the provenance
+byte, the four-byte clock words and their read order) no longer exist at these reads: they are reads of a copy on the
+thread that made it. Those paragraphs are kept as the record of the reads they argued.
+
+**What each read reads now.**
+
+| read | until P5-16 | since P5-16 |
+|---|---|---|
+| `pollInputHistory` | `getLocalInputCache(id)`, through `DelayLineMotionHistory` | the entry's `localCaptures` (a window of the cache's captures, same `at(tick)` contract), when `hasLocalInputCache` |
+| `pollInputHistoryLanes`: the offset | the estimator's `getPredictionOffsetTicks()` | the snapshot clock's `predictionOffsetTicks` (G-09) |
+| the locality test | `getLocalInputCache(id) != nullptr` | the entry's `hasLocalInputCache` (G-10) |
+| the tier decomposition | the tier consumer, `getTimeConfig()`, the published-delay atomic | the snapshot's tier reading, and a copy of `getTimeConfig()` with the snapshot's floor (G-11) |
+| the clock reading | the client clock and the estimator | the snapshot's clock reading, field for field (G-12) |
+| the relayed rings | `getRelayedReadObservations`, `getRelayedInputArrivals` | the entry's rings, by value, when present |
+| the applied refs and provenance | `ReconciliationSlotReader` over the reconciliation | the entry's `applied` window, the same three questions |
+| `getRelayReadReadout` | `getRelayedReadObservations(id)` | the entry's read ring |
+| `gatherNearestCandidates` | the storage's `getVizState()` copies | the session's display copies (G-17) |
+
+The lanes poll returns at once for an id without an entry, as the row poll does; the component calls it only for an id
+whose entry it has just drawn, so no caller reaches that return today.
+
+**The windows are asserted where they are read.** The session's snapshot carries `kSessionDisplayWindowTicks` capture
+ticks and applied ticks (64, the local input cache's capacity), and the session names no brawler constant. Two
+`static_assert`s at the top of the feed's definitions require the snapshot's windows to cover the polls' windows,
+`kCapturePollWindowTicks` (64) and `kAppliedPollWindowTicks` (60): a narrower snapshot would show captured ticks as absent
+and applied ticks as unapplied, silently. Each ends at the same tick as the poll: the component passes the snapshot
+clock's `predictionTick` as both polls' newest tick, and the fill ended both windows there.
+
+**What the store's row poll lost, and why.** `InputHistoryStore::poll` took the cache and built a `DelayLineMotionHistory`
+over it; it now takes any history with `at(tick)` returning a pointer to the capture or null, and the snapshot's window is
+one. Its `static_assert` that `simulatableBrawler::PlayerInput` is trivially copyable is deleted: it guarded a game-thread
+read of a slot the physics thread could be writing (§8.6, "Why it cannot fault"), and no such read remains. The
+snapshot copies the input by assignment on the post-physics pass.
+
+**The presence test (was G-06) and the read order (was G-13).** Both guards retired with their subjects. The applied
+window's `hasCorrectionCache` is a value the fill copied, and the clock's seven event words are copied by
+`readDisplayClock` (og-simulation) while nothing steps, so there is no reader across a writer to order. Their entries, as
+they stood:
+
+##### The retired entry, verbatim: G-06 — the presence test stays a presence test
+
+**Site:** `return m_reconciliation.template findCorrectionCache<SimulatableT>(m_id) != nullptr;` in
+`ReconciliationSlotReader::hasCorrectionCache`.
+
+**The prohibition, as it stood in the source:**
+
+> ⛔ SAME-THREAD, NOT A CROSSING -- the cache map is mutated on the GAME THREAD alone
+> (createCacheFor/removeCacheFor); a presence test, not the input read the fence bars.
+
+**Verified (R0).** `createCacheFor` is called only from `registerSimulatable`, and `removeCacheFor` only from
+`unregisterSimulatableContainers`, through the `unregisterSimulatable` facade. Both are reached from
+`tryRegister` / `unregisterFromNewFramework` on the game thread (the actor's until og-ue-simulationcomponentandmanagersplit
+task 28, the session's since). The reader is called from
+the lane poll, which `UOGBrawlerSimulatableComponent::TickComponent` runs on the game thread. The manager's own side of
+this argument is in `InputHistoryDisplay-rationale.md` §8.6 ("The presence test crosses nothing either"), which task 22
+moved there from `OGBrawlerSimulationManager-rationale.md` §1 with the feed.
+
+**Consequence.** Turning this into a read *through* the found cache (its states or inputs) is a game-thread read of
+physics-thread-written slots. That is a crossing this reader was argued free of.
+
+##### The retired entry, verbatim: G-13 — Each event counter is read BEFORE its tick
+
+**Moved from** `OGBrawlerSimulationManager-guards.md` G-09 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
+
+**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the first of the seven `predictionClock.getDiagnostics()` reads in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes` (`reading.skipCount`).
+
+**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
+
+<!-- header lines 606-606 at b9f6d81 -->
+```
+// ⛔ COUNT BEFORE ITS TICK: the clock writes tick then count, so the tear is one-way.
+```
+
+**What breaks if the edit is made.** `ClientPredictionClock` writes each pair tick-first, count-second (`ClientPredictionClock.cpp`: `lastSkipTick` then `++skipCount`, and likewise for stall and hard resync). Reading count-first makes the harmful straddle — a fresh count beside a stale tick, which files an event against a tick that predates it — the one the program order does not produce. Reversing the reads makes it the likely one.
+
+⛔ **R0, task 11 — the fence overclaims, and the rationale doc's copy said "CANNOT be observed".** Both sides are plain `unsigned int`s: neither the writes nor the reads are atomic, so C++ gives no ordering guarantee at all, and an optimizing compiler may reorder either pair. Source order makes the harmful straddle unlikely; it does not make it impossible. The guard is still worth keeping — reversing the order makes the wrong case the expected one — but the property it protects is "unlikely", not "unreachable". A real guarantee needs acquire/release atomics in `og-simulation`, which is not this file's to change.
+
+The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes no bare accessor"* — is not a guard. The compiler already holds it (task 11 measured `c.skipCount()` → `C2039` and `c.m_eventSeamDiagnostics` → `C2248`).
+
+**Verified (R0, task 22).** All four write sites are in `ClientPredictionClock::advancePrediction`, and each writes its tick (the hard resync: both ticks) before `++` on its count. The seven fields are plain `unsigned int`s of `EventSeamDiagnostics`, read through `getDiagnostics()`. The task-11 R0 paragraph above stands.

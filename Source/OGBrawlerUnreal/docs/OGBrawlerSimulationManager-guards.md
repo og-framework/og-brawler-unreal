@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: predictionClock -- a local of pollInputHistoryLanes until og-input-latency task P5-16 (the clock reading comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: OnRep -- Unreal Engine replication hook name, outside every scan root -->
 <!-- lint-external-ref: registerInstance -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
 <!-- lint-external-ref: noteDelayedInputComponent -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->

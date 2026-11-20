@@ -27,6 +27,7 @@
 #include "OGBrawler/InputSequence/GameMotions.h"
 
 UOGBrawlerInputCollectionComponent::UOGBrawlerInputCollectionComponent()
+	: m_sampleMailbox(std::make_unique<TripleBuffer<BrawlerInputSample>>())
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
@@ -125,6 +126,48 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 
 	// Latency-budget hop H1 start: this frame's input sample (docs/BrawlerSessionGameUImpl-rationale.md §2).
 	noteInputSampled();
+
+	refreshGameThreadCaches(*ch);
+
+	// [og-input-latency P5-15] Stage this frame's sample after the caches are refreshed, whichever
+	// of refreshGameThreadCaches' returns was taken (a missing controller or look mode still wrote
+	// a zero aim). sampledSeconds keeps the stamp noteInputSampled took above.
+	writeSampleFields(m_stagedSample);
+
+#if OG_PHYSICS_BACKEND_CHAOS
+	// The Chaos configuration has no tick driver, so no sampleInput hook publishes; its steps start
+	// after this Tick (InjectInputs_External, at the physics frame's start), as the hook's would.
+	publishSample();
+#endif
+}
+
+void UOGBrawlerInputCollectionComponent::publishSample()
+{
+	checkf(IsInGameThread(),
+		TEXT("UOGBrawlerInputCollectionComponent::publishSample runs on the game thread only: the input-sample ")
+		TEXT("TripleBuffer has one producer, and the staged sample is the game thread's (og-input-latency P5-15)."));
+	m_sampleMailbox->write() = m_stagedSample;
+	m_sampleMailbox->publish();
+}
+
+void UOGBrawlerInputCollectionComponent::writeSampleFields(BrawlerInputSample& sample) const
+{
+	sample.hasInputComponent       = hasInputComponent();
+	sample.camForward              = m_camForwardCache;
+	sample.mouseAim                = m_mouseAimCache;
+	sample.moveKeys                = m_moveKeys;
+	sample.leftStick               = m_leftStick;
+	sample.rightStick              = m_rightStick;
+	sample.leftAttack              = m_leftAttack;
+	sample.rightAttack             = m_rightAttack;
+	sample.blockLook               = m_blockLook;
+	sample.holdGuard               = m_holdGuard;
+	sample.lastMoveInputWasGamepad = m_lastMoveInputWasGamepad;
+}
+
+void UOGBrawlerInputCollectionComponent::refreshGameThreadCaches(AOGBrawlerUECharacter& characterRef)
+{
+	AOGBrawlerUECharacter* ch = &characterRef;
 
 	// Resolve camera forward: PCM with FollowCamera fallback.
 	// Single home for the resolution previously duplicated in OGBrawlerUECharacter::Tick
@@ -226,23 +269,48 @@ namespace
 	}
 } // namespace
 
+// [og-input-latency P5-15] The component's game-thread accessors run the sample's arithmetic on a
+// live sample of the members, so the GT readers and the step cannot compute differently.
 glm::vec2 UOGBrawlerInputCollectionComponent::getMoveStick() const
 {
-	return routeRawSticks(m_moveKeys, m_leftStick, m_rightStick).move;
+	return liveSample().getMoveStick();
 }
 
 glm::vec2 UOGBrawlerInputCollectionComponent::getAimStick() const
 {
-	return routeRawSticks(m_moveKeys, m_leftStick, m_rightStick).aim;
+	return liveSample().getAimStick();
 }
 
 glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
+{
+	return liveSample().buildAimDirection();
+}
+
+glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorld() const
+{
+	return liveSample().buildMoveDirectionWorld();
+}
+
+// The bodies below were the component's getMoveStick / getAimStick / buildAimDirection /
+// buildMoveDirectionWorld(For) until og-input-latency P5-15, unchanged but for the member names:
+// m_moveKeys -> moveKeys, m_camForwardCache -> camForward, m_mouseAimCache -> mouseAim, and so on.
+glm::vec2 BrawlerInputSample::getMoveStick() const
+{
+	return routeRawSticks(moveKeys, leftStick, rightStick).move;
+}
+
+glm::vec2 BrawlerInputSample::getAimStick() const
+{
+	return routeRawSticks(moveKeys, leftStick, rightStick).aim;
+}
+
+glm::vec3 BrawlerInputSample::buildAimDirection() const
 {
 	// AimRelative + BlockLook: the aim is the flattened camera forward, ahead of every stick and
 	// mouse branch (og-attackstatetransition-cleanup task 11; og-brawler
 	// DAttackMachineSimulationRuntimeTweakables-rationale.md §9).
 	if (const std::optional<glm::vec3> lookAim = dInput::stickRouting::cameraLookAim(
-			dAttackMachineSimulation::g_movementScheme.load(), m_blockLook, m_camForwardCache))
+			dAttackMachineSimulation::g_movementScheme.load(), blockLook, camForward))
 		return checkUnitAim(*lookAim);
 
 	const float aimDeadzone = dAttackMachineSimulation::g_aimStickDeadzone.load();
@@ -253,14 +321,14 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
 		// aim-stick-up means aim direction equals move direction). When no movement is
 		// happening, fall back to camera-forward as the reference so aim is still usable
 		// — that matches CameraRelative/AimRelative aim-stick behavior when idle.
-		glm::vec3 aimReference = m_camForwardCache;
+		glm::vec3 aimReference = camForward;
 		if (dAttackMachineSimulation::g_movementScheme == dAttackMachineSimulation::MovementScheme::MoveRelativeAim)
 		{
 			const glm::vec3 moveDir = buildMoveDirectionWorld();
 			if (glm::length(moveDir) > KINDA_SMALL_NUMBER)
 				aimReference = moveDir;
 		}
-		return checkUnitAim(getInputDirectionInCameraSpace(aimReference, aimStick3));
+		return checkUnitAim(UOGBrawlerInputCollectionComponent::getInputDirectionInCameraSpace(aimReference, aimStick3));
 	}
 
 	// Gamepad-only fallback: aim stick below deadzone AND move stick above its deadzone
@@ -272,23 +340,23 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildAimDirection() const
 	const float moveDeadzone = dAttackMachineSimulation::g_moveStickDeadzone.load();
 	const glm::vec3 moveStick3 = simFrame::fromForwardRight(getMoveStick(), 0.f);
 	if (dAttackMachineSimulation::g_gamepadMoveStickFeedsAim.load()
-		&& m_lastMoveInputWasGamepad
+		&& lastMoveInputWasGamepad
 		&& glm::length(moveStick3) > moveDeadzone)
-		return checkUnitAim(getInputDirectionInCameraSpace(m_camForwardCache, moveStick3));
+		return checkUnitAim(UOGBrawlerInputCollectionComponent::getInputDirectionInCameraSpace(camForward, moveStick3));
 
 	// Fall back to mouse aim if present, else camera forward.
-	if (glm::length(m_mouseAimCache) > 0.2f)
-		return checkUnitAim(glm::normalize(m_mouseAimCache));
-	const glm::vec3 cf = simFrame::flatten(m_camForwardCache);
+	if (glm::length(mouseAim) > 0.2f)
+		return checkUnitAim(glm::normalize(mouseAim));
+	const glm::vec3 cf = simFrame::flatten(camForward);
 	return checkUnitAim(glm::normalize(cf));
 }
 
-glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorldFor(const glm::vec3& referenceForward) const
+glm::vec3 BrawlerInputSample::buildMoveDirectionWorldFor(const glm::vec3& referenceForward) const
 {
-	return getInputDirectionInCameraSpace(referenceForward, simFrame::fromForwardRight(getMoveStick(), 0.f));
+	return UOGBrawlerInputCollectionComponent::getInputDirectionInCameraSpace(referenceForward, simFrame::fromForwardRight(getMoveStick(), 0.f));
 }
 
-glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorld() const
+glm::vec3 BrawlerInputSample::buildMoveDirectionWorld() const
 {
 	// Below the move-stick deadzone there is no meaningful direction — return zero so
 	// callers (sim PlayerInput, CMC Move) do not normalize a near-zero vector into NaN.
@@ -310,11 +378,11 @@ glm::vec3 UOGBrawlerInputCollectionComponent::buildMoveDirectionWorld() const
 		const bool gamepadAimFallback =
 			dAttackMachineSimulation::g_gamepadMoveStickFeedsAim.load()
 			&& !aimStickActive
-			&& m_lastMoveInputWasGamepad;
+			&& lastMoveInputWasGamepad;
 		if (!gamepadAimFallback)
 			return buildMoveDirectionWorldFor(buildAimDirection());
 	}
-	return buildMoveDirectionWorldFor(m_camForwardCache);
+	return buildMoveDirectionWorldFor(camForward);
 }
 
 glm::vec3 UOGBrawlerInputCollectionComponent::getInputDirectionInCameraSpace(const glm::vec3& camForward, const glm::vec3& inputDirection)
@@ -460,18 +528,26 @@ void UOGBrawlerInputCollectionComponent::onRightAttack(const FInputActionValue& 
 
 simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerInput(
     const SimulationTimeStep& step, uint32 componentId,
-    const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache) const
+    const LocalInputCache<simulatableBrawler::PlayerInput>& localInputCache)
 {
-	if (!hasInputComponent())
+	// [og-input-latency P5-15] Every live value below comes from `sample`, the latest published
+	// input sample, never from a member the game thread writes. ⛔ Do not read the component's
+	// raw fields, caches or accessors here (getLeftAttack(), m_moveKeys, buildAimDirection(), ...):
+	// they are the game thread's, and this runs on the step's thread.
+	const BrawlerInputSample* const sample = m_sampleMailbox->acquireLatest();
+#if OG_LATENCY_BUDGET_DIAGNOSTICS
+	m_consumedSampledSeconds.store(sample != nullptr ? sample->sampledSeconds : 0.0, std::memory_order_relaxed);
+#endif
+	if (sample == nullptr || !sample->hasInputComponent)
 		return simulatableBrawler::getZeroPlayerInput();
 
 	// Continuous fields via the shared core reader — the ONE source of truth, also used by
 	// buildLatestVisualizationInput(). Do not re-read the accessors directly here.
 	const simulatableBrawler::ContinuousInputFields continuous =
-		simulatableBrawler::readContinuousInputFields(*this);
+		simulatableBrawler::readContinuousInputFields(*sample);
 
-	const bool leftAttack  = getLeftAttack();
-	const bool rightAttack = getRightAttack();
+	const bool leftAttack  = sample->leftAttack;
+	const bool rightAttack = sample->rightAttack;
 
 	// [movement-sim task 14] THE POINT WHERE holdGuard REACHES THE SIMULATION. This is the
 	// field's first and only writer onto the wire: makeSimPlayerInput turns this bool into
@@ -506,19 +582,19 @@ simulatableBrawler::PlayerInput UOGBrawlerInputCollectionComponent::buildPlayerI
 	const float moveDeadzone = dAttackMachineSimulation::g_moveStickDeadzone.load();
 	const float backStopMaxMagnitude = dAttackMachineSimulation::g_backStopMaxMagnitude.load();
 	const bool holdGuard   = dInput::stickRouting::guardFreezeRequested(
-		getHoldGuard(),
-		dInput::stickRouting::StickSources{ m_moveKeys, m_leftStick, m_rightStick },
+		sample->holdGuard,
+		dInput::stickRouting::StickSources{ sample->moveKeys, sample->leftStick, sample->rightStick },
 		scheme, legacySwap, feedsAim, moveDeadzone, backStopMaxMagnitude);
 
 	// --- Motion-sequence matching (predicting client only) ---
 	// Runs over the client's RAW CAPTURE history and produces a triggeredActionId carried on
-	// the synced PlayerInput. The result replicates to the server through the normal
-	// PlayerInput RPC path — same trust model as attackLeft.
+	// the synced PlayerInput. The result reaches the server through the normal
+	// PlayerInput path (og-sim-net's input bundle; an RPC until og-input-latency P5-7) — same trust model as attackLeft.
 	//
 	// [T15] Everything below the argument list is engine-free and lives in
 	// OGBrawler/BrawlerMotionMatching.h, so it is reachable from OGBrawlerTests (which links
-	// OGBrawler but not this module). This function is now purely: read live fields, adapt the
-	// history, call the core. DelayLineMotionHistory is the has()-gated adapter — the delay
+	// OGBrawler but not this module). This function is now purely: read the published sample
+	// (og-input-latency P5-15; live fields before it), adapt the history, call the core. DelayLineMotionHistory is the has()-gated adapter — the delay
 	// line answers an absent tick with the NEUTRAL input, and matchSequence needs a nullptr.
 	const uint32_t triggeredActionId = simulatableBrawler::resolveTriggeredActionId(
 		simulatableBrawler::DelayLineMotionHistory(localInputCache),

@@ -41,11 +41,25 @@ public:
 	Manager& manager() { return *m_session.m_manager; }
 	Storage& storage() { return m_session.m_storage; }
 
-	void beforePump(double, TickRateDoor&) {}
+	template <typename CharacterT = Character>
+	void sampleInput()
+	{
+		for (const auto& entry : m_session.getRegisteredComponentsById())
+		{
+			auto* const registered = entry.second.Get();
+			CharacterT* const character = registered != nullptr ? Cast<CharacterT>(registered->GetOwner()) : nullptr;
+			if (character != nullptr)
+				character->getInputCollection()->publishSample();
+		}
+	}
+
+	void beforePump(double, TickRateDoor&) { m_session.beforeAuthorityPump_Runner(); }
+
+	IdleWake idleUntil(double deadlineSeconds) { return m_session.idleUntil_Runner(deadlineSeconds); }
 
 	void onFrameStepsDue(int32_t firstUpcomingSimTick, int32_t numSteps)
 	{
-		m_session.onFrameStepsDue_GameThread(firstUpcomingSimTick, numSteps);
+		m_session.onFrameStepsDue_Step(firstUpcomingSimTick, numSteps);
 	}
 
 	void afterInlineBatch(int32_t firstUpcomingSimTick) { m_session.afterAuthorityBatch(firstUpcomingSimTick); }
@@ -56,9 +70,19 @@ public:
 		m_session.releaseDelayedInputsForStep(static_cast<int32>(authorityTick), 1);
 	}
 
-	void onStepStarted(double stepStartSeconds) { m_session.editLatencyBudgetDiagnostics().stampAfterStep_Internal(stepStartSeconds); }
+	void receiveForStep() { m_session.receiveForClientStep_Step(); }
 
-	void onStepEnded() { m_session.editLatencyBudgetDiagnostics().stampStepEnd_Internal(); }
+	void onStepStarted(double stepStartSeconds)
+	{
+		m_session.editLatencyBudgetDiagnostics().stampAfterStep_Internal(stepStartSeconds);
+		m_session.afterClientCapture_Step();
+	}
+
+	void onStepEnded()
+	{
+		m_session.editLatencyBudgetDiagnostics().stampStepEnd_Internal();
+		m_session.afterStep_Step();
+	}
 
 	void onPostPhysics() { m_session.onPostPhysicsStep(); }
 
@@ -85,5 +109,20 @@ private:
 };
 
 using BrawlerTickDriverGame = BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>;
+
+static_assert(TickDriverSampleGame<BrawlerTickDriverGame>,
+	"BrawlerTickDriverGame must keep a void sampleInput(): SimulationTickDriver calls it only under if constexpr, so "
+	"without it nothing publishes the input sample and every client buildPlayerInput returns the neutral input. Added by "
+	"og-input-latency task P5-15.");
+
+static_assert(TickDriverReceiveGame<BrawlerTickDriverGame>,
+	"BrawlerTickDriverGame must keep a void receiveForStep(): TickDriverStepHooks calls it only under if constexpr, so "
+	"without it an immediate client's step never drains og-sim-net and receives nothing once its session is bound. Was the "
+	"drain in onStepStarted, which fed the next step (og-input-latency task P5-30).");
+
+static_assert(TickDriverIdleGame<BrawlerTickDriverGame>,
+	"BrawlerTickDriverGame must keep IdleWake idleUntil(double): SimulationTickBackend::runAuthorityLoop requires it, and the "
+	"authority runner services og-net only through it, so without it og.Sim.AuthorityLoop=1 cannot build. Added by "
+	"og-input-latency task P5-19 (P11 design section 4).");
 
 #undef HasAuthority

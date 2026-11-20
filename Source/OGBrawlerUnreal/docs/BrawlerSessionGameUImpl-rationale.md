@@ -18,6 +18,8 @@ code.
 * **§6** is the six start-up hooks (task 27b), with the gravity cross-check and the neutral input's guard.
 * **§7** is the four registration hooks (task 28), with the brawler's part of the registration: the capsule body id, the
   movement sub-simulation, the notify's dependants and the first-call pass's quoted comments.
+* **§8** is the two authority presentation hooks (og-input-latency task P5-20): the ring-out score push on a loop-on
+  dedicated server, from the session's authority presentation snapshot.
 * **§3** is how the header and the `.cpp` are compiled, and who includes the header.
 
 ---
@@ -53,9 +55,11 @@ thread only loads the time the input collection component published. Why that ma
 are the plugin's (`UELatencyBudgetDiagnostics-rationale.md` §2 and `UELatencyBudgetDiagnostics-guards.md` G-02, in
 OGSimulationUnreal's docs).
 
-**The input-sample time** is `UOGBrawlerInputCollectionComponent`'s `std::atomic<double>`, written by `noteInputSampled`
-(`FPlatformTime::Seconds`, relaxed) as the first statement of `updateGameThreadCache` after the owner check, on the game
-thread, once per frame: hop `H1`'s start. It starts at the frame's input refresh, not at the device event: Enhanced Input
+**The input-sample time** is `UOGBrawlerInputCollectionComponent`'s `std::atomic<double>` `m_consumedSampledSeconds`: the
+`sampledSeconds` of the input sample the latest `buildPlayerInput` consumed, stored by `buildPlayerInput` (relaxed) on the
+step's thread. That plain `sampledSeconds` is written by `noteInputSampled` (`FPlatformTime::Seconds`) into the staged
+sample as the first statement of `updateGameThreadCache` after the owner check, on the game thread, once per frame, and
+travels with the sample (og-input-latency task P5-15): hop `H1`'s start. It starts at the frame's input refresh, not at the device event: Enhanced Input
 dispatched the frame's events earlier in the same frame, and the OS queued them up to one frame before that, so the true
 input age is **under**-stated by up to one game frame. It exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1, as does
 its view `getDiagnostics()`, so `inputSampledSeconds` is declared only then; `inputSampleSource` is a production read and
@@ -82,8 +86,9 @@ provider on the client branch, and a listen host's local players have no client 
   them. `BrawlerSessionTraitsUImpl.h` still only forward-declares `BrawlerSessionGameUImpl`.
 * **The out-of-line hooks are defined in `BrawlerSessionGameUImpl.cpp`** (since task 33; until then in
   `OGBrawlerSimulationManager.cpp`, between the actor's own members, in its `OGSIM_OPTIMIZE_OFF` region). There are
-  eleven, in this order: `makeStaticData` (§4, task 24a), five of the six start-up hooks (§6, task 27b),
-  `afterVisualization` (§5, task 27a) and the four registration hooks (§7, task 28). They cannot be inline here: they
+  thirteen, in this order: `makeStaticData` (§4, task 24a), five of the six start-up hooks (§6, task 27b),
+  `afterVisualization` (§5, task 27a), the two authority presentation hooks (§8, og-input-latency task P5-20) and the four
+  registration hooks (§7, task 28). They cannot be inline here: they
   need what the actor's header declares (the complete actor, whose private `readMovementStaticDataCVars()`
   `makeStaticData` calls because the actor befriends this class, and `LogOGBrawler`), and that header includes this one
   before it declares them. So the `.cpp` includes the actor's header, right after this one (UBT requires a `.cpp`'s own
@@ -431,3 +436,30 @@ for the brawler, as the quote says (the session's §12.1 states it for any game)
 `onUnregistered`; the feed forwards it to its store, which erases the rows and the lanes under one key
 (`InputHistoryVisualizationUImpl-guards.md` G-04 and `InputHistoryDisplay-rationale.md` §8.1). The `§10` the note ends with was the actor's
 section, now split between this §7 and the session's §12.
+
+---
+
+## §8 The authority presentation hooks (og-input-latency task P5-20)
+
+| hook | brawler statements | when, which thread |
+|---|---|---|
+| `struct AuthorityPresentationSlice` | the ring-out score (`ringoutScore`) and whether the score system holds an entry for the id (`hasScoreEntry`) | the session's per-id entry type in its authority presentation snapshot |
+| `static authorityPresentationSlice_Step(systems, id)` | the executor's `brawlerRingout::ScoreSystem`: `scoreOf(id)` and `hasScoreEntry(id)` | once per stepping wake per simulatable, on the authority runner, after the batch (the session's `publishAuthorityPresentation_Runner`) |
+| `static presentAuthoritySlice(session, id, slice)` | with a score entry: the registered component for `id` (`getRegisteredComponentsById()`), its owner as the brawler character, `SetAuthoritativeRingoutScore(slice.ringoutScore)` | once per frame per entry of the newest snapshot, from the session's `onPostPhysicsStep`, on the game thread |
+
+* **Only with the authority loop on.** A loop-on dedicated server steps on the runner, so the score system is the runner's
+  and the game thread may not read it; `afterVisualization` (§5) is not called there (`UESimulationSession-rationale.md`
+  §19.5, in OGSimulationUnreal's docs). Instead the session publishes, after each batch, a snapshot with one slice per
+  simulatable from the first hook, and the game thread applies the newest one with the second (that file's §21.3). Every
+  other world keeps §5's push unchanged.
+* **The same write, from a copy.** `presentAuthoritySlice` writes the replicated score property exactly as
+  `BrawlerRosterUImpl::pushRingoutScores` does (the property's setter returns early on an unchanged value), so clients
+  learn it through the same `OnRep_RingoutScore` and the scoreboard reads the same property. The values are those of the
+  runner's newest published batch when the game thread reads the snapshot.
+* **No `checkf` on the entry.** `pushRingoutScores` `checkf`s that every routed id has a score entry, because its
+  game-thread read of the live map may not insert. The snapshot is a copy, so an id the runner has not yet notified to its
+  systems (its entry is created in `onCharacterRegistered`) carries `hasScoreEntry` false and is skipped; its score is 0
+  until then anyway.
+* **Defined in `BrawlerSessionGameUImpl.cpp`, in its `OGSIM_OPTIMIZE_OFF` region**, beside `afterVisualization`: the
+  second hook needs the complete brawler character (§3). The slice's two fields are the only brawler state the snapshot
+  carries; a new authority-only value a dedicated server must present joins the slice here.

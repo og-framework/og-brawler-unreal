@@ -141,7 +141,7 @@ guarded `TimeConfig` field**:
 | -------------------------- | --------------- | ------------- |
 | `rollbackWindowTicks`      | `12`            | `TimeConfig.h`, `TimeConfigDefaultsTest.cpp` |
 | `rollbackWindowHardCap`    | `20`            | `TimeConfig.h`, `TimeConfigDefaultsTest.cpp` |
-| `redundancyDepthTicks`     | `3` / `5`       | `TimeConfig.h`, `TimeConfigDefaultsTest.cpp`, `InputRedundancyBundle.h`, `FInputRedundancyBundle.h` |
+| `redundancyDepthTicks`     | `3` / `5`       | `TimeConfig.h`, `TimeConfigDefaultsTest.cpp`, `SimNetClientSendAtCaptureTest.cpp` (its `sendConfig()` parameter default, a test input) |
 | `tickFrequency`            | `60` / `100`    | `TimeConfig.h`, `NetworkTimeEstimator.cpp` |
 | `hardResyncThresholdTicks` | `15` (old default — must not reappear; current is `21`) | *(none)* |
 
@@ -161,9 +161,6 @@ default-drift updated."*
 
 ### Stage-specific extension points
 
-- **Task 7 (`FInputRedundancyBundle`)** — the `redundancyDepthTicks` entry already
-  allow-lists `InputRedundancyBundle.h` / `FInputRedundancyBundle.h`; T7 should keep
-  whichever basename it ships and drop the other.
 - **Task 14 (Stage 2 100→60 Hz audit)** — if the audit finds the async-physics tick
   setup hard-codes an Hz literal in a file, add that file to the `tickFrequency`
   entry's `Allowed` list (the member-access derive site

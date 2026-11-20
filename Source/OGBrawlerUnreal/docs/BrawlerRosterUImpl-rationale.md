@@ -483,7 +483,10 @@ would fire it in Development.
   unbind. The push reads it by `const&`, so `routes.erase(…)` still does not compile.
 - `SetAuthoritativeRingoutScore`'s `checkf` message names the push as `BrawlerRosterUImpl::pushRingoutScores`, called
   from `OnPostPhysicsStep`, since task 23. *Task 27a:* the message still says the actor's `OnPostPhysicsStep`; the call
-  is the hook's since then (the message is code, outside that task's ownership, and is listed for the lead).
+  is the hook's since then (the message is code, outside that task's ownership, and is listed for the lead). *og-input-latency
+  task P5-33:* the message names both writers now: this push, from the hook `BrawlerSessionGameUImpl::afterVisualization`
+  in the session's `onPostPhysicsStep`, and, with the authority loop on, `BrawlerSessionGameUImpl::presentAuthoritySlice`
+  from the runner's presentation snapshot (`UESimulationSession-rationale.md` §21.3).
 
 ---
 

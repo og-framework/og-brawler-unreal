@@ -45,6 +45,18 @@ public:
 
 	static void afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>& session);
 
+	struct AuthorityPresentationSlice
+	{
+		uint32 ringoutScore  = 0u;
+		bool   hasScoreEntry = false;
+	};
+
+	static AuthorityPresentationSlice authorityPresentationSlice_Step(const BrawlerCompositionUImpl::SystemsExec& systems,
+		unsigned int id);
+
+	static void presentAuthoritySlice(const UESimulationSession<BrawlerSessionTraitsUImpl>& session, unsigned int id,
+		const AuthorityPresentationSlice& slice);
+
 	static BodyId rootBodyId(const BrawlerSessionTraitsUImpl::Simulatable& simulatable);
 
 	void afterBodiesCreated(BrawlerSessionTraitsUImpl::Simulatable& simulatable,

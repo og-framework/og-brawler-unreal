@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: vizSimulationStep -- a local of UOGBrawlerSimulatableComponent::TickComponent until og-input-latency task P5-16 (the tick comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: FInputRedundancyBundle -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
 <!-- lint-external-ref: NetSerialize -- Unreal Engine replication hook name (a USTRUCT's NetSerialize member), outside every scan root -->
 <!-- lint-external-ref: ASimulationInputRelay -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
@@ -456,7 +457,7 @@ store is **cold**, not because it is absent.
 
 **The echoed value carries continuous fields only.** Every discrete field is pinned neutral by
 `simulatableBrawler::makeVisualizationPlayerInput`, so an attack or a Hadouken edge structurally cannot render-echo. It is
-cosmetic: never fed to the simulation, the RPC, or a cache.
+cosmetic: never fed to the simulation, the input bundle og-sim-net sends, or a cache.
 
 **No tier consult.** Muting the echo on a degraded connection tier is a separate, optional change and
 is not wired here.
@@ -534,7 +535,7 @@ volume with `UESimulationSession::registerVizVolume`, handing it the descriptor 
 (og-simulationscheduler-withjolt task 51, on the manager; the manager's session's since
 og-ue-simulationcomponentandmanagersplit task 24b, reached as `session()`). The other composition reads the
 visualization makes (`editStorage`, `getLastRelayedInput`, `runsPrediction` and the two clocks) go through `session()`
-too. The manager owns the choice of physics backend
+too. (Since og-input-latency task P5-16 those reads are the display snapshot's doors instead, §23.) The manager owns the choice of physics backend
 (`OGBrawlerSimulationManager-rationale.md` §18), and these members exist in both configurations, so this
 component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
 instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
@@ -789,6 +790,9 @@ run (og-simulationscheduler-withjolt task 80; the rule and the rates are `UESimu
 
 ## §16 The NetSync sibling and the binding (og-ue-simulationcomponentandmanagersplit task 20a)
 
+> **History.** og-input-latency task P5-8 deleted the sibling and the binding's net half (§22); P5-7 moved the sim traffic
+> to og-sim-net (§21). §16 and §17 are the account as it stood until then.
+
 **The ruled deviation.** Task 20a moved this component's reflected wire surface — the replicated correction-state
 buffer, `OnRep_CorrectionState`, `ServerReceiveRemoteMove` with its two fences, the mismatch latch and the toast key, and
 `GetLifetimeReplicatedProps` — verbatim into `USimulatableNetSyncComponent` (OGSimulationUnreal), created on the
@@ -1010,7 +1014,8 @@ character is not in its storage (before registration, after unregistration, an i
 empty as world up and supported-unknown; the camera and the mouse aim take world up.
 
 **Which state, and why it is not a new crossing.** Both slices come from `UESimulationSession::getVizSlice`, the
-session's by-value read of the **visualization snapshot** (`getVizState`), never the live state: that is the
+session's by-value read of the **visualization snapshot** (`getVizState` until og-input-latency task P5-16; the session's
+display copy since, §23), never the live state: that is the
 session's guard G-02 (`UESimulationSession-guards.md`), and the accessor offers no route to the live state. The
 snapshot is taken on the game thread once per post-physics pass, so a game-thread reader such as the character's
 `Tick` reads a copy no other thread writes, the same state `TickComponent` draws from. The two slices are read one
@@ -1066,3 +1071,43 @@ Task P5-8 deleted the code P5-7 left unreachable (`UESimulatableOwnerBinding-rat
   (`SimulatableBrawlerOwnerTraits.h` names it for both roles, and the session's `compositionContractsHold` asserts that
   both owners are that type), so its subject no longer exists and P5-8 deleted it.
 - **Unchanged.** The four registration hooks, the key hook, the visualization and every log line.
+
+## §23 The visualization reads the display snapshot (og-input-latency task P5-16)
+
+`TickComponent` and `vizGround` read no simulation state of their own any more: they read the session's display snapshot
+(`UESimulationSession-rationale.md` §17, in OGSimulationUnreal's docs), through the session's doors.
+
+- **The state.** `TickComponent` asks `findDisplayVizState(ownKey)` and returns when it is null (the id has no entry: not
+  registered yet, or unregistered, or no snapshot yet), where it asked the storage's `has` before. The state it draws,
+  `attackSimAllState`, is that game-thread copy: the end of the last step batch, with the rendered poses overlaid on every
+  non-root body exactly as the presenter overlaid them on the storage's copy before. So the paragraphs above about "the
+  copy" hold for this one; only its source changed.
+- **The tick and the step length.** The projectile pass and both input-history polls took `vizSimulationStep`, the
+  client's prediction step or the authority's simulation step, read live. They now take the held snapshot's
+  `clock.predictionTick` and `clock.stepDeltaSeconds`, which the session fills from the same two steps when it publishes
+  (an authority's snapshot carries its simulation step there). The snapshot is non-null whenever the state is.
+- **The remote proxy's input.** `getLastRelayedInput(ownKey)` keeps its name and answers from the snapshot's entry.
+- **`vizGround`** is unchanged in code: `getVizSlice` answers from the same game-thread copy (§20; `UESimulationSession-guards.md`
+  G-02).
+
+What the snapshot changes is when, not what: the state, the relayed input, the tick and the caches the polls read are all
+as of the end of the last step batch. Before, the input and clock reads were live at the component's tick; the state was
+already the post-physics copy. A component that ticks after a frame's steps but before its post-physics pass therefore
+sees the relayed input and the tick one step batch later than before (the task's DEV).
+
+## §24 The dedicated server's visualization gate (og-input-latency task P5-20)
+
+A loop-on dedicated server (`og.Sim.AuthorityLoop=1`) steps its authority on the runner and has no game-thread viz world
+(`UESimulationSession-rationale.md` §21.4, in OGSimulationUnreal's docs). The component's two visualization paths ask the
+session first, through `hasGameThreadVizWorld()` (false exactly while the loop runs):
+
+- **`initializeWithManager`** returns `Ready` right after it caches the input collection, before the target-visualization
+  volume and the three visualization states. The volume would be registered with the free-running tick backend, which refuses
+  it (its `OG_CHECK`, `TickDriverBackendUImpl-rationale.md` §15), and the states feed only `TickComponent`'s drawing. The
+  registration itself does not depend on either: the binding calls `tryRegister` after `Ready` as before.
+- **`TickComponent`** returns right after it finds the manager, before it reads the display snapshot. On the loop the session
+  publishes none, so the snapshot read already returned early; the gate makes the order explicit, and it keeps the three
+  visualization states' `value()` calls below unreachable while they are empty.
+
+Everywhere else (clients, listen servers, an inline dedicated server, Chaos) `hasGameThreadVizWorld()` is true and both paths
+run as before.
