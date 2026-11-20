@@ -66,6 +66,7 @@ public:
 
 	void releaseInputsForAuthorityTick(SimTick authorityTick)
 	{
+		m_session.noteAuthorityStepTime_Step();
 		// ⛔G-01  docs/BrawlerTickDriverGameUImpl-guards.md
 		m_session.releaseDelayedInputsForStep(static_cast<int32>(authorityTick), 1);
 	}
@@ -83,6 +84,8 @@ public:
 		m_session.editLatencyBudgetDiagnostics().stampStepEnd_Internal();
 		m_session.afterStep_Step();
 	}
+
+	void publishForDisplay() { m_session.publishDisplaySnapshot_Step(); }
 
 	void onPostPhysics() { m_session.onPostPhysicsStep(); }
 
@@ -119,6 +122,12 @@ static_assert(TickDriverReceiveGame<BrawlerTickDriverGame>,
 	"BrawlerTickDriverGame must keep a void receiveForStep(): TickDriverStepHooks calls it only under if constexpr, so "
 	"without it an immediate client's step never drains og-sim-net and receives nothing once its session is bound. Was the "
 	"drain in onStepStarted, which fed the next step (og-input-latency task P5-30).");
+
+static_assert(TickDriverDisplayGame<BrawlerTickDriverGame>,
+	"BrawlerTickDriverGame must keep a void publishForDisplay(): SimulationTickDriver calls it only under if constexpr, after a "
+	"client's step batch on the step thread, so without it a Jolt client publishes no display snapshot and its HUD, input "
+	"history and visualization show nothing. Was the game-thread fill in onPostPhysicsStep, which raced the worker step "
+	"(og-input-latency task P5-36).");
 
 static_assert(TickDriverIdleGame<BrawlerTickDriverGame>,
 	"BrawlerTickDriverGame must keep IdleWake idleUntil(double): SimulationTickBackend::runAuthorityLoop requires it, and the "
