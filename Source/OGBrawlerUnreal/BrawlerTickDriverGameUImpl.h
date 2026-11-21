@@ -53,7 +53,7 @@ public:
 		}
 	}
 
-	void beforePump(double, TickRateDoor&) { m_session.beforeAuthorityPump_Runner(); }
+	void beforePump(double hostNowSeconds, TickRateDoor& rate) { m_session.beforePump_Owner(hostNowSeconds, rate); }
 
 	IdleWake idleUntil(double deadlineSeconds) { return m_session.idleUntil_Runner(deadlineSeconds); }
 

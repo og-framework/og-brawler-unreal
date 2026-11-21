@@ -186,7 +186,7 @@ namespace tickDriverFormatParityTest
     std::string newFrameLine(const ValueSet& set)
     {
         TickDriverWindow window(set.isAuthority, set.stepsInline);
-        return window.formatFrameLine(set.dtSeconds, set.cap);
+        return window.formatFrameLine(set.dtSeconds, set.cap, 0.75, 1.25);
     }
 
     std::string newFirstStepLine(const ValueSet& set)

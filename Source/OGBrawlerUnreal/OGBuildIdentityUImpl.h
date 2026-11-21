@@ -167,7 +167,7 @@ struct WireToken
 };
 
 constexpr WireToken wireTokenFor(uint8 correctionVersion, uint8 ringVersion, uint8 bundleVersion, uint8 envelopeVersion,
-	uint8 rosterVersion)
+	uint8 rosterVersion, uint8 clockVersion)
 {
 	WireToken  token;
 	const auto append = [&token](std::string_view prefix, uint8 version)
@@ -187,6 +187,7 @@ constexpr WireToken wireTokenFor(uint8 correctionVersion, uint8 ringVersion, uin
 	append("b", bundleVersion);
 	append("e", envelopeVersion);
 	append("ro", rosterVersion);
+	append("ck", clockVersion);
 	return token;
 }
 
@@ -209,14 +210,16 @@ constexpr bool refusesWireLogin(WireLoginVerdict verdict)
 	return verdict != WireLoginVerdict::Match;
 }
 
-static_assert(wireTokenFor(15, 3, 3, 1, 1).view() == "c15.r3.b3.e1.ro1"
-                  && wireTokenFor(6, 2, 2, 1, 1).view() == "c6.r2.b2.e1.ro1"
-                  && wireTokenFor(10, 2, 3, 0, 12).view() == "c10.r2.b3.e0.ro12"
-                  && wireTokenFor(255, 100, 0, 9, 1).view() == "c255.r100.b0.e9.ro1"
-                  && wireTokenFor(255, 255, 255, 255, 255).view() == "c255.r255.b255.e255.ro255",
+static_assert(wireTokenFor(15, 3, 3, 1, 1, 2).view() == "c15.r3.b3.e1.ro1.ck2"
+                  && wireTokenFor(6, 2, 2, 1, 1, 1).view() == "c6.r2.b2.e1.ro1.ck1"
+                  && wireTokenFor(10, 2, 3, 0, 12, 0).view() == "c10.r2.b3.e0.ro12.ck0"
+                  && wireTokenFor(255, 100, 0, 9, 1, 10).view() == "c255.r100.b0.e9.ro1.ck10"
+                  && wireTokenFor(255, 255, 255, 255, 255, 255).view() == "c255.r255.b255.e255.ro255.ck255"
+                  && wireTokenFor(255, 255, 255, 255, 255, 255).view().size() == 31,
               "Was og-sim-metres-yup task 15's three-field token c<correction>.r<ring>.b<bundle> (design section 5); "
-              "og-input-latency P5-6 appends .e<sim envelope>.ro<roster>. Each version is in decimal without leading "
-              "zeros, and the longest token fits the buffer. See docs/OGBuildIdentity-rationale.md section 8.");
+              "og-input-latency P5-6 appends .e<sim envelope>.ro<roster>, and og-time-dilation task 2 appends "
+              ".ck<og-sim-net clock>. Each version is in decimal without leading zeros, and the longest token (31 "
+              "characters) fits the buffer. See docs/OGBuildIdentity-rationale.md section 8.");
 static_assert(classifyWireLogin("c6.r2.b2", "c6.r2.b2") == WireLoginVerdict::Match
                   && classifyWireLogin("c8.r3.b3", "c7.r2.b2") == WireLoginVerdict::Different
                   && classifyWireLogin("c6.r2.b2", "c6.r2.b3") == WireLoginVerdict::Different
@@ -224,10 +227,13 @@ static_assert(classifyWireLogin("c6.r2.b2", "c6.r2.b2") == WireLoginVerdict::Mat
                   && classifyWireLogin("c6.r2.b2", "") == WireLoginVerdict::Missing
                   && classifyWireLogin("c15.r3.b3.e1.ro1", "c15.r3.b3.e1.ro1") == WireLoginVerdict::Match
                   && classifyWireLogin("c15.r3.b3.e1.ro1", "c15.r3.b3") == WireLoginVerdict::Different
-                  && classifyWireLogin("c15.r3.b3.e1.ro1", "c15.r3.b3.e1.ro2") == WireLoginVerdict::Different,
+                  && classifyWireLogin("c15.r3.b3.e1.ro1", "c15.r3.b3.e1.ro2") == WireLoginVerdict::Different
+                  && classifyWireLogin("c15.r3.b3.e1.ro1.ck2", "c15.r3.b3.e1.ro1") == WireLoginVerdict::Different
+                  && classifyWireLogin("c15.r3.b3.e1.ro1", "c15.r3.b3.e1.ro1.ck2") == WireLoginVerdict::Different,
               "og-sim-metres-yup task 15: a login's OGWire token is a match only when it equals the server's exactly; "
-              "an absent or empty one is Missing. So a three-field token from before og-input-latency P5-6 is Different. "
-              "See docs/OGBuildIdentity-rationale.md section 8.");
+              "an absent or empty one is Missing. So a three-field token from before og-input-latency P5-6 is Different, "
+              "and so is a five-field token from before og-time-dilation task 2 (no .ck), on either side. See "
+              "docs/OGBuildIdentity-rationale.md section 8.");
 static_assert(refusesWireLogin(WireLoginVerdict::Missing) && refusesWireLogin(WireLoginVerdict::Different)
                   && !refusesWireLogin(WireLoginVerdict::Match),
               "Was the user's ruling Q2 (og-sim-metres-yup, 2026-10-25): a login lacking OGWire, or with a different "

@@ -50,7 +50,7 @@ friendship any more and lost its line.
 | hook (og-simulation) | when, which thread | the binding calls |
 |---|---|---|
 | `manager()`, `storage()` | the driver's constructor (the step driver runs on the manager) | `*m_session.m_manager`, `m_session.m_storage` |
-| `beforePump(hostNow, rate)` | once per frame, on the game thread, before the pump; on the authority loop at every runner wake, on the runner | the session's `beforeAuthorityPump_Runner()`: on the authority loop the runner requests, then og-sim-net's server `drain()`; otherwise nothing (the brawler changes no rate in the MVP; §10) |
+| `beforePump(hostNow, rate)` | once per frame, on the game thread, before the pump; on the authority loop at every runner wake, on the runner | the session's `beforePump_Owner(hostNow, rate)`, both arguments forwarded (since og-time-dilation task 8, §12): on a predicting client the clock-dilation stage, which in `Shadow` reads and logs but sets no rate, and in `Off` does nothing; on the authority loop the runner requests, then og-sim-net's server `drain()`; otherwise nothing (§10) |
 | `idleUntil(deadline)` (`TickDriverIdleGame`, since og-input-latency task P5-19) | only on the authority loop, on the runner, between wakes | the session's `idleUntil_Runner(deadline)`: og-sim-net's `SimNetIdle` over the server endpoint, or `Unavailable` with no endpoint (§10) |
 | `onFrameStepsDue(first, n)` | once per frame with steps, before the steps (`SimulationTickDriver-guards.md` G-02): on the game thread; on the authority loop once per stepping wake, on the runner | the session's `onFrameStepsDue_Step(first, n)` (the actor's, through `owner()`, until task 26b): PROBE A on both roles, and on the authority PROBE 6 and the one-shot `[PacketBudget]` line (`UESimulationSession-rationale.md` §9.9, OGSimulationUnreal) |
 | `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06); on the authority loop once per stepping wake, on the runner | the session's `afterAuthorityBatch(first)` (since og-input-latency task P5-5, §7), which reaps (the coordinator's `reapConnections(first)`) when the session has a coordinator: only the authority does, so an inline client reaps nothing. On the authority loop it first writes the corrections and publishes the clock, and og-sim-net's `afterInlineBatch` sends and reaps (§10). Before P5-5 the binding made that test itself, through `getReceptionCoordinator()` (the actor's, through `owner()`, until task 26a) |
@@ -233,7 +233,8 @@ session's runner thread (`UESimulationSession-rationale.md` §19, OGSimulationUn
 - **`idleUntil`** is new: `SimulationTickBackend::runAuthorityLoop` requires `TickDriverIdleGame`, and a `static_assert` below the
   class keeps the hook, because without it the loop does not build. It forwards to the session, whose `SimNetIdle` services
   og-net's server endpoint until the deadline. Inline and on clients nothing calls it.
-- **`beforePump`** forwards on every role and every frame or wake; the session returns at once unless the loop is on. On the
+- **`beforePump`** forwards on every role and every frame or wake; on the authority the session returns at once unless the loop
+  is on (a client runs the dilation stage instead, §12). On the
   loop it is og-sim-net's drain point (P2-19: `beforePump` → `drain()`), after the session's runner requests (registration and
   unregistration, `UESimulationSession-rationale.md` §19.4).
 - **`afterInlineBatch`** keeps its one call; the session's `afterAuthorityBatch` does the loop's sends and reap.
@@ -255,3 +256,13 @@ of two or more steps. `onPostPhysics` now only acquires what was published.
 **The `static_assert`.** The driver calls the hook under `if constexpr (TickDriverDisplayGame<...>)`, so a binding that lost
 it would compile and a Jolt client would publish no display snapshot: the session no longer fills one in the post-physics
 pass for a predicting session on a world-host backend. The `static_assert` after the alias makes that a compile error.
+
+## §12 The rate hook's arguments (og-time-dilation task 8)
+
+`beforePump(hostNowSeconds, rate)` forwards both of its arguments to the session's `beforePump_Owner`. Until this task it
+dropped them, because nothing in the brawler read the host time or changed the rate. Now a predicting client's session runs
+og-simulation's clock-dilation stage there (`clockDilation::beforeClientPump`), which reads the door (`rate`: its tick offset,
+step count, next deadline, interval and scale) and places the prediction tick with `hostNowSeconds`. Where the stage runs, in which modes, and
+why `Shadow` changes no rate are the session's (`UESimulationSession-rationale.md` §22, OGSimulationUnreal). The binding still
+decides nothing: one call, on whatever thread the driver calls it on (the game thread on a client, the runner on the authority
+loop, §10).

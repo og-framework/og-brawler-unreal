@@ -17,6 +17,7 @@
 
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
+#include "OGSimNet/SimNetClock.h"
 #include "OGSimNet/SimNetRoster.h"
 #include "OGSimulation/CorrectionStateBufferCodec.h"
 #include "OGSimulation/InputRedundancyBundleCodec.h"
@@ -145,7 +146,8 @@ FString backendRefusalText(buildIdentityUImpl::BackendLoginVerdict verdict, cons
 
 constexpr buildIdentityUImpl::WireToken kWireToken = buildIdentityUImpl::wireTokenFor(
 	correctionStateBuffer::kWireFormatVersion, relayedInputRing::kWireFormatVersion,
-	inputRedundancyBundle::kWireFormatVersion, kSimEnvelopeVersion, ogsimnet::kRosterWireVersion);
+	inputRedundancyBundle::kWireFormatVersion, kSimEnvelopeVersion, ogsimnet::kRosterWireVersion,
+	ogsimnet::kClockWireVersion);
 
 #if !UE_BUILD_SHIPPING
 std::optional<FString> wireTokenOverride()

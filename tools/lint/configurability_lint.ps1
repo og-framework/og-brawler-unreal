@@ -396,6 +396,145 @@ $Blacklist = @(
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
         Message = 'simClockJitterMultiplier default (0.5 - the SimClock source''s jitter multiplier, measured by og-input-latency P3-13) must live only in TimeConfig; read config.simClockJitterMultiplier instead of re-declaring it (R-P1)'
     },
+    # -----------------------------------------------------------------------
+    # ServerTickEstimatorConfig (og-time-dilation task 3): the server-tick
+    # sensor's seven own defaults. Not TimeConfig fields, so the self-lint
+    # does not require them; listed so a second copy of a sensor constant is
+    # flagged like any TimeConfig one. Its eighth field, tickFrequency,
+    # defaults to TimeConfig{}.tickFrequency and is guarded by that entry.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'filterTauSeconds'
+        Pattern = '(?<![\w.>])filterTauSeconds\s*=\s*5\.0\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'filterTauSeconds default (5.0 s - the server-tick estimate''s filter time constant) must live only in ServerTickEstimatorConfig; read config.filterTauSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttGateMultiplier'
+        Pattern = '(?<![\w.>])rttGateMultiplier\s*=\s*1\.5\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'rttGateMultiplier default (1.5 - the server-tick estimate''s queued-sample gate) must live only in ServerTickEstimatorConfig; read config.rttGateMultiplier instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttGateMarginSeconds'
+        Pattern = '(?<![\w.>])rttGateMarginSeconds\s*=\s*0\.010\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'rttGateMarginSeconds default (0.010 s - the server-tick estimate''s queued-sample gate) must live only in ServerTickEstimatorConfig; read config.rttGateMarginSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'samplesToValid'
+        Pattern = '(?<![\w.>])samplesToValid\s*=\s*20u?\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'samplesToValid default (20 - samples since the seed before the server-tick estimate is valid) must live only in ServerTickEstimatorConfig; read config.samplesToValid instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'staleAfterSeconds'
+        Pattern = '(?<![\w.>])staleAfterSeconds\s*=\s*1\.0\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'staleAfterSeconds default (1.0 s - the server-tick estimate''s staleness) must live only in ServerTickEstimatorConfig; read config.staleAfterSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'reseedJumpTicks'
+        Pattern = '(?<![\w.>])reseedJumpTicks\s*=\s*3\.0\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'reseedJumpTicks default (3.0 ticks - the server-tick estimate''s re-seed jump) must live only in ServerTickEstimatorConfig; read config.reseedJumpTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'reseedRunSamples'
+        Pattern = '(?<![\w.>])reseedRunSamples\s*=\s*5u?\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'reseedRunSamples default (5 - consecutive jumps before the server-tick estimate re-seeds) must live only in ServerTickEstimatorConfig; read config.reseedRunSamples instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # ClockDilationConfig (og-time-dilation task 6): the client rate
+    # controller's fourteen own defaults (task 10c added the fourteenth). Not TimeConfig fields, so the
+    # self-lint does not require them; listed so a second copy of a
+    # controller constant is flagged like any TimeConfig one.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'mode'
+        Pattern = '(?<![\w.>])mode\s*=\s*ClockDilationMode::Off\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'mode default (ClockDilationMode::Off - the rate controller is off unless a host turns it on) must live only in ClockDilationConfig; read config.mode instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'setpoint'
+        Pattern = '(?<![\w.>])setpoint\s*=\s*ClockDilationSetpoint::OwnRtt\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'setpoint default (ClockDilationSetpoint::OwnRtt - the rate controller''s per-client RTT target) must live only in ClockDilationConfig; read config.setpoint instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'gainPerTick'
+        Pattern = '(?<![\w.>])gainPerTick\s*=\s*0\.005\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'gainPerTick default (0.005 per tick - the rate law''s proportional gain) must live only in ClockDilationConfig; read config.gainPerTick instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'maxDeviation'
+        Pattern = '(?<![\w.>])maxDeviation\s*=\s*0\.01\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'maxDeviation default (0.01 - the rate scale''s clamp, bounded by the render bracket) must live only in ClockDilationConfig; read config.maxDeviation instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'slewPerCall'
+        Pattern = '(?<![\w.>])slewPerCall\s*=\s*0\.002\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'slewPerCall default (0.002 - the rate scale''s slew per call) must live only in ClockDilationConfig; read config.slewPerCall instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'quantum'
+        Pattern = '(?<![\w.>])quantum\s*=\s*1e-4\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'quantum default (1e-4 - the rate scale''s rounding step) must live only in ClockDilationConfig; read config.quantum instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'changeHysteresisQuanta'
+        Pattern = '(?<![\w.>])changeHysteresisQuanta\s*=\s*2\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'changeHysteresisQuanta default (2.0 quanta - the rate scale holds until the slewed value is this far away, except while frozen; og-time-dilation task 10c) must live only in ClockDilationConfig; read config.changeHysteresisQuanta instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'targetTauSeconds'
+        Pattern = '(?<![\w.>])targetTauSeconds\s*=\s*10\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'targetTauSeconds default (10.0 s - the rate controller''s target low-pass) must live only in ClockDilationConfig; read config.targetTauSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'guardTauSeconds'
+        Pattern = '(?<![\w.>])guardTauSeconds\s*=\s*2\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'guardTauSeconds default (2.0 s - the band guard centre''s low-pass) must live only in ClockDilationConfig; read config.guardTauSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'guardLowTicks'
+        Pattern = '(?<![\w.>])guardLowTicks\s*=\s*-0\.5\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'guardLowTicks default (-0.5 ticks - the band guard''s low edge below its frame-aware centre) must live only in ClockDilationConfig; read config.guardLowTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'guardHighTicks'
+        Pattern = '(?<![\w.>])guardHighTicks\s*=\s*2\.5\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'guardHighTicks default (2.5 ticks - the band guard''s high edge) must live only in ClockDilationConfig; read config.guardHighTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'freezeAfterResyncSeconds'
+        Pattern = '(?<![\w.>])freezeAfterResyncSeconds\s*=\s*1\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'freezeAfterResyncSeconds default (1.0 s - the rate controller''s freeze after a hard resync) must live only in ClockDilationConfig; read config.freezeAfterResyncSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'commonLeadTicks'
+        Pattern = '(?<![\w.>])commonLeadTicks\s*=\s*2\.5\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'commonLeadTicks default (2.5 ticks - the Common setpoint''s session lead) must live only in ClockDilationConfig; read config.commonLeadTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'targetOffsetTicks'
+        Pattern = '(?<![\w.>])targetOffsetTicks\s*=\s*0\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'targetOffsetTicks default (0.0 ticks - the rate controller''s target shift knob) must live only in ClockDilationConfig; read config.targetOffsetTicks instead of re-declaring it (R-P1)'
+    },
     @{
         Field   = 'softDriftThresholdTicks'
         Pattern = '(?<![\w.>])softDriftThresholdTicks\s*=\s*3\b'
