@@ -525,9 +525,9 @@ $Blacklist = @(
     },
     @{
         Field   = 'commonLeadTicks'
-        Pattern = '(?<![\w.>])commonLeadTicks\s*=\s*2\.5\b'
+        Pattern = '(?<![\w.>])commonLeadTicks\s*=\s*3\.65\b'
         Allowed = @('ClockDilationController.h')
-        Message = 'commonLeadTicks default (2.5 ticks - the Common setpoint''s session lead) must live only in ClockDilationConfig; read config.commonLeadTicks instead of re-declaring it (R-P1)'
+        Message = 'commonLeadTicks default (3.65 ticks - the Common setpoint''s session lead, og-time-dilation task 14 from task 13''s report; [OGNetcode] ClockDilationCommonLeadTicks is its door) must live only in ClockDilationConfig; read config.commonLeadTicks instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'targetOffsetTicks'

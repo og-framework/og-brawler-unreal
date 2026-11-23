@@ -858,6 +858,9 @@ the whole session, and the readout will say `no tier  fallback base N` throughou
 EXPECTED on LAN, not a regression the delay bar introduced** — it is the same standing
 divergence the tier system has carried since before this display existed, now visible instead
 of silent. T24's PIE session confirms it is present and reads correctly.
+*Closed by og-input-latency P6-2 (2026-11-22):* the server now sends a wire's first tier, tier 0 included, and the client
+pays the fallback-to-tier change (`ConnectionTierTable-rationale.md` §8), so a LAN wire's readout shows `tier 0` once its
+first sample lands; at the shipped floor 6 both ends were already at the floor.
 
 ### 7.10 The gate hierarchy — one master, four children, and the compaction it buys
 
@@ -1648,7 +1651,10 @@ thread — same-thread, nothing to tear. `getPredictionTick`, `evaluateDrift` an
 `getRequiredInputDelayIncreaseStallTicks` reach the physics-written prediction tick and stall
 debt (the debt is written on both threads: the game thread's `requestInputDelayIncreaseStall` adds to it, the step's
 `advancePrediction` decrements it), which is the accepted tear already taken: a naturally-aligned four-byte load on x64
-cannot tear, so the worst case is one line of diagnostic text one tick stale. **The CROSSING
+cannot tear, so the worst case is one line of diagnostic text one tick stale. *Since og-input-latency P6-2* the
+debt is a signed `std::atomic<int32_t>` (`requestInputDelayTransition` adds, Skips owed when negative; og-simulation's
+`ThreadingCrossings.md` row 12), so the load is atomic outright; the readout's `debt` still shows Stalls owed only
+(`getRequiredInputDelayIncreaseStallTicks`, 0 while Skips are owed). **The CROSSING
 table gains no bullet** — this is more reads inside one entry point.
 ⛔ It takes `runsPrediction()` for the harder of the two reasons: `getClientClock()` does not
 return a wrong number on a role that does not predict, it calls `std::terminate` (guard G-12).
