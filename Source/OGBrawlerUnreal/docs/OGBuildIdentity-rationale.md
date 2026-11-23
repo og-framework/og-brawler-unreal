@@ -141,8 +141,10 @@ hash rather than testing this code.
 
 ## 7. The physics backend: the token and the login check
 
-Until task 21 of og-simulationscheduler-withjolt, one build of this game runs either the Chaos host or
-the Jolt host, chosen at compile time (`OGBrawlerSimulationManager-rationale.md` §18). Two peers of
+Until og-session-runtime task 3 (the retirement og-simulationscheduler-withjolt task 21 had planned), one
+build of this game ran either the Chaos host or the Jolt host, chosen at compile time
+(`OGBrawlerSimulationManager-rationale.md` §18). Since then every build runs the Jolt host, and the token
+and the check below stay generic over the engine traits, for a later engine (Box3D). Two peers of
 different backends cannot play together: they simulate the same inputs differently, so every
 prediction would be corrected. The build identity therefore carries a **backend token**, and the server
 refuses a login whose backend differs from its own. Two Jolt peers whose Jolt builds step differently (a
@@ -153,8 +155,11 @@ a Warning that names both fingerprints (the policy below).
 
 | configuration | token | example |
 |---|---|---|
-| Chaos | `chaos` | `chaos` |
 | Jolt | `jolt:<fingerprint>`, the 16 lower-case hex digits of the Jolt determinism fingerprint's value | jolt:35a523518f873707 |
+
+An engine without a fingerprint has its bare name as its token: the former Chaos configuration (removed
+by og-session-runtime tasks 3–6) sent `chaos`, and the classification's `static_assert`s still use that
+string as a second backend.
 
 The fingerprint is og-simulation-jolt's `determinismFingerprint`: the Jolt version and feature bits,
 the instruction set the library was compiled for, fused multiply-add, the step's FP mode and the
@@ -163,13 +168,14 @@ state hash of a short probe simulation, folded into one 64-bit value
 (`EngineTraits::computeDeterminismFingerprint`, which the build identity calls directly since og-tickdriver task 15b
 and through a forwarder of the same name in `PhysicsBackendUImpl.h` before it: since og-tickdriver task 15a
 `JoltEngineTraitsUImpl::computeDeterminismFingerprint` acquires the Jolt runtime, runs the probe and releases the
-runtime; the Chaos configuration has none), and the build identity computes it once,
+runtime; the former Chaos configuration had none), and the build identity computes it once,
 on first use, and keeps it for the process. The first use is `applyNetworkVersion` at
 `FCoreDelegates::OnPostEngineInit`, so the start line (§1) already carries the full token, and the probe
 runs before any world exists. It takes about 2 ms; the runtime's two lines
 (initialised, shut down) are logged at `Log` on `LogOGBuildIdentity`.
-`buildIdentityUImpl::backendFingerprint()` is the hex alone (`none` for Chaos); the manager's
-`[SimHost.Backend] backend=<chaos|jolt> fingerprint=<hex|none>` line prints it.
+`buildIdentityUImpl::backendFingerprint()` is the hex alone (`none` for an engine without a fingerprint,
+as Chaos was); the manager's `[SimHost.Backend] backend=<name> fingerprint=<hex|none>` line prints it
+(`backend=jolt` in every build since og-session-runtime task 3).
 
 **The check, at login.** The client puts its token in its login URL, and the server compares it in its
 game mode's pre-login, before the player is admitted:

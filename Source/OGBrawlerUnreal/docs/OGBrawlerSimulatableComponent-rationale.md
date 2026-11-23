@@ -249,7 +249,7 @@ character still holds that slot on this client.
 The session then returns an empty volume id, and the hook answers `Retry` **before** it builds the visualization
 states, so the states are only ever built over a registered volume; the skeleton reschedules loop one for the next
 frame. The wait counts against the binding's `kMaxRegistrationAttempts` like the manager wait, and its `checkf` names
-the owner. The Chaos configuration never waits here.
+the owner. The former Chaos configuration (removed by og-session-runtime tasks 3–6) never waited here.
 
 **Loop two's hooks.** `resolveRegistrationKey` waits for the pawn's `SimCharacterId` (§13) and answers its storage key;
 `makeInputProvider` builds the locally predicted character's provider (§4); `makeSimulatable` builds the
@@ -497,8 +497,8 @@ projectile pool. So the weapon, guard and projectile passes draw where the rende
 one or two steps ahead of it. The root (movement) body is left at the newest tick on purpose: the visible
 character is the capsule and its mesh, which the render sync already moved, and this movement draw's
 outline is documented as the simulation's belief, built from a body pose and a probe reading of the same
-tick. Every other `State` and `DerivedState` value in the copy stays the newest tick's. In the Chaos
-configuration the copy is unchanged (`TickDriverBackendUImpl-rationale.md` §7).
+tick. Every other `State` and `DerivedState` value in the copy stays the newest tick's. In the former Chaos
+configuration (removed by og-session-runtime tasks 3–6) the copy was unchanged.
 
 **The movement cvar is read per frame, deliberately (guard G-26).** Task 16 made `StaticData` cvars
 read once, at construction, so a tunable cannot move under a running session and put two peers on
@@ -534,23 +534,23 @@ and read bodies through `UESimulationSession::getVizReader`; loop one registers 
 volume with `UESimulationSession::registerVizVolume`, handing it the descriptor and the owner
 (og-simulationscheduler-withjolt task 51, on the manager; the manager's session's since
 og-ue-simulationcomponentandmanagersplit task 24b, reached as `session()`). The other composition reads the
-visualization makes (`editStorage`, `getLastRelayedInput`, `runsPrediction` and the two clocks) go through `session()`
-too. (Since og-input-latency task P5-16 those reads are the display snapshot's doors instead, §23.) The manager owns the choice of physics backend
-(`OGBrawlerSimulationManager-rationale.md` §18), and these members exist in both configurations, so this
+visualization makes (`getLastRelayedInput`, `runsPrediction`, the two clocks, and editStorage, which og-session-runtime
+task 7b deleted) go through `session()`
+too. (Since og-input-latency task P5-16 those reads are the display snapshot's doors instead, §23.) The manager owned the choice of physics backend
+(`OGBrawlerSimulationManager-rationale.md` §18) while there were two, and these members existed in both configurations, so this
 component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
-instead of the two Chaos adapter headers. In the Chaos configuration the members return the Chaos
-query adapter and the game-thread reader, and `registerVizVolume` builds the query parameters this
-file used to build itself (simple collision, the owner ignored), so the volume and the two passes
-behave as before. `registerVizVolume` returns an optional volume id, which is empty only in the Jolt
-configuration while the slot acquire waits (§3). The visualizers are templates over the adapter types, so the calls compile against
-whichever pair the manager selects.
+instead of the two Chaos adapter headers it included before. In the former Chaos configuration (removed by og-session-runtime
+tasks 3–6) the members returned the Chaos query adapter and the game-thread reader, and `registerVizVolume` built the query
+parameters this file used to build itself (simple collision, the owner ignored). `registerVizVolume` returns an optional
+volume id, which is empty while the Jolt slot acquire waits (§3). The visualizers are templates over the adapter types, so the
+calls compile against the pair `PhysicsBackendUImpl.h` names.
 
 In the Jolt configuration the two accessors return the step world's adapters on the authority and on
 a client stepping inline (`og.Sim.RunInline`), and the game-thread shadow world's on a client that
 steps on a worker, where the step's own world may be queried only by the step or under the world
 mutex (`TickDriverBackendUImpl-rationale.md` §6). Either
 way the component gets a world it may query on the game thread, so both passes run on every peer, as
-in the Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
+they did in the former Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
 and the component skipped the two passes there; task 56 removed that skip.)
 
 ---
@@ -1109,5 +1109,5 @@ session first, through `hasGameThreadVizWorld()` (false exactly while the loop r
   publishes none, so the snapshot read already returned early; the gate makes the order explicit, and it keeps the three
   visualization states' `value()` calls below unreachable while they are empty.
 
-Everywhere else (clients, listen servers, an inline dedicated server, Chaos) `hasGameThreadVizWorld()` is true and both paths
+Everywhere else (clients, listen servers, an inline dedicated server) `hasGameThreadVizWorld()` is true and both paths
 run as before.

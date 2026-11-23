@@ -51,7 +51,7 @@ og-input-latency task P5-7, which replaced it with the registered-component map)
 | `NetConfig` | `UEBrawlerNetConfig` | no template yet; the session's dt check will read it (a later task). Added by task 24a, as the design's list names it |
 | `EngineTraits` | the configuration's `EngineTraits` (`PhysicsBackendUImpl.h`) | the session: the three adapter types, its integration executor's adapters (task 35), and the `PhysicsEngineTraits` assertion (task 35). Added by task 24a |
 | `PhysicsBackendWorlds` | `physicsBackendUImpl::BackendWorlds` (`PhysicsBackendHostUImpl.h`) | the session: the type of `m_physicsBackendWorlds`. Added by task 24a as `BackendWorlds`; renamed by task 35 (§5) |
-| `PhysicsBackend<SessionT>` | `physicsBackendUImpl::BackendFor<SessionT>`: `ChaosTickBackendUImpl`, or `TickDriverBackendUImpl` over `BrawlerTickDriverGameUImpl<SessionT>` | the session: the type of `m_physicsBackend`, and its friend line. Added by task 24a as `Backend<SessionT>`; renamed by task 35 (§5) |
+| `PhysicsBackend<SessionT>` | `physicsBackendUImpl::BackendFor<SessionT>`: `TickDriverBackendUImpl` over `BrawlerTickDriverGameUImpl<SessionT>` (in the former Chaos configuration, removed by og-session-runtime task 3, the Chaos host) | the session: the type of `m_physicsBackend`, and its friend line. Added by task 24a as `Backend<SessionT>`; renamed by task 35 (§5) |
 | `TickDriverGame<SessionT>` | `BrawlerTickDriverGameUImpl<SessionT>` | the session: its friend line, and the row that its manager type is this binding's `Manager`. Added by task 24a |
 | `InputSampleSource` | `const UOGBrawlerInputCollectionComponent*` | what `inputSampleSource` returns at registration and `inputSampledSeconds` reads per step |
 
@@ -75,9 +75,11 @@ their translation unit has the complete type.
 `BrawlerCompositionUImpl.h` (`Composition`'s members are named by the session, and since task 34 by the map of §4, whose
 og-simulation templates it brings too), `UEBrawlerNetConfig.h`,
 `PhysicsBackendHostUImpl.h` (the backend selector: `BackendWorlds`, `BackendFor` and the concept the assertion names) and
-`BrawlerTickDriverGameUImpl.h` (`TickDriverGame`, in both configurations; the selector includes it only in the Jolt one).
+`BrawlerTickDriverGameUImpl.h` (`TickDriverGame`; the selector includes it too, and did only in the Jolt configuration
+while there were two).
 The component's header includes this one, so every file that includes the component or the character now sees the
-configuration's backend header too (the Chaos host's or the tick-driver host's, with its `extern template`). No file
+backend header too (the tick-driver host's, with its `extern template`; in the former Chaos configuration, removed by
+og-session-runtime task 3, the Chaos host's). No file
 includes this header that any of the four includes, so there is no cycle; the four forward-declare
 `BrawlerSessionTraitsUImpl` and `UESimulationSession` where they name them. The incomplete types (`SessionOwner`,
 `Component`, `Character`, `Game`) are still forward-declared.

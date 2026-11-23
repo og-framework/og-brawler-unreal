@@ -100,9 +100,7 @@ public:
 	// exactly once per frame. Resolves PCM/FollowCamera forward, mouse-aim line-plane
 	// intersection, and SetShowMouseCursor — all UObject APIs unsafe from physics thread.
 	// Writes m_camForwardCache and m_mouseAimCache, then stages this frame's BrawlerInputSample
-	// (og-input-latency P5-15). In the Chaos configuration, which has no tick driver and so no
-	// sampleInput hook, it also publishes the staged sample here (still before the frame's
-	// physics, as the hook does).
+	// (og-input-latency P5-15).
 	// [P5-15] resolveCameraForward / resolveMouseAim ("physics-thread-safe cache reads") are
 	// gone: they had no caller, and the step now reads the caches only through the sample.
 	void updateGameThreadCache();
@@ -110,7 +108,7 @@ public:
 	// [og-input-latency P5-15] Publishes the sample updateGameThreadCache last staged, so the next
 	// buildPlayerInput reads it. Game thread only (checkf: the TripleBuffer has one producer).
 	// Called once per frame by the tick driver's sampleInput hook (BrawlerTickDriverGameUImpl),
-	// first in startFrame, before the pump; in the Chaos configuration by updateGameThreadCache.
+	// first in startFrame, before the pump.
 	void publishSample();
 
 #if OG_LATENCY_BUDGET_DIAGNOSTICS

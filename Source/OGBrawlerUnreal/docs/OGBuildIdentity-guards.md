@@ -73,8 +73,9 @@ parses it back and splits options at `?` only (URL.cpp:184-214), and UGameplaySt
 splits at `?` only (GameplayStatics.cpp:3405-3430). With `&`, the server reads one option `OGBackend` whose
 value is `<backend token>&OGWire=<wire token>`, and no `OGWire` option. Every login is then refused: a Jolt
 server sees the same backend name with a different fingerprint, admits the backend with a misleading
-fingerprint Warning, and refuses the login as "the client reports no wire format"; a Chaos server refuses it
-as a different physics backend whose name contains the wire token. With `?` the two arrive as two options.
+fingerprint Warning, and refuses the login as "the client reports no wire format"; a server of another backend
+(a Chaos server, until og-session-runtime tasks 3–6 removed that configuration) refuses it as a different
+physics backend whose name contains the wire token. With `?` the two arrive as two options.
 
 **What breaks if the tag moves.** The tag sits on the only statement that writes the separator. If the two
 options are ever built in one function instead, the tag moves with the separator.

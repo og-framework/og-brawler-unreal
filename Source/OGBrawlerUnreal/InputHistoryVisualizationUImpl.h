@@ -185,7 +185,7 @@ private:
 		"BrawlerInputHistoryFeedUImpl reads production state through a CONST reference to the session only - the "
 		"manager, the storage, the reconciliation, the local and relayed input diagnostics, the tier consumer and the "
 		"effective input delay through the session's const reads - and mutates nothing but its own store. A mutable "
-		"reference here would be a write door from a diagnostic display into the session's mutable doors (editStorage, "
+		"reference here would be a write door from a diagnostic display into the session's mutable doors ("
 		"editServerClock, editReconciliation, the visualization query, the effective-delay publish) and, through "
 		"owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
 		"og-ue-simulationcomponentandmanagersplit task 22, when the input-history feeds left AOGBrawlerSimulationManager, "

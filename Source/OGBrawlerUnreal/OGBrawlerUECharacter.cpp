@@ -37,12 +37,6 @@
 #include "glm/ext/matrix_transform.hpp"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "Physics/Experimental/PhysScene_Chaos.h"
-#include "Chaos/Framework/PhysicsSolverBase.h"
-#include "Chaos/Declares.h"
-#include "PBDRigidsSolver.h"
-#include "Chaos/SimCallbackInput.h"
-#include "Chaos/ChaosMarshallingManager.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -189,7 +183,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 
 	CapsulePhysicalMaterial = CreateDefaultSubobject<UPhysicalMaterial>(TEXT("BrawlerCapsulePhysMat"));
 	CapsulePhysicalMaterial->Friction = 0.f;
-	// ⛔G-04  docs/OGBrawlerUECharacter-guards.md
 	CapsulePhysicalMaterial->Restitution = 0.f;
 	// ⛔G-17  docs/OGBrawlerUECharacter-guards.md
 

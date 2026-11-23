@@ -5,6 +5,7 @@
 <!-- lint-external-ref: FBodyInstance::UpdateMassProperties -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: GetSimplePhysicalMaterial -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: GetComplexPhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: ChaosPhysicsFactory -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
 # `OGBrawlerUECharacter.h` and `.cpp` — guards
 
 Every prohibition that survived the task-25 conversion of the pawn's two files. Each entry has an
@@ -37,26 +38,24 @@ entry replaced.
 > ⛔⛔ 42 / 96 IS A CONTRACT, NOT A TUNING VALUE. […] A different size in the constructor is an
 > immediate assert at the first character registration. Change both together or neither.
 
-**Consequence.** A size that disagrees fails a `checkf` at the first registration, one per physics
-backend (radius and half-height compared with `FMath::IsNearlyEqual`):
+**Consequence.** A size that disagrees fails a `checkf` at the first registration (radius and
+half-height compared with `FMath::IsNearlyEqual`): the check in `tryRegister`'s first-call bind (the
+session's since og-ue-simulationcomponentandmanagersplit task 28; og-simulationscheduler-withjolt task 53,
+design D14), which is `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's
+`createBodies_GameThread`, since og-tickdriver task 15a. Jolt builds the character body from the
+descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
+camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
 
-* **Chaos configuration:** `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root branch, which
-  adopts this capsule as the root body.
-* **Jolt configuration** (og-simulationscheduler-withjolt task 53, design D14): the check in
-  `tryRegister`'s first-call bind (the session's since og-ue-simulationcomponentandmanagersplit task 28), which is
-  `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's `createBodies_GameThread`, since
-  og-tickdriver task 15a. Jolt builds the character body from the
-  descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
-  camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
+The former Chaos configuration (removed by og-session-runtime tasks 3–6) had a second check, the one
+the quote names: the Chaos factory's adopt-root branch, which adopted this capsule as the root body.
 
 **Units (og-sim-metres-yup tasks 5a, 7, 8, 7b and 22).** 42 / 96 are UE centimetres. The descriptor ships
 `CapsuleGeometry{0.42f, 0.96f}` (`BrawlerMovementSimulation.h`), in og-simulation metres, and both checks convert the
 descriptor's sizes to UE units with `ueFrame::lengthToUe` before they compare. So the contract is 42 / 96 cm on this
 side and 0.42 / 0.96 m on the simulation's: change both together.
 
-⚠ Both `checkf`s compile out when `DO_CHECK == 0`, and a Shipping build would then run with a
-capsule whose size disagrees with the simulation's. Task 21 drops the Chaos bullet with the Chaos
-configuration.
+⚠ The `checkf` compiles out when `DO_CHECK == 0`, and a Shipping build would then run with a
+capsule whose size disagrees with the simulation's.
 
 **What breaks if the tag moves.** The mirror is also quoted by line in `SimulatableBrawlerTypes.h`
 and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
@@ -72,12 +71,12 @@ and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
 > §GATE 1 onwards) records `CollisionCylinder`. Keeping it makes "PIE parity with task 15"
 > a line-for-line comparison instead of a judgement call.
 
-**Consequence.** A rename compiles and runs. In both physics configurations it renames a default
-subobject that serialized instances refer to by name. In the Chaos configuration it also breaks the
-line-for-line comparison of `[PhysicsFactory.AdoptRoot]` lines against the recorded transcripts:
-`ChaosPhysicsFactory`'s adopt-root branch logs the adopted component's name. The Jolt configuration
-adopts nothing, so it prints no such line (og-simulationscheduler-withjolt task 19); task 21 drops
-this half with the Chaos configuration.
+**Consequence.** A rename compiles and runs. It renames a default subobject that serialized instances
+refer to by name. The Jolt configuration adopts nothing, so it prints no `[PhysicsFactory.AdoptRoot]`
+line (og-simulationscheduler-withjolt task 19). In the former Chaos configuration (removed by
+og-session-runtime tasks 3–6) a rename also broke the line-for-line comparison of those lines against
+the recorded transcripts, because the Chaos factory's adopt-root branch logged the adopted component's
+name; no code emits that line since.
 
 ---
 
@@ -90,13 +89,9 @@ where a movement component would be created.
 > CLASS. Locomotion is `brawlerMovementSimulation`; do not re-introduce a second authority
 > over this capsule.
 
-**Consequence.** The capsule has exactly one writer in each physics configuration, and a second
-writer (a movement component, or re-basing the class on the engine's walking-pawn base) fights it:
+**Consequence.** The capsule has exactly one writer, and a second writer (a movement component, or
+re-basing the class on the engine's walking-pawn base) fights it:
 
-* **Chaos configuration:** the physics factory adopts and simulates the capsule, the movement
-  sub-simulation writes it every tick (`drivesBody`), and the engine's end-of-physics sync moves the
-  component to the interpolated result. A second writer fights the simulation and the correction
-  path.
 * **Jolt configuration** (og-simulationscheduler-withjolt task 19): the character's body is a Jolt
   slot body built from the movement descriptor, and this capsule does not simulate
   (`tryRegister`'s Ready path, `TickDriverBackendUImpl::onRegistered_GameThread`, switches its physics simulation
@@ -108,20 +103,9 @@ writer (a movement component, or re-basing the class on the engine's walking-paw
   the render apply's held check logs a `[SimHost.RenderApply]` MOVED Warning the first time it
   happens.
 
-Task 21 drops the Chaos bullet with the Chaos configuration.
-
----
-
-## G-04 — the capsule's restitution stays 0
-
-**Site:** `CapsulePhysicalMaterial->Restitution = 0.f;` in the constructor.
-
-> RESTITUTION 0 IS LOAD-BEARING (revision 6): step 6' measures the solver's positional
-> push-out and adopts it, so a bouncy capsule would feed a rebound back into the movement
-> state.
-
-**Consequence.** Any restitution above 0 turns contacts into a rebound that step 6' adopts as
-movement. Friction 0 is recorded in the rationale but is not relied on, so it has no guard.
+In the former Chaos configuration (removed by og-session-runtime tasks 3–6) the physics factory
+adopted and simulated the capsule, the movement sub-simulation wrote it every tick (`drivesBody`), and
+the engine's end-of-physics sync moved it to the interpolated result.
 
 ---
 
@@ -357,6 +341,33 @@ standalone shows it.
 
 ⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.
 
+### G-04 — RETIRED (og-session-runtime task 7b, 2026-11-23): its premise was removed
+
+**Was:** *the capsule's restitution stays 0*.
+
+**Why it retired.** Successor: none: premise removed by og-session-runtime tasks 3–6. The prohibition kept a rebound out
+of step 6' in the former Chaos configuration, where the physics factory simulated this capsule, and tasks 3–6 removed
+that configuration. Nothing simulates the capsule now: no code calls `SetSimulatePhysics` on it, and the Jolt character
+body takes friction 0 and restitution 0 from `JoltBodyDefaults.h`'s `kAdoptedRootMaterial`, which
+`JoltPhysicsFactory.cpp` gives every root body, never from this material. A restitution above 0 here changes nothing
+simulated. The constructor still writes 0 (rationale §2).
+
+**The entry as it stood:**
+
+**Site:** `CapsulePhysicalMaterial->Restitution = 0.f;` in the constructor.
+
+> RESTITUTION 0 IS LOAD-BEARING (revision 6): step 6' measures the solver's positional
+> push-out and adopts it, so a bouncy capsule would feed a rebound back into the movement
+> state.
+
+**Consequence.** In the former Chaos configuration (removed by og-session-runtime tasks 3–6), where
+the physics factory simulated this capsule, any restitution above 0 turned contacts into a rebound
+that step 6' adopted as movement. Since then the material is inert for gameplay: the capsule never
+simulates, and the Jolt character body takes friction 0 and restitution 0 from `JoltBodyDefaults.h`'s
+`kAdoptedRootMaterial` (`OGBrawlerUECharacter-rationale.md` §2). A restitution above 0 here changes
+nothing simulated; it would matter again only if this capsule simulated. Friction 0 is recorded in
+the rationale but is not relied on, so it has no guard.
+
 ### G-20 — RETIRED (og-input-latency P5-8, 2026-11-18): the property it guarded was deleted
 
 **Was:** *`PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`*.
@@ -383,8 +394,7 @@ reasons as G-10.
   slot would never be sent.
 
 **What breaks if the tag moves.** Nothing mechanical checks the condition, and the LLT targets cannot
-reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot. The
-Chaos configuration never reads the property, so there the failure is silent.
+reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot.
 
 ### G-21 — RETIRED (og-input-latency P5-8, 2026-11-18): the statement it guarded was deleted
 

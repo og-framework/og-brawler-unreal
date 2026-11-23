@@ -64,8 +64,8 @@ friendship any more and lost its line.
 
 ## §3 Why the brawler's hooks sit where they do
 
-* **The per-frame pair and the drain** (og-simulationscheduler-withjolt design D3, D4). The Chaos configuration
-  ran PROBE A, PROBE 6, the drain of the whole batch and the reap once per physics frame in
+* **The per-frame pair and the drain** (og-simulationscheduler-withjolt design D3, D4). The former Chaos
+  configuration (removed by og-session-runtime tasks 3–6) ran PROBE A, PROBE 6, the drain of the whole batch and the reap once per physics frame in
   `InjectInputs_External`. Here the probes and the reap stay per frame, and the drain is per authority step,
   immediately before the tick it releases for. No receipt lands between inline steps (receipts happen in the
   engine's receive dispatch), so the queue contents are those of Chaos's batch; the difference is at consumption,
@@ -88,7 +88,8 @@ friendship any more and lost its line.
 ## §4 The tick the per-frame hooks receive
 
 `first` is the batch's first physics step plus the offset J3 the step hooks publish, `tick − physicsStep`, with no
-`+ 1` (`SimulationTickDriver-guards.md` G-03). It reproduces the Chaos tick mapper's semantics on driver data:
+`+ 1` (`SimulationTickDriver-guards.md` G-03). It reproduces the semantics of the former Chaos tick mapper (removed by
+og-session-runtime task 4) on driver data:
 `TickOutcome::tick` is the tick the step integrated, so the sum is the frame's first upcoming tick, and the series
 advances by the dispatched step count whatever a worker client's progress. The one residual difference: the mapper
 took its offset before a step moved the clock, the driver after, so a client Skip or Stall's ±1 reaches PROBE A one
@@ -205,9 +206,10 @@ is (§5): the character and the component are incomplete in this header, and ove
 lost the hook, or changed its return type, would still compile and simply never publish: every client input would then be
 neutral. The `static_assert` after the `BrawlerTickDriverGame` alias makes that a compile error.
 
-**The Chaos configuration** has no tick driver, so nothing calls this hook there; the input collection component publishes
-at the end of `updateGameThreadCache` instead, under `OG_PHYSICS_BACKEND_CHAOS` (its Chaos steps start after the
-character's `Tick`, at the physics frame's start).
+**The former Chaos configuration** (removed by og-session-runtime tasks 3–6) had no tick driver, so nothing called this
+hook there; the input collection component published at the end of `updateGameThreadCache` instead, under
+`OG_PHYSICS_BACKEND_CHAOS` (its Chaos steps started after the character's `Tick`, at the physics frame's start). Task 3
+removed that arm with the macro.
 
 ## §9 The receive (og-input-latency task P5-30)
 

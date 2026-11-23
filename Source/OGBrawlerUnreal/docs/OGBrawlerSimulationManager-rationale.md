@@ -41,6 +41,22 @@
 <!-- lint-external-ref: SimulationManagerUImpl-guards.md -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager-guards.md (ids unchanged); kept in the §12 history -->
 <!-- lint-external-ref: getRingoutVizState -- retired name: became AOGBrawlerSimulationManager::getVizSlice (og-ue-simulationcomponentandmanagersplit task 22); historical mention in the carried header comments (§12) -->
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: folded into BrawlerSessionGameUImpl::makeStaticData by og-ue-simulationcomponentandmanagersplit task 24a; historical mention in §0, §11 and the carried header comments (§12) -->
+<!-- lint-external-ref: noteResimRequest -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: bodyName -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: ContactModification -- Unreal Engine / Chaos API name, outside every scan root; its last in-tree code user, the brawler's Chaos host, was deleted by og-session-runtime task 3 -->
+<!-- lint-external-ref: ESimCallbackOptions -- Unreal Engine / Chaos API name, outside every scan root; its last in-tree code user, the brawler's Chaos host, was deleted by og-session-runtime task 3 -->
+<!-- lint-external-ref: m_pushProbeStash -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: m_pushProbeStashFrame -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: pushFrame -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: readFrame -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: pushProbeResimTypeText -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: beforePush -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: nonInertMatched -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: PushProbeTally -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: ChaosPhysicsBodyAdapter::getBodyTransform -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: ChaosPhysicsBodyReaderAdapter::getBodyTransform -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: m_toEngine -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: ResimAsFollower -- Unreal Engine / Chaos API name, outside every scan root; its last in-tree code user, OGSimulationUnreal's Chaos spatial query adapter or physics factory, was deleted by og-session-runtime task 4 -->
 # `AOGBrawlerSimulationManager` — rationale
 
 New to this code? Start with [SimulationArchitecture.md](SimulationArchitecture.md).
@@ -62,9 +78,9 @@ collide.
   six of its prose fences (§13.9) and the claims it made that were not true (§13.10)
   (og-netcode-v2-field-defects task 12).
 * **§14** recorded a later code change: how the first replayed step hands the restored body state to
-  the engine (og-netcode-v2-field-defects task 10's fix). It moved to `ChaosTickBackendUImpl-rationale.md` §5
-  with the Chaos host (og-simulationscheduler-withjolt task 82), as did §8's rewind-push probe and §9's
-  derivation of the `+ 1`.
+  the engine (og-netcode-v2-field-defects task 10's fix). It moved to the Chaos host's rationale
+  (ChaosTickBackendUImpl-rationale.md §5) with the Chaos host (og-simulationscheduler-withjolt task 82), as did §8's
+  rewind-push probe and §9's derivation of the `+ 1`; that document went with the Chaos host (og-session-runtime task 3).
 * **§16**, the latency-budget probe's host side (og-simulationscheduler-withjolt task 1), moved into the latency
   class's rationale with the code (og-tickdriver task 18). Since og-ue-simulationcomponentandmanagersplit task 19a
   the code is OGSimulationUnreal's `UELatencyBudgetDiagnostics` and its game-neutral part is that template's
@@ -75,10 +91,11 @@ collide.
   document before) and `BrawlerTickDriverGameUImpl-rationale.md`; since
   og-tickdriver task 8 the frame pipeline and the step hooks are og-simulation's `SimulationTickDriver` and
   `TickDriverStepHooks`.
-* **§18** is the backend switch: the compile-time choice between the Chaos host and the Jolt host
-  (og-simulationscheduler-withjolt task 51) and the flip of the default to Jolt (task 18). Since task 82 it
-  holds the seam, the fixed set of entry points through which this class calls its backend host; since
-  task 83 both hosts are classes of their own and this class has no arm. Its subsections on the Jolt
+* **§18** is the history of the backend switch: the compile-time choice between the Chaos host and the Jolt host
+  (og-simulationscheduler-withjolt task 51) and the flip of the default to Jolt (task 18), until og-session-runtime
+  tasks 3–6 removed the former Chaos configuration and the switch with it; the Jolt host is the only backend now.
+  Since task 82 it holds the seam, the fixed set of entry points through which this class calls its backend host; since
+  task 83 both hosts were classes of their own and this class has no arm. Its subsections on the Jolt
   configuration's world (task 53), stepping (task 54), render publish and apply (task 55), game-thread shadow
   world (task 56), render interpolation, correction smoothing and contact counts moved to
   `TickDriverBackendUImpl-rationale.md` §3–§9 (task 83).
@@ -90,13 +107,9 @@ collide.
      ========================================================================= -->
 <!-- lint-external-ref: bUseLoggingInShipping -- Unreal Engine target-rules flag (Shipping logging); this project does not set it -->
 <!-- lint-external-ref: FNoLoggingCategory -- Unreal Engine type (LogMacros.h), outside every scan root -->
-<!-- lint-external-ref: writeRestoredBodyState -- retired name: the Chaos rollback write deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
 <!-- lint-external-ref: pushBodyState -- retired name: the Chaos rollback-push lambda deleted by og-simulationscheduler-withjolt task 84 (historical mention) -->
 <!-- lint-external-ref: UDataStreamChannel::WriteData -- Unreal Engine method, outside every scan root -->
-<!-- lint-external-ref: FRewindData::FindValidResimFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FPBDRigidsSolver::ConditionalApplyRewind_Internal -- Chaos engine method, outside every scan root -->
 <!-- lint-external-ref: FRewindData::SetTargetStateAtFrame -- Chaos engine method, outside every scan root -->
-<!-- lint-external-ref: FChaosScene -- Unreal Engine type, outside every scan root -->
 <!-- lint-external-ref: seedRingoutSpawnPointsFromLevel -- retired name: became BrawlerRosterUImpl::seedSpawnPointsFromLevel (og-ue-simulationcomponentandmanagersplit task 23); historical mention in §11 and the carried header comments (§12) -->
 <!-- lint-external-ref: void seedRingoutSpawnPointsFromLevel(UWorld& world); -- the retired declaration, quoted in the §12 heading of its carried comment block (code moved to BrawlerRosterUImpl.h, task 23) -->
 <!-- lint-external-ref: editQueryAdapter -- RETIRED in task 51 (§18): the public query-adapter accessor, replaced by editVizQuery. It must NOT resolve -->
@@ -105,7 +118,6 @@ collide.
 <!-- lint-external-ref: UWorld::OnPostTickFlush -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: AddWeakLambda -- Unreal Engine delegate method, outside every scan root -->
 <!-- lint-external-ref: AddUObject -- Unreal Engine delegate method, outside every scan root -->
-<!-- lint-external-ref: FChaosScene::GetNetworkDeltaTimeScale -- Unreal Engine method, outside every scan root -->
 <!-- lint-external-ref: FPlatformTime::Seconds -- Unreal Engine function, outside every scan root -->
 <!-- lint-external-ref: NoLogging -- an Unreal log-verbosity enumerator, written as an ini value -->
 <!-- lint-external-ref: notReady -- a field NAME inside one probe's log format string, not a declared identifier -->
@@ -268,19 +280,20 @@ are annotations, not edits to the carried text.*
   independently of `LogOGSim` — does not depend on the level and stands.
 
 **Jolt-configuration annotations (og-simulationscheduler-withjolt task 18).** The block describes the
-Chaos host. Since task 18 the default build is the Jolt configuration (§18; `TickDriverBackendUImpl-rationale.md` §2), and there:
+former Chaos host. Since task 18 the default build was the Jolt configuration, and since og-session-runtime tasks 3–6
+removed the former Chaos configuration it is the only one (§18; `TickDriverBackendUImpl-rationale.md` §2), and there:
 
-* *"binds them to Chaos"* — the manager binds every character to a Jolt world it owns; Chaos is the
-  gameplay physics only in the Chaos configuration, until task 21.
-* THREADS, the GAME row's *"InjectInputs_External -> releaseDelayedInputsForStep"* — that is the Chaos
+* *"binds them to Chaos"* — the manager binds every character to a Jolt world it owns; Chaos was the
+  gameplay physics only in the former Chaos configuration.
+* THREADS, the GAME row's *"InjectInputs_External -> releaseDelayedInputsForStep"* — that was the former Chaos
   configuration's per-frame entry. In the Jolt configuration the frame host's `TG_StartPhysics` tick
   function, through the tick driver, runs the per-frame half (`onFrameStepsDue_Step`, then, on the authority, the reap after
   the inline steps), and the drain runs once per step from the authority's `beforeTick` (§7; `TickDriverBackendUImpl-rationale.md` §2).
-* THREADS, the PHYSICS row's *"FSimulationManagerAsyncCallback's five _Internal hooks"* — the Chaos
+* THREADS, the PHYSICS row's *"FSimulationManagerAsyncCallback's five _Internal hooks"* — the former Chaos
   configuration's. In the Jolt configuration the physics side is the step: one worker task per frame on
   a client, inline on the game thread on the authority, each step running the step driver and the four
   step hooks under the world mutex (`TickDriverBackendUImpl-rationale.md` §2).
-* CROSSING — the count of three is unchanged in both configurations. The Jolt host adds its own
+* CROSSING — the count of three is unchanged in the Jolt configuration. The Jolt host adds its own
   game-thread-to-step mechanisms (J1–J6 and the shadow hand-over), which are the Jolt host's boundary and
   not og-simulation crossings (§1).
 
@@ -308,12 +321,14 @@ since og-ue-simulationcomponentandmanagersplit task 25 (this file's G-16 until t
 | `BeginPlay` / `EndPlay` | GAME | the composition root; since og-ue-simulationcomponentandmanagersplit task 27a `EndPlay` is `m_session.endPlay()`, then `Super` (the session's teardown, `UESimulationSession-rationale.md` §10, in OGSimulationUnreal's docs), and since task 27b `BeginPlay` is `Super`, then `m_session.beginPlay()` (the session's start-up, its §11) |
 | `onConnectionTierReceived`, `onRelayDelayFloorReceived`, `onTimingInfoReceived` (and the two `Replayed` members until og-input-latency task P5-9) | GAME; on an immediate client the step's thread (`UESimulationSession-rationale.md` §18) | the session's tier, floor and clock entry points (`m_session`'s since task 25): the relay listeners until og-input-latency task P5-7, called since by the og-net client host from the client session's drain, at the driver's `PostTickDispatch` frame-locked and at step start immediate (`UESimulationSession-rationale.md` §9, §16, §18, in OGSimulationUnreal's docs). *R0, task 25: the row said "the four replication listeners"; there were six entry points over three interfaces, and the timing callback was not listed* |
 | og-sim-net's server: its drain and flush, `releaseForStep`, `afterBatch` (`afterInlineBatch` on the authority loop) | GAME; on the authority loop (`og.Sim.AuthorityLoop=1`) the runner | the reception since og-input-latency task P5-7: og-sim-net's `SimNetServer`, which the session holds on the authority and which drains at the og-net driver's `PostTickDispatch` and flushes at its `TickFlush` (`UESimulationSession-rationale.md` §16); on the authority loop (og-input-latency task P5-19) its transport is immediate, and it drains in the game binding's `beforePump` and sends after each batch in `afterAuthorityBatch`, both on the runner (`UESimulationSession-rationale.md` §19.3). From task 26a until P5-7 the session's own sinks, driven from the net-sync RPC's receipt path, and the route's registration; this class kept the registration's `SimCharacterId` wrapper until task 36 |
-| `InjectInputs_External` → `onFrameStepsDue_Step`, `releaseDelayedInputsForStep`, `reapConnections` (Chaos configuration, §18; a `ChaosTickBackendUImpl` member since task 82) | GAME | PROBE A and PROBE 6 once per physics frame, then the drain and the reap (§7; the probes' function is the session's since task 26b, the drain since task 26a) |
-| `onPostPhysicsStep` (the session's since task 27a, `UESimulationSession-rationale.md` §10; this class's `OnPostPhysicsStep` before) | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, `TickDriverBackendUImpl-rationale.md` §6), the render interpolation and apply and the shadow overwrite (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §5, §7), visualization snapshot (with the rendered poses in the Jolt configuration), timing buffer, score push (the brawler's hook `BrawlerSessionGameUImpl::afterVisualization` since task 27a), latency probe; bound to the scene's post-tick delegate in the Chaos configuration, called by the frame host's `TG_EndPhysics` tick function in the Jolt configuration |
+| `onPostPhysicsStep` (the session's since task 27a, `UESimulationSession-rationale.md` §10; this class's `OnPostPhysicsStep` before) | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, `TickDriverBackendUImpl-rationale.md` §6), the render interpolation and apply and the shadow overwrite (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §5, §7), visualization snapshot (with the rendered poses in the Jolt configuration), timing buffer, score push (the brawler's hook `BrawlerSessionGameUImpl::afterVisualization` since task 27a), latency probe; called by the frame host's `TG_EndPhysics` tick function (the former Chaos configuration bound it to the scene's post-tick delegate) |
 | the frame host's two tick functions → the tick driver → `onFrameStepsDue_Step`, the reap (authority), `onPostPhysicsStep`, through `BrawlerTickDriverGameUImpl` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | GAME; on the authority loop (`og.Sim.AuthorityLoop=1`) the tick driver runs on the runner, once per stepping wake (`UESimulationSession-rationale.md` §19, §21) | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`UETickDriverHost-rationale.md`; `SimulationTickDriver-rationale.md` §3) |
 | the tick driver's per-step body (`SimulationTickDriver`) → `SimulationStepDriver::runTick` and the four step hooks (`TickDriverStepHooks`), including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | PHYSICS: a worker task on a client; on the authority inline, on the game thread, or on the runner on the authority loop (`UESimulationSession-rationale.md` §19) | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
-| `FSimulationManagerAsyncCallback::OnPreSimulate_Internal`, `OnPostSolve_Internal`, `ProcessInputs_Internal`, `TriggerRewindIfNeeded_Internal`, `FirstPreResimStep_Internal`, `ApplyCorrections_Internal` | PHYSICS | the six Chaos hook overrides (Chaos configuration, §18; in `ChaosTickBackendUImpl.cpp` since task 82) — `ProcessInputs_Internal` and `ApplyCorrections_Internal` are empty (§11 C5) — and everything the core `SimulationManager` runs beneath them |
 | `pollInputHistory`, `pollInputHistoryLanes` (members of `BrawlerInputHistoryFeedUImpl`, this class's `m_inputHistoryFeed`, since task 22) | GAME | the input-history display's render-rate feed, driven from `UOGBrawlerSimulatableComponent::TickComponent`; it reads the session `m_session` through a `const` reference since task 24b, this class before (`InputHistoryDisplay-rationale.md` §8.6) |
+
+*Two rows left this table with the former Chaos configuration (og-session-runtime task 3): InjectInputs_External, the
+Chaos host's per-frame entry on the game thread (PROBE A and PROBE 6, then the drain and the reap), and the six
+FSimulationManagerAsyncCallback hook overrides on the physics thread.*
 
 **There are three crossings, and they are not alike.** One is a write of one scalar; the other
 two are reads — of a whole capture by the input-history feed (argued in `InputHistoryDisplay-rationale.md` §8.6 since
@@ -336,10 +351,10 @@ other side: physics-thread-only, and its correctness rests on nothing else touch
 
 ### The Jolt host's mechanisms J1–J6 and the shadow hand-over (og-simulationscheduler-withjolt tasks 54–56 and 52)
 
-The Jolt configuration replaces Chaos's implicit marshalling (its game-thread body API, its
+The Jolt configuration replaced the former Chaos configuration's implicit marshalling (its game-thread body API, its
 scene-query copy, the tick mapper's atomic, its marshalled input struct, its end-of-physics body
 sync) with five host mechanisms
-(design D §2.4), and Chaos's game-thread copy of the physics scene with a shadow world on a worker client (design D §2.5, "(e) in detail"). A sixth, J6, replaces nothing: it carries the step's measured cost to the game thread for `[SimHost.Window]` (§8). A seventh, J7, replaces Chaos's hand-over of a resimulation's error with its results (task 57). Until og-tickdriver task 8 none was a crossing between og-simulation structures; since task 8, J1, J3 and J6 are mailboxes of og-simulation's `SimulationTickDriver` and are listed in og-simulation's `ThreadingCrossings.md` ("The tick driver's mailboxes"); since og-tickdriver task 9, J5 and J7 are og-simulation's render presenter's (`TickDriverPresenter`) and are listed there too; and since og-tickdriver task 10, J2 and the shadow hand-over are og-simulation-jolt's world host's (`JoltTickWorldHost`, which the Jolt host `TickDriverBackendUImpl` holds in `m_physicsBackendWorlds`), and J2 is listed there too.
+(design D §2.4), and Chaos's game-thread copy of the physics scene with a shadow world on a worker client (design D §2.5, "(e) in detail"). A sixth, J6, replaces nothing: it carries the step's measured cost to the game thread for `[SimHost.Window]` (§8). A seventh, J7, replaced Chaos's hand-over of a resimulation's error with its results (task 57). Until og-tickdriver task 8 none was a crossing between og-simulation structures; since task 8, J1, J3 and J6 are mailboxes of og-simulation's `SimulationTickDriver` and are listed in og-simulation's `ThreadingCrossings.md` ("The tick driver's mailboxes"); since og-tickdriver task 9, J5 and J7 are og-simulation's render presenter's (`TickDriverPresenter`) and are listed there too; and since og-tickdriver task 10, J2 and the shadow hand-over are og-simulation-jolt's world host's (`JoltTickWorldHost`, which the Jolt host `TickDriverBackendUImpl` holds in `m_physicsBackendWorlds`), and J2 is listed there too.
 
 | | what | direction | mechanism | why it is safe |
 |---|---|---|---|---|
@@ -422,18 +437,18 @@ that, so the day the ordering changes, a Development build says so instead of ra
 ### Why the passthroughs are narrow rather than `edit*()` accessors
 
 `requestInputDelayIncreaseStall`, `publishClientEffectiveInputDelayTicks`, `getLastRelayedInput`,
-`getLocalInputCache`, `noteResimRequest` and
-`noteResimGrant` are one-purpose entry points. Each of the objects behind
+`getLocalInputCache` (and, until og-session-runtime task 3 removed the Chaos host, noteResimRequest and
+noteResimGrant) are one-purpose entry points. Each of the objects behind
 them is otherwise driven **exclusively** by the core `SimulationManager`'s tick loop. Handing
 game-thread `UObject` code a general mutable handle to one of them would invite exactly the
 cross-thread reach the entry point exists to bound. **Do not widen one into an accessor.**
 
 ⚠ **This list has now gone stale twice**, both times because a new member matching the pattern
 exactly was added without extending the sentence. The rule it states is about the *class* of
-member, not about these six names: **every public member of `AOGBrawlerSimulationManager` that
+member, not about these names: **every public member of `AOGBrawlerSimulationManager` that
 forwards to one core-owned object for one purpose belongs here**, and the enumeration is a
 reading aid. Replacing the list outright with that sentence would end the drift, at the cost of
-the six anchors `doc_anchor_lint.ps1` currently resolves through it — a trade worth making only
+the four anchors `doc_anchor_lint.ps1` currently resolves through it (six until og-session-runtime task 3) — a trade worth making only
 if the lead wants the anchors spent elsewhere.
 
 *(Until og-ue-simulationcomponentandmanagersplit task 22 the list had ten names: it also named `pollInputHistory`,
@@ -446,14 +461,15 @@ them to `InputHistoryDisplay-rationale.md` §8.6.)*
 are members of the session, `m_session`, with the composition reads they sit beside; the rule binds them there, and the
 session's rationale states it for them (`UESimulationSession-rationale.md` §8). Since task 25 two more,
 `requestInputDelayIncreaseStall` and `publishClientEffectiveInputDelayTicks`, are the session's, with the transport
-(`UESimulationSession-rationale.md` §9.3). The other names here stay the Chaos host's.)*
+(`UESimulationSession-rationale.md` §9.3). The other two, noteResimRequest and noteResimGrant, were the Chaos host's
+until og-session-runtime task 3 removed it.)*
 
-**In the Chaos configuration only (§18):** `noteResimRequest` and `noteResimGrant` have no callers
-but the Chaos hooks, and neither have the four plain forwards beside them (`onGameSimulation`,
-`onPostGameSimulation`, `onCheckIsSimilar`, `prepareResimulation`), so all six sat in the Chaos arm.
-Since task 82 they are members of `ChaosTickBackendUImpl`, the Chaos host, which reaches the manager through its
-owner (`ChaosTickBackendUImpl-rationale.md` §1). They are still one-purpose forwards, and the rule above binds them
-there. The Jolt host feeds the resim-gate probe from the step driver instead (task 18).
+**History: the former Chaos configuration (§18), removed by og-session-runtime task 3.** noteResimRequest and
+noteResimGrant had no callers but the Chaos hooks, and neither had the four plain forwards beside them
+(`onGameSimulation`, `onPostGameSimulation`, `onCheckIsSimilar`, `prepareResimulation`), so all six sat in the Chaos
+arm. From task 82 they were members of the Chaos host (ChaosTickBackendUImpl), which reached the manager through its
+owner, and they went with it. The Jolt host feeds the resim-gate probe from the step driver instead (task 18;
+`SimulationStepDriver.h`'s `editResimGateProbe()` calls).
 
 *The paragraph on `requestInputDelayIncreaseStall`'s `runsPrediction()` guard moved with the member to `UESimulationSession-rationale.md` §9.3
 (task 25); the guard is `UESimulationSession-guards.md` G-03.*
@@ -542,6 +558,9 @@ which the session's `beginPlay` hands `*m_physAdapter` and `*m_queryAdapter` (`B
 `firePreIntegrate` of the next tick (og-netcode-v2-field-defects task 20; `firePostIntegrate` before
 it), and reads the TARGET's guard transform that the target's integrate wrote on the physics-thread
 particle, as the physics step left it.
+
+*The configuration this record measured, the former Chaos configuration, was removed by og-session-runtime tasks 3–6;
+the record stays as the reason for the rule, which binds the Jolt adapters the same way.*
 
 ### `m_staticData` is the ownership root
 
@@ -659,9 +678,12 @@ correction lines carry the `field=` tail.
 | category | tags |
 |---|---|
 | `LogOGLatencyBudget` | `[LatencyBudget]`, `[LatencyBudget.Window]` (logged with `UE_LOG` directly, not routed; since task 19a declared, exported, in OGSimulationUnreal's `UELatencyBudgetDiagnostics.h` and defined in its `.cpp`, both under `!UE_BUILD_SHIPPING`; that template's rationale §3 and §7) |
-| `LogOGChaosDilation` | `[ChaosDilation]` (logged with `UE_LOG` directly, not routed; since task 19a declared in `ChaosTickBackendUImpl.h` and defined in its `.cpp`, gated by `OG_LATENCY_BUDGET_DIAGNOSTICS`, so it exists only in the Chaos configuration; §16) |
 
-They are not routed and have no row; the rule that gives each probe family its own category is
+The second category, LogOGChaosDilation (`[ChaosDilation]`, logged with `UE_LOG` directly; since task 19a declared in
+the Chaos host's header and defined in its `.cpp`), existed only in the former Chaos configuration and went with the
+Chaos host (og-session-runtime task 3; §16).
+
+`LogOGLatencyBudget` is not routed and has no row; the rule that gives each probe family its own category is
 `UESimulationLogRoutes-rationale.md` §3.
 
 ### This module's rows, by emitter (og-tickdriver task 12)
@@ -671,13 +693,13 @@ under `Plugins/` and `Source/`, with a leading `[Verbose]` or `[Warning]` token 
 removes it, assigned to the row that routed it.
 - og-simulation only (25 rows, now in `kSimulationLogRoutes`; 26 since og-input-latency task 5b added `[InputArrival.Window]`; 27 since P3-1 added `[InputArrival.BackDate]`; 28 since P2-5 added `[RelayFlush]`): every row not listed below. Their emitting
   files are listed in og-simulation's `SimulationLogRoutes-rationale.md` §5.
-- Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also `ChaosTickBackendUImpl.cpp`, this
-  module's `.cpp`, and since task 26b the session header's PROBE A client line, instantiated only in this module),
+- Emitted by og-simulation **and** this module (kept here): `[ResimProbe` (also, since task 26b, the session header's
+  PROBE A client line, instantiated only in this module; the Chaos host's .cpp too until og-session-runtime task 3 removed
+  it; this module's `.cpp` emits none),
   `[ServerReceive]` (also `OGBrawlerSimulatableComponent.cpp`) and `[RelayProbe` (also the session header's PROBE A server
   line and PROBE 6 lines, this module's `.cpp` until task 26b, and its PROBE 5 lines, this module's `.cpp` until task
   26a; the session is instantiated only in this module).
-- Emitted by this module only (kept here): `[ResimCheck.TriggerRewind]` (`ChaosTickBackendUImpl.cpp`),
-  `[ClientPrediction]` (`OGBrawlerInputCollectionComponent.cpp`), `[ReceiveCorrectionState]`
+- Emitted by this module only (kept here): `[ClientPrediction]` (`OGBrawlerInputCollectionComponent.cpp`), `[ReceiveCorrectionState]`
   (`OGBrawlerSimulatableComponent.cpp`), `[ReleaseBatch]` (this module's `.cpp` until task 26a; since then the session header's, instantiated only in this
   module), `SimulationManager:` (this
   module's `.cpp`), `tryRegister:` (`BrawlerJoltBindingUImpl.cpp`'s capsule `checkf`, the Jolt host's `.cpp` until og-tickdriver task
@@ -685,6 +707,8 @@ removes it, assigned to the row that routed it.
   (`OGBrawlerSimulatableComponent.cpp` and this module's `.cpp`).
 - No emitter (kept here; deleting them was out of scope): `[SendRemoteInputToClients]`,
   `[ReceiveCorrectionInput]`, `[InjectCorrectionInput]`, `[DrainOutOfOrder]`.
+- Deleted: `[ResimCheck.TriggerRewind]`, which only the Chaos host's .cpp emitted. Its row had no emitter after
+  og-session-runtime task 3 removed that host, and og-session-runtime task 7b deleted the row.
 
 *Since og-input-latency task P5-8* the record above is history for three of its attributions:
 `OGBrawlerSimulatableComponent.cpp` logs nothing, the binding's `[ServerReceive]` line was deleted with its net half,
@@ -703,10 +727,11 @@ level is set in one place for routed and direct lines alike. The sites:
 | row | site | file |
 |---|---|---|
 | `[ReleaseBatch]` | `releaseDelayedInputsForStep`, the session's since og-ue-simulationcomponentandmanagersplit task 26a | `UESimulationSession.h` (OGSimulationUnreal; `OGBrawlerSimulationManager.cpp` before) |
-| `[ResimCheck.TriggerRewind]` | `TriggerRewindIfNeeded_Internal`, the two `rewind=0` lines (Chaos only) | `ChaosTickBackendUImpl.cpp` |
 | `[ClientPrediction]` | `buildPlayerInput` | `OGBrawlerInputCollectionComponent.cpp` |
 
-The category stays at the site. Nothing checks that it is the row's category; all four sites agree today. Until
+The category stays at the site. Nothing checks that it is the row's category; the sites agree today. Until
+og-session-runtime task 3 the table had a `[ResimCheck.TriggerRewind]` row too: the two `rewind=0` lines of the Chaos
+host's TriggerRewindIfNeeded_Internal, which went with the Chaos host. Until
 og-input-latency task P5-8 the table had two more rows, both in `UESimulatableOwnerBinding.h` since task 21 (in
 `OGBrawlerSimulatableComponent.cpp` before): `[ServerReceive]`, from `receiveRemoteMoveBundle`'s no-coordinator path
 (the RPC tail since og-ue-simulationcomponentandmanagersplit task 20a), and `[ReceiveCorrectionState]`, from
@@ -715,9 +740,9 @@ deleted both with the binding's net half; the `[ReceiveCorrectionState]` line is
 
 **Direct sites that stay at a fixed `Log`:**
 
-* the `rewind=1` line of `TriggerRewindIfNeeded_Internal` (Chaos only). It is a resim request, a
-  rare event, but it shares the `[ResimCheck.TriggerRewind]` tag with the per-step `rewind=0` lines,
-  and the text that tells them apart is at the end of the line, where no prefix row can reach it.
+* until og-session-runtime task 3 removed the Chaos host, the `rewind=1` line of its TriggerRewindIfNeeded_Internal: a
+  resim request, a rare event, that shared the `[ResimCheck.TriggerRewind]` tag with the per-step `rewind=0` lines, with
+  the text that told them apart at the end of the line, where no prefix row can reach it.
 * `[RelayDelayFloor]` and `[ConnectionTier]` (session and tier events, at most about 0.1 per second;
   `[ConnectionTier]` also in `OGBrawlerSimulatableComponent.cpp`). They have no row and need none. Their sites are the
   session header's since tasks 25 and 26b (the floor's ini line moved with `applySessionKnobs`).
@@ -882,7 +907,7 @@ the positions of the statements it held: `beginReceptionCoordinator(pctmloggerSe
 (the actor's `BeginPlay` until task 27b, as `m_session.beginReceptionCoordinator`; the session's `beginPlay` since), and
 `forgetReceptionOwner(id)` in `unregisterFromNewFramework` (this class's, as `m_session.forgetReceptionOwner`, until task
 28; the session's own since, `UESimulationSession-rationale.md` §12.3). What stays here is the
-history below and the brawler's two hosts' call patterns.
+history below and the brawler's host's call pattern (with the former Chaos host's, as history).
 
 `sampleAndDeriveConnectionTier` and `tryEnqueueDelayedRemoteInput` are **gone**; their
 engine-primitive acquisition moved up to the RPC boundary (the component binding's `receiveRemoteMoveBundle`), which forwarded straight into
@@ -895,34 +920,26 @@ Unreal server host's `rttMs`). Nothing of the per-slot path is manager-side.
 
 The three pieces of a frame's reception work (the session's `onFrameStepsDue_Step`, this class's until task 26b;
 the session's drain `releaseDelayedInputsForStep`; and the coordinator's reap; `UESimulationSession-rationale.md` §9.7 and
-§9.9) are called by the brawler's two hosts as follows.
+§9.9) are called by the brawler's host, the Jolt host, as below. PROBE A runs on both roles and a pure client never has
+a coordinator, so every coordinator test sits below it.
 
-**The Chaos configuration's call order is the order of the code before the split.**
-`InjectInputs_External` (a `ChaosTickBackendUImpl` member since task 82) runs on the game thread once per
-physics frame, before the frame's steps are handed to the solver, and calls: the mapper's
-`firstUpcomingSimTick` (`ChaosTickBackendUImpl-rationale.md` §4, `ChaosTickBackendUImpl-guards.md` G-07); then
-`onFrameStepsDue_Step(first, NumSteps)`; then, when a coordinator exists, the drain with
-`(first, NumSteps)` and `reapConnections(first)`. So this configuration releases the frame's whole
-batch up front, before its first step: one `[ReleaseBatch]` per frame, with `numSteps` equal to the
-frame's step count. Every `[Release]` line that follows lies in `[first, first + numSteps)` of the
-nearest `[ReleaseBatch]` before it. That containment is the within-run check of the pattern (§18).
-
-The drain hands over only the game-thread-safe upcoming sim tick (`ChaosTickBackendUImpl-rationale.md` §4) and the per-id callback. The
-reap was relocated here off the former arrival-gated RTT sample path: it runs once per physics frame
-regardless of traffic — a documented benign cadence change, since an idle server now reaps — and the
-coordinator gates it on the dwell boundary internally. Its tick comes from the mapper, **not** the
+**History: the former Chaos configuration's call order, removed by og-session-runtime tasks 3–6.** It was the order of
+the code before the split: the Chaos host's InjectInputs_External ran on the game thread once per physics frame, before
+the frame's steps were handed to the solver, and called the tick mapper's firstUpcomingSimTick, then
+`onFrameStepsDue_Step(first, NumSteps)`, then, when a coordinator existed, the drain with `(first, NumSteps)` and
+`reapConnections(first)`. So it released the frame's whole batch up front, before its first step: one `[ReleaseBatch]`
+per frame, with `numSteps` equal to the frame's step count, each later `[Release]` line inside `[first, first + numSteps)`
+of the nearest `[ReleaseBatch]` before it. The reap ran once per physics frame regardless of traffic (relocated off
+the former arrival-gated RTT sample path, so an idle server reaps), with its tick from the mapper, not the
 physics-thread-written server clock.
-
-PROBE A runs on both roles and a pure client never has a coordinator, so every coordinator test sits
-below it.
 
 **The Jolt configuration's call pattern (og-simulationscheduler-withjolt task 54).** The same three
 pieces, at the three places design D3 puts them (`SimulationTickDriver-rationale.md` §3 since og-tickdriver
 task 8; `BrawlerTickDriverGameUImpl-rationale.md` §2):
 
 * `onFrameStepsDue_Step(first + offset, n)` once per frame at `TG_StartPhysics`, only when the
-  scheduler made `n ≥ 1` steps due: the condition and the arguments under which Chaos called
-  `InjectInputs_External`.
+  scheduler made `n ≥ 1` steps due: the condition and the arguments under which the former Chaos host
+  called it.
 * The drain **per simulation tick**, from the authority step's `beforeTick`, as
   `releaseDelayedInputsForStep(authorityTick, 1)`: one `[ReleaseBatch]` with `numSteps=1` per step,
   for the tick that step will simulate (`TickDriverStepHooks-guards.md` G-01 and `BrawlerTickDriverGameUImpl-guards.md`
@@ -936,10 +953,10 @@ task 8; `BrawlerTickDriverGameUImpl-rationale.md` §2):
 
 No receipt can land between inline steps (receipts happen in the engine's receive dispatch, before the
 tick groups), so the queue a step drains holds what the batch would have held. The two patterns
-release the same `(id, captureTick, releaseTick)` set and differ only in which step pops an input in a
-multi-step frame with a per-character gap (design D4): the batch hands the next input to the gap tick;
-per step, the gap tick underruns and the rest apply on time. The comparison is therefore by
-distribution, never line by line (§18).
+released the same `(id, captureTick, releaseTick)` set and differed only in which step pops an input in a
+multi-step frame with a per-character gap (design D4): the batch handed the next input to the gap tick;
+per step, the gap tick underruns and the rest apply on time. The comparison of the two configurations was therefore
+by distribution, never line by line (§18).
 
 ---
 
@@ -958,16 +975,16 @@ call in `onFrameStepsDue_Step`, with the window-length assertion. The argument (
 needed it, why it lives beside the host's call, why this hook, why the client's tick is safe, the per-role tags, the
 window comparability) moved, verified and game-neutral, to `UESimulationSession-rationale.md` §9.9.
 
-**The brawler's tick source, per configuration.** The probe is measured on the game thread from the tick its host hands
-it, and the only tick source legal to read there is the host's own. In the Chaos configuration that is the
-`ChaosTickMapper`'s atomic offset, which the brawler's Chaos host owns (a `ChaosTickBackendUImpl` member since task 82):
-`InjectInputs_External` calls `onFrameStepsDue_Step` with the mapper's tick (§7, §18). In the Jolt configuration
+**The brawler's tick source.** The probe is measured on the game thread from the tick its host hands
+it, and the only tick source legal to read there is the host's own. In the former Chaos configuration (removed by
+og-session-runtime tasks 3–6) that was the tick mapper's atomic offset, which the Chaos host owned: its
+InjectInputs_External called `onFrameStepsDue_Step` with the mapper's tick (§7, §18). In the Jolt configuration
 the tick driver calls it at `TG_StartPhysics` with its dispatch counter plus the published offset J3 (§1), which is the
 mapper's value except that a client Skip or Stall's ±1 reaches the probe one frame earlier
 (`BrawlerTickDriverGameUImpl-rationale.md` §4; the frame host until og-tickdriver task 8); the line formats are unchanged
-(og-simulationscheduler-withjolt task 54). The `+ 1` in the Chaos host's derivation is proved under an authority-only
-assumption (`ChaosTickBackendUImpl-rationale.md` §4); the session's §9.9 says why the probe's deltas are safe on a client
-anyway.
+(og-simulationscheduler-withjolt task 54). The `+ 1` in the former Chaos host's derivation was proved under an
+authority-only assumption (in its rationale, deleted with it); the session's §9.9 says why the probe's deltas are safe on
+a client anyway.
 
 ### PROBE 5 — relay writes per frame: moved to the session (task 26a)
 
@@ -992,41 +1009,22 @@ shot per process, not per session.
 bound**: if the `usableSingleBunchBytes` the line logs is ever smaller than that literal, the literal is optimistic and
 must be lowered there.
 
-### The resim-gate feeds (`noteResimRequest` / `noteResimGrant`), client only
+### The resim-gate feeds (noteResimRequest / noteResimGrant), client only
 
-*Chaos configuration only (§18): both feeds are called from the Chaos hooks, and since task 82 both are
-`ChaosTickBackendUImpl` members. In the Jolt configuration
-the step driver feeds the same probe (`SimulationStepDriver::resimulateIfRequested`: a request when the
+The step driver feeds the resim-gate probe (`SimulationStepDriver::resimulateIfRequested`: a request when the
 gate names an anchor, a grant when the world still holds that tick), so `[ResimProbe.Gate]`,
 `[ResimProbe.Chaos]` and `[ResimProbe.Apply]` keep their formats with a sim-tick frame domain: a
-refusal is a ring miss, a clamp cannot happen (task 54).*
+refusal is a ring miss, a clamp cannot happen (og-simulationscheduler-withjolt task 54).
 
-**Why our own counters at all.** `FRewindData::FindValidResimFrame` and
-`FPBDRigidsSolver::ConditionalApplyRewind_Internal` log every refusal and every silent frame-skip
-behind `DEBUG_REWIND_DATA` / `DEBUG_NETWORK_PHYSICS`, which are compiled out of any normal build. A
-refused rewind is therefore **completely silent** today, and our side simply retries next frame
-because nothing cleared `needsResimulation()`. These two calls are the only way that second gate
-becomes countable, and `requests − grants` is the refusal count. (The retry property is now
-structural rather than incidental: only the resim-completion edge can consume a pending anchor, so
-a refusal cannot clear the gate even by accident. The counters' meaning is unchanged.)
-
-**The request is counted after the tick conversion**, so the Chaos frame recorded is exactly the
-one Chaos receives and `clampedGrants` compares a grant against the number actually asked for. The
-per-event `Verbose` line carries the mapper **offset**, which is the discriminator: the offset
-legitimately moves ±1 across Stall/Skip steps, and a ±1 skew at trigger time converts directly into
-a request landing on a refused frame or a replay one frame short of the clock's catch-up need.
-
-**The grant** is recorded where Chaos starts the rewind, at `PhysicsStep`, which can differ from
-the frame we asked for **only by being deeper**: an engine-side requester merged in via a *min*,
-or the validation walking down (`FMath::Min` on the engine side). A *shallower* clamp is structurally impossible on this wiring —
-validation walks downward, the merge can only deepen, and the replay-loop push-data skip that could
-start a replay late is dead code on this engine. So `clampedGrants` reads a constant `0` by
-construction and a nonzero value is an **engine-behaviour-change alarm**. The engine may also
-rewind on its own initiative with no request of ours on record; that stays uncharged. See `ResimGateProbe::noteGrant`.
-
-`noteResimGrant` is called **before** `prepareResimulation`, so a grant is recorded even if
-anything below early-returns: `grants` and `prepares` are counted on opposite sides of that
-boundary on purpose, and their agreement is the wiring check.
+*History: the former Chaos configuration (§18), removed by og-session-runtime tasks 3–6.* There the two feeds,
+noteResimRequest and noteResimGrant, were called from the Chaos hooks (members of the Chaos host since task 82). They
+existed because Chaos logged a refused rewind only behind debug defines compiled out of every normal build, so
+`requests − grants` was the only refusal count. The request was counted after the tick conversion, with the tick
+mapper's offset on the per-event `Verbose` line as the discriminator for a ±1 skew across Stall/Skip steps. The grant
+was recorded where Chaos started the rewind, which could differ from the frame asked for only by being deeper, so
+`clampedGrants` read a constant `0` by construction and a nonzero value was an engine-behaviour-change alarm (see
+`ResimGateProbe::noteGrant`). The grant was recorded before `prepareResimulation`, so `grants` and `prepares`, counted
+on opposite sides of that boundary, checked the wiring.
 
 *Since og-ue-simulationcomponentandmanagersplit task 27b the startup proof line below, and the field-diff predicate the
 next paragraphs name, are the session's statements in its `beginPlay`'s client branch, unchanged
@@ -1055,14 +1053,15 @@ type as `-> bool` (same task). Under `NO_LOGGING`, `UE_LOG_ACTIVE(...)` expands 
 returned `int`. `std::function<bool()>` then converts that `int` to `bool` inside the standard
 library, and warning C4800 is an error in this build (`error C4800` at `functional(810)`). The
 Shipping client first reported it once the two C2039 errors above were gone. With the return type
-declared, the conversion is a constant `0` in the lambda's own `return`, like the
-`const bool pushProbeActive = UE_LOG_ACTIVE(...)` initialisation in the same file, which compiles
-cleanly. With logging on, `UE_LOG_ACTIVE` already yields a `bool`, so nothing changes. The
+declared, the conversion is a constant `0` in the lambda's own `return`, like the push-probe flag's
+initialisation from `UE_LOG_ACTIVE(...)` that the same file held then (later the Chaos host's, removed by
+og-session-runtime task 3), which compiled cleanly. With logging on, `UE_LOG_ACTIVE` already yields a `bool`, so nothing changes. The
 predicate still reads the category live (guard G-50).
 
 ### The rewind-push probe (`[ResimProbe.PushTarget]` / `[ResimProbe.PushVerdict]`), client only
 
-Moved to `ChaosTickBackendUImpl-rationale.md` §3 (og-simulationscheduler-withjolt task 82), with the code it describes.
+Moved to the Chaos host's rationale (ChaosTickBackendUImpl-rationale.md §3) by og-simulationscheduler-withjolt task 82,
+with the code it describes; both were deleted by og-session-runtime task 3.
 
 ### `[SimHost.Window]` — the Jolt host's window line, both roles (og-simulationscheduler-withjolt task 52)
 
@@ -1088,9 +1087,9 @@ The Jolt host (`TickDriverBackendUImpl` since task 83) feeds it two game-thread 
 
 ## §9 Tick alignment — the `+ 1`
 
-The Chaos configuration's derivation of the `+ 1` moved to `ChaosTickBackendUImpl-rationale.md` §4 (og-simulationscheduler-withjolt task 82).
-
-**That derivation is the Chaos configuration's** and retires with it (task 21). The Jolt configuration
+The former Chaos configuration's derivation of the `+ 1` moved to the Chaos host's rationale
+(ChaosTickBackendUImpl-rationale.md §4) in og-simulationscheduler-withjolt task 82, and retired with that configuration:
+og-session-runtime tasks 3–6 removed it. The Jolt configuration
 has no mapper and no `+ 1`: the step driver hands each authority step `serverTick + 1` and checks after
 the step that it simulated exactly that tick (`SimulationStepDriver-rationale.md` §7), and the per-frame
 tick is the tick driver's dispatch counter plus the offset `afterTick` publishes, `tick − physicsStep`,
@@ -1396,9 +1395,10 @@ definition are what hold it. Task 11's C12 said the sentence's *substance* was t
 
 §9 said the drain was reached through the pre-tick hook, then `InjectInputs_External`. The pre-tick
 hook this class bound to the scene's pre-tick delegate had an empty body and called nothing.
-`InjectInputs_External` is bound to the rewind callback's `InjectInputsExternal` delegate, which
-Chaos broadcasts from the solver when it pushes the frame's steps. Task 51 deleted the empty hook
-and its binding, and §9 then named the real caller. That text is `ChaosTickBackendUImpl-rationale.md` §4 since task 82.
+InjectInputs_External was bound to the rewind callback's InjectInputsExternal delegate, which
+Chaos broadcast from the solver when it pushed the frame's steps. Task 51 deleted the empty hook
+and its binding, and §9 then named the real caller. That text moved to the Chaos host's rationale
+(ChaosTickBackendUImpl-rationale.md §4) in task 82 and was deleted with it by og-session-runtime task 3.
 
 *Found by og-simulationscheduler-withjolt task 51.*
 
@@ -1619,7 +1619,7 @@ module.*
 // Rationale, the token table and the residual blind spot: docs/SimulationManagerUImpl-rationale.md §8
 ```
 
-**Where it went:** Lines 272-273 → **`⛔G-02`**. The rest is rationale — §8, *The rewind-push probe*. Task 82 moved both with the Chaos host: they are `ChaosTickBackendUImpl-guards.md` G-01 and `ChaosTickBackendUImpl-rationale.md` §3.
+**Where it went:** Lines 272-273 → **`⛔G-02`**. The rest is rationale — §8, *The rewind-push probe*. Task 82 moved both with the Chaos host, as its guards' G-01 and its rationale's §3 (ChaosTickBackendUImpl-guards.md, ChaosTickBackendUImpl-rationale.md); og-session-runtime task 3 deleted both with it.
 
 #### Header lines 287-300 — above `class FSimulationManagerAsyncCallback : public Chaos::TSimCallbackObject<`
 
@@ -2671,7 +2671,7 @@ unchanged.*
 
 ### 13.3 The collision-category table
 
-*Now one table per configuration, in the brawler's engine bindings: `BrawlerChaosBindingUImpl::categoryChannels`, which the Chaos host's `buildWorld` hands the query adapter, and `BrawlerJoltBindingUImpl::categoryChannels`, which the Jolt host's `buildWorld` hands the static importer (og-tickdriver task 15a). Before that it was one file-local function, emplaceBrawlerQueryAdapter, called from both role branches; og-simulationscheduler-withjolt task 82 moved it into `ChaosTickBackendUImpl.cpp`, called once from `buildWorld`, and task 83 gave the Jolt configuration its own table, brawlerCategoryChannels in the Jolt host's `.cpp` (TickDriverBackendUImpl.cpp, a historical name: og-tickdriver task 15e deleted it).*
+*Now one table, in the brawler's engine binding: `BrawlerJoltBindingUImpl::categoryChannels`, which the Jolt host's `buildWorld` hands the static importer (og-tickdriver task 15a). From task 15a until og-session-runtime task 3 the former Chaos configuration had a second, in the Chaos binding (BrawlerChaosBindingUImpl::categoryChannels), which the Chaos host's buildWorld handed the query adapter; task 3 deleted both. Before that it was one file-local function, emplaceBrawlerQueryAdapter, called from both role branches; og-simulationscheduler-withjolt task 82 moved it into the Chaos host's .cpp (ChaosTickBackendUImpl.cpp), called once from buildWorld, and task 83 gave the Jolt configuration its own table, brawlerCategoryChannels in the Jolt host's `.cpp` (TickDriverBackendUImpl.cpp, a historical name: og-tickdriver task 15e deleted it).*
 
 ⭐ **The duplication is gone, and with it the fence.** The source carried the table twice, once
 per role branch, under "KEEP IN SYNC … adding to one silently diverges client from server". It
@@ -2781,9 +2781,10 @@ stood beside the router's old branches, and corrections C13-2 and C13-3 restated
 
 ### 13.7 The rewind-push probe — the source's own wording, beyond §8
 
-*`ChaosTickBackendUImpl-rationale.md` §3 carries this probe's design (§8's text, moved there by task 82). These are the
-passages from its source that it did not already state. Chaos configuration only: the probe and its helpers are
-the Chaos host's (`ChaosTickBackendUImpl.cpp` since task 82) and retire with it in task 21 (§18).*
+*History. The Chaos host's rationale (ChaosTickBackendUImpl-rationale.md §3) carried this probe's design (§8's text,
+moved there by task 82). These are the passages from its source that it did not already state. The probe and its
+helpers were the former Chaos configuration's (the Chaos host's .cpp since task 82) and went with it: og-session-runtime
+task 3 removed them (§18).*
 
 > TWO QUESTIONS, ONE FIELD SET, ONE PRODUCTION COMPARATOR. `match` asks whether the
 > replay's starting state equals the pushed value; `inert` asks whether the push could
@@ -2811,9 +2812,9 @@ the Chaos host's (`ChaosTickBackendUImpl.cpp` since task 82) and retire with it 
 > replay. It compares all four fields regardless of the wire shape, because both sides
 > are LIVE reads of the same particle.
 
-⚠ **Outdated by task 10's fix (2026-09-25), not wrong when written.** The push is now a direct write
-onto the particle (`ChaosTickBackendUImpl-rationale.md` §5), so the after-push read differs from `beforePush` on every non-inert push, and
-`moved=1` is the expected reading. The verdict still comes from read 3, one hook later.
+⚠ **Outdated by task 10's fix (2026-09-25), not wrong when written.** From then on the push was a direct write
+onto the particle (the Chaos host's rationale §5), so the after-push read differed from `beforePush` on every non-inert
+push, and `moved=1` was the expected reading. The verdict still came from read 3, one hook later.
 
 > BodyId lookup goes through the m_physics composite bindings (local-only).
 >
@@ -2822,9 +2823,10 @@ onto the particle (`ChaosTickBackendUImpl-rationale.md` §5), so the after-push 
 > `BodyStateT` is the declaration's ACTUAL wire shape, before the widening
 > conversion into `pushBodyState`'s `const PhysicsBodyState&` erases it.
 
-Verified: `createPhysicalObject(D::descriptor(), D::name)` is the factory call of the first-call bind. *R0, task 28:* it is
-in the self-scheduled host's `ChaosTickBackendUImpl::createBodies_GameThread` (since og-simulationscheduler-withjolt task 82),
-which `tryRegister`'s first call reaches through the backend; it was never `tryRegister`'s own statement after that task.
+Verified: `createPhysicalObject(D::descriptor(), D::name)` was the factory call of the first-call bind. *R0, task 28:* it
+was in the self-scheduled host's ChaosTickBackendUImpl::createBodies_GameThread (from og-simulationscheduler-withjolt
+task 82 until og-session-runtime task 3 removed the host), which `tryRegister`'s first call reached through the backend;
+it was never `tryRegister`'s own statement after that task.
 There is no member named `m_physics`; the lookup goes through `getPhysicsComposite()`.
 
 > ⛔ At PostPushData: direct SetX/SetV/SetW is a NO-OP on ResimAsFollower bodies.
@@ -2835,8 +2837,8 @@ tree's bodies. On UE 5.6 `RewindToFrame` re-stamps every dynamic body's resim ty
 rewind, so none is `ResimAsFollower` during a replay. The push it justifies was also measured
 never read (task 10's capture: 185 of 185 rewinds `MISMATCH`, `nonInertMatched=0`). ~~The call
 stays, because task 10's fix will decide what replaces it.~~ Task 10's fix (2026-09-25) removed the
-call and writes the particle directly (`ChaosTickBackendUImpl-rationale.md` §5, `ChaosTickBackendUImpl-guards.md` G-08). The sentence has no guard, because it no
-longer describes a reason.
+call and wrote the particle directly (the Chaos host's rationale §5 and its guards' G-08, both deleted with the host by
+og-session-runtime task 3). The sentence has no guard, because it no longer describes a reason.
 
 At `b9f6d81` `Config/DefaultEngine.ini` sets `LogOGResimProbe=Verbose`, so the "shipped
 `LogOGResimProbe=Warning`" in the probe banner's volume paragraph (quoted in §8) does not
@@ -2871,7 +2873,7 @@ observed. The file was then restored and its hash checked.
 | was | now | seen to fail |
 |---|---|---|
 | "ORDER IS LOAD-BEARING: this MUST precede the `[Resim.` catch-all" and the defensive `[ResimProbe` placement | `static_assert(ogLogRoutesAreAllReachable())` over `kOGLogRoutes`: no prefix may begin with an earlier one, compared case-insensitively as `FString::StartsWith` does | `[Resim.` moved above `[Resim.Input]` ⇒ `C2338`; `[Resim.` widened to `[Resim` ⇒ `C2338`; a lower-case duplicate `[resim.input]` appended ⇒ `C2338` |
-| the two collision tables and their "KEEP IN SYNC" | one table, emplaceBrawlerQueryAdapter, called from both branches (since og-tickdriver task 15a the Chaos binding's `BrawlerChaosBindingUImpl::categoryChannels`) | nothing left to poison: the two copies no longer exist |
+| the two collision tables and their "KEEP IN SYNC" | one table, emplaceBrawlerQueryAdapter, called from both branches (from og-tickdriver task 15a the Chaos binding's categoryChannels, deleted by og-session-runtime task 3; the Jolt binding's `BrawlerJoltBindingUImpl::categoryChannels` is the one table) | nothing left to poison: the two copies no longer exist |
 | "NOT `HasAuthority()`" at four sites | `#define HasAuthority HasAuthority_is_constant_true_on_AOGBrawlerSimulationManager_use_worldIsAuthority_or_runsPrediction` after the includes, `#undef` at the end of the file (it must not leak into the next file of a unity blob), in `OGBrawlerSimulationManager.cpp` and, since task 33, the same two lines in `BrawlerSessionGameUImpl.cpp`, whose hook bodies were under it here | `HasAuthority()` typed in `BeginPlay` ⇒ `C3861` naming that identifier; task 33: `HasAuthority()` typed in a hook body of `BrawlerSessionGameUImpl.cpp` ⇒ `C3861`, the same identifier |
 | PROBE A's "COMPARABLE WITH ResimGateProbe … same 120 samples" | `static_assert(kFrameHealthProbeWindowSamples == kResimGateProbeWindowSamples)` (in the session's `onFrameStepsDue_Step` since task 26b) | a local shadow of 121 ⇒ `C2338` |
 | "NOT ROLE-GATED" at the spawn-point seed | `checkf(m_ringoutSpawnPointsSeeded)` after both role branches (in `BrawlerRosterUImpl::checkSeeded` since task 23) | compiled only. A runtime check in the UE layer cannot be exercised from a low-level test |
@@ -2881,7 +2883,7 @@ observed. The file was then restored and its hash checked.
 
 | the comment said | what already enforces it | seen to fail |
 |---|---|---|
-| the request is counted after the tick conversion | data dependency: `noteResimRequest` takes the converted tick | hoisted above it ⇒ `C2065` |
+| the request is counted after the tick conversion | data dependency: noteResimRequest took the converted tick (in the former Chaos host since task 82; removed with it by og-session-runtime task 3) | hoisted above it ⇒ `C2065` |
 | a stale route is skipped, never erased, in the score push | the route table arrives by `const&` | `routes.erase(id)` ⇒ `C2663` |
 | no depth is passed to the relay stage | `stageRelayedInput` had no depth parameter (og-input-latency task P5-8 deleted it); `RelayRedundancyDepthTest.cpp` | not re-poisoned here |
 | a client must not push scores | `SetAuthoritativeRingoutScore`'s `checkf` on `HasAuthority()` (the pawn replicates) | not re-poisoned here |
@@ -2976,7 +2978,8 @@ and on four early returns: `// pre-BeginPlay ordering; the relay latches and rep
 
 ## §14 The first replayed step — the restored body state is written, not targeted
 
-Moved to `ChaosTickBackendUImpl-rationale.md` §5 (og-simulationscheduler-withjolt task 82), with the code it describes.
+Moved to the Chaos host's rationale (ChaosTickBackendUImpl-rationale.md §5) by og-simulationscheduler-withjolt task 82,
+with the code it describes; both were deleted by og-session-runtime task 3.
 
 ---
 
@@ -3031,8 +3034,9 @@ The probe's host is OGSimulationUnreal's template `UELatencyBudgetDiagnostics` (
 og-ue-simulationcomponentandmanagersplit task 19a). Its rationale, `UELatencyBudgetDiagnostics-rationale.md` in
 OGSimulationUnreal's docs, is the class, its gate, its const access, the fence test, the template's own stamp points and
 threads, the `H3` hook and the `[LatencyBudget]` lines. This section is the brawler's side: this class's member and call
-sites, the brawler's other stamp sites, their threads and errors, and the Chaos host's `[ChaosDilation]` line. The
-probe is a measurement of the Chaos build, per hop, that the scheduler migration was compared against. **It changes no
+sites, the brawler's other stamp sites, their threads and errors, and, as history, the former Chaos host's
+`[ChaosDilation]` line. The probe was written as a measurement of the Chaos build, per hop, that the scheduler migration
+was compared against; since og-session-runtime tasks 3–6 removed the Chaos configuration it measures the Jolt build only. **It changes no
 gameplay behaviour, timing or netcode: every addition is a timestamp and a counter.**
 
 ### Ownership and call sites
@@ -3056,17 +3060,18 @@ probe's code had before og-tickdriver task 18 moved it out of this class:
   stepping (`startStepping`, at the end of the start-up), and nothing resets them before the actor is destroyed, so a step
   can never reach a null or freed mailbox (this class's `BeginPlay` until task 27b, the session's `beginPlay` since, its
   own statement, `UESimulationSession-rationale.md` §11);
-* the teardown: `end`, inside the world test, before `onEndPlayWorld` (in this class's `EndPlay` until task 27a, in the
-  session's `endPlay` since, `UESimulationSession-rationale.md` §10);
+* the teardown: `end`, inside the world test (before the backend's onEndPlayWorld until og-session-runtime task 5
+  removed it; in this class's `EndPlay` until task 27a, in the session's `endPlay` since, `UESimulationSession-rationale.md` §10);
 * `tryRegister`: `wrapInputProvider`, on the client branch (this class's until task 28, the session's own statement since,
   `UESimulationSession-rationale.md` §12.1);
 * `unregisterFromNewFramework`: `forgetCharacter` (likewise, §12.3);
-* the last statement of the post-physics pass: `tick_GameThread`, with the backend's `editDiagnostics()` view (this
-  class's `OnPostPhysicsStep` until task 27a, the session's `onPostPhysicsStep` since, after the brawler's hook).
+* the last statement of the post-physics pass: `tick_GameThread` (handed the backend's diagnostics view until
+  og-session-runtime task 5 removed the view; this class's `OnPostPhysicsStep` until task 27a, the session's
+  `onPostPhysicsStep` since, after the brawler's hook).
 
-No production local, decision or replicated value moved into the template. The two neighbours that feed it have their
-own fenced blocks: the Chaos host's `[ChaosDilation]` window (`ChaosTickBackendUImpl-guards.md` G-11) and the input
-collection component's input-sample time (an old-style fence comment; that file is unconverted).
+No production local, decision or replicated value moved into the template. The neighbour that feeds it has its own
+fenced block: the input collection component's input-sample time (an old-style fence comment; that file is
+unconverted). Until og-session-runtime task 3 a second did, the Chaos host's [ChaosDilation] window (its guards' G-11).
 
 PIE in one process has two manager instances and two probes; the `role=` field tells their lines apart. The component's
 game-thread sites reach the role's instance through `UELatencyBudgetDiagnostics::withInstance`
@@ -3075,15 +3080,17 @@ game-thread sites reach the role's instance through `UELatencyBudgetDiagnostics:
 ### Threads — the brawler's reads add no crossing
 
 The template's own reads are same-thread with their writers (its rationale §6). The brawler's: the correction buffer's
-tick (written by `sendCorrectionAll` inside `onPostSimulationGameThread`), `m_delayedInputComponentsById`, the scene's
-network delta-time scale (written by the engine's time-dilation client RPC) and the local player controller's physics
-tick offset (written by the engine's timestamp-setup client RPC) are all read on the game thread, where they are written.
+tick (written by `sendCorrectionAll` inside `onPostSimulationGameThread`) and `m_delayedInputComponentsById` are read on
+the game thread, where they are written; so were the former Chaos host's two dilation reads (the scene's network
+delta-time scale and the local player controller's physics tick offset, each written by an engine client RPC) until
+og-session-runtime task 3 removed them.
 The one value that crosses from the game thread to the step thread, the input-sample time, is a `std::atomic<double>` on
 the input collection component (`BrawlerSessionGameUImpl-rationale.md` §2). **This class's CROSSING count stays three**
 (§1), and this paragraph is the argument for it, made rather than assumed.
 
-On a dedicated server the step thread *is* the game thread (Chaos steps inline; the Jolt configuration steps the
-authority inline too).
+On a dedicated server the step thread is the game thread when the authority steps inline, and the runner thread on
+the authority loop (`og.Sim.AuthorityLoop=1`, `UESimulationSession-rationale.md` §19); the former Chaos configuration
+stepped the authority inline.
 
 ### Why the capture stamp is a wrapper in `tryRegister`, not a line in the provider lambda
 
@@ -3099,19 +3106,19 @@ wrapper never changes it (the template's rationale §3).
 
 ### What the brawler has at 0 (Shipping, and the fence build)
 
-The template's members are no-ops (its rationale §3). On the brawler's side: the Chaos host's `[ChaosDilation]` window
-members and `LogOGChaosDilation` do not exist and its view's four members are inline no-ops; the input collection
+The template's members are no-ops (its rationale §3). On the brawler's side: the input collection
 component's input-sample time and its view do not exist, so `BrawlerSessionGameUImpl::inputSampledSeconds` is not
-declared either. **What still runs at 0, deliberately:** the Chaos async callback still reads `FPlatformTime::Seconds`
-before `onGameSimulation`, because the step-start time must be taken before the step and it is a production local beside
-production statements. Until og-input-latency task P5-8 the authority's relay-host flush callback was also still
+declared either. Until og-session-runtime task 3 removed the Chaos host, its [ChaosDilation] window members and
+LogOGChaosDilation did not exist at 0 either and its view's four members were inline no-ops, while its async callback
+still read `FPlatformTime::Seconds` before `onGameSimulation`, deliberately: the step-start time had to be taken before
+the step, a production local beside production statements. Until og-input-latency task P5-8 the authority's relay-host flush callback was also still
 bound (the sibling's `attachInputRelayHost` bound `makeRingFlushedCallback`'s result), with a body that was a single
 `withInstance` call, a no-op at 0; P5-8 deleted both.
 
 **The fence test** (the template's rationale §5) forces the macro in this module's `OGBrawlerUnreal.Build.cs` through a
-`PublicDefinitions` entry. The harness's two Chaos client checks for the latency lines (`[ChaosDilation]` present with
-`samples>0`, `[LatencyBudget.Window]` present) fail there by design and are judged as expected-absent (og-tickdriver
-task 18's lead ruling).
+`PublicDefinitions` entry. The harness's client check for `[LatencyBudget.Window]` fails there by design and is judged
+as expected-absent (og-tickdriver task 18's lead ruling, which covered the former Chaos configuration's `[ChaosDilation]`
+check, `samples>0`, the same way; that line went with the Chaos host in og-session-runtime task 3).
 
 ### The hop table: stamp sites and known measurement error
 
@@ -3154,38 +3161,34 @@ In the Jolt configuration "PT" is the step's thread (the tick driver's task on a
 authority), every game-thread site is unchanged, and the step-side sites are the game binding's step hooks
 (`BrawlerTickDriverGameUImpl-rationale.md`):
 
-| stamp | Chaos configuration (`ChaosTickBackendUImpl.cpp`, through the host's `editDiagnostics()`) | Jolt configuration (`BrawlerTickDriverGameUImpl.h`) |
-|---|---|---|
-| step-start time for `H4`, `H6`, `H6c`, `H6L`'s use and the clock counts | `OnPreSimulate_Internal`, immediately before `onGameSimulation` | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03); on a client early only by the Jolt scratch save |
-| `stampAfterStep_Internal(start)` | `OnPreSimulate_Internal`, after `onGameSimulation`, when not resimulating | `onStepStarted`, from `beforePhysics`, after `onGameSimulation`, before the physics step |
-| `stampStepEnd_Internal` (`H5`, `H7` starts) | `OnPostSolve_Internal`, when not resimulating | `onStepEnded`, from `afterTick`, after the post-step pass and the ring save: microseconds later |
+| stamp | Jolt configuration (`BrawlerTickDriverGameUImpl.h`) |
+|---|---|
+| step-start time for `H4`, `H6`, `H6c`, `H6L`'s use and the clock counts | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03); on a client early only by the Jolt scratch save |
+| `stampAfterStep_Internal(start)` | `onStepStarted`, from `beforePhysics`, after `onGameSimulation`, before the physics step |
+| `stampStepEnd_Internal` (`H5`, `H7` starts) | `onStepEnded`, from `afterTick`, after the post-step pass and the ring save |
 
-Both configurations take the start time at the same instant, so gate 22 compared them like for like. `[ChaosDilation]` is
-the Chaos configuration's only.
+*History: the former Chaos configuration, removed by og-session-runtime tasks 3–6, stamped the same three in its Chaos
+host's .cpp through the host's diagnostics view: the start time in OnPreSimulate_Internal immediately before
+`onGameSimulation`, `stampAfterStep_Internal` after it and `stampStepEnd_Internal` in OnPostSolve_Internal, both when not
+resimulating; the Jolt end stamp is microseconds later. Both configurations took the start time at the same instant, so
+gate 22 compared them like for like.*
 
 ### The `[ChaosDilation]` line (client only)
 
-Per window, from `tick_GameThread`, in the Chaos configuration only. The Chaos host samples and logs it, through its
-`editDiagnostics()` view's `sampleLatencyWindow_GameThread` and `logLatencyWindow_GameThread`
-(`ChaosTickBackendUImpl-rationale.md` §2), under its own category `LogOGChaosDilation`, which `ChaosTickBackendUImpl.h`
-declares and its `.cpp` defines (both gated with the probe; since task 19a, before that beside the probe's category):
-
-* `min` / `mean` / `max` / `samples`: the physics scene's network delta-time scale, sampled once per game frame from
-  the world's physics scene (`GetPhysicsScene`, an `FChaosScene`; `FChaosScene::GetNetworkDeltaTimeScale`, beside the
-  setter the engine's time-dilation client RPC calls). It is the engine's physics time dilation.
-* `resets` / `offset`: how many times the first local player controller's network physics tick offset changed in the
-  window, and its current value. The engine's timestamp-setup client RPC writes that offset. ⚠ A reset to the **same**
-  value is invisible to this poll, and only the first local player controller is read.
-* `skips` / `stalls` / `hardResyncs`: the window's increase in `ClientPredictionClock`'s Skip, Stall and HardResync
-  counts, read on the step thread and carried by the template's clock mailbox (`clockCountsInWindow`). A client that
-  joins mid-session shows one hard resync in its first window.
+*History: the former Chaos configuration's line, removed with the Chaos host by og-session-runtime task 3.* Per
+window, from `tick_GameThread`, on a client, the Chaos host sampled and logged it through its diagnostics view under
+its own category, LogOGChaosDilation (declared in its header and defined in its `.cpp`, both gated with the probe):
+`min` / `mean` / `max` / `samples` of the physics scene's network delta-time scale (the engine's physics time
+dilation, which the engine's time-dilation client RPC sets), sampled once per game frame; `resets` / `offset` of the
+first local player controller's network physics tick offset (a reset to the same value was invisible to the poll);
+and `skips` / `stalls` / `hardResyncs`, the window's increase in `ClientPredictionClock`'s counts, carried by the
+template's clock mailbox (`clockCountsInWindow`). That category had no ini line and ran at its declared default.
 
 ```
 [ChaosDilation] role=Client min=0.9762 mean=0.9998 max=1.0237 samples=1000 resets=0 offset=537 skips=0 stalls=0 hardResyncs=0
 ```
 
-All three latency lines are `Warning`. `Config/DefaultEngine.ini` pins `LogOGLatencyBudget=Warning`; `LogOGChaosDilation`
-has no ini line and runs at its declared default (`Log`), which prints its `Warning` line.
+The latency lines are `Warning`. `Config/DefaultEngine.ini` pins `LogOGLatencyBudget=Warning`.
 
 ### Verified, and what was not
 
@@ -3223,8 +3226,8 @@ are wiring evidence, not a baseline.
   | m_latencyProbe, m_latencyMailbox, m_latencyClockMailbox | `m_probe`, `m_mailbox`, `m_clockMailbox` |
   | m_latencyClockPosted_Physics, m_latencyClockLatest, m_latencyClockAtWindowStart | `m_clockPosted_Physics`, `m_clockLatest`, `m_clockAtWindowStart` |
   | m_latencyMailboxDropped, m_latencyLastHandedCorrectionTick, m_latencyPostTickFlushHandle | `m_mailboxDropped`, `m_lastHandedCorrectionTick`, `m_postTickFlushHandle` |
-  | the backend hosts' sampleLatencyWindow_GameThread and logLatencyWindow_GameThread | the same names on each host's `editDiagnostics()` view |
-  | the Chaos host's stampLatencyAfterStep_Internal and stampLatencyStepEnd_Internal forwarders | the same names on `ChaosTickBackendUImpl::Diagnostics` |
+  | the backend hosts' sampleLatencyWindow_GameThread and logLatencyWindow_GameThread | the same names on each host's editDiagnostics() view (both views since removed: the Chaos host's by og-session-runtime task 3, the Jolt host's empty one by task 5) |
+  | the Chaos host's stampLatencyAfterStep_Internal and stampLatencyStepEnd_Internal forwarders | the same names on the Chaos host's Diagnostics view (removed with it by og-session-runtime task 3) |
   | the input collection component's getInputSampledSeconds | `inputSampledSeconds`, on the view `UOGBrawlerInputCollectionComponent::getDiagnostics` returns |
 
   Two mechanical differences, both equivalent: the post-tick-flush binding was an `AddUObject` binding of this class's
@@ -3245,40 +3248,41 @@ Moved to `TickDriverBackendUImpl-rationale.md` §2 (og-simulationscheduler-withj
 
 ## §18 The backend switch — `OG_PHYSICS_BACKEND_CHAOS` (og-simulationscheduler-withjolt task 51)
 
-The initiative replaces Chaos with Jolt as the gameplay physics engine. Until gate 22 compares the
-two, both hosts stay selectable at compile time, and task 21 removes the switch after the gate (the
-user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos is retired soon).
+*History. og-session-runtime tasks 3–6 removed the former Chaos configuration, and the switch with it: task 3 the macro,
+its constant in `OGBrawlerUnreal.Build.cs`, the brawler's Chaos host and Chaos binding and both selectors' Chaos arms;
+task 4 OGSimulationUnreal's Chaos adapters, physics factory, tick mapper, time context and engine traits; task 5 the UE
+and brawler readers of the world-host flag, the seam's onEndPlayWorld and the hosts' diagnostics view; task 6
+og-simulation's self-scheduled engine shape. The Jolt configuration is the only one. This section keeps what the switch
+was, and the parts that still hold: the selector, the seam's Jolt column and the shared changes.*
+
+The initiative replaced Chaos with Jolt as the gameplay physics engine. Until gate 22 compared the two, both hosts
+stayed selectable at compile time (the user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos
+was retired soon). The removal planned as og-simulationscheduler-withjolt task 21 is og-session-runtime tasks 3–6.
 
 ### The macro and the traits header
 
-* **One macro**, `OG_PHYSICS_BACKEND_CHAOS`: `1` builds the Chaos host, `0` the Jolt host. It comes
-  from one constant, `PhysicsBackendChaos` in `OGBrawlerUnreal.Build.cs`, added as a
-  **`PublicDefinitions`** entry, so every module that includes this header sees the same value. A
-  private definition would let a future includer compile the other arm, an ODR violation. It is not
-  an environment variable, because nothing established that UBT re-reads a changed environment
-  variable before it reuses its makefile; an edited `OGBrawlerUnreal.Build.cs` is always re-read. Task 51 saw both: a
-  flipped constant, and a deleted definition, each recompiled the module and stopped at the traits
-  header's matching error. A switch changes a definition every file of the module compiles with, so
-  make it with the editor closed rather than through Live Coding.
-* **The constant is `0`, the Jolt configuration, since task 18.** Task 51 built the switch with the
-  constant at `1` and a Jolt branch that was only an `#error`; tasks 53 to 56 built the Jolt host in
-  that branch (below) with the constant still `1`, and task 18 flipped it. Set it to `1` to build the
-  Chaos configuration, for the comparison playtests until task 21.
-* **`PhysicsBackendUImpl.h`** stops the build when the macro is undefined. Since og-tickdriver task 15a it is
-  seam A of the backend (`PhysicsBackendUImpl-rationale.md`): the concepts `PhysicsEngineTraits` and
-  `BrawlerEngineBinding`, and one selector that names the configuration's engine traits and the brawler's binding
-  for that engine. Since og-tickdriver task 15e `PhysicsEngineTraits` is not defined there: the header includes it,
-  OGSimulationUnreal's in task 15e and og-simulation's `PhysicsEngineTraits.h` since task 15f, and asserts it on the
-  selected traits:
+* **The macro was** OG_PHYSICS_BACKEND_CHAOS: `1` built the Chaos host, `0` the Jolt host. It came from one constant,
+  PhysicsBackendChaos in `OGBrawlerUnreal.Build.cs`, added as a **`PublicDefinitions`** entry, so every module that
+  included the header saw the same value (a private definition would have let a future includer compile the other arm,
+  an ODR violation; an edited `OGBrawlerUnreal.Build.cs` is always re-read, where an environment variable might not
+  be). Task 18 flipped the constant to `0`, the Jolt configuration; og-session-runtime task 3 deleted the constant, its
+  definition and the macro.
+* **`PhysicsBackendUImpl.h`** is seam A of the backend since og-tickdriver task 15a (`PhysicsBackendUImpl-rationale.md`):
+  the concepts `PhysicsEngineTraits` and `BrawlerEngineBinding`, and the selector, which names the Jolt engine traits and
+  the brawler's Jolt binding unconditionally since og-session-runtime task 3 (until then it stopped the build when the
+  macro was undefined and picked the configuration's pair). Since og-tickdriver task 15e `PhysicsEngineTraits` is not
+  defined there: the header includes it, OGSimulationUnreal's in task 15e and og-simulation's `PhysicsEngineTraits.h`
+  since task 15f, and asserts it on the selected traits:
 
-| alias | Chaos configuration | Jolt configuration |
-|---|---|---|
-| `EngineTraits` | `ChaosEngineTraitsUImpl` | `JoltEngineTraitsUImpl` |
-| `EngineBinding` | `BrawlerChaosBindingUImpl` | `BrawlerJoltBindingUImpl` |
+| alias | type |
+|---|---|
+| `EngineTraits` | `JoltEngineTraitsUImpl` |
+| `EngineBinding` | `BrawlerJoltBindingUImpl` |
 
-  The engine traits hold the six adapter types (`BodyAdapter`, `ReaderAdapter`, `QueryAdapter`, `Factory`,
-  `VizQuery`, `VizReader`), the backend name `kName` (`chaos` or `jolt`) and `computeDeterminismFingerprint`, which
-  runs og-simulation-jolt's determinism fingerprint in the Jolt configuration and returns none in the Chaos one.
+  (The former Chaos configuration's pair was ChaosEngineTraitsUImpl and BrawlerChaosBindingUImpl.) The engine traits
+  hold the six adapter types (`BodyAdapter`, `ReaderAdapter`, `QueryAdapter`, `Factory`, `VizQuery`, `VizReader`), the
+  backend name `kName` (`jolt`; `chaos` was the Chaos traits') and `computeDeterminismFingerprint`, which runs
+  og-simulation-jolt's determinism fingerprint.
   The session's adapter members (`m_physAdapter`, `m_physReaderAdapter`, `m_queryAdapter`; this class's until
   og-ue-simulationcomponentandmanagersplit task 24a), this class's two visualization doors and its `[SimHost.Backend]` line name them through
   `EngineTraits` (the session through `BrawlerSessionTraitsUImpl::EngineTraits`). Until task 15a the header held the
@@ -3289,8 +3293,8 @@ user's ruling D21, 2026-10-07: compile time rather than run time, because Chaos 
 
 ### What the arms hold (tasks 82 and 83)
 
-Since og-simulationscheduler-withjolt task 82 the Chaos host is a class of its own, `ChaosTickBackendUImpl`
-(`ChaosTickBackendUImpl.h` and `.cpp`; its reasoning is `ChaosTickBackendUImpl-rationale.md`). Since task 83 the Jolt
+From og-simulationscheduler-withjolt task 82 until og-session-runtime task 3 the Chaos host was a class of its own,
+ChaosTickBackendUImpl (a header and a `.cpp`, with a rationale and a guards document). Since task 83 the Jolt
 host is too, `TickDriverBackendUImpl` with its state struct `TickDriverBackendWorldsUImpl` (`TickDriverBackendUImpl.h` and,
 until og-tickdriver task 15e moved the host to OGSimulationUnreal as a header template, a `.cpp`;
 `TickDriverBackendUImpl-rationale.md`). Until og-tickdriver task 15b the two had historical names:
@@ -3298,35 +3302,34 @@ ChaosBackendUImpl with ChaosBackendWorldsUImpl (historical names), and
 JoltBackendUImpl with JoltBackendWorldsUImpl (historical names). Task 15b named them by who schedules the steps and
 made the Jolt one a template over the engine traits and the binding. This class's two files have no arm left:
 
-* **Header:** the include of `PhysicsBackendHostUImpl.h`, which includes the configuration's backend header and
-  names its two types (`PhysicsBackendHostUImpl-rationale.md`); the members `m_physicsBackendWorlds`, above the adapters,
+* **Header:** the include of `PhysicsBackendHostUImpl.h`, which includes the backend header and names its two types
+  (`PhysicsBackendHostUImpl-rationale.md`); the members `m_physicsBackendWorlds`, above the adapters,
   and `m_physicsBackend`, directly after `m_manager`, which are the session's since og-ue-simulationcomponentandmanagersplit task 24a (typed by
   `BrawlerSessionTraitsUImpl::PhysicsBackendWorlds` and `PhysicsBackend`, which this header's selector defines;
   `UESimulationSession-rationale.md` §3); and `friend physicsBackendUImpl::Backend;`, which befriended the
   configuration's one host (since og-tickdriver task 15b; it replaced one `friend class` line per host), and the
   class-template friend `BrawlerTickDriverGameUImpl` (which replaced the frame host's friend line in og-tickdriver
-  task 8), in both configurations, until og-ue-simulationcomponentandmanagersplit task 27b deleted both: since task 24a the session befriends the two hosts
-  through its traits, and by task 27b neither of this class's lines covered a call.
+  task 8), in both configurations then, until og-ue-simulationcomponentandmanagersplit task 27b deleted both: since task 24a the session befriends the
+  host through its traits, and by task 27b neither of this class's lines covered a call.
 * **`.cpp`:** at each seam call site (the table below), one unconditional call on the session's backend,
   `m_session.m_physicsBackend.` (`m_backend.` until og-ue-simulationcomponentandmanagersplit task 24a).
 
-`ChaosTickBackendUImpl` holds what the Chaos arm held before task 82: the Chaos engine includes; `FSimulationState2`,
-`FSimulationInput2`, `FRewindPushProbeStashedBody` and `FSimulationManagerAsyncCallback`, whose definitions moved
-with them; the six passthroughs from `onGameSimulation` to `noteResimGrant` (§1); `InjectInputs_External` with
-`editChaosTickMapper` / `getChaosTickMapper`; `m_asyncCallback`, the two delegate handles and `m_chaosTickMapper`;
-the `[ChaosDilation]` window; the category-table helper (emplaceBrawlerQueryAdapter, whose rows moved into the
-Chaos binding's `BrawlerChaosBindingUImpl::categoryChannels` in og-tickdriver task 15a), `writeRestoredBodyState` and
-the push-probe helpers.
-Since task 53 the arm had also held three pieces that task 51 left shared: the role branches' adapter
-construction in `BeginPlay` (with the solver lookup above the branches), `tryRegister`'s first-call bind
-(`ChaosPhysicsFactory` and the volume registration), and `registerVizVolume`'s query parameters. They moved too.
-The callback and its input hold a `ChaosTickBackendUImpl*` instead of this class. One member stayed here,
-the clock counts at the window start (m_latencyClockAtWindowStart, historical name), for a reason
-`ChaosTickBackendUImpl-rationale.md` §2 gives, until og-tickdriver task 18 moved it into the latency class
-(`m_clockAtWindowStart`; the class is `UELatencyBudgetDiagnostics` since task 19a).
+The Chaos host held what the Chaos arm held before task 82: the Chaos engine includes; the Chaos state and input
+structs (FSimulationState2, FSimulationInput2), the push-probe stash (FRewindPushProbeStashedBody) and the async callback
+(FSimulationManagerAsyncCallback), whose definitions moved with them; the six passthroughs from `onGameSimulation` to
+noteResimGrant (§1); InjectInputs_External with the tick mapper's accessors and member; the callback and the two
+delegate handles; the [ChaosDilation] window; the category-table helper (emplaceBrawlerQueryAdapter, whose rows moved
+into the Chaos binding in og-tickdriver task 15a), writeRestoredBodyState and the push-probe helpers. Since task 53 the
+arm had also held three pieces that task 51 left shared: the role branches' adapter construction in `BeginPlay` (with
+the solver lookup above the branches), `tryRegister`'s first-call bind (the Chaos physics factory and the volume
+registration), and `registerVizVolume`'s query parameters; they moved too. One member stayed here, the clock counts at
+the window start (m_latencyClockAtWindowStart, historical name), until og-tickdriver task 18 moved it into the latency
+class (`m_clockAtWindowStart`; the class is `UELatencyBudgetDiagnostics` since task 19a). og-session-runtime task 3
+deleted the Chaos host with all of it.
 
 The guards on that code moved with it. This class's G-02, G-51 to G-55, G-71, G-76 and G-77 are retired
-(`OGBrawlerSimulationManager-guards.md` §R) and are `ChaosTickBackendUImpl-guards.md` G-01 to G-09.
+(`OGBrawlerSimulationManager-guards.md` §R); their successors, the Chaos host's G-01 to G-09, retired with it in
+og-session-runtime task 3 (successor: none).
 
 `TickDriverBackendUImpl` holds what the Jolt arms held before task 83: the Jolt includes, console variables and
 anonymous helpers; the stepping mode, the world build, the slot table, the bind and the release; the frame host,
@@ -3341,78 +3344,81 @@ release, the shadow world and the contact counts are og-simulation-jolt's world 
 ### The seam (task 82)
 
 This class calls its backend through one fixed set of entry points. Each is called from exactly one place, the
-site where the arm sat, with no `#if`. Task 82 implemented the entry points that have a Chaos body; task 83 moved
-the Jolt column into its own host and gave every entry point a body on both hosts: an empty inline body where the
-column says "empty". The set is checked at compile time: the concept `PhysicsBackendHost`
-(`PhysicsBackendHostUImpl.h`) lists every entry point with its signature, and `BrawlerSessionTraitsUImpl.h` asserts
-it on the backend the session holds, `BrawlerSessionTraitsUImpl::PhysicsBackend<UESimulationSession<BrawlerSessionTraitsUImpl>>`
+site where the arm sat, with no `#if`. Task 82 implemented the entry points that had a Chaos body; task 83 moved
+the Jolt column into its own host and gave every entry point a body on both hosts. The set is checked at compile time:
+the concept `PhysicsBackendHost` (`PhysicsBackendHostUImpl.h`) lists every entry point with its signature, and
+`BrawlerSessionTraitsUImpl.h` asserts it on the backend the session holds,
+`BrawlerSessionTraitsUImpl::PhysicsBackend<UESimulationSession<BrawlerSessionTraitsUImpl>>`
 (this class's `compositionContractsHold()` did until og-ue-simulationcomponentandmanagersplit task 24a), as the selector does after it picks the host
 (since og-tickdriver task 15b).
 
-| entry point | call site in this class | Chaos body (`ChaosTickBackendUImpl`) | Jolt body (`TickDriverBackendUImpl`) |
-|---|---|---|---|
-| `buildWorld` | the start-up (the session's `beginPlay` since task 27b), after the ini reads, before the role branches | the solver checks, then the adapter emplacement (both moved, `ChaosTickBackendUImpl-rationale.md` §2) | the static import, then the world host's `build` |
-| `startStepping` | the end of the start-up (the session's `beginPlay` since task 27b) | the post-tick delegate, the async callback, the `InjectInputsExternal` delegate | `startDriverStepping` |
-| `onEndPlayBegin` | the first statement of the teardown, and it stays first (this class's `EndPlay` and its `G-85` until task 27a; the session's `endPlay` and `UESimulationSession-guards.md` G-20 since) | empty | unregister the tick functions and wait for outstanding steps (`TickDriverBackendUImpl-guards.md` G-01) |
-| `onEndPlayWorld` | the teardown (the session's `endPlay` since task 27a), inside the world test, after the latency diagnostics' `end` | remove both delegates, free the callback | empty |
-| `beforePresent_GameThread` | the post-physics pass (the session's `onPostPhysicsStep` since task 27a), before the post-simulation pass | empty | the presenter's `present_GameThread` (og-simulation's `TickDriverPresenter`) |
-| `updateVisualization_GameThread` (`overlayRenderPoses_GameThread(id, vizState)` since og-input-latency task P5-16, once per display entry, after the session's snapshot publish) | the post-physics pass (the session's `onPostPhysicsStep` since task 27a), after the timing buffer | `updateVisualizationAll` (since P5-16: nothing) | the presenter's `updateVisualization_GameThread` (since P5-16: its `overlayRenderPoses_GameThread`) |
-| `editVizQuery`, `getVizReader`, `registerVizVolume` | the three public doors of the same names, which keep their signatures and forward (the session's since og-ue-simulationcomponentandmanagersplit task 24b) | the query adapter, the reader, the volume with the owner ignored | the step world or the shadow world, by stepping mode |
-| `createBodies_GameThread` | `tryRegister`'s first pass; `false` returns `TryRegisterStatus::Pending` | the `ChaosPhysicsFactory` bind; returns `true` | the slot acquire and the Jolt bind; `false` where it waits for a slot |
-| `onRegistered_GameThread` | `tryRegister`'s Ready path | empty | the occupancy push and the render target |
-| `onUnregistered_GameThread` | `unregisterFromNewFramework` | empty | the render target and the slot release |
-| `editDiagnostics().sampleLatencyWindow_GameThread` | `UELatencyBudgetDiagnostics::tick_GameThread`, before the window closes (since og-tickdriver task 18; this class's own latency tick before) | the dilation scale and the tick-offset poll | empty |
-| `editDiagnostics().logLatencyWindow_GameThread` | `UELatencyBudgetDiagnostics::tick_GameThread`, after `[LatencyBudget.Window]` | the `[ChaosDilation]` line and its reset | empty |
+| entry point | call site in this class | body (`TickDriverBackendUImpl`) |
+|---|---|---|
+| `buildWorld` | the start-up (the session's `beginPlay` since task 27b), after the ini reads, before the role branches | the static import, then the world host's `build` |
+| `startStepping` | the end of the start-up (the session's `beginPlay` since task 27b) | `startDriverStepping` |
+| `onEndPlayBegin` | the first statement of the teardown, and it stays first (this class's `EndPlay` and its `G-85` until task 27a; the session's `endPlay` and `UESimulationSession-guards.md` G-20 since) | unregister the tick functions and wait for outstanding steps (`TickDriverBackendUImpl-guards.md` G-01) |
+| `beforePresent_GameThread` | the post-physics pass (the session's `onPostPhysicsStep` since task 27a), before the post-simulation pass | the presenter's `present_GameThread` (og-simulation's `TickDriverPresenter`) |
+| `updateVisualization_GameThread` (`overlayRenderPoses_GameThread(id, vizState)` since og-input-latency task P5-16, once per display entry, after the session's snapshot publish) | the post-physics pass (the session's `onPostPhysicsStep` since task 27a), after the timing buffer | the presenter's `updateVisualization_GameThread` (since P5-16: its `overlayRenderPoses_GameThread`) |
+| `editVizQuery`, `getVizReader`, `registerVizVolume` | the three public doors of the same names, which keep their signatures and forward (the session's since og-ue-simulationcomponentandmanagersplit task 24b) | the step world or the shadow world, by stepping mode |
+| `createBodies_GameThread` | `tryRegister`'s first pass; `false` returns `TryRegisterStatus::Pending` | the slot acquire and the Jolt bind; `false` where it waits for a slot |
+| `onRegistered_GameThread` | `tryRegister`'s Ready path | the occupancy push and the render target |
+| `onUnregistered_GameThread` | `unregisterFromNewFramework` | the render target and the slot release |
+
+*History: until og-session-runtime task 3 the table had a Chaos column, the Chaos host's bodies: the solver checks and
+the adapter emplacement (buildWorld); the post-tick delegate, the async callback and the rewind callback's input delegate
+(startStepping); the Chaos query adapter, its reader and the volume with the owner ignored (the three doors); the Chaos
+physics factory's bind, always `true` (createBodies_GameThread); updateVisualizationAll (nothing since P5-16); and empty
+bodies for the other four. Until task 5 it had three more rows: onEndPlayWorld (the teardown, inside the world test,
+after the latency diagnostics' `end`: on Chaos the removal of both delegates and the callback, empty on Jolt) and the
+diagnostics view's sampleLatencyWindow_GameThread and logLatencyWindow_GameThread (from
+`UELatencyBudgetDiagnostics::tick_GameThread`: on Chaos the dilation-scale and tick-offset poll and the [ChaosDilation]
+line, empty on Jolt).*
 
 The root-capsule check after `tryRegister`'s bind reads the movement declaration's stamped
-`bindings.parentBodyId`, because `createBodies_GameThread` returns only whether the bind happened
-(`ChaosTickBackendUImpl-rationale.md` §2). The Jolt bind stamps the slot's root body there on every declaration, so
-the value is the one the check compared before (`TickDriverBackendUImpl-rationale.md` §1).
+`bindings.parentBodyId`, because `createBodies_GameThread` returns only whether the bind happened. The Jolt bind stamps
+the slot's root body there on every declaration (`TickDriverBackendUImpl-rationale.md` §1).
 
 ### The rules
 
-1. **Nothing reflected sits inside an arm.** UHT rejects `UPROPERTY`, `UFUNCTION` and the other
+*History: the rules the switch's arms followed, until og-session-runtime task 3 removed every arm.*
+
+1. **Nothing reflected sat inside an arm.** UHT rejects `UPROPERTY`, `UFUNCTION` and the other
    reflection markers inside a preprocessor block it does not know ("must not be inside preprocessor
-   blocks"; the UHT header parser, lines 631-636 of UhtHeaderFileParser.cs, UE 5.6), and
-   `OG_PHYSICS_BACKEND_CHAOS` is such a block. Plain C++ inside it is fine. This header's only
-   reflected declarations are the `UCLASS` and its `GENERATED_BODY`, both outside every arm; since task 83
-   this header has no arm at all. A reflected declaration that one backend needs is declared in both
-   configurations.
-2. **Arms live only in `OGBrawlerUnreal.Build.cs` (the constant), the seam-A selector `PhysicsBackendUImpl.h`,
-   the host selector `PhysicsBackendHostUImpl.h`, `ChaosTickBackendUImpl.cpp` and, since og-tickdriver task 15a,
-   `BrawlerJoltBindingUImpl.cpp` and `BrawlerChaosBindingUImpl.cpp`.** The last three are whole-file arms; the
-   engine-traits and binding headers have no `#if` (`PhysicsBackendUImpl-rationale.md` §4). The Jolt host's `.cpp`
+   blocks"; the UHT header parser, lines 631-636 of UhtHeaderFileParser.cs, UE 5.6), and the backend macro's
+   blocks were such blocks. Plain C++ inside them was fine. This header's only reflected declarations are the
+   `UCLASS` and its `GENERATED_BODY`, both outside every arm; since task 83 this header had no arm at all.
+2. **Arms lived only in `OGBrawlerUnreal.Build.cs` (the constant), the seam-A selector `PhysicsBackendUImpl.h`,
+   the host selector `PhysicsBackendHostUImpl.h`, the Chaos host's `.cpp` and, since og-tickdriver task 15a,
+   `BrawlerJoltBindingUImpl.cpp` and the Chaos binding's `.cpp`.** The last three were whole-file arms; the
+   engine-traits and binding headers had no `#if` (`PhysicsBackendUImpl-rationale.md` §4). The Jolt host's `.cpp`
    and the Jolt traits' `.cpp` were two more arms until og-tickdriver task 15e, which made the host a header template
    in OGSimulationUnreal (its instantiation is in `BrawlerJoltBindingUImpl.cpp`) and moved the traits to
    OGSimulationJoltUnreal, which has no arm. The frame host's `.cpp` was a third until og-tickdriver task 11 moved it to OGSimulationUnreal,
-   where it has no arm (`UETickDriverHost-rationale.md` §7). The two backend headers have no `#if`, and only the
-   selector includes them, each in its own configuration (task 83, which replaced task 82's list; this class's
-   two files had arms until then). `UOGBrawlerSimulatableComponent` and
-   `AOGBrawlerUECharacter` have none. The component reaches the visualization adapters through three members
-   that exist in both configurations (below).
-3. **Both adapter sets compile in both configurations** once the Jolt arm exists (task 18). The
-   switch selects wiring, never whether an adapter compiles.
-4. **The Chaos arm holds the code as it was,** with only the edits the shared changes below force. No
-   new feature lands in it. Task 82 moved it into `ChaosTickBackendUImpl` with the owner prefix and the pointer
+   where it has no arm (`UETickDriverHost-rationale.md` §7). `UOGBrawlerSimulatableComponent` and
+   `AOGBrawlerUECharacter` had none. og-session-runtime task 3 removed the rest: no file has a backend arm now.
+3. **Both adapter sets compiled in both configurations** once the Jolt arm existed (task 18). The
+   switch selected wiring, never whether an adapter compiled.
+4. **The Chaos arm held the code as it was,** with only the edits the shared changes below forced. No
+   new feature landed in it. Task 82 moved it into the Chaos host with the owner prefix and the pointer
    types changed, the call order inside each piece kept, and two pieces of `BeginPlay` moved into one
-   `buildWorld` call (`ChaosTickBackendUImpl-rationale.md` §2).
-5. **No comment marks an arm.** This section is the description.
+   buildWorld call.
+5. **No comment marked an arm.** This section was the description.
 
 ### The shared changes
 
 * `OnPostPhysicsStep` takes no argument (nor does the session's `onPostPhysicsStep`, which it became in task 27a). The
-  Chaos configuration binds the scene's post-tick delegate to a weak lambda that drops the scene and calls it. The `[ChaosDilation]` block reads the scene
-  from `GetWorld()` instead (§16, "The `[ChaosDilation]` line"). The two empty physics-scene hooks (pre-tick and step) and their
+  former Chaos configuration bound the scene's post-tick delegate to a weak lambda that dropped the scene and called it,
+  and its [ChaosDilation] block read the scene from `GetWorld()` instead (§16, "The `[ChaosDilation]` line"). The two empty physics-scene hooks (pre-tick and step) and their
   bindings are deleted (§11 C20).
 * **The split** of the frame's game-thread work into `onFrameStepsDue_GameThread`, the drain and the
   reap (§7).
 * **`[ReleaseBatch] first=<tick> numSteps=<n>`**, one line per drain call, on `LogOGNet` at `Verbose`
   (its `kOGLogRoutes` row, `UESimulationLogRoutes-rationale.md` §6), after the drain's coordinator test and before it drains. The committed
-  `LogOGNet=Warning` hides it, and so does `LogOGNet=Log`. In the Chaos configuration there is one per physics frame, with `n` equal to the frame's step
-  count; the Jolt host will print one per step with `n = 1`. Every `[Release]` line's `releaseTick`
-  lies in `[first, first + n)` of the nearest `[ReleaseBatch]` before it. `[Release]` prints
-  absolute ticks, which differ between runs, so the two backends are compared by distributions,
-  never by lines (gate 22).
+  `LogOGNet=Warning` hides it, and so does `LogOGNet=Log`. The Jolt host's authority drain prints one per step with
+  `n = 1` (the former Chaos configuration printed one per physics frame, with `n` equal to the frame's step count). Every
+  `[Release]` line's `releaseTick` lies in `[first, first + n)` of the nearest `[ReleaseBatch]` before it. `[Release]`
+  prints absolute ticks, which differ between runs, so the two backends were compared by distributions, never by lines
+  (gate 22).
 * **`og.Sim.TestGameThreadHitchMs`** (not in Shipping): *code moved to `UESimulationSession.cpp` and the session's
   `onPostPhysicsStep` (og-ue-simulationcomponentandmanagersplit task 27a); `UESimulationSession-rationale.md` §10, in
   OGSimulationUnreal's docs, describes it.* The brawler's use: on its inline-stepping server, 250 ms gives a frame of
@@ -3421,35 +3427,33 @@ the value is the one the check compared before (`TickDriverBackendUImpl-rational
   `editQueryAdapter()` and `getPhysicsBodyReaderAdapter()`, and the unused body-adapter accessor is
   deleted, so no code outside this class can name a body adapter. The first two return references to
   a world every peer's game thread may query (`OGBrawlerSimulatableComponent-rationale.md` §10; task 53 made
-  them pointers, null on a worker client, until task 56 gave that client its shadow world). In the Chaos configuration
-  they always return the Chaos query adapter and reader; `registerVizVolume` builds the query
-  parameters the component used to build itself (simple collision, the owner ignored) and registers
-  the volume on the query adapter. It returns an optional volume id: always set in the Chaos
-  configuration, empty in the Jolt configuration while the owner's slot acquire waits (task 66, the slot
-  table, `TickDriverBackendUImpl-rationale.md` §3). They are handles, an exception to §1's narrow-passthrough rule that
+  them pointers, null on a worker client, until task 56 gave that client its shadow world). `registerVizVolume` returns
+  an optional volume id, empty while the owner's slot acquire waits (task 66, the slot table,
+  `TickDriverBackendUImpl-rationale.md` §3). In the former Chaos configuration they always returned the Chaos query
+  adapter and reader, and `registerVizVolume` built the query parameters the component used to build itself (simple
+  collision, the owner ignored), registered the volume on the query adapter and always set the id. They are handles, an exception to §1's narrow-passthrough rule that
   they inherit from the accessors they replace: the two visualizers are templates over the adapter
   types and call them directly, on the game thread. The Jolt configuration's answers are in
   `TickDriverBackendUImpl-rationale.md` §3. Since og-ue-simulationcomponentandmanagersplit task 24b the three doors are the
   session's (`UESimulationSession-rationale.md` §8), and the component reaches them through this class's `session()`.
 * **The backend token.** The build identity builds its token from `EngineTraits::kName` (kBackendName until og-tickdriver task 15b) and the fingerprint:
-  `chaos`, or `jolt:<fingerprint>`. The server refuses a login whose backend differs from its own, with a
+  `jolt:<fingerprint>` (`chaos` in the former Chaos configuration). The server refuses a login whose backend differs from its own, with a
   reason that names both, and admits a different Jolt fingerprint with a Warning (`OGBuildIdentity-rationale.md` §7).
 * **`LogOGSimHost`** and its one-shot `Warning` line at the start-up (since og-ue-simulationcomponentandmanagersplit task 27b
   the session's statement in `beginPlay`, with the fingerprint from the brawler's hook `backendFingerprint()`;
   `UESimulationSession-rationale.md` §11.6):
-  `[SimHost.Backend] backend=chaos fingerprint=none` in the Chaos configuration, and
-  `[SimHost.Backend] backend=jolt fingerprint=<16 hex digits>` in the Jolt one, so every log names the
-  configuration it came from. The fingerprint is the build identity's (`backendFingerprint`), computed
+  `[SimHost.Backend] backend=jolt fingerprint=<16 hex digits>` (`backend=chaos fingerprint=none` in the former Chaos
+  configuration), so every log names the backend it came from. The fingerprint is the build identity's (`backendFingerprint`), computed
   once per process. `Config/DefaultEngine.ini` pins the category at `Warning`, beside
   `LogOGLatencyBudget`. Since og-tickdriver task 11 the category is declared, exported, in OGSimulationUnreal's
   `OGSimulationUnreal.h` and defined in its `.cpp`, under the same name, so that ini row still governs it; this
   class's header includes that header where its own declaration of the category was, so every file that saw the
-  category through it still does, in both configurations. In the Chaos configuration it is the category's only `Warning` line; the Jolt
-  host adds the lines `TickDriverBackendUImpl-rationale.md` §2 lists, its window line `[SimHost.Window]` among them (§8).
-* **`dt`** is the engine physics setting AsyncFixedTimeStepSize in both configurations, `checkf`-ed at the start-up to
+  category through it still does. The Jolt host adds the lines `TickDriverBackendUImpl-rationale.md` §2 lists, its window line `[SimHost.Window]` among them (§8);
+  in the former Chaos configuration this was the category's only `Warning` line.
+* **`dt`** is the engine physics setting AsyncFixedTimeStepSize, `checkf`-ed at the start-up to
   be one tick of `UEBrawlerNetConfig::tickFrequencyHz` (since task 27b by the session's `beginPlay`, through its traits'
-  `NetConfig`, which is `UEBrawlerNetConfig`; `UESimulationSession-rationale.md` §11.5). It is the number Chaos steps
-  with, and the Chaos arm `checkf`s that its solver's async dt is the same value, which it was before
+  `NetConfig`, which is `UEBrawlerNetConfig`; `UESimulationSession-rationale.md` §11.5). It was the number Chaos stepped
+  with, and the former Chaos arm `checkf`-ed that its solver's async dt was the same value, which it was before
   the manager stopped asking the solver (design D13).
 
 ### The Jolt arm's world (task 53)
@@ -3482,21 +3486,21 @@ Moved to `TickDriverBackendUImpl-rationale.md` §9 (og-simulationscheduler-withj
 
 ### The build rule until task 21
 
-Every task that edits a file with an arm (the traits header, the selector, `ChaosTickBackendUImpl.cpp` and
-`BrawlerJoltBindingUImpl.cpp`, which instantiates the Jolt host since og-tickdriver task 15e; the host's own `.cpp`
-until then), or a file the selector includes or that includes it (this class's
-two files, both backend headers), builds both configurations: the Jolt configuration on the task's full target matrix, and the Chaos configuration
-on the editor, the targets gate 22 runs it on (the packaged dedicated server and the Android client)
-and both test targets. To build the Chaos configuration, set the constant to `1`, build, set it back to
-`0`, and make sure the restored `OGBrawlerUnreal.Build.cs` has a new modification time: a restore that
-keeps the old time (a copy that preserves it) lets UBT reuse the other configuration's makefile, and the
-module silently keeps the other arm.
+*History.* Until og-session-runtime task 3 removed the switch, every task that edited a file with an arm (the traits
+header, the selector, the Chaos host's `.cpp` and `BrawlerJoltBindingUImpl.cpp`, which instantiates the Jolt host since
+og-tickdriver task 15e; the host's own `.cpp` until then), or a file the selector includes or that includes it (this
+class's two files, both backend headers), built both configurations: the Jolt configuration on the task's full target
+matrix, and the Chaos configuration on the editor, the targets gate 22 ran it on (the packaged dedicated server and the
+Android client) and both test targets, by setting the constant to `1`, building, and setting it back to `0` with a new
+modification time on the restored `OGBrawlerUnreal.Build.cs` (a restore that keeps the old time lets UBT reuse the other
+configuration's makefile, and the module silently keeps the other arm).
 
 ### Task 21
 
-After gate 22, task 21 deletes the Chaos arms, the macro, the constant and the traits header's Chaos
-branch, and retires the guards listed above. Since task 83 that is deleting `ChaosTickBackendUImpl.h` and `.cpp` with
-their two documents, the Chaos branches of the traits header and the selector, and the config flip.
+*History.* The plan was: after gate 22, task 21 deletes the Chaos arms, the macro, the constant and the traits header's
+Chaos branch, and retires the guards listed above; since task 83, deleting the Chaos host's header and `.cpp` with their
+two documents, the Chaos branches of the traits header and the selector, and the config flip. og-session-runtime tasks
+3–6 did it (the config flip is that initiative's task 9).
 
 ---
 

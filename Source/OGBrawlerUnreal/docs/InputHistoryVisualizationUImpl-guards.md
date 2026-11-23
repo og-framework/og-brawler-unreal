@@ -6,6 +6,7 @@
 <!-- lint-external-ref: UGameInstance::AddLocalPlayer -- Unreal Engine method (GameInstance.cpp), outside every scan root; quoted in the R0 correction of the index-0 claim -->
 <!-- lint-external-ref: UGameInstance::RemoveLocalPlayer -- Unreal Engine method (GameInstance.cpp), outside every scan root; its RemoveAt is why the local-player array is not append-only -->
 <!-- lint-external-ref: AddUnique -- Unreal Engine TArray method, outside every scan root -->
+<!-- lint-external-ref: RemoveAt -- Unreal Engine TArray method (UGameInstance::RemoveLocalPlayer calls it), outside every scan root; it resolved only through the Chaos spatial query adapter's own use until og-session-runtime task 4 deleted that file. The prose is about the engine, not Chaos: this declaration stays -->
 # `InputHistoryVisualizationUImpl.h` and `.cpp` — guards
 
 These are the prohibitions left after the comment conversion of the two files (og-netcode-v2-field-defects task 25,

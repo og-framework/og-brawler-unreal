@@ -95,8 +95,8 @@ class-scope `static_assert` in og-simulation's `TickDriverPresenter` checks it: 
 the render source's `kMaxSimulatableSlots` times the presenter's `kDeclarationsPerSlot` (`declarationCountOf` the
 source's `PhysicsComposite`, the brawler's physics composite).
 
-**No backend switch.** The adapter types come from `PhysicsBackendUImpl.h`, which holds the switch, so
-this header has no `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
+**No backend switch.** The adapter types come from `PhysicsBackendUImpl.h`, which held the switch until
+og-session-runtime task 3 removed it, so this header never had an `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
 the dependency runs the other way.
 
 ## 3. The compile-time checks

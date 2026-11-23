@@ -174,9 +174,9 @@ The component's fifth hook, `storageKeyOfOwner`, is the key the binding names th
 spawns. Both it and the component's `EndPlay` read the replicated id through the component's helper `simCharacterId`.
 
 **Each frame.** The backend calls the session before the steps (`onFrameStepsDue_Step`, and the authority's
-release of delayed inputs) and after physics (`onPostPhysicsStep`): on Chaos from the physics scene's post-tick event in
-`ChaosTickBackendUImpl.cpp`, on the tick driver from `BrawlerTickDriverGameUImpl::onPostPhysics` (the driver's brawler
-side). The post-physics pass runs the backend's pre-present step, the core's post-simulation pass, the authority's
+release of delayed inputs) and after physics (`onPostPhysicsStep`), from `BrawlerTickDriverGameUImpl::onPostPhysics` (the
+tick driver's brawler side; the former Chaos backend, removed by og-session-runtime task 3, called it from the physics
+scene's post-tick event). The post-physics pass runs the backend's pre-present step, the core's post-simulation pass, the authority's
 server-clock publish (`publishServerClock_GameThread`, to og-sim-net's server), the backend's visualization update,
 `Game::afterVisualization` (the authority pushes ring-out scores) and the latency diagnostics' tick. The sim traffic
 moves at the og-net driver's own points: after its receive dispatch and after its tick flush it calls the lanes, which
@@ -282,7 +282,6 @@ Rationale and guards documents sit in the `docs` folder beside each module's sou
 | `BrawlerSessionTraitsUImpl` | ties the templates to the brawler | brawler, BUSL | `BrawlerSessionTraitsUImpl-rationale.md` · `BrawlerSessionTraitsUImpl-guards.md` | `BrawlerSessionTraitsUImpl.h` |
 | `UESimulationSession` | the session: core, backend, transport, sequences | plugin, MPL | `UESimulationSession-rationale.md` · `UESimulationSession-guards.md` | `UESimulationSession.h` |
 | `BrawlerTickDriverGameUImpl` | the tick driver's brawler side | brawler, BUSL | `BrawlerTickDriverGameUImpl-rationale.md` · `BrawlerTickDriverGameUImpl-guards.md` | `BrawlerTickDriverGameUImpl.h` |
-| `ChaosTickBackendUImpl` | the Chaos physics backend | brawler, BUSL | `ChaosTickBackendUImpl-rationale.md` · `ChaosTickBackendUImpl-guards.md` | `ChaosTickBackendUImpl.h` |
 | `UELatencyBudgetDiagnostics` | latency stamps and reports | plugin, MPL | `UELatencyBudgetDiagnostics-rationale.md` · `UELatencyBudgetDiagnostics-guards.md` | `UELatencyBudgetDiagnostics.h` |
 | `UESimNetLanes` | the og-net driver's sim lanes: og-sim-net's transport, a client's session | plugin, MPL | `UESimNetLanes-rationale.md` · `UESimNetLanes-guards.md` | `UESimNetLanes.h` |
 | `UESimNetServerHost`, `UESimNetClientHost` | og-sim-net's hosts on Unreal: round trip, stamps, log | plugin, MPL | `UESimNetHost-rationale.md` · `UESimNetHost-guards.md` | `UESimNetHost.h` |
@@ -291,6 +290,8 @@ Until og-input-latency tasks P5-8 and P5-9 the table also listed `USimulatableNe
 surface, `SimulatableNetSyncComponent.h`, with `SimulatableNetSyncComponent-rationale.md` and
 `SimulatableNetSyncComponent-guards.md`) and the three relay actors `ASimulationTimingRelay` (`SimulationTimingRelay.h`),
 `ASimulationConnectionRelay` (`SimulationConnectionRelay.h`) and `ASimulationInputRelay` (`SimulationInputRelay.h`).
+Until og-session-runtime task 3 it also listed ChaosTickBackendUImpl, the Chaos physics backend, with its rationale and
+guards documents; task 3 deleted all three.
 
 ---
 
@@ -347,5 +348,5 @@ the reverse). The session asserts each core alias and executor against the compo
 against `BrawlerCompositionUImpl` (`UESimulationSession-rationale.md` §13 and §14, `BrawlerSessionTraitsUImpl-rationale.md` §4).
 
 **`PhysicsBackend`** is the physics backend host: it owns and steps the physics worlds and updates the visuals (Jolt
-through the tick driver, or Chaos). The session holds it as `m_physicsBackend` and names it through the traits'
+through the tick driver; the Chaos backend was removed by og-session-runtime task 3). The session holds it as `m_physicsBackend` and names it through the traits'
 `PhysicsBackend<SessionT>`.

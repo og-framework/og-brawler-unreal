@@ -133,12 +133,6 @@ void UOGBrawlerInputCollectionComponent::updateGameThreadCache()
 	// of refreshGameThreadCaches' returns was taken (a missing controller or look mode still wrote
 	// a zero aim). sampledSeconds keeps the stamp noteInputSampled took above.
 	writeSampleFields(m_stagedSample);
-
-#if OG_PHYSICS_BACKEND_CHAOS
-	// The Chaos configuration has no tick driver, so no sampleInput hook publishes; its steps start
-	// after this Tick (InjectInputs_External, at the physics frame's start), as the hook's would.
-	publishSample();
-#endif
 }
 
 void UOGBrawlerInputCollectionComponent::publishSample()

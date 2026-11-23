@@ -26,8 +26,8 @@ host until og-tickdriver task 15a, and moved without a change to what it compute
 
 Six rows, one og-simulation collision category to one Unreal collision channel: `body` → `ECC_GameTraceChannel2`,
 `guard` → `ECC_GameTraceChannel3`, `queryRouting` → `ECC_GameTraceChannel4`, `projectile` →
-`ECC_GameTraceChannel5`, `world` → `ECC_WorldStatic`, `character` → `ECC_GameTraceChannel6`. They are the rows of
-the Chaos binding's table (`BrawlerChaosBindingUImpl-rationale.md` §2), in the same order.
+`ECC_GameTraceChannel5`, `world` → `ECC_WorldStatic`, `character` → `ECC_GameTraceChannel6`. They were the rows of
+the Chaos binding's table too, in the same order, until og-session-runtime task 3 deleted that binding.
 
 * The table is a function-local `static const std::vector`, built at the first call. The first call is the Jolt
   host's `buildWorld`, which hands it to `UEStaticGeometryImporter` (on the game thread, at `BeginPlay`), as before.
@@ -46,7 +46,8 @@ the check runs first in the Jolt host's `createBodies_GameThread`, which `tryReg
 
 The comparison is in UE units (og-sim-metres-yup task 8): the descriptor's radius and half-height are og-simulation
 lengths, so each is converted with `ueFrame::lengthToUe` and narrowed to the engine's `float` before
-`FMath::IsNearlyEqual` compares it with the pawn's centimetres, as the Chaos factory's adopt-root check does. The
+`FMath::IsNearlyEqual` compares it with the pawn's centimetres, as the Chaos factory's adopt-root check did (removed by
+og-session-runtime task 4). The
 message prints those converted values, so both pairs read in cm. The descriptor ships 0.42 and 0.96 (metres), and
 `lengthToUe` multiplies each by 100 in double; narrowed to `float` they are exactly 42 and 96, so the check and its text
 are what they were while the simulation ran in centimetres. From task 8 until
@@ -68,8 +69,9 @@ game configuration in og-simulation lengths, so its name carries no unit (design
 
 ## §5 The file
 
-The `.cpp` is a whole-file `#if !OG_PHYSICS_BACKEND_CHAOS`, as the Jolt host's was until og-tickdriver task 15e made
-the host a header template in OGSimulationUnreal. The header has no `#if`. Since task 15e the `.cpp` also holds the
+The `.cpp` has no `#if` since og-session-runtime task 3. Until then it was a whole-file `#if !OG_PHYSICS_BACKEND_CHAOS`,
+as the Jolt host's was until og-tickdriver task 15e made the host a header template in OGSimulationUnreal; Chaos was
+off in every build, so the arm compiled in every build. The header has no `#if`. Since task 15e the `.cpp` also holds the
 console variable (§6) and the host's one explicit instantiation (§7).
 
 ## §6 `og.Jolt.ContactCounts` (og-tickdriver task 15e)
@@ -80,9 +82,10 @@ thread, when it fills the world host's configuration in `buildWorld` (`TickDrive
 
 * **Why it is here** (lead ruling L4). From og-tickdriver task 15a until task 15e the variable and its read were the
   Jolt engine traits'. Task 15e moved the traits to the OGSimulationJoltUnreal module, which cannot see the game's
-  backend switch: the variable would have registered in the Chaos configuration too. Here, in a whole-file Jolt arm
-  of the game module, it registers in the Jolt configuration only, at the game module's static initialization, as
-  before. The engine traits keep the log sink (`JoltEngineTraitsUImpl-rationale.md` §2).
+  backend switch: the variable would have registered in the Chaos configuration too. Here, in what was a whole-file
+  Jolt arm of the game module until og-session-runtime task 3, it registered in the Jolt configuration only, at the game
+  module's static initialization, as before. Since task 3 there is only that configuration, and it registers there,
+  as before. The engine traits keep the log sink (`JoltEngineTraitsUImpl-rationale.md` §2).
 * **The host does not require it** of a binding through a concept: a binding without it fails inside the host's
   `buildWorld` at the instantiation (og-simulation's `PhysicsEngineTraits-rationale.md` §3).
 * Task 15e compared the console-variable dumps of both configurations before and after the move: unchanged, and an

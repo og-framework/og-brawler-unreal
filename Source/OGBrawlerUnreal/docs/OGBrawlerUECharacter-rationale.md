@@ -30,6 +30,8 @@
 <!-- lint-external-ref: ComponentInits -- Unreal Engine FObjectInitializer member, outside every scan root -->
 <!-- lint-external-ref: InitSubobjectProperties -- Unreal Engine FObjectInitializer method, outside every scan root -->
 <!-- lint-external-ref: USimmableUpdateComponent -- RENAMED by og-ue-simulationcomponentandmanagersplit task 21a to UOGBrawlerSimulatableComponent (the property is BrawlerSimulatable since then, ruling R-1); kept in the verbatim quote of §9 -->
+<!-- lint-external-ref: ChaosPhysicsFactory::applyDescriptor -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: Source/OGSimulationUnreal/ChaosPhysicsFactory.cpp -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
 # `AOGBrawlerUECharacter` — rationale
 
 Companion to `Source/OGBrawlerUnreal/OGBrawlerUECharacter.h` and
@@ -76,6 +78,7 @@ G-01, G-02 and G-03.
 
 Verified 2026-09-26: `ChaosPhysicsFactory::applyDescriptor` sets simulate-physics, gravity and the
 collision object type from the descriptor (`Source/OGSimulationUnreal/ChaosPhysicsFactory.cpp`).
+That factory and the Chaos configuration it served were removed by og-session-runtime tasks 3–6 (§1.2).
 The block counts "four settings" and then lists five calls after the size (profile, step-up,
 physics volume, affect-navigation, dynamic obstacle); the reasoning covers all five.
 
@@ -118,19 +121,20 @@ converted, and the `simulatePhysics` half of the pair is now a `static_assert` o
 `kCharacterCapsuleBody` whose message names both halves. `StaticData::drivesBody` defaults to
 `true` at its declaration.
 
-### 1.2 The capsule in the two physics configurations (og-simulationscheduler-withjolt task 19)
+### 1.2 The capsule in the Jolt configuration (og-simulationscheduler-withjolt task 19)
 
-Everything above describes the **Chaos configuration**, where `ChaosPhysicsFactory`'s adopt-root
-branch takes this capsule as the character's root body, simulates it, and the engine's end-of-physics
-sync moves it to the physics result, interpolated two steps behind.
+Everything above was written for the former **Chaos configuration** (removed by og-session-runtime
+tasks 3–6), where the Chaos factory's adopt-root branch took this capsule as the character's root body,
+simulated it, and the engine's end-of-physics sync moved it to the physics result, interpolated two
+steps behind.
 
-In the **Jolt configuration** (the default since task 18; the switch is described once, in
-`OGBrawlerSimulationManager-rationale.md` §18) the capsule is **render-only**:
+In the **Jolt configuration** (the default since task 18 and the only one since og-session-runtime
+task 3; the former switch is `OGBrawlerSimulationManager-rationale.md` §18) the capsule is **render-only**:
 
 * **The simulated body is not this component.** It is a Jolt slot body that `JoltWorld` builds from
   the movement descriptor (`kCharacterCapsuleBody`, 42 / 96, `isRoot`); the descriptor's
-  `simulatePhysics` makes that slot body dynamic. Nothing adopts this capsule, and `applyDescriptor`
-  never runs on it, so it keeps the Pawn collision profile from the constructor for its whole life.
+  `simulatePhysics` makes that slot body dynamic. Nothing adopts this capsule and no factory applies a
+  descriptor to it, so it keeps the Pawn collision profile from the constructor for its whole life.
 * **It does not simulate.** `tryRegister` (the session's since og-ue-simulationcomponentandmanagersplit task 28), on the registration's Ready path
   (`TickDriverBackendUImpl::onRegistered_GameThread`),
   switches its physics simulation off and logs one `[SimHost.RenderTarget]` line per character with
@@ -139,12 +143,12 @@ In the **Jolt configuration** (the default since task 18; the switch is describe
 * **One writer.** The render sync is the only thing that moves it: once per frame, at the end of
   physics, og-simulation's presenter, through `UERenderTargetTable::applyRootPose`, teleports the actor to the
   simulated root body's pose interpolated two steps behind the host time (`og.Render.InterpolationDelaySteps`),
-  as Chaos's sync did. Guard G-03 names the writer per configuration.
+  as the former Chaos configuration's engine sync did. Guard G-03 names the writer.
 * **It stays input.** The capsule is still the mouse-aim plane point
   (`UOGBrawlerInputCollectionComponent::updateGameThreadCache`) and the camera boom's anchor, so the
   rendered pose feeds the aim the next simulated tick reads, as it did under Chaos.
-* **The size contract holds in both.** G-01's `checkf` moves to `tryRegister` in the Jolt
-  configuration: the slot body is built from the descriptor, so a capsule of a different size would
+* **The size contract holds.** G-01's `checkf` is in `tryRegister` (the former Chaos configuration's
+  was in its factory): the slot body is built from the descriptor, so a capsule of a different size would
   put the aim plane and the camera off the simulated body.
 
 ## 2. The capsule's physical material
@@ -166,14 +170,16 @@ In the **Jolt configuration** (the default since task 18; the switch is describe
 > accumulate into. Mass is deliberately NOT asserted (revision 6: mass plays no part in
 > the movement path).
 
-The restitution prohibition is guard G-04.
+The restitution prohibition was guard G-04, retired by og-session-runtime task 7b with its premise (guards §R).
 
 **In the Jolt configuration the material is inert for gameplay** (og-simulationscheduler-withjolt
 task 19): the capsule is not simulated (§1.2), and the Jolt slot body's friction and restitution come
 from `JoltBodyDefaults.h`, whose `kAdoptedRootMaterial` gives the character's root body friction 0 and
 restitution 0, the values this material carries. The
-override call stays in `PostInitializeComponents` (G-17), and G-04 stays until task 21 removes the
-Chaos configuration, where the material is still live.
+override call stays in `PostInitializeComponents` (G-17). The Chaos
+configuration, where the material was live, was removed by og-session-runtime tasks 3–6 (the retirement
+og-simulationscheduler-withjolt task 21 had planned), so G-04 guarded a value nothing simulated reads, and
+og-session-runtime task 7b retired it.
 
 ### 2.1 Where the override is applied: `PostInitializeComponents`, not the constructor (shrink-install task 9)
 
@@ -260,7 +266,8 @@ authority assigns it (§9).
 the frame host steps at the same 60 Hz, from the same fixed step size, so the frequency still matches
 the rate at which the simulation produces new states (og-simulationscheduler-withjolt task 19).
 
-`m_cameraAxis` is a simulating Chaos sphere in **both** configurations. It is cosmetic: it feeds no
+`m_cameraAxis` is a simulating sphere in the engine's own (Chaos) physics scene, in the Jolt configuration as it was
+in the former Chaos configuration (removed by og-session-runtime tasks 3–6). It is cosmetic: it feeds no
 simulation, and the narrow-world ruling of og-simulationscheduler-withjolt keeps cosmetic physics on
 Chaos. It is the one component the `[SimHost.RenderTarget]` line (§1.2) lists as still simulating.
 
@@ -778,9 +785,9 @@ an optional slot, empty for 0, and `SetAuthoritativePhysicsSlot()` is its one wr
   set-once: a character keeps its slot until it leaves, and a pawn that leaves is destroyed, so a
   second write would be a bug. A `static_assert` pins that slot + 1 fits the byte.
 * **Who reads it.** Only the Jolt configuration's acquire, on a client, where it is the only input to
-  the slot choice. The property exists in both configurations, because a reflected member cannot sit
-  inside a custom preprocessor block (task 51's arm rule) and the pawn carries no backend arm; the Chaos
-  configuration never writes or reads it, so there it replicates as 0.
+  the slot choice. The property existed in both configurations while there were two, because a reflected
+  member cannot sit inside a custom preprocessor block (task 51's arm rule) and the pawn carries no backend
+  arm; the former Chaos configuration (removed by og-session-runtime tasks 3–6) never wrote or read it.
 * **Cost.** One byte per character, sent when it changes, which is once. It never enters a composite or
   the correction wire, so the correction wire format does not change.
 
@@ -849,8 +856,8 @@ G-16.
 > — so its world translation WAS the capsule's. Same sphere, same place, one fewer component.
 
 `Tick` runs in the pre-physics group, before this frame's end of physics, so the capsule it reads is
-the pose the previous frame's sync set: the engine's sync in the Chaos configuration, the render sync
-in the Jolt configuration (§1.2). The input component's `updateGameThreadCache`, called from here,
+the pose the previous frame's sync set: the render sync (§1.2; the engine's sync in the former Chaos
+configuration, removed by og-session-runtime tasks 3–6). The input component's `updateGameThreadCache`, called from here,
 reads the aim plane from the same pose (og-simulationscheduler-withjolt task 19).
 
 **The humanoid's facing crosses the frame edge (og-sim-metres-yup task 8).** `buildAimDirection()` returns the aim in
@@ -924,6 +931,11 @@ facing stays `humanoidDefaultForward` and the rotation is the identity. `humanoi
   file-scope `gNextBrawlerColorIndex`, and `PossessedBy`'s `HasAuthority()` branch, which wrote the
   colour and applied it. Guards G-08, G-14 and G-15 are retired; G-15's reason moved to G-22. The
   colour is derived from the sim id (§5).
+* **The Chaos solver includes, removed** (og-session-runtime task 3, 2026-11-23). The `.cpp` included six Chaos
+  headers (the physics scene, the solver base, the declarations, the rigid-body solver, the callback input and the
+  marshalling manager) that no line of the file used: it builds without them in every target. The constructor's
+  capsule material, its sizes and the simulating camera sphere run in every configuration, so they stay; the
+  pawn had no backend arm (§9.1).
 
 ## 13. Corrections found before the move (R0), task-25 conversion, 2026-09-26
 

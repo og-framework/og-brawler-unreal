@@ -10,6 +10,9 @@
 <!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (§2): the record field deleted with the two-source tripwire. It must NOT resolve -->
 <!-- lint-external-ref: PlayerStart5 -- ThirdPersonMap actor label (level content, an external-actor package), not code (§1a) -->
 <!-- lint-external-ref: PlayerStart6 -- ThirdPersonMap actor label (level content, an external-actor package), not code (§1a) -->
+<!-- lint-external-ref: OnPhysScenePostTick -- Unreal Engine / Chaos API name, outside every scan root; its last in-tree code user, the brawler's Chaos host, was deleted by og-session-runtime task 3 -->
+<!-- lint-external-ref: ChaosPhysicsFactory::createPhysicalObject -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: ChaosPhysicsFactory.cpp -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
 # `BrawlerRosterUImpl` — rationale
 
 `BrawlerRosterUImpl.h` and `.cpp` (BUSL-1.1, `Source/OGBrawlerUnreal/`). The guards are in `BrawlerRosterUImpl-guards.md`;
@@ -379,10 +382,10 @@ session's `onPostPhysicsStep` calls at the same position (`BrawlerSessionGameUIm
 
 *The cross-thread argument is in §1, the second read crossing. What follows is the rest.*
 
-*Call site by configuration: the post-physics pass (the session's `onPostPhysicsStep` since task 27a, the actor's
-`OnPostPhysicsStep` before) is called by the scene's post-tick delegate in the
-Chaos configuration and by the frame host's `TG_EndPhysics` tick function, through the tick driver, in the Jolt one, at the same
-point of the frame (after the wait for earlier frames' steps) and every frame. On the authority every
+*Call site: the post-physics pass (the session's `onPostPhysicsStep` since task 27a, the actor's
+`OnPostPhysicsStep` before) is called by the frame host's `TG_EndPhysics` tick function, through the tick driver, after
+the wait for earlier frames' steps, every frame. The former Chaos configuration (removed by og-session-runtime tasks 3–6)
+called it from the scene's post-tick delegate at the same point of the frame. On the authority every
 step has run inline before it, so the push reads a score table no step is writing; the argument below
 is unchanged (task 54).*
 

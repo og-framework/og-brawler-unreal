@@ -278,26 +278,31 @@ brawler's `CharacterBindings`, and its **source is the movement sub-simulation's
 creation fold has run. Before the fold that id is still zero, which is why the stamp sits below it.
 
 The value is the capsule's, and it is the capsule's *by construction* rather than by coincidence:
-the movement descriptor sets `isRoot`, so `ChaosPhysicsFactory` **adopts** the engine character's
-existing capsule instead of creating a body under it, and its adopt-root arm ends in a `checkf`
-that the adopted body's id equals the parent id the factory derived from that same component. One
-body, one id, reached through the sub-simulation's own declaration.
+the movement descriptor sets `isRoot`, so in the Jolt bind (`JoltTickWorldHost::bind`) the movement
+declaration's own body is the slot's one `isRoot` body, which `JoltPhysicsFactory` also hands every
+declaration as its `parentBodyId`; the roster's `checkf` that the two are equal watches it. One body,
+one id, reached through the sub-simulation's own declaration. In the former Chaos configuration
+(removed by og-session-runtime tasks 3–6) the Chaos factory adopted the engine character's existing
+capsule instead of creating a body under it, and its adopt-root arm ended in a `checkf` that the
+adopted body's id equalled the parent id it derived from that same component.
 
 A **two-source tripwire** used to sit at this stamp: a second `checkf`, comparing the declaration's
 `ownBodyId` against a capsule id cached on `PendingRegistration` for as long as the two sources
 coexisted. Both are gone. The cached `parentBodyId` field had exactly two readers — that tripwire
 and the resolvability gate — and the gate now reads the same declaration, so the field had none
-left. Removing it removes a duplicate, not the only witness: the factory's own assertion, which
-this file does not own, still watches the identity. The capsule id is still derived inside the
+left. Removing it removed a duplicate, not the only witness: the Chaos factory's own assertion watched
+the identity then; since og-session-runtime tasks 3–6 removed that factory, the roster's `checkf` (above) does.
+The capsule id is still derived inside the
 first-call pass, as a **local**, because the factory and each declaration's own
 `bindings.parentBodyId` consume it there.
 
 *R0, task 28:* verified: the stamp is `BrawlerRosterUImpl::onBodiesCreated`'s `setCharacterBindings`, after its read of
 the movement declaration's `bindings.ownBodyId`, which the hook `afterBodiesCreated` calls at the end of the first-call
-pass, after the backend's fold; `kCharacterCapsuleBody` sets `isRoot`; `ChaosPhysicsFactory`'s adopt-root arm ends in
-`checkf(bodyId == m_parentBodyId, …)`. The record (`PendingRegistration`, the session's since task 28) has no capsule-id
-field. Two precisions: the "first-call pass" that derives the capsule id is the backend's `createBodies_GameThread` (the
-self-scheduled host's local `parentBodyId`, from the capsule's handle), which `tryRegister`'s first call reaches; and the
+pass, after the backend's fold; `kCharacterCapsuleBody` sets `isRoot`; the Chaos factory's adopt-root arm ended in
+`checkf(bodyId == m_parentBodyId, …)` (deleted by og-session-runtime task 4). The record (`PendingRegistration`, the
+session's since task 28) has no capsule-id field. Two precisions: the "first-call pass" that derives the capsule id is the
+backend's `createBodies_GameThread` (in the former self-scheduled Chaos host, a local `parentBodyId` from the capsule's
+handle; in the Jolt host, the factory's `parentBodyId`), which `tryRegister`'s first call reaches; and the
 roster's stamp is preceded by a `checkf` that the declaration's own body is its parent body, both read from the
 declaration (task 23's restatement of the isRoot fence), which is not the retired two-source tripwire: that compared the
 declaration with the record's cached field.
@@ -328,9 +333,9 @@ the resim policy) and `StaticData::drivesBody`; the teleport seed is written by 
 capsule's location, and `InitialConditions` (`teleportPending`, `teleportPos`) is a serialized field set, append-only, so it
 rides the wire; the movement step consumes it with `setBodyTransform` without testing `drivesBody`. **Correction:** the
 second bullet's "one row in EACH of the two mapping tables in `BeginPlay` — authority branch and client branch" is stale:
-since og-tickdriver task 15a there is one category table per configuration (`BrawlerChaosBindingUImpl::categoryChannels`,
-`BrawlerJoltBindingUImpl::categoryChannels`; the Chaos table has the `collisionCategory::character` row), so a new
-category needs one row in each configuration's table (`OGBrawlerSimulationManager-rationale.md` §13.3).
+since og-tickdriver task 15a there is one category table per configuration, and since og-session-runtime task 3 deleted
+the Chaos binding's table one in all, `BrawlerJoltBindingUImpl::categoryChannels`, so a new category needs one row there
+(`OGBrawlerSimulationManager-rationale.md` §13.3).
 
 **Attach parent and parent body are the same capsule** under the one-deep hierarchy, so passing one
 handle expresses "these shapes belong to this character". They used to be passed separately, which
@@ -338,9 +343,9 @@ let callers get them out of sync; the factory derives the parent `BodyId` from t
 body-instance handle internally now, and that factory-owned parent id becomes the root for every
 shape it registers — so `overlap()` emits an actor-level `rootBodyId` equal to the capsule id.
 
-*R0, task 28:* this paragraph describes the Chaos configuration's factory (`ChaosPhysicsFactory`, the self-scheduled
-host's bind); verified: its adopt-root arm registers the adopted body's shapes with no parent (`registerShape(…,
-std::nullopt)`), so a direct hit on it reports the body itself as the root.
+*R0, task 28:* this paragraph describes the Chaos configuration's factory (the self-scheduled host's bind, removed by
+og-session-runtime tasks 3–6); verified then: its adopt-root arm registered the adopted body's shapes with no parent
+(`registerShape(…, std::nullopt)`), so a direct hit on it reported the body itself as the root.
 
 #### The notify's brawler dependants
 
@@ -405,8 +410,8 @@ and the quote is left intact.*
 > state both halves.
 
 Since this conversion there is **one** table per configuration (`OGBrawlerSimulationManager-rationale.md` §13.3; since og-tickdriver task 15a
-`BrawlerChaosBindingUImpl::categoryChannels` and `BrawlerJoltBindingUImpl::categoryChannels`), so a new
-category needs one row in each, not one per role branch.
+the bindings' tables, and since og-session-runtime task 3 deleted the Chaos binding's only
+`BrawlerJoltBindingUImpl::categoryChannels`), so a new category needs one row, not one per role branch.
 
 *R0, task 28:* the first quote's class is still the type the contract requires: the session's cast reads
 `TraitsT::Character`, which is `AOGBrawlerUECharacter` (`BrawlerSessionTraitsUImpl.h`), and since task 28 the check's
