@@ -1,0 +1,6 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> thirdparty/og-simulation/OGSimulation/OGAssert.h
+#pragma once
+#include <cassert>
+#include "OGSession/SessionTypes.h"

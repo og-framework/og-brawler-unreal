@@ -548,6 +548,150 @@ pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/sim_trig_lint.Tests.ps1
 
 ---
 
+# Module tier lint
+
+`module_tier_lint.ps1` makes the dependency direction between the libraries a gate (og-session-runtime task 19). Each
+library sits on a tier; a file may include headers of its own tier or lower, never higher, and never of a library its
+row forbids. The engine-free libraries include no engine header. Every source root of the game is classified. Two
+report arms make the coupling visible without failing on it: headers a library keeps only for the layers above it, and
+classes whose private members other classes name.
+
+```pwsh
+pwsh -NoProfile -File tools/lint/module_tier_lint.ps1
+pwsh -NoProfile -File tools/lint/module_tier_lint.ps1 -RepoRoot Plugins/OGSimulation
+pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/module_tier_lint.Tests.ps1 -Output Detailed"
+```
+
+A run over the game takes about 5 s. Reviewers run it with the other lints.
+
+## The table: `module_tiers.psd1`
+
+The table is keyed by **library**, not by path, so the same file works from the game, from the plugin repository
+alone, from a CMake runner tree or from a Godot tree. Every root is a **glob resolved under `-RepoRoot`**: `**` is any
+number of directory segments, `*` and `?` stay inside one segment, matching ignores case. A node absent under a root is
+reported `absent`, not an error.
+
+| Node | Tier | Engine-free | Roots |
+|---|---|---|---|
+| `OGNet` | 0 | yes | `**/Source/OGNet`, `**/og-net/OGNet` |
+| `OGSimulation` | 0 | yes | `**/Source/OGSimulation`, `**/og-simulation/OGSimulation` |
+| `OGTickDriver` | 1 | yes | `**/og-simulation/OGSimulation`, by file name (below) |
+| `OGSimulationJolt`, `OGSimNet`, `OGBrawler` | 2 | yes | their module folder and their library folder |
+| `OGSimSession` | 3 | yes | `**/Source/OGSimulationSession`, `**/og-sim-session/OGSession` |
+| `OGNetUnreal`, `DVolume`, `ProceduralMountainSide` | 4 | no | their module folder |
+| `OGSimulationUnreal` | 5 | no | `**/Source/OGSimulationUnreal` |
+| `OGSimulationJoltUnreal` | 6 | no | `**/Source/OGSimulationJoltUnreal` |
+| `OGBrawlerUnreal` | 7 | no | `**/Source/OGBrawlerUnreal` |
+
+- **A file belongs to the node with the deepest matching root**; at equal depth a node with `Names` wins. Two nodes
+  claiming one file at the same depth is a misconfiguration (exit 2).
+- **og-tickdriver is a file set inside og-simulation**, so its node shares og-simulation's root and picks files by
+  `Names` (case-sensitive base-name patterns: `ThreadChainExecutor.h`, `TickDriver*`, `SimulationTickDriver*`,
+  `SimulationTickBackend*`, `SimulationStepDriver*`, `SimulationScheduler*`, `TickSlotTable*`), minus `ExceptNames`:
+  `TickDriverGameTypes.h` and `SimulationScheduler.h` are og-sim's vocabulary (a leaf that the vocabulary types take
+  by reference). The two share `Group = 'og-simulation'`, which R1 reads as one library.
+- `ModuleBoilerplate` names, per engine-free node, the UE module `.cpp` files A2 lets include `Modules/ModuleManager.h`.
+- `Unlinted`: source roots outside the graph on purpose, each with its reason (the test modules, the glm wrapper).
+- `SourceParents` are the folders whose children A3 checks; `ExcludeSegments` are directory names never walked
+  (matched **case-sensitively**, so `ThirdParty` does not prune a Godot tree's `thirdparty/` holding the libraries);
+  tests, docs and tools folders are excluded, so a library's own tests may include any tier.
+- `EngineHeaders`: the include patterns A2 treats as engine headers (`CoreMinimal.h`, `Engine/*`, `*.generated.h`, …).
+- `MayNotInclude`: the nodes a node must not include although the tier order allows it (A4, below).
+- `Passengers`, `Watch` and `ReachClasses` configure R1 and R2 (below).
+
+A new library is a new row. An unknown key, a missing tier, a `MayNotInclude` or report entry naming no node, or a
+repository root under which no node root resolves to a file exits 2.
+
+### The forbidden pairs (`MayNotInclude`)
+
+A tier order cannot say "og-sim-net uses the core but not the tick driver", so the target graph's other rules are listed
+per node. Each comes from the graph (the arrows and their notes) or from its type-ownership rule that og-net's wire,
+connection, lane and budget types are borrowed by og-sim-net only.
+
+| Node | May not include | Why |
+|---|---|---|
+| `OGNet` | `OGSimulation` | og-net depends on nothing of ours |
+| `OGSimulation` | `OGNet` | og-net's types are borrowed by og-sim-net only |
+| `OGTickDriver` | `OGNet` | the same |
+| `OGSimulationJolt` | `OGNet`, `OGSimNet`, `OGBrawler` | it builds on the core and the tick driver only |
+| `OGSimNet` | `OGTickDriver`, `OGSimulationJolt`, `OGBrawler` | it uses the core's port and og-sim's vocabulary headers, not the tick driver |
+| `OGBrawler` | `OGNet`, `OGTickDriver`, `OGSimulationJolt`, `OGSimNet` | the game's sims use the core only |
+| `OGSimSession` | `OGNet`, `OGSimulationJolt`, `OGBrawler`, every engine node | templated on the engine traits (no og-sim-jolt) and on the game's traits; og-net only through og-sim-net |
+
+The session's engine entries repeat what A1 already enforces (every engine node has a higher tier); they are listed so
+the row states the rule whole. Target-state rules for the engine adapters (OGSimulationUnreal stops including og-net,
+OGBrawlerUnreal stops including og-sim-net and og-tickdriver) are not in the table yet: today's tree still has those
+includes, and the task that removes them adds the row.
+
+## How an include is resolved
+
+Comments are blanked first (keeping every line and column), then every `#include` at the start of a line is read.
+An include resolves, in order, to the file next to the includer (`"X.h"`, `"../X.h"`), else to the node files whose
+path ends with it (any case), preferring the includer's own node. An include matching files of several other nodes
+prints an `[ModuleTier.Ambiguous]` line and counts against each. An include that matches no node file is external
+(the standard library, a third party, the engine) and only A2 looks at it.
+
+## The arms
+
+| Arm | Kind | Fires when |
+|---|---|---|
+| **A1** | gate | a file includes a header of a node with a **higher tier** |
+| **A2** | gate | a file of an engine-free node includes an `EngineHeaders` match (its `ModuleBoilerplate` aside) |
+| **A3** | gate | a code file under a `SourceParents` child belongs to no node and no `Unlinted` root (one finding per source root) |
+| **A4** | gate | a file includes a header of a node its `MayNotInclude` names (an include A1 already reports is not reported again) |
+| **R1** | report | an **orphan header**: files of other groups include it, and no file of its own group does, other than its own `.cpp` and other orphans |
+| **R2** | report | `x.m_member` or `x->m_member` where `x` is declared in the same file as a reference or pointer to a `ReachClasses` class (or one of its aliases), outside the class's own file |
+
+R1 also prints two lists:
+- **Passengers** (`[ModuleTier.R1.Passengers]`): headers of the `Passengers.Of` nodes that only the `Riders` reach,
+  directly or through other headers of those nodes, and that nothing else needs. These are the headers that would
+  leave the core with og-sim-net and the session. They are meaningful only from a root holding every node: from the
+  plugin repository alone the game is absent and the list grows.
+- **Watch** (`[ModuleTier.R1.Watch]`): every file of `From` that includes a header of `To`
+  (`OGSimSession -> OGSimNet`), or `none`, or `absent`.
+
+Exit **0** = A1, A2, A3 and A4 at zero (R1 and R2 may report). **1** = a gate arm fired. **2** = misconfiguration: the
+table, the repository root, or a fixture.
+
+## `-Poison`, the fixtures and `-ListFiles`
+
+`-Poison A1|A2|A3|A4|R1|R2` expands the fixtures into a temporary folder, checks that every arm is at zero there, plants
+one violation of that arm, and runs again. It exits **1** when that arm fired and every other arm stayed at zero
+(`POISON ARM FIRED`), and **2** when the arm did not fire, another arm moved too, or the fixture was not clean before
+planting. The temporary folder is removed on every exit.
+
+The fixtures are text bundles, `tests/fixtures/module_tier/*.tree.txt`: a line `>>> <path>` starts a file and the
+lines after it are its content. They are bundles and not `.h` files because `doc_anchor_lint.ps1` resolves documents
+against `tools/`: a fixture header named like a real one would keep a stale claim about the real one green.
+`-FixturesPath a,b -ExpandTo <dir>` writes them out, later bundles replacing earlier files; `clean.tree.txt` is the
+clean tree and each other bundle is one change to it.
+
+`-ListFiles` prints `node<TAB>path` for every classified file, then the unlinted and uncovered ones.
+
+## Known limitations
+
+- A4 works per node, not per header: a rule such as "OGSimulationUnreal includes og-sim-net's link but not its session
+  headers" cannot be written as a row.
+- `EngineHeaders` is a list: an engine header it does not name passes A2.
+- Includes inside `#if 0`, or built by a macro, are read as written or not at all.
+- A3 checks only the `SourceParents` children (the Unreal layout); a Godot or CMake tree has none.
+- R2 is textual: a reference declared in another file, or through a type name not in the table, is not seen.
+- R2 does not see a declaration whose type is namespace-qualified (`ns::UESimulationSession<T>& x`): its pattern
+  requires the class name not to follow `::`. The tree has no such declaration today.
+- The `-Poison` leak check (`POISON LEAKED`) has no fixture that makes it fire.
+
+## Tests
+
+`tests/module_tier_lint.Tests.ps1` (Pester 5): the clean fixture is silent on every arm; each arm fires on its own
+bundle and leaves the other five at zero; the two upward include lines og-session-runtime task 18 removed from
+`ClockDilationController.h` make A1 fire twice, and the og-sim-net line it removed makes A4 fire; an upward include
+whose target the includer's `MayNotInclude` also names is A1 only; passengers follow og-sim headers (a header the game
+reaches through another one is not a passenger, a header only a passenger includes is one); `-Poison` fires each
+arm alone and refuses a dirty fixture; a Godot-shaped tree resolves with the same table and gates there too; seven
+misconfigurations exit 2.
+
+---
+
 # Bandwidth measurement (`measure_bandwidth.ps1`)
 
 `measure_bandwidth.ps1` is the Phase 2a (`og-netcode-v1-impl` Task 19) measurement

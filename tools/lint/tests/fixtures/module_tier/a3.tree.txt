@@ -1,0 +1,5 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Source/NewGameModule/NewGameModule.h
+#pragma once
+#include <cstdint>

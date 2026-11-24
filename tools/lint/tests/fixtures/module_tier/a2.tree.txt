@@ -1,0 +1,6 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/SimNetClient.h
+#pragma once
+#include "CoreMinimal.h"
+#include "OGSimNet/SimNetIdle.h"

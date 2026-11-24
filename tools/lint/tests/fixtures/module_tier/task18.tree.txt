@@ -1,0 +1,8 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/PCTimeManagement/ClockDilationController.h
+#pragma once
+#include "OGSimulation/TickDriverGameTypes.h"
+#include "OGSimulation/HostLog.h"
+#include "OGSimulation/TickDriverConcepts.h"
+#include "OGSimulation/TickDriverLog.h"

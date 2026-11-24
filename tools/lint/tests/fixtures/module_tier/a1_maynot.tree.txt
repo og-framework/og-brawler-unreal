@@ -1,0 +1,6 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSession/SessionHost.h
+#pragma once
+#include "OGSession/SessionTypes.h"
+#include "UESimulationSession.h"
