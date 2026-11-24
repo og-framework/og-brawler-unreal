@@ -295,6 +295,7 @@ With no arguments it lints **every docs tier** against `Plugins`, `Source`,
 | `Plugins/OGSimulation/…/og-net/OGNet/docs` | MPL-2.0 | the `og-net` submodule |
 | `Plugins/OGSimulation/…/OGNetUnreal/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule |
 | `Plugins/OGSimulation/…/og-sim-net/OGSimNet/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule (og-sim-net is a plain folder in it) |
+| `Plugins/OGSimulation/…/og-sim-session/OGSimSession/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule (og-sim-session is a plain folder in it) |
 
 Decision **D9** (2026-08-23) ruled the second tier in: `OGBrawlerUnreal`
 documentation cannot live in the MPL-2.0 tier, because that tier ships with a
@@ -537,9 +538,9 @@ pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/palette_legend_lint.Tes
 # Sim trigonometry lint (`sim_trig_lint.ps1`)
 
 `sim_trig_lint.ps1` checks that the engine-free simulation trees (og-simulation, og-simulation-jolt's own sources,
-og-sim-net, og-brawler) call no libm trigonometry, so every platform computes the same angles and rotations
-(og-input-latency task 22). The sim uses og-simulation's `simTrig` (`SimTrig.h`) instead. The script's header lists
-what it flags and the presentation-only files it allows. Implementers and reviewers run it with the other lints.
+og-sim-net, og-sim-session, og-brawler) call no libm trigonometry, so every platform computes the same angles and
+rotations (og-input-latency task 22). The sim uses og-simulation's `simTrig` (`SimTrig.h`) instead. The script's header
+lists what it flags and the presentation-only files it allows. Implementers and reviewers run it with the other lints.
 
 ```pwsh
 pwsh -NoProfile -File tools/lint/sim_trig_lint.ps1
@@ -577,7 +578,7 @@ reported `absent`, not an error.
 | `OGSimulation` | 0 | yes | `**/Source/OGSimulation`, `**/og-simulation/OGSimulation` |
 | `OGTickDriver` | 1 | yes | `**/og-simulation/OGSimulation`, by file name (below) |
 | `OGSimulationJolt`, `OGSimNet`, `OGBrawler` | 2 | yes | their module folder and their library folder |
-| `OGSimSession` | 3 | yes | `**/Source/OGSimulationSession`, `**/og-sim-session/OGSession` |
+| `OGSimSession` | 3 | yes | `**/Source/OGSimulationSession`, `**/og-sim-session/OGSimSession` |
 | `OGNetUnreal`, `DVolume`, `ProceduralMountainSide` | 4 | no | their module folder |
 | `OGSimulationUnreal` | 5 | no | `**/Source/OGSimulationUnreal` |
 | `OGSimulationJoltUnreal` | 6 | no | `**/Source/OGSimulationJoltUnreal` |

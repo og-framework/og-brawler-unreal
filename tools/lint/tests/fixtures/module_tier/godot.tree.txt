@@ -25,13 +25,13 @@ tools/lint/README.md "Module tier lint"
 >>> og-sim-net/OGSimNet/SimNetClient.h
 #pragma once
 #include "OGSimNet/SimNetIdle.h"
->>> og-sim-session/OGSession/SessionTypes.h
+>>> og-sim-session/OGSimSession/SessionTypes.h
 #pragma once
 #include "OGSimNet/SimNetIdle.h"
 #include "OGSimulation/TickDriverConcepts.h"
->>> og-sim-session/OGSession/SessionRuntime.h
+>>> og-sim-session/OGSimSession/SessionRuntime.h
 #pragma once
-#include "OGSession/SessionTypes.h"
+#include "OGSimSession/SessionTypes.h"
 >>> src/register_types.cpp
 #include <godot_cpp/core/class_db.hpp>
-#include "OGSession/SessionTypes.h"
+#include "OGSimSession/SessionTypes.h"

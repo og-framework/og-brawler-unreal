@@ -593,7 +593,7 @@ retired: `Engine.SomeRetiredCase`
                 # og-simulation-jolt-unreal tier, the og-net tier, the og-net-unreal
                 # tier and then the og-sim-net tier joined -DefaultDocDirs; this fixture
                 # builds two, so the other seven report ABSENT and still count as reported tiers.
-                $r.Out  | Should -Match 'default doc tiers\s+: 9'
+                $r.Out  | Should -Match 'default doc tiers\s+: 10'
             } finally { Remove-Item -LiteralPath $root -Recurse -Force }
         }
 

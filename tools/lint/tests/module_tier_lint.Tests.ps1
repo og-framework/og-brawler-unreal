@@ -74,7 +74,7 @@ Describe 'module_tier_lint: the clean fixture' {
     }
 
     It 'lists the session headers that include OGSimNet (R1 watch) without counting them' {
-        $script:Clean.Text | Should -Match '\[ModuleTier\.R1\.Watch\] OGSimSession -> OGSimNet: \S+/OGSession/SessionTypes\.h -> OGSimNet/SimNetIdle\.h'
+        $script:Clean.Text | Should -Match '\[ModuleTier\.R1\.Watch\] OGSimSession -> OGSimNet: \S+/OGSimSession/SessionTypes\.h -> OGSimNet/SimNetIdle\.h'
     }
 }
 
@@ -176,14 +176,14 @@ Describe 'module_tier_lint: the same table on another layout' {
         $r.Exit | Should -Be 0
         foreach ($n in 'OGNet', 'OGSimulation', 'OGTickDriver', 'OGSimNet', 'OGSimSession') { $r.Text | Should -Match "(?m)^  $n +tier \d +\S+ +present" }
         foreach ($a in 'A1', 'A2', 'A3', 'A4', 'R1', 'R2') { $r.Counts[$a] | Should -Be 0 }
-        $r.Text | Should -Match '\[ModuleTier\.R1\.Watch\] OGSimSession -> OGSimNet: og-sim-session/OGSession/SessionTypes\.h -> OGSimNet/SimNetIdle\.h'
+        $r.Text | Should -Match '\[ModuleTier\.R1\.Watch\] OGSimSession -> OGSimNet: og-sim-session/OGSimSession/SessionTypes\.h -> OGSimNet/SimNetIdle\.h'
     }
 
     It 'gates an upward include there too' {
         $r = Invoke-OnTree @('godot', 'godot_a1')
         $r.Exit | Should -Be 1
         $r.Counts['A1'] | Should -Be 1
-        $r.Text | Should -Match 'thirdparty/og-simulation/OGSimulation/OGAssert\.h:3: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGSession/SessionTypes\.h" of OGSimSession \(tier 3\)'
+        $r.Text | Should -Match 'thirdparty/og-simulation/OGSimulation/OGAssert\.h:3: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGSimSession/SessionTypes\.h" of OGSimSession \(tier 3\)'
     }
 }
 

@@ -183,7 +183,8 @@ param(
         'Plugins/OGSimulation/Source/OGSimulationJoltUnreal/docs',
         'Plugins/OGSimulation/Source/OGNet/og-net/OGNet/docs',
         'Plugins/OGSimulation/Source/OGNetUnreal/docs',
-        'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/docs'
+        'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/docs',
+        'Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSimSession/docs'
     ),
     [string[]]$ScanRoots = @(
         'Plugins',

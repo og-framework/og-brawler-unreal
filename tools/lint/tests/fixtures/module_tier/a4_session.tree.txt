@@ -7,7 +7,7 @@ tools/lint/README.md "Module tier lint"
 #pragma once
 #include "OGSimulationJolt/JoltWorld.h"
 #include "OGSimulation/TickDriverConcepts.h"
->>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSession/SessionTypes.h
+>>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSimSession/SessionTypes.h
 #pragma once
 #include "OGSimNet/SimNetIdle.h"
 #include "OGSimulation/TickDriverConcepts.h"

@@ -10,7 +10,7 @@ public class OGBrawlerUnreal : ModuleRules
 		FPSemantics = FPSemanticsMode.Precise;
 		PrivatePCHHeaderFile = EngineDirectory + "/Source/Runtime/Engine/Public/EngineSharedPCH.h";
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJoltUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent", "OGNet", "OGNetUnreal", "OGSimulationNet" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJoltUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent", "OGNet", "OGNetUnreal", "OGSimulationNet", "OGSimulationSession" });
 		PrivateDependencyModuleNames.Add("ApplicationCore");
 		SetupIrisSupport(Target);
 	}

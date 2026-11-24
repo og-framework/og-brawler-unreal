@@ -40,6 +40,7 @@ param(
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation',
         'Plugins/OGSimulation/Source/OGSimulationJolt/og-simulation-jolt/OGSimulationJolt',
         'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net',
+        'Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler'
     ),
     [string[]]$Allow = @(
@@ -73,7 +74,9 @@ function Get-RelPath {
 }
 
 $files = [Collections.Generic.List[string]]::new()
+$rootCounts = [Collections.Generic.List[string]]::new()
 foreach ($r in $ScanRoots) {
+    $before = $files.Count
     $full = [IO.Path]::GetFullPath([IO.Path]::Combine($RepoRoot, $r))
     if (-not [IO.Directory]::Exists($full)) { Exit-Usage "scan root not found: $r (under $RepoRoot)" }
     $stack = [Collections.Generic.Stack[string]]::new()
@@ -89,6 +92,7 @@ foreach ($r in $ScanRoots) {
             $stack.Push($s)
         }
     }
+    $rootCounts.Add("sim_trig_lint: root $r`: $($files.Count - $before) files")
 }
 $files.Sort([StringComparer]::Ordinal)
 if ($files.Count -eq 0) { Exit-Usage 'no .h, .cpp or .inl file under the scan roots' }
@@ -147,6 +151,7 @@ foreach ($a in $allowRx) {
     }
 }
 
+$rootCounts | ForEach-Object { Write-Output $_ }
 Write-Output "sim_trig_lint: $($files.Count) files found, $scanned scanned, $($files.Count - $scanned) allowed; $violations violation(s)"
 if ($violations -gt 0) { exit 1 }
 exit 0

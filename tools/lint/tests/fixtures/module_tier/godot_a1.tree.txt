@@ -3,4 +3,4 @@ tools/lint/README.md "Module tier lint"
 >>> thirdparty/og-simulation/OGSimulation/OGAssert.h
 #pragma once
 #include <cassert>
-#include "OGSession/SessionTypes.h"
+#include "OGSimSession/SessionTypes.h"

@@ -46,7 +46,7 @@
                                     ModuleBoilerplate = @('OGBrawler.cpp')
                                     MayNotInclude = @('OGNet', 'OGTickDriver', 'OGSimulationJolt', 'OGSimNet') }
         OGSimSession           = @{ Tier = 3; EngineFree = $true
-                                    Roots = @('**/Source/OGSimulationSession', '**/og-sim-session/OGSession')
+                                    Roots = @('**/Source/OGSimulationSession', '**/og-sim-session/OGSimSession')
                                     ModuleBoilerplate = @('OGSimulationSessionModule.cpp')
                                     MayNotInclude = @('OGNet', 'OGSimulationJolt', 'OGBrawler', 'OGNetUnreal', 'DVolume',
                                                       'ProceduralMountainSide', 'OGSimulationUnreal', 'OGSimulationJoltUnreal',

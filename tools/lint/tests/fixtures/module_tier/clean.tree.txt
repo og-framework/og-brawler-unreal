@@ -82,7 +82,7 @@ IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationNet)
 >>> Plugins/OGSimulation/Source/OGSimulationSession/OGSimulationSessionModule.cpp
 #include "Modules/ModuleManager.h"
 IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationSession)
->>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSession/SessionTypes.h
+>>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSimSession/SessionTypes.h
 #pragma once
 #include "OGSimNet/SimNetIdle.h"
 #include "OGSimulation/TickDriverConcepts.h"

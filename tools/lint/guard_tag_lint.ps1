@@ -133,7 +133,8 @@ param(
         'Plugins/OGSimulation/Source/OGSimulationJoltUnreal/docs',
         'Plugins/OGSimulation/Source/OGNet/og-net/OGNet/docs',
         'Plugins/OGSimulation/Source/OGNetUnreal/docs',
-        'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/docs'
+        'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/docs',
+        'Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSimSession/docs'
     ),
     [string[]]$SourceExtensions = @('.h', '.cpp', '.hpp', '.inl'),
     [ValidateSet('None', 'UnresolvedTag', 'Orphan', 'Duplicate', 'RetiredReuse',
@@ -285,6 +286,13 @@ $ddocs = Get-DocEntries -Filter '*-rationale.md' -LiveRx $D_LIVE_RX -RetiredRx $
 $tags  = @(Get-SourceTags -TagRx $TAG_RX   -ScannedCount ([ref]$scanned))
 $dtags = @(Get-SourceTags -TagRx $D_TAG_RX -ScannedCount ([ref]$dScanned))
 
+foreach ($d in $DocDirs) {
+    $full = Join-Path $RepoRoot $d
+    if (-not (Test-Path $full)) { Write-Info ('  doc tier ABSENT   {0}' -f $d); continue }
+    $g = @(Get-ChildItem -Path $full -Filter '*-guards.md' -File -ErrorAction SilentlyContinue).Count
+    $r = @(Get-ChildItem -Path $full -Filter '*-rationale.md' -File -ErrorAction SilentlyContinue).Count
+    Write-Info ('  doc tier {0,-7}  {1}  ({2} guards, {3} rationale)' -f ($(if ($g + $r -gt 0) { 'present' } else { 'EMPTY' })), $d, $g, $r)
+}
 Write-Info ("  guards docs    (G-nn) : {0}" -f $gDocCount)
 Write-Info ("  rationale docs (D-nn) : {0}" -f $dDocCount)
 

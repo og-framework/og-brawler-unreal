@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 <#
 .SYNOPSIS
-    Clang header probe - every og-simulation and og-sim-net header compiles on its own under
+    Clang header probe - every og-simulation, og-sim-net and og-sim-session header compiles on
+    its own under
     clang-cl, and under the Android NDK's clang with libc++, so a clang-only or
     libc++-only error in a header is caught on Win64.
 
@@ -33,6 +34,11 @@
     og-simulation's roots, so an og-simulation header that includes an og-net or
     og-sim-net header fails here too.
 
+    og-session-runtime task 22 added og-sim-session's headers
+    (<SessionRoot>/OGSimSession). Their TUs get og-sim-session's include root
+    (-SessionRoot) as well as og-sim-net's and og-net's, so an og-sim-net header
+    that includes an og-sim-session header fails here too.
+
     ------------------------------------------------------------------------
     WHAT IT RUNS
     ------------------------------------------------------------------------
@@ -43,15 +49,16 @@
         clang-cl /nologo /std:c++20 /DOG_STANDALONE_BUILD /Zs
                  /clang:-fno-delayed-template-parsing
                  [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm
-                 [-I<SimNetRoot> -I<NetRoot>]  <tu>.cpp
+                 [-I<SimNetRoot> -I<NetRoot>] [-I<SessionRoot>]  <tu>.cpp
 
     libc++ (the NDK's clang++):
         clang++ --target=<AndroidTarget> -std=c++20 -stdlib=libc++ -fsyntax-only
                 -DOG_STANDALONE_BUILD
                 [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm
-                [-I<SimNetRoot> -I<NetRoot>]  <tu>.cpp
+                [-I<SimNetRoot> -I<NetRoot>] [-I<SessionRoot>]  <tu>.cpp
 
-    The bracketed -I<SimNetRoot> -I<NetRoot> are passed for og-sim-net headers only.
+    The bracketed -I<SimNetRoot> -I<NetRoot> are passed for og-sim-net and
+    og-sim-session headers, -I<SessionRoot> for og-sim-session headers only.
 
     `/Zs` and `-fsyntax-only` are syntax-only modes: templates are instantiated
     and `static_assert`s are evaluated, nothing is code-generated.
@@ -96,12 +103,13 @@
     Per failing header, `[clang-probe] FAIL <header> rc=<n>` (clang-cl) or
     `[clang-probe] libc++ FAIL <header> rc=<n>` (libc++), followed by its first
     -MaxErrorLines `error:` / `note:` lines, indented. Then, per arm that ran,
-        [clang-probe] headers=N simnet=M failed=F clang=<version> elapsed=S s
-        [clang-probe] libc++ headers=N simnet=M failed=F known=K clang=<version> ndk=<rev> target=<t> elapsed=S s
-    (N counts every header, M the og-sim-net ones among them; elapsed is the whole
-    probe's). A seen-failing run on an old copy of a header:
+        [clang-probe] headers=N simnet=M session=S failed=F clang=<version> elapsed=S s
+        [clang-probe] libc++ headers=N simnet=M session=S failed=F known=K clang=<version> ndk=<rev> target=<t> elapsed=S s
+    (N counts every header, M the og-sim-net ones among them, S the og-sim-session
+    ones; elapsed is the whole probe's). A seen-failing run on an old copy of a header:
     put the copy at <dir>/OGSimulation/<Header>.h (an og-sim-net header at
-    <dir>/OGSimNet/<Header>.h) and pass `-IncludeOverlay <dir>`;
+    <dir>/OGSimNet/<Header>.h, an og-sim-session header at
+    <dir>/OGSimSession/<Header>.h) and pass `-IncludeOverlay <dir>`;
     the overlay is searched first by both arms, so every TU that includes that
     header sees the copy.
 
@@ -125,11 +133,20 @@
     TUs, relative to -RepoRoot or absolute. Default:
     Plugins/OGSimulation/Source/OGNet/og-net. Not read when -SimNetRoot is ''.
 
+.PARAMETER SessionRoot
+    og-sim-session's include root (the directory that holds `OGSimSession/`),
+    relative to -RepoRoot or absolute. Default:
+    Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session. '' leaves
+    og-sim-session out, and so does -SimNetRoot '': og-sim-session depends on
+    og-sim-net, so an explicit -SessionRoot with -SimNetRoot '' is an exit 2.
+
 .PARAMETER Headers
     Headers to probe, as include paths under -SimRoot
     (e.g. `OGSimulation/SimulationFrame.h`), or under -SimNetRoot for a path that
-    starts with `OGSimNet/` (e.g. `OGSimNet/SimNetChannel.h`). Default: every `*.h`
-    under <SimRoot>/OGSimulation, then every `*.h` under <SimNetRoot>/OGSimNet.
+    starts with `OGSimNet/` (e.g. `OGSimNet/SimNetChannel.h`), or under
+    -SessionRoot for a path that starts with `OGSimSession/`. Default: every `*.h`
+    under <SimRoot>/OGSimulation, then every `*.h` under <SimNetRoot>/OGSimNet,
+    then every `*.h` under <SessionRoot>/OGSimSession.
     A header that does not exist is an exit 2.
 
 .PARAMETER Arms
@@ -162,7 +179,8 @@
     Exit 0 = every arm that ran passed, or every arm skipped.
     Exit 1 = one or more headers fail an arm (a stale known failure included).
     Exit 2 = usage or IO, one message line on stderr: a missing -RepoRoot,
-             -SimRoot, -SimNetRoot, -NetRoot, header, known-failure header or
+             -SimRoot, -SimNetRoot, -NetRoot, -SessionRoot (or one without
+             -SimNetRoot), header, known-failure header or
              -IncludeOverlay, an
              unknown arm, or an empty header list.
 #>
@@ -172,6 +190,7 @@ param(
     [string]$SimRoot = 'Plugins/OGSimulation/Source/OGSimulation/og-simulation',
     [string]$SimNetRoot = 'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net',
     [string]$NetRoot = 'Plugins/OGSimulation/Source/OGNet/og-net',
+    [string]$SessionRoot = 'Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session',
     [string[]]$Headers = @(),
     [string[]]$Arms = @('clang-cl', 'libc++'),
     [string]$ClangCl = '',
@@ -215,9 +234,24 @@ if ($SimNetRoot -ne '') {
     $netDir = (Resolve-Path -LiteralPath $netDir).Path
 }
 
+$sessionDir = ''
+if ($SessionRoot -ne '' -and $simNetDir -eq '' -and $PSBoundParameters.ContainsKey('SessionRoot')) {
+    Exit-Usage "SessionRoot needs SimNetRoot: og-sim-session depends on og-sim-net"
+}
+if ($SessionRoot -ne '' -and $simNetDir -ne '') {
+    $sessionDir = if ([IO.Path]::IsPathRooted($SessionRoot)) { $SessionRoot } else { Join-Path $RepoRoot $SessionRoot }
+    if (-not (Test-Path -LiteralPath (Join-Path $sessionDir 'OGSimSession') -PathType Container)) { Exit-Usage "SessionRoot has no OGSimSession/ directory: $sessionDir" }
+    $sessionDir = (Resolve-Path -LiteralPath $sessionDir).Path
+}
+
 function Test-SimNetHeader {
     param([string]$Header)
     return $Header.StartsWith('OGSimNet/')
+}
+
+function Test-SessionHeader {
+    param([string]$Header)
+    return $Header.StartsWith('OGSimSession/')
 }
 
 function Resolve-HeaderPath {
@@ -225,6 +259,10 @@ function Resolve-HeaderPath {
     if (Test-SimNetHeader $Header) {
         if ($simNetDir -eq '') { return '' }
         return (Join-Path $simNetDir $Header)
+    }
+    if (Test-SessionHeader $Header) {
+        if ($sessionDir -eq '') { return '' }
+        return (Join-Path $sessionDir $Header)
     }
     return (Join-Path $simDir $Header)
 }
@@ -242,15 +280,19 @@ if ($Headers.Count -eq 0) {
         $Headers += @(Get-ChildItem -LiteralPath (Join-Path $simNetDir 'OGSimNet') -Recurse -File -Filter '*.h' |
             ForEach-Object { [IO.Path]::GetRelativePath($simNetDir, $_.FullName).Replace('\', '/') } | Sort-Object)
     }
+    if ($sessionDir -ne '') {
+        $Headers += @(Get-ChildItem -LiteralPath (Join-Path $sessionDir 'OGSimSession') -Recurse -File -Filter '*.h' |
+            ForEach-Object { [IO.Path]::GetRelativePath($sessionDir, $_.FullName).Replace('\', '/') } | Sort-Object)
+    }
 }
 if ($Headers.Count -eq 0) { Exit-Usage "no headers to probe under $simDir" }
 foreach ($h in $Headers) {
     $path = Resolve-HeaderPath $h
-    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "header not found under SimRoot or SimNetRoot: $h" }
+    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "header not found under SimRoot, SimNetRoot or SessionRoot: $h" }
 }
 foreach ($k in $LibcxxKnownFailures.Keys) {
     $path = Resolve-HeaderPath $k
-    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "LibcxxKnownFailures header not found under SimRoot or SimNetRoot: $k" }
+    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "LibcxxKnownFailures header not found under SimRoot, SimNetRoot or SessionRoot: $k" }
 }
 
 $compilers = [ordered]@{}
@@ -308,6 +350,8 @@ if ($overlayDir -ne '') { $includes += "-I$overlayDir" }
 $includes += @("-I$simDir", ("-I" + (Join-Path $simDir 'glm')))
 $simNetIncludes = if ($simNetDir -ne '') { @("-I$simNetDir", "-I$netDir") } else { @() }
 $simNetCount = @($Headers | Where-Object { Test-SimNetHeader $_ }).Count
+$sessionIncludes = if ($sessionDir -ne '') { @($simNetIncludes + "-I$sessionDir") } else { @() }
+$sessionCount = @($Headers | Where-Object { Test-SessionHeader $_ }).Count
 $versions = @{}
 foreach ($arm in $compilers.Keys) {
     $versions[$arm] = (& $compilers[$arm].Exe --version 2>&1 | Select-Object -First 1).ToString().Trim()
@@ -327,7 +371,7 @@ try {
     $tus = for ($i = 0; $i -lt $Headers.Count; $i++) {
         $tu = Join-Path $scratch ("tu{0:d4}.cpp" -f $i)
         [IO.File]::WriteAllText($tu, "#include `"$($Headers[$i])`"`n")
-        $extra = if (Test-SimNetHeader $Headers[$i]) { $simNetIncludes } else { @() }
+        $extra = if (Test-SimNetHeader $Headers[$i]) { $simNetIncludes } elseif (Test-SessionHeader $Headers[$i]) { $sessionIncludes } else { @() }
         [pscustomobject]@{ Header = $Headers[$i]; Tu = $tu; Includes = @($includes + $extra) }
     }
     $jobs = foreach ($arm in $compilers.Keys) {
@@ -376,10 +420,10 @@ try {
             }
         }
         if ($arm -eq 'clang-cl') {
-            Write-Host ('{0} headers={1} simnet={2} failed={3} clang={4} elapsed={5} s' -f $prefix, $armResults.Count, $simNetCount, $failed, $versions[$arm], $elapsed)
+            Write-Host ('{0} headers={1} simnet={2} session={3} failed={4} clang={5} elapsed={6} s' -f $prefix, $armResults.Count, $simNetCount, $sessionCount, $failed, $versions[$arm], $elapsed)
         } else {
-            Write-Host ('{0} headers={1} simnet={2} failed={3} known={4} clang={5} target={6} elapsed={7} s' -f `
-                $prefix, $armResults.Count, $simNetCount, $failed, $known, $versions[$arm], $AndroidTarget, $elapsed)
+            Write-Host ('{0} headers={1} simnet={2} session={3} failed={4} known={5} clang={6} target={7} elapsed={8} s' -f `
+                $prefix, $armResults.Count, $simNetCount, $sessionCount, $failed, $known, $versions[$arm], $AndroidTarget, $elapsed)
         }
         if ($armResults.Count -ne $Headers.Count) {
             [Console]::Error.WriteLine("[clang-probe] exit 2: $arm has $($armResults.Count) results for $($Headers.Count) headers")
