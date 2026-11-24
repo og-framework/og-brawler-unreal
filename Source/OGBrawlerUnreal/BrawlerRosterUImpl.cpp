@@ -188,33 +188,4 @@ void BrawlerRosterUImpl::forgetCharacter(unsigned int id)
     m_spawnSlots.release(id);
 }
 
-void BrawlerRosterUImpl::pushRingoutScores(
-    const brawlerRingout::ScoreSystem& scoreSystem,
-    const std::unordered_map<unsigned int, TWeakObjectPtr<UOGBrawlerSimulatableComponent>>& routes)
-{
-    for (const auto& entry : routes)
-    {
-        const unsigned int id = entry.first;
-
-        UOGBrawlerSimulatableComponent* component = entry.second.Get();
-        if (component == nullptr)
-            continue;
-
-        AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(component->GetOwner());
-        if (character == nullptr)
-            continue;
-
-        checkf(scoreSystem.hasScoreEntry(id),
-               TEXT("Ring-out score push: id=%u is in the authority route table but has no ")
-               TEXT("ScoreSystem roster entry. The game-thread read of the score table is ")
-               TEXT("safe only because the roster is seeded by onCharacterRegistered before ")
-               TEXT("tryRegister returns Ready - an unseeded id lets postIntegrate's ")
-               TEXT("operator[] INSERT, and rehash, on the physics thread under this walk."),
-               id);
-
-        character->SetAuthoritativeRingoutScore(
-            static_cast<int32>(scoreSystem.scoreOf(id)));
-    }
-}
-
 OGSIM_OPTIMIZE_ON

@@ -55,7 +55,7 @@ The code is split in two halves by licence:
 |  | UOGBrawlerInputCollectionComponent (local input)       [brawler, BUSL] |  |
 |  +------------------------------------------------------------------------+  |
 +------------------------------------------------------------------------------+
-        | registers through SessionOwner::instanceFor(isAuthority)->session()
+        | registers through SessionOwner::instanceFor(world, isAuthority)->session()
         v
 +------------------------------------------------------------------------------+
 | AOGBrawlerSimulationManager (an AActor, one per world)       [brawler, BUSL] |
@@ -113,9 +113,11 @@ The code is split in two halves by licence:
   input and state, the component, the character, the session owner, the hooks class, the composition, the net config
   and the physics backend. `SimulatableBrawlerOwnerTraits.h` binds the core's owner concept to the character's og-sim-net
   channel for both roles (to the component until og-input-latency task P5-7).
-* **`instanceFor(isAuthority)`** finds the running session. The session keeps one slot for the authority and one for the
-  client, filled in `UESimulationSession::beginPlay` and cleared in `UESimulationSession::endPlay`; `beginPlay` checks the
-  slot is free. `AOGBrawlerSimulationManager::instanceFor` returns the session's owner. "Authority" means any world
+* **`instanceFor(world, isAuthority)`** finds the session of the caller's world. The session registry holds one slot per
+  world (several in one editor process: a single-process PIE session), taken when `UESimulationSession::beginPlay` starts
+  or refuses the world (the authority's on its runner, before its first batch) and
+  released in `UESimulationSession::endPlay`; a second world of a role in one process starts no session
+  (`UESimulationSession-rationale.md` §9.2, §23.1). `AOGBrawlerSimulationManager::instanceFor` returns the session's owner. "Authority" means any world
   whose net mode is not `NM_Client`; the binding, the component and the session compute it that way.
 
 **Where the hook bodies are.** `neutralInput` and the two latency hooks are inline in `BrawlerSessionGameUImpl.h`; the
@@ -128,43 +130,51 @@ complete actor and `LogOGBrawler`), so the `.cpp` includes `OGBrawlerSimulationM
 
 ## 3. Lifecycle, in call order
 
-**Session start.** `AOGBrawlerSimulationManager::BeginPlay` calls `Super::BeginPlay`, then `UESimulationSession::beginPlay`:
+**Session start.** `AOGBrawlerSimulationManager::BeginPlay` calls `Super::BeginPlay`, then `UESimulationSession::beginPlay`.
+First the start rule (`refuseToStart`): only a dedicated server and a client on the og-net driver start a session. A
+standalone or listen-server world, a world whose driver is not og-net and a retired knob start none (a dedicated server
+then exits); the session still takes its role's instance slot (`UESimulationSession-rationale.md` §23). Then:
 
 1. `m_game.beforeWorldBuild`: the gravity cross-check, then the roster seeds the level's spawn points.
-2. The step-size check, then the latency diagnostics begin, the session knobs are read and the backend builds the world.
+2. The step-size check, then the latency diagnostics begin and the session knobs are read.
 3. In the role's branch, on both roles: claim the instance slot; emplace the integration layer; `Game::emplaceSystems`
    emplaces the brawler's systems; emplace the core `SimulationManager` (the authority's without prediction, the
    client's with it); set the loggers and `Game::neutralInput`. Then the authority binds og-sim-net (`beginServerSimNet`:
-   it finds the og-net driver's sim lanes, emplaces og-sim-net's server and its host and binds the server's frame points
-   to the lanes), applies the session knobs (publishing the relay delay floor through og-sim-net's server) and starts the
-   tier consumer; the client starts the tier consumer, then binds itself to the lanes' client session
-   (`beginClientSimNet`), which replays the relay delay floor and the connection tier that arrived before it. Without the
-   og-net driver a networked world logs `[SimNet.Host] refused …`, shows a toast and runs detached. Both then call
-   `Game::installGameLoggers`. (Until og-input-latency task P5-7 the branches registered the timing, connection and input
-   relay listeners instead, and the authority started the reception coordinator itself.)
+   it finds the og-net driver's sim lanes, emplaces og-sim-net's server and its host and gives the lanes the runner's RTT
+   publish and join), applies the session knobs (publishing the relay delay floor through og-sim-net's server) and starts
+   the tier consumer; the client starts the tier consumer, then binds itself to the lanes' client session
+   (`beginClientSimNet`), which replays the relay delay floor and the connection tier that arrived before it. Both then
+   call `Game::installGameLoggers`. (Until og-input-latency task P5-7 the branches registered the timing, connection and
+   input relay listeners instead, and the authority started the reception coordinator itself.)
 4. The resim trigger policy, then the latency knobs (`applyLatencyKnobs`), then `m_game.afterSessionConfigured` (the
-   roster checks it was seeded), then the backend log line with `Game::backendFingerprint`, then the backend starts stepping.
+   roster checks it was seeded), then the backend log line with `Game::backendFingerprint`.
+
+A client runs steps 3 and 4 on the game thread, between the backend's world build and the start of its stepping. On the
+authority the game thread starts the runner and waits for it (`runAuthorityLoop_GameThread`): the runner builds the world,
+runs steps 3 and 4, then steps (`UESimulationSession-rationale.md` §19.2).
 
 **Registration.** Every character on every peer registers, on the instance its own world selects:
 
 1. `UOGBrawlerSimulatableComponent::BeginPlay` calls `UESimulatableOwnerBinding::beginRegistration`, which schedules
    `tryInitializeWithManager` for the next tick.
-2. `tryInitializeWithManager` looks up the session owner with `instanceFor(isAuthority)` and retries each tick until it
+2. `tryInitializeWithManager` looks up the session owner with `instanceFor(world, isAuthority)` and retries each tick until it
    exists (600 attempts, then a fatal check). It calls the component's hook `initializeWithManager`, which caches the
    input collection and registers a visualization query volume (`Retry` while the volume cannot be registered).
 3. Next tick, `tryRegisterWithNewFramework` calls the component's hooks in order: `resolveRegistrationKey` (the
    authority allocates the character's `SimCharacterId` through the roster; the client retries until it has replicated
    and then until og-sim-net's roster has an entry for it, through the session's `clientBindStep`),
    then `makeInputProvider` (only for a client's own, autonomous-proxy character), then `makeSimulatable`.
-4. It calls `UESimulationSession::tryRegister` directly. The first call creates the bodies through the backend and calls
+4. It calls `UESimulationSession::tryRegister` directly. The first call has the bodies created and calls
    `m_game.afterBodiesCreated` (the roster stamps the capsule body, seeds the teleport position and, on the authority,
-   takes a spawn slot), then answers `Pending`.
-   Later calls test `Game::rootBodyId` and every body for resolvability; once all resolve, the authority adds the
-   character to og-sim-net's server (`addSimNetCharacter`; a refusal answers `Refused`) and a client finds its channel
-   in og-sim-net's client (`Pending` until it exists), and the simulatable is registered with the core, the channel as
-   its owner (the client's input provider wrapped by `UELatencyBudgetDiagnostics::wrapInputProvider`), then
-   `m_game.afterRegistered` (the authority's character-cap warning), the systems executor's notify and the backend's
-   `onRegistered_GameThread`. The binding retries every `Pending` on the next tick.
+   takes a spawn slot), then answers `Pending`: a client creates them through the backend on the game thread, and the
+   authority (every call through `tryRegisterOnRunner`) posts the body request to its runner.
+   Later calls wait for every body to resolve (`Game::rootBodyId` first); then a client queues the character on
+   og-sim-net's client and the authority's runner registers it on og-sim-net's server (a refusal answers `Refused`), and
+   og-sim-net registers the simulatable with the core, its channel as its owner (the client's input provider wrapped by
+   `UELatencyBudgetDiagnostics::wrapInputProvider`), and notifies the systems executor in its applied hook. On the next
+   call after that the session runs `m_game.afterRegistered` (the authority's character-cap warning) and the backend's
+   registration hook. The binding retries every `Pending` on the next tick. Until og-session-runtime task 14 an in-frame
+   authority (a listen server, a standalone world) registered the character on the game thread in one call.
 5. On `Ready` the binding logs `NewFramework: registered`. Until og-input-latency task P5-7 it also linked the input
    relay host there (the authority spawned it with `ASimulationInputRelay::spawnForCharacter`; the client found it with
    `ASimulationInputRelay::findForOwner`) and, on the authority, recorded the component as the delivery target for its
@@ -173,32 +183,37 @@ complete actor and `LogOGBrawler`), so the `.cpp` includes `OGBrawlerSimulationM
 The component's fifth hook, `storageKeyOfOwner`, is the key the binding names the owner by when the session owner never
 spawns. Both it and the component's `EndPlay` read the replicated id through the component's helper `simCharacterId`.
 
-**Each frame.** The backend calls the session before the steps (`onFrameStepsDue_Step`, and the authority's
-release of delayed inputs) and after physics (`onPostPhysicsStep`), from `BrawlerTickDriverGameUImpl::onPostPhysics` (the
-tick driver's brawler side; the former Chaos backend, removed by og-session-runtime task 3, called it from the physics
-scene's post-tick event). The post-physics pass runs the backend's pre-present step, the core's post-simulation pass, the authority's
-server-clock publish (`publishServerClock_GameThread`, to og-sim-net's server), the backend's visualization update,
-`Game::afterVisualization` (the authority pushes ring-out scores) and the latency diagnostics' tick. The sim traffic
-moves at the og-net driver's own points: after its receive dispatch and after its tick flush it calls the lanes, which
-run og-sim-net's server's or client's `dispatchFrame` and `flushFrame` (`UESimNetLanes-rationale.md` §3). Separately, the
-component's `TickComponent` draws its debug visualization from the storage.
+**Each frame.** The tick driver calls the session through `BrawlerTickDriverGameUImpl` (the tick driver's brawler side;
+the former Chaos backend, removed by og-session-runtime task 3, called it from the physics scene's post-tick event). On a
+client, the game thread calls it before the steps (`onFrameStepsDue_Step`) and after them (`onPostPhysicsStep`), and each
+step on a worker task drains og-sim-net's client at its start, sends the input bundle at capture and, after the batch,
+publishes the display snapshot. On the authority the runner calls it per wake: og-sim-net's server drain before the
+steps, the release of delayed inputs per step, and after the batch `afterAuthorityBatch` (the core's post-simulation
+send, the clock, the corrections and the ring-out scores' presentation slices); og-net is serviced on the runner between
+batches. The game thread's post-physics pass (`onPostPhysicsStep`) runs the backend's pre-present step and collects the
+lifecycle outcomes; then on a client it refreshes the display view and calls `Game::afterVisualization`, and on the
+authority it applies the presentation slices (`BrawlerSessionGameUImpl::presentAuthoritySlice` sets each character's ring-out score); then the
+latency diagnostics' tick. Who calls what on which thread: `UESimulationSession-rationale.md` §24 (OGSimulationUnreal).
+Separately, the component's `TickComponent` draws its debug visualization from the session's display snapshot.
 
 **Teardown.** No code here relies on an order between the manager's and the characters' `EndPlay`.
 
 1. `UOGBrawlerSimulatableComponent::EndPlay` calls `AOGBrawlerSimulationManager::unregisterFromNewFramework` (skipped if
-   `instanceFor` already returns null), which calls `UESimulationSession::unregisterFromNewFramework`: the executor's
-   notify if the character is stored, the core unregister, the og-sim-net forget (the authority removes the character
-   from og-sim-net's server, a client marks it unregistered), `m_game.onUnregistered` (the roster and the input-history
-   feed forget the id), the latency forget, then the backend's `onUnregistered_GameThread`. The call does nothing for an
-   id the session already unregistered (a client's roster Remove of the character, or the og-net driver's stop), so
-   `NewFramework: unregistered` prints once.
+   `instanceFor` already returns null), which calls `UESimulationSession::unregisterFromNewFramework`. The core
+   unregister is a request to the role's owner thread: a client queues it for its next step's drain
+   (`requestQueuedUnregister_GameThread`), the authority posts it to its runner, which removes the character from
+   og-sim-net's server and releases its bodies (`requestRunnerUnregister_GameThread`). On the game thread the session then
+   runs `m_game.onUnregistered` (the roster and the input-history feed forget the id), the latency forget and the
+   backend's host-side release. The call does nothing for an id the session already unregistered (a client's roster
+   Remove of the character, or the og-net driver's stop), so `NewFramework: unregistered` prints once.
 2. `UOGBrawlerSimulatableComponent::EndPlay` then calls `Super::EndPlay`. Until og-input-latency task P5-8 it also
    detached the input relay host here, if bound (`USimulatableNetSyncComponent::detachInputRelayHost`; P5-7 already
    removed that call), and then unbound the netsync component (`unbindNetSync`).
 3. `AOGBrawlerSimulationManager::EndPlay` calls `UESimulationSession::endPlay` before `Super::EndPlay`: the backend's
-   end-play start, the detach from the og-net driver's sim lanes, the reset of og-sim-net's server, its host and the
-   registered characters' maps, the tier consumer, the instance slot, the latency diagnostics, then the backend's end of
-   world.
+   end-play start (the tick functions unregistered, the authority's runner joined, the steps waited for), a client's
+   teardown drain, the detach from the og-net driver's sim lanes, the reset of og-sim-net's server, its host and the
+   registered characters' maps, the tier consumer, the held display snapshot, the instance slot, then the latency
+   diagnostics.
 
 ---
 
@@ -213,8 +228,8 @@ delay floor, the connection tier and the roster) rides og-net's sim lanes, not U
   holds og-sim-net's transport and, on a client, og-sim-net's client session `SimNetClient` with its host
   `UESimNetClientHost` (`UESimNetLanes-rationale.md`).
 * **The session's hookup.** On the authority the session holds og-sim-net's server `SimNetServer` with its host
-  `UESimNetServerHost` and binds the server's dispatch and flush to the lanes (`beginServerSimNet`); a client's session
-  binds itself to the lanes' client session (`beginClientSimNet`). The hosts are og-sim-net's view of Unreal: the round
+  `UESimNetServerHost` (`beginServerSimNet`), which its runner drains and flushes; a client's session binds itself to
+  the lanes' client session (`beginClientSimNet`), which its steps drain. The hosts are og-sim-net's view of Unreal: the round
   trip, the latency stamps, the log and the toasts (`UESimNetHost-rationale.md`).
 * **The core's owner.** The core's owner of a character, on both roles, is the character's og-sim-net channel
   (`UESimNetChannel`, named for both roles by `SimulatableBrawlerOwnerTraits.h`). The session gets it from og-sim-net's
@@ -234,7 +249,7 @@ and the binding's net half with it (`UESimulatableOwnerBinding-rationale.md` §1
 * **Roles.** The authority runs the core without prediction and owns input reception; a client predicts every character
   and corrects each against the correction states og-sim-net's client delivers to its channel. In one process there is
   at most one of each.
-* **Clock and floor.** The authority publishes its server clock each frame and the session's relay delay floor once,
+* **Clock and floor.** The authority publishes its server clock after each step batch and the session's relay delay floor once,
   through og-sim-net's server (`publishClock`, `publishFloor`); on a client the client host hands them to the session
   (`onTimingInfoReceived`, `onRelayDelayFloorReceived`).
 * **Connection tier.** og-sim-net's server sends each owning client its connection tier; the client host hands it to the

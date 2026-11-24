@@ -1,4 +1,6 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
 <!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 <!-- lint-external-ref: OnPhysScenePreTick -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in og-simulationscheduler-withjolt task 51 (§1 quotes the old source) -->
 <!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in og-simulationscheduler-withjolt task 51 (§1 quotes the old source) -->
@@ -72,12 +74,14 @@ session). It reads nothing at construction. The actor reaches it as `m_roster`; 
 `unregisterFromNewFramework` (the session's since og-ue-simulationcomponentandmanagersplit task 28, through the brawler's
 registration hooks), the component's registration attempt and the post-physics pass (the actor's
 `OnPostPhysicsStep` until og-ue-simulationcomponentandmanagersplit task 27a; since then the session's
-`onPostPhysicsStep`, through the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`). The score push is the one
-cross-thread read, and its argument (§3, and `OGBrawlerSimulationManager-rationale.md` §1, "The second read crossing") is
-unchanged: the roster adds no member to any crossing.
+`onPostPhysicsStep`, through the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`), until og-session-runtime
+task 16b deleted the score push it called. The push was the one cross-thread read (§3, and
+`OGBrawlerSimulationManager-rationale.md` §1, "The second read crossing"); the roster adds no member to any crossing.
+Since og-session-runtime task 14 the push ran nowhere, and task 16b deleted it (§3).
 
 **Optimization state (lead ruling F1).** Every moved body came from inside `OGBrawlerSimulationManager.cpp`'s
-`OGSIM_OPTIMIZE_OFF`/`ON` pair, so `BrawlerRosterUImpl.cpp` wraps all seven definitions in a pair of its own. None is a
+`OGSIM_OPTIMIZE_OFF`/`ON` pair, so `BrawlerRosterUImpl.cpp` wraps all its definitions (seven, six since og-session-runtime
+task 16b deleted the push) in a pair of its own. None is a
 template, so the pair keeps them unoptimized in Development, as before; task 23 measured it by disassembly before and
 after (its notes). The header defines no function.
 
@@ -380,6 +384,12 @@ Verified: `respawnDelayTicks` defaults to `120u`. The caller computes `isAuthori
 Since task 27a the call and its gate are the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`, which the
 session's `onPostPhysicsStep` calls at the same position (`BrawlerSessionGameUImpl-rationale.md` §5).*
 
+**Since og-session-runtime task 14 the push ran nowhere, and task 16b deleted it; this section is its record.** The hook's gate holds only on
+an authority, and the session's `onPostPhysicsStep` calls the hook only on a client. Every authority is a dedicated server
+on its runner, whose scores `BrawlerSessionGameUImpl::presentAuthoritySlice` writes from the runner's presentation
+snapshot (`BrawlerSessionGameUImpl-rationale.md` §8). Until task 14 an in-frame authority (a listen server, a standalone
+world, a dedicated server with og.Sim.AuthorityLoop=0) ran the push below.
+
 *The cross-thread argument is in §1, the second read crossing. What follows is the rest.*
 
 *Call site: the post-physics pass (the session's `onPostPhysicsStep` since task 27a, the actor's
@@ -489,7 +499,8 @@ would fire it in Development.
   is the hook's since then (the message is code, outside that task's ownership, and is listed for the lead). *og-input-latency
   task P5-33:* the message names both writers now: this push, from the hook `BrawlerSessionGameUImpl::afterVisualization`
   in the session's `onPostPhysicsStep`, and, with the authority loop on, `BrawlerSessionGameUImpl::presentAuthoritySlice`
-  from the runner's presentation snapshot (`UESimulationSession-rationale.md` §21.3).
+  from the runner's presentation snapshot (`UESimulationSession-rationale.md` §21.3). *og-session-runtime task 16b:* the
+  push is deleted, and the message names the one writer, `BrawlerSessionGameUImpl::presentAuthoritySlice`.
 
 ---
 

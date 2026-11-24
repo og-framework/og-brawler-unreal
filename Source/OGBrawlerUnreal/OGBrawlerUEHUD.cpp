@@ -320,7 +320,7 @@ const AOGBrawlerSimulationManager* AOGBrawlerUEHUD::findHistorySource(
 
 	// The same role expression the poll's own manager lookup uses: the history lives on
 	// one instance and reading the other role's would find none.
-	return AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
+	return AOGBrawlerSimulationManager::instanceFor(GetWorld(), GetNetMode() != NM_Client);
 }
 
 void AOGBrawlerUEHUD::drawInputHistoryPanel()
@@ -1050,7 +1050,7 @@ void AOGBrawlerUEHUD::drawScoreboard()
 	// ⛔ POINTER TO CONST, and it stays one: the board may not write a thing it draws.
 	//   The same role expression every other manager lookup in this file uses.
 	const AOGBrawlerSimulationManager* manager =
-		AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
+		AOGBrawlerSimulationManager::instanceFor(GetWorld(), GetNetMode() != NM_Client);
 
 	// ⭐ ALREADY ORDERED BY CHARACTER ID when it arrives, so two peers watching one match
 	//   see the same player in the same row. Never re-sorted, and never sorted here.

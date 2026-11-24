@@ -14,7 +14,7 @@ The brawler's `TickDriverGame` for og-simulation's `SimulationTickDriver`: the s
 step hooks call, each forwarded to the session, plus the manager and the storage the driver's step driver runs on.
 Since og-input-latency task P5-15 it is also a `TickDriverSampleGame`: an eighth hook, `sampleInput()`, publishes each
 registered character's input sample (§8). Since og-input-latency task P5-30 it is also a `TickDriverReceiveGame`: a ninth
-hook, `receiveForStep()`, is an immediate client's og-sim-net drain at each step's start (§9). Since og-input-latency task
+hook, `receiveForStep()`, is a client's og-sim-net drain at each step's start (§9). Since og-input-latency task
 P5-36 it is also a `TickDriverDisplayGame`: a tenth hook, `publishForDisplay()`, is a client's display publish after each
 step batch, on the step's thread (§11).
 The session is `UESimulationSession<BrawlerSessionTraitsUImpl>` since og-ue-simulationcomponentandmanagersplit task 24a (`AOGBrawlerSimulationManager`
@@ -50,31 +50,31 @@ friendship any more and lost its line.
 | hook (og-simulation) | when, which thread | the binding calls |
 |---|---|---|
 | `manager()`, `storage()` | the driver's constructor (the step driver runs on the manager) | `*m_session.m_manager`, `m_session.m_storage` |
-| `beforePump(hostNow, rate)` | once per frame, on the game thread, before the pump; on the authority loop at every runner wake, on the runner | the session's `beforePump_Owner(hostNow, rate)`, both arguments forwarded (since og-time-dilation task 8, §12): on a predicting client the clock-dilation stage, which in `Shadow` reads and logs but sets no rate, and in `Off` does nothing; on the authority loop the runner requests, then og-sim-net's server `drain()`; otherwise nothing (§10) |
-| `idleUntil(deadline)` (`TickDriverIdleGame`, since og-input-latency task P5-19) | only on the authority loop, on the runner, between wakes | the session's `idleUntil_Runner(deadline)`: og-sim-net's `SimNetIdle` over the server endpoint, or `Unavailable` with no endpoint (§10) |
-| `onFrameStepsDue(first, n)` | once per frame with steps, before the steps (`SimulationTickDriver-guards.md` G-02): on the game thread; on the authority loop once per stepping wake, on the runner | the session's `onFrameStepsDue_Step(first, n)` (the actor's, through `owner()`, until task 26b): PROBE A on both roles, and on the authority PROBE 6 and the one-shot `[PacketBudget]` line (`UESimulationSession-rationale.md` §9.9, OGSimulationUnreal) |
-| `afterInlineBatch(first)` | once per frame, after the inline steps (`SimulationTickDriver-guards.md` G-06); on the authority loop once per stepping wake, on the runner | the session's `afterAuthorityBatch(first)` (since og-input-latency task P5-5, §7), which reaps (the coordinator's `reapConnections(first)`) when the session has a coordinator: only the authority does, so an inline client reaps nothing. On the authority loop it first writes the corrections and publishes the clock, and og-sim-net's `afterInlineBatch` sends and reaps (§10). Before P5-5 the binding made that test itself, through `getReceptionCoordinator()` (the actor's, through `owner()`, until task 26a) |
-| `releaseInputsForAuthorityTick(tick)` | each authority step's `beforeTick`, on the game thread (`TickDriverStepHooks-guards.md` G-01) | the session's `noteAuthorityStepTime_Step()` (since og-input-latency task P5-37: the step's time for its `[Release]` and `[AuthoritySimulation]` lines, `UESimulationSession-rationale.md` §19.7, OGSimulationUnreal), then `releaseDelayedInputsForStep(tick, 1)` (`⛔G-01`; the actor's, through `owner()`, until task 26a): one `[ReleaseBatch]` with `numSteps=1` per step |
-| `receiveForStep()` (`TickDriverReceiveGame`, since og-input-latency task P5-30) | each client step's `beforeTick`, on the step's thread, before the resimulation check and the collect (`TickDriverStepHooks-guards.md` G-04); never on the authority | the session's `receiveForClientStep_Step()`: on a bound immediate client the queued unregistrations and the og-sim-net drain, otherwise nothing (`UESimulationSession-rationale.md` §18.2, OGSimulationUnreal; §9) |
-| `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `UELatencyBudgetDiagnostics-rationale.md` §3, OGSimulationUnreal), then the session's `afterClientCapture_Step()`: on a bound immediate client the send at capture, otherwise nothing (`UESimulationSession-rationale.md` §18.2, OGSimulationUnreal; og-input-latency task P5-17). Until og-input-latency task P5-30 the drain followed the send here (`onClientStepStarted_Step()`), and fed the next step |
+| `beforePump(hostNow, rate)` | on a client once per frame, on the game thread, before the pump; on the authority at every runner wake, on the runner | the session's `beforePump_Owner(hostNow, rate)`, both arguments forwarded (since og-time-dilation task 8, §12): on a client the clock-dilation stage (`UESimulationSession-rationale.md` §22, OGSimulationUnreal); on the authority its refused-rate line, the runner requests, then og-sim-net's server `drain()` (§10) |
+| `idleUntil(deadline)` (`TickDriverIdleGame`, since og-input-latency task P5-19) | only on the authority, on the runner, between wakes | the session's `idleUntil_Runner(deadline)`: og-sim-net's `SimNetIdle` over the server endpoint, or `Unavailable` with no endpoint (§10) |
+| `onFrameStepsDue(first, n)` | once per frame or wake with steps, before the steps (`SimulationTickDriver-guards.md` G-02): on a client on the game thread; on the authority once per stepping wake, on the runner | the session's `onFrameStepsDue_Step(first, n)` (the actor's, through `owner()`, until task 26b): PROBE A on both roles (`UESimulationSession-rationale.md` §9.9, OGSimulationUnreal); until og-session-runtime task 14 also PROBE 6 and the one-shot `[PacketBudget]` line on the authority |
+| `afterInlineBatch(first)` | after each inline batch (`SimulationTickDriver-guards.md` G-06): on the authority once per stepping wake, on the runner; never on a client, whose batches run on a worker (`FrameBounded`) | the session's `afterAuthorityBatch(first)` (since og-input-latency task P5-5, §7): with og-sim-net's server, the core's post-simulation send, the clock's publish, then og-sim-net's `afterInlineBatch` (the corrections, the clock, the reap and the window), the correction stamps and the presentation slices (§10). Before P5-5 the binding tested the reception coordinator itself, through `getReceptionCoordinator()` (the actor's, through `owner()`, until task 26a) |
+| `releaseInputsForAuthorityTick(tick)` | each authority step's `beforeTick`, on the runner (`TickDriverStepHooks-guards.md` G-01) | the session's `noteAuthorityStepTime_Step()` (since og-input-latency task P5-37: the step's time for its `[Release]` and `[AuthoritySimulation]` lines, `UESimulationSession-rationale.md` §19.7, OGSimulationUnreal), then `releaseDelayedInputsForStep(tick, 1)` (`⛔G-01`; the actor's, through `owner()`, until task 26a): one `[ReleaseBatch]` with `numSteps=1` per step |
+| `receiveForStep()` (`TickDriverReceiveGame`, since og-input-latency task P5-30) | each client step's `beforeTick`, on the step's thread, before the resimulation check and the collect (`TickDriverStepHooks-guards.md` G-04); never on the authority | the session's `receiveForClientStep_Step()`: on a bound client the queued unregistrations and the og-sim-net drain, otherwise nothing (`UESimulationSession-rationale.md` §18.2, OGSimulationUnreal; §9) |
+| `onStepStarted(t1)` | each step's `beforePhysics`, on the step's thread | `editLatencyBudgetDiagnostics().stampAfterStep_Internal(t1)` (a no-op in Shipping; `UELatencyBudgetDiagnostics-rationale.md` §3, OGSimulationUnreal), then the session's `afterClientCapture_Step()`: on a bound client the send at capture, otherwise nothing (`UESimulationSession-rationale.md` §18.2, OGSimulationUnreal; og-input-latency task P5-17). Until og-input-latency task P5-30 the drain followed the send here (`onClientStepStarted_Step()`), and fed the next step |
 | `onStepEnded()` | each step's `afterTick`, before the render and shadow publishes | `editLatencyBudgetDiagnostics().stampStepEnd_Internal()`, then the session's `afterStep_Step()`: on a server, the server tick to the SimClock server (§10) |
 | `publishForDisplay()` (`TickDriverDisplayGame`, since og-input-latency task P5-36) | once per client batch, after its last step, on the step's thread, under the world lock; never on the authority | the session's `publishDisplaySnapshot_Step()`: the client's display snapshot fill (`UESimulationSession-rationale.md` §17.2, OGSimulationUnreal; §11) |
-| `onPostPhysics()` | every frame at `TG_EndPhysics`, after the wait | the session's `onPostPhysicsStep()` (since task 27a; the actor's `OnPostPhysicsStep()`, through `owner()`, before) |
+| `onPostPhysics()` | every frame at `TG_EndPhysics`, on the game thread, after a client's wait for its step | the session's `onPostPhysicsStep()` (since task 27a; the actor's `OnPostPhysicsStep()`, through `owner()`, before) |
 | `sampleInput()` (`TickDriverSampleGame`, since og-input-latency task P5-15) | once per frame, first in `startFrame` (`TG_StartPhysics`, game thread), before `beforePump` and the pump; never in `FreeRunning` | each registered component's owner, cast to the brawler character, `getInputCollection()->publishSample()` (§8) |
 
 ## §3 Why the brawler's hooks sit where they do
 
 * **The per-frame pair and the drain** (og-simulationscheduler-withjolt design D3, D4). The former Chaos
   configuration (removed by og-session-runtime tasks 3–6) ran PROBE A, PROBE 6, the drain of the whole batch and the reap once per physics frame in
-  `InjectInputs_External`. Here the probes and the reap stay per frame, and the drain is per authority step,
-  immediately before the tick it releases for. No receipt lands between inline steps (receipts happen in the
-  engine's receive dispatch), so the queue contents are those of Chaos's batch; the difference is at consumption,
-  in a multi-step frame with a per-character gap tick, where the batch let a later input fill the gap early.
-  The details are `OGBrawlerSimulationManager-rationale.md` §7.
+  `InjectInputs_External`. Here PROBE A and the reap run once per authority batch (PROBE 6 until og-session-runtime
+  task 14), and the release is per authority step, immediately before the tick it releases for. No receipt lands
+  between the steps of a batch (the runner services og-net only between batches), so the queue contents are those of
+  the former Chaos batch; the difference is at consumption, in a multi-step batch with a per-character gap tick, where
+  the Chaos batch let a later input fill the gap early. The details are `OGBrawlerSimulationManager-rationale.md` §7.
 * **The reap's null check.** Before og-tickdriver task 8 the frame host made the call only when
-  `getReceptionCoordinator()` returned one; the driver now calls `afterInlineBatch` on every inline frame with
+  `getReceptionCoordinator()` returned one; the driver then called `afterInlineBatch` on every inline frame with
   steps, an inline client's included, so the check moved here unchanged. og-input-latency task P5-5 moved it on into the
-  session's `afterAuthorityBatch` (§7).
+  session's `afterAuthorityBatch` (§7), which now tests og-sim-net's server instead.
 * **The latency stamps** (design D9, D18; og-simulationscheduler-withjolt task 49). The Chaos configuration took
   the step-start time immediately before `onGameSimulation` and stamped after it. og-simulation's
   `beforeSimulate` takes `t1` at that instant on both roles (`TickDriverStepHooks-guards.md` G-03); on a client it is
@@ -82,7 +82,8 @@ friendship any more and lost its line.
   posted from `beforePhysics`; the step-end stamps go in `afterTick`, after the post-step pass and the ring save
   (`OGBrawlerSimulationManager-rationale.md` §16, "The step-side stamp sites per configuration").
 * **`onPostPhysics` every frame.** `onPostPhysicsStep` (the actor's `OnPostPhysicsStep` until task 27a) runs with or without steps, as the scene's post-tick delegate
-  did, so the correction rotation still advances once per game frame. Its first backend call is the Jolt host's
+  did. Until og-session-runtime task 14 the in-frame server's pass advanced the correction rotation there, once per game
+  frame; on the authority's runner it advances after each batch (`afterInlineBatch`). Its first backend call is the Jolt host's
   `beforePresent_GameThread` (`TickDriverBackendUImpl-rationale.md` §5, §6).
 
 ## §4 The tick the per-frame hooks receive
@@ -187,15 +188,15 @@ og-simulation's docs); `FreeRunning` never calls it (an `OG_CHECK` there). The h
 game thread at `TG_StartPhysics`. The character's `Tick`, which stages the sample, runs earlier in the frame, at the actor
 default `TG_PrePhysics`, after its controller's tick (the engine makes a possessed pawn's tick depend on its controller's), where Enhanced Input dispatches
 the frame's events. So every step the frame dispatches reads values sampled in the same frame, before the pump, as it did
-when it read the fields directly. What changed is a step batch that outlives its frame (`FrameBounded` with the default
-block mode waits for the previous frame's steps at end of physics): it used to read the next frame's fields while the
+when it read the fields directly. What changed is a step batch that outlives its frame (`FrameBounded` waits at end of
+physics for the earlier frames' steps, and for its own only in a single-step frame): it used to read the next frame's fields while the
 game thread wrote them; it now reads whole samples, the newest one published when it reads.
 
 **Every registered component, not only the local ones.** Only a client's autonomous proxies have an input provider
 (`UESimulatableOwnerBinding-guards.md` G-09, in OGSimulationUnreal's docs), so only their samples are read. Publishing
 the others' too costs a copy of a few dozen bytes per character per frame and keeps a second "is this local" rule out of
-the binding, where it could drift from the provider's. On an authority the hook runs only in `Inline` (a dedicated
-server in `FreeRunning` never calls it), and no provider reads what it publishes.
+the binding, where it could drift from the provider's. An authority never runs the hook: every authority session steps
+in `FreeRunning` (og-session-runtime task 14), which never calls it.
 
 **The template parameter.** `sampleInput` is a function template over `CharacterT = Character`, as `callWithSlotRequest`
 is (§5): the character and the component are incomplete in this header, and over `CharacterT` the cast and the
@@ -213,35 +214,37 @@ removed that arm with the macro.
 
 ## §9 The receive (og-input-latency task P5-30)
 
-**What `receiveForStep()` does.** It forwards to the session's `receiveForClientStep_Step()`, which on a bound immediate
-client takes the game thread's queued unregistrations and drains og-sim-net (`UESimulationSession-rationale.md` §18.2,
+**What `receiveForStep()` does.** It forwards to the session's `receiveForClientStep_Step()`, which on a bound client
+takes the game thread's queued unregistrations and drains og-sim-net (`UESimulationSession-rationale.md` §18.2,
 OGSimulationUnreal). og-simulation calls it at the start of each client step, before the step's resimulation check and its
 input collect (`TickDriverConcepts-rationale.md` §10, OGSimulation), so a correction, a relay ring or a clock sample the drain
-delivers is used by the step that drained it. A frame-locked client and the server return at once: a frame-locked client's
-game thread drains at the frame point, and the hook never runs on an authority step.
+delivers is used by the step that drained it. An unbound client and the server return at once (the hook never runs on an
+authority step). Until og-session-runtime task 12 a frame-locked client returned at once too: its game thread drained at the
+frame point.
 
 **The send stays at capture.** `onStepStarted` keeps the send (`afterClientCapture_Step()`): it runs after the step's
 collect, so it sends the input the step just captured. Only the drain moved: in `onStepStarted` it ran after the collect
 and fed the next step (og-input-latency task P5-17's finding F2: H6c one tick, N6 up).
 
 **The `static_assert`.** The step hooks call the hook under `if constexpr (TickDriverReceiveGame<...>)`, so a binding that
-lost it would compile and an immediate client would never drain once its session binds (the game thread stops draining
-then). The `static_assert` after the alias, beside `sampleInput`'s, makes that a compile error.
+lost it would compile and a client would never drain once its session binds (the lanes' game-thread drain stops then,
+`UESimNetLanes-guards.md` G-02, OGSimulationUnreal). The `static_assert` after the alias, beside `sampleInput`'s, makes that a compile error.
 
 ## §10 The authority loop's hooks (og-input-latency task P5-19)
 
-With `og.Sim.AuthorityLoop=1` on a Jolt dedicated server, og-simulation's driver runs the authority in `FreeRunning` on the
+On a dedicated server, the only world that runs an authority session since og-session-runtime task 14, og-simulation's
+driver runs the authority in `FreeRunning` on the
 session's runner thread (`UESimulationSession-rationale.md` §19, OGSimulationUnreal), and calls this binding there:
 - **`idleUntil`** is new: `SimulationTickBackend::runAuthorityLoop` requires `TickDriverIdleGame`, and a `static_assert` below the
-  class keeps the hook, because without it the loop does not build. It forwards to the session, whose `SimNetIdle` services
-  og-net's server endpoint until the deadline. Inline and on clients nothing calls it.
-- **`beforePump`** forwards on every role and every frame or wake; on the authority the session returns at once unless the loop
-  is on (a client runs the dilation stage instead, §12). On the
-  loop it is og-sim-net's drain point (P2-19: `beforePump` → `drain()`), after the session's runner requests (registration and
-  unregistration, `UESimulationSession-rationale.md` §19.4).
-- **`afterInlineBatch`** keeps its one call; the session's `afterAuthorityBatch` does the loop's sends and reap.
+  class keeps the hook, because without it the loop, which every dedicated server runs, does not build (its message says so
+  since og-session-runtime task 14, which retired the knob it named). It forwards to the session, whose `SimNetIdle` services
+  og-net's server endpoint until the deadline. On clients nothing calls it.
+- **`beforePump`** forwards on both roles, at every runner wake on the authority; a client runs the dilation stage there
+  instead (§12). On the authority it is og-sim-net's drain point (P2-19: `beforePump` → `drain()`), after the session's
+  runner requests (registration and unregistration, `UESimulationSession-rationale.md` §19.4).
+- **`afterInlineBatch`** keeps its one call; the session's `afterAuthorityBatch` does the runner's sends and reap.
 - **`onStepEnded`** also publishes the server tick to og-sim-net's SimClock server after every authority step (`afterStep_Step`;
-  P2-20 F2), on the loop and inline; on a client it does nothing.
+  P2-20 F2); on a client it does nothing.
 - **`sampleInput`** is not called in `FreeRunning` (og-simulation's `OG_CHECK`), and **`onPostPhysics`** still runs on the game
   thread, from the frame thread's `endFrame`.
 
@@ -256,8 +259,7 @@ worker: under the frame-locked client's `EarlierFrames`, and under the immediate
 of two or more steps. `onPostPhysics` now only acquires what was published.
 
 **The `static_assert`.** The driver calls the hook under `if constexpr (TickDriverDisplayGame<...>)`, so a binding that lost
-it would compile and a Jolt client would publish no display snapshot: the session no longer fills one in the post-physics
-pass for a predicting session on a world-host backend. The `static_assert` after the alias makes that a compile error.
+it would compile and a client would publish no display snapshot: the post-physics pass only acquires one. The `static_assert` after the alias makes that a compile error.
 
 ## §12 The rate hook's arguments (og-time-dilation task 8)
 
@@ -266,5 +268,5 @@ dropped them, because nothing in the brawler read the host time or changed the r
 og-simulation's clock-dilation stage there (`clockDilation::beforeClientPump`), which reads the door (`rate`: its tick offset,
 step count, next deadline, interval and scale) and places the prediction tick with `hostNowSeconds`. Where the stage runs, in which modes, and
 why `Shadow` changes no rate are the session's (`UESimulationSession-rationale.md` §22, OGSimulationUnreal). The binding still
-decides nothing: one call, on whatever thread the driver calls it on (the game thread on a client, the runner on the authority
-loop, §10).
+decides nothing: one call, on whatever thread the driver calls it on (the game thread on a client, the runner on the authority,
+§10).

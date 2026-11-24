@@ -396,10 +396,9 @@ void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)
 {
 	checkf(HasAuthority(),
 		TEXT("SetAuthoritativeRingoutScore called on a non-authority peer (id=%u). The score ")
-		TEXT("is pushed only on the authority, from the session's onPostPhysicsStep on the game thread: by ")
-		TEXT("BrawlerRosterUImpl::pushRingoutScores (BrawlerSessionGameUImpl::afterVisualization, under the manager's ")
-		TEXT("!runsPrediction() gate) or, with the authority loop on, by BrawlerSessionGameUImpl::presentAuthoritySlice ")
-		TEXT("(the runner's presentation snapshot); a client learns it through OnRep_RingoutScore."),
+		TEXT("is pushed only on the authority, from the session's onPostPhysicsStep on the game thread, by ")
+		TEXT("BrawlerSessionGameUImpl::presentAuthoritySlice (the runner's presentation snapshot); a client learns it ")
+		TEXT("through OnRep_RingoutScore."),
 		toStorageKey(GetSimCharacterId()));
 
 	if (RingoutScore == NewScore)

@@ -131,7 +131,7 @@ static_assert(TickDriverDisplayGame<BrawlerTickDriverGame>,
 
 static_assert(TickDriverIdleGame<BrawlerTickDriverGame>,
 	"BrawlerTickDriverGame must keep IdleWake idleUntil(double): SimulationTickBackend::runAuthorityLoop requires it, and the "
-	"authority runner services og-net only through it, so without it og.Sim.AuthorityLoop=1 cannot build. Added by "
-	"og-input-latency task P5-19 (P11 design section 4).");
+	"authority runner services og-net only through it, so without it the authority loop, which every dedicated server "
+	"runs, cannot build. Added by og-input-latency task P5-19 (P11 design section 4).");
 
 #undef HasAuthority

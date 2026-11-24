@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: m_connectionBudgetProbe.noteSample( -- PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
 <!-- lint-external-ref: hadAnyTier -- retired by og-input-latency P6-2 (the client pays its effective delay's change, either sign); kept in the history -->
 <!-- lint-external-ref: predictionClock -- a local of pollInputHistoryLanes until og-input-latency task P5-16 (the clock reading comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: OnRep -- Unreal Engine replication hook name, outside every scan root -->

@@ -3,6 +3,7 @@
 <!-- lint-external-ref: getRelayedReadObservations -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
 <!-- lint-external-ref: getRelayedInputArrivals -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
 <!-- lint-external-ref: getStorage -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
+<!-- lint-external-ref: editReconciliation -- the session's reconciliation door, deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
 <!-- lint-external-ref: makeReconciliationSlotReader -- deleted by og-input-latency task P5-16 (the lanes poll reads the display snapshot's applied window); kept in the history -->
 <!-- lint-external-ref: ReconciliationSlotReader::hasCorrectionCache -- deleted by og-input-latency task P5-16 (the lanes poll reads the display snapshot's applied window); kept in the history -->
 <!-- lint-external-ref: predictionClock -- a local of pollInputHistoryLanes until og-input-latency task P5-16 (the clock reading comes from the display snapshot); kept in the history -->
@@ -394,7 +395,9 @@ absent cell and an unmapped one are opposite failures.
 the authority, a listen-server host, standalone — writes nothing to the provenance lane on any
 poll, so its bar is holes end to end rather than a wall of `Pending`. `frameMeterHorizonOf`
 answers `NoCache` for that reading, the horizon anchors the right edge, and the residency
-readout says so in words (§7.5).
+readout says so in words (§7.5). Since og-session-runtime task 14 no authority holds a display snapshot (a dedicated
+server publishes none; a listen-server host and a standalone world start no session, `UESimulationSession-rationale.md`
+§23), so the feed's polls return before they read a role there, and only a client fills the lanes.
 
 ### 7.4 Two palettes, one colour language
 
@@ -445,8 +448,8 @@ twice — once to backfill the tick it skipped, once for its own advance — so 
 advances two sim ticks between polls and the rule steps two lane columns at once. That is
 correct, not a flicker; report it as a bug and you have found the wrong thing.
 
-**On a listen host — or standalone, or the dedicated server — it sits at the RIGHT edge, with
-the no-cache readout line, never a sky-blue bar.** `hasCorrectionCache() == false` for every id
+**On a listen host — or standalone, or the dedicated server — it sat at the RIGHT edge, with
+the no-cache readout line, never a sky-blue bar** (until og-session-runtime task 14; no authority polls since, §7.3). `hasCorrectionCache() == false` for every id
 on a role with no correction cache, so the reading answers `NoCache`, the horizon anchors
 `RightEdge`, and the provenance bar draws as pure holes (§7.3) rather than a wall of `Pending`
 claiming every tick that role ran was merely pressed.
@@ -788,7 +791,7 @@ reference to the manager does the list's job, §8.6.)*
 ⚠ **History since og-input-latency task P5-16 (§8.7).** The lanes poll reads the tier, the floor and the published delay
 from the display snapshot's tier reading, so the argument below is the record of the reads it argued. Since og-input-latency
 task P5-7 the "OnRep listeners" are og-sim-net's tier and floor arrivals, on the client session's drain thread (the step's
-thread on an immediate client), so the writers it names are no longer all on the game thread.
+thread, on every client since og-session-runtime task 12), so the writers it names are no longer all on the game thread.
 
 **The same-thread argument, stated once rather than per field.** `ReplicatedTierConsumer`'s
 tier is GAME-THREAD-written (`applyReplicatedConnectionTier`, §5 of the manager rationale);
@@ -1483,11 +1486,13 @@ manager's generic `getVizSlice`, the session's since task 24b (`ScoreboardDispla
 
 **Const access, and the compiler holds it.** Since task 24b the feed holds a `const` reference to the session,
 `m_session` (its alias `Session` is `UESimulationSession<BrawlerSessionTraitsUImpl>`), bound at the actor's construction
-from the actor's own `m_session`, viewed as `const`. It reads the session's public const members: `getManager()` (the
-manager's optional), `getStorage()`, the const `editReconciliation()`, and the diagnostic doors `getLocalInputCache`,
-`isLocallyControlledOnThisPeer`, `getRelayedReadObservations` and `getRelayedInputArrivals`, and since task 25 the
-transport's `getReplicatedTierConsumer()` and `getClientEffectiveInputDelayTicks()` (in task 24b it read those two through
-the session's const `owner()`, from the actor, which held the transport until task 25). It writes nothing but its own store, and it is nobody's friend:
+from the actor's own `m_session`, viewed as `const`. It reads the session's public const members: the display snapshot
+(`getDisplaySnapshot`, `findDisplayEntry`, `forEachDisplayVizState`), `getManager()` (the manager's optional: its role and
+its time configuration), `isLocallyControlledOnThisPeer` and, since task 25, the transport's `getReplicatedTierConsumer()`
+(in task 24b it read it through the session's const `owner()`, from the actor, which held the transport until task 25).
+Until og-input-latency task P5-16 it also read `getStorage()`, the const `editReconciliation()`, the diagnostic doors
+`getLocalInputCache`, `getRelayedReadObservations` and `getRelayedInputArrivals`, and `getClientEffectiveInputDelayTicks()`;
+P5-16 moved its reads to the display snapshot (§8.7). It writes nothing but its own store, and it is nobody's friend:
 every member it reads is public and `const`. A `static_assert` in the class pins the reference `const`, so a mutable
 reference, which would be a write door from a diagnostic display into the session's mutable doors and, through
 `owner()`, into the actor's, does not compile. That is the pattern of the latency member, `UELatencyBudgetDiagnostics`

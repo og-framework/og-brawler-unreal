@@ -81,13 +81,8 @@ std::string_view BrawlerSessionGameUImpl::backendFingerprint()
 	return buildIdentityUImpl::backendFingerprint();
 }
 
-void BrawlerSessionGameUImpl::afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>& session)
+void BrawlerSessionGameUImpl::afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>&)
 {
-	if (session.getManager().has_value() && session.getSystemsExec().has_value() && !session.getManager()->runsPrediction())
-	{
-		BrawlerRosterUImpl::pushRingoutScores(session.getSystemsExec()->get<brawlerRingout::ScoreSystem>(),
-			session.getRegisteredComponentsById());
-	}
 }
 
 BrawlerSessionGameUImpl::AuthorityPresentationSlice BrawlerSessionGameUImpl::authorityPresentationSlice_Step(

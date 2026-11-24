@@ -263,7 +263,7 @@ SimulatableBrawler UOGBrawlerSimulatableComponent::makeSimulatable()
 void UOGBrawlerSimulatableComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	const bool isAuthority = (GetNetMode() != NM_Client);
-	AOGBrawlerSimulationManager* manager = AOGBrawlerSimulationManager::instanceFor(isAuthority);
+	AOGBrawlerSimulationManager* manager = AOGBrawlerSimulationManager::instanceFor(GetWorld(), isAuthority);
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework(simCharacterId(), *this, isAuthority);
 
@@ -283,7 +283,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	const bool vizIsAuthority = (GetNetMode() != NM_Client);
-	AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(vizIsAuthority);
+	AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetWorld(), vizIsAuthority);
 	if (vizManager == nullptr)
 		return;
 	if (!vizManager->session().hasGameThreadVizWorld())
@@ -481,7 +481,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 
 std::optional<BrawlerVizGround> UOGBrawlerSimulatableComponent::vizGround() const
 {
-	const AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
+	const AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetWorld(), GetNetMode() != NM_Client);
 	if (vizManager == nullptr)
 		return std::nullopt;
 	const unsigned int ownKey = toStorageKey(simCharacterId());

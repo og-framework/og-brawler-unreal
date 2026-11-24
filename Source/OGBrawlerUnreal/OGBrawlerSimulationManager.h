@@ -81,10 +81,10 @@ class AOGBrawlerSimulationManager : public AActor
 public:
     AOGBrawlerSimulationManager();
 
-    static AOGBrawlerSimulationManager* instanceFor(bool isAuthority)
+    static AOGBrawlerSimulationManager* instanceFor(const UWorld* world, bool isAuthority)
     {
         UESimulationSession<BrawlerSessionTraitsUImpl>* session =
-            UESimulationSession<BrawlerSessionTraitsUImpl>::instanceFor(isAuthority);
+            UESimulationSession<BrawlerSessionTraitsUImpl>::instanceFor(world, isAuthority);
         return session != nullptr ? &session->owner() : nullptr;
     }
 

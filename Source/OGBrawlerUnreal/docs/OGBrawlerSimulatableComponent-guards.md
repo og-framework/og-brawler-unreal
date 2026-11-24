@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
 <!-- lint-external-ref: ASimulationConnectionRelay -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
 <!-- lint-external-ref: ASimulationInputRelay::spawnForCharacter -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
 <!-- lint-external-ref: ServerReceiveRemoteMove -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
@@ -207,8 +208,8 @@ replicated id's wait (og-input-latency task P5-7).
 exist only once the roster entry has arrived: registered earlier, `tryRegister` finds no channel and answers `Pending` until the
 600-attempt `checkf`, and the slot request reads no slot. The role check is the point of the call (P7's C-3): the roster's
 local index decides which characters this client predicts, and a pawn the engine thinks is local but the roster does not (or
-the reverse) must fail loudly, not register with the wrong provider. Mapping `Abandon` to `retry()` turns a detached client (no
-og-net driver) into a `checkf` after 600 frames, against the user's ruling Q1 (no Fatal).
+the reverse) must fail loudly, not register with the wrong provider. Mapping `Abandon` to `retry()` turns a client world without a
+session (no og-net driver, or a refused knob; a detached client until og-session-runtime task 14) into a `checkf` after 600 frames, against the user's ruling Q1 (no Fatal).
 
 ---
 
@@ -456,7 +457,8 @@ The entry as it stood before the move:
 
 **Correction (R0).** The stated mechanism is about the wrong actor. "Always true on a non-replicated
 actor" describes the MANAGER (`bReplicates = false`); this component's owner is a replicated pawn. The
-prohibition stands for the other half of the sentence: `AOGBrawlerSimulationManager::instanceFor(isAuthority)`
+prohibition stands for the other half of the sentence: `AOGBrawlerSimulationManager::instanceFor(isAuthority)` (since
+og-session-runtime task 16b `instanceFor(world, isAuthority)`, keyed by the caller's world as well)
 indexes the manager slot that `AOGBrawlerSimulationManager::BeginPlay` filled from
 `worldIsAuthority = (worldNetMode != NM_Client)` (since og-ue-simulationcomponentandmanagersplit task 25 the slot is the
 session's registry, and since task 27b the session's `beginPlay` fills it, with the same predicate). Only the same world-level predicate is guaranteed to
@@ -573,7 +575,7 @@ statements in four registration hooks of this component, and the guarded stateme
 text game-neutral and R0-checked (corrections are listed in the successor). **Successor:**
 `UESimulatableOwnerBinding-guards.md` G-11.
 
-**What stays here (brawler).** The second half of the title is the brawler's: `BrawlerRosterUImpl::pushRingoutScores` walks the session's delivery routes (`getDelayedInputComponentsById`) as the list of characters whose scores leave the server, so narrowing the registration silently drops their scores (`BrawlerRosterUImpl-rationale.md` §3; rationale §19 here). The successor states the generic half: a game may walk the same map.
+**What stays here (brawler).** The second half of the title was the brawler's: `BrawlerRosterUImpl::pushRingoutScores` walked the session's delivery routes (`getDelayedInputComponentsById`) as the list of characters whose scores leave the server, so narrowing the registration silently dropped their scores (`BrawlerRosterUImpl-rationale.md` §3; rationale §19 here). og-session-runtime task 16b deleted the push (it ran nowhere since task 14); the authority's scores leave through `BrawlerSessionGameUImpl::presentAuthoritySlice`, which looks each id up in the same map. The successor states the generic half: a game may walk the same map.
 
 The entry as it stood before the move:
 

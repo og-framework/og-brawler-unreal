@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
 <!-- lint-external-ref: vizSimulationStep -- a local of UOGBrawlerSimulatableComponent::TickComponent until og-input-latency task P5-16 (the tick comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: FInputRedundancyBundle -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
 <!-- lint-external-ref: NetSerialize -- Unreal Engine replication hook name (a USTRUCT's NetSerialize member), outside every scan root -->
@@ -180,8 +181,8 @@ surfaces, and turns engine primitives into the arguments the engine-free core ex
 nothing about netcode.
 
 Both roles run the same class. In one PIE process the server's world and each client's world run
-their own instance against their own manager; a listen server's single world runs the authority role
-only. ⚠ **Correction (R0, task 20a).** This said "on a listen server both run in the same process
+their own instance against their own manager; a listen server's single world takes the authority role
+only, and since og-session-runtime task 14 its session simulates nothing (`UESimulationSession-rationale.md` §23). ⚠ **Correction (R0, task 20a).** This said "on a listen server both run in the same process
 against two different manager instances"; a listen server fills only the authority slot of
 `AOGBrawlerSimulationManager::instanceFor`. The role test is `GetNetMode() != NM_Client` — **world-level**, never
 `HasAuthority()`, because that answers `true` on a non-replicated actor and would disagree with the
@@ -442,8 +443,8 @@ host, and the host is exactly the character this echo was added to cover.
   real input as relayed by the authority, and the source the simulation's own proxy prediction
   resolves from. It is deliberately *not* the per-tick scheduled read: the visualization wants "what
   is this player doing", not "which input does tick N run on". This used to read the correction
-  cache's input column through `editReconciliation().getLatestInput(...)`, roughly one round-trip
-  behind; the relayed value is fresher by about the return leg, and both that column and
+  cache's input column through the session's reconciliation door, editReconciliation().getLatestInput(...)
+  (the door og-input-latency task P5-16 deleted), roughly one round-trip behind; the relayed value is fresher by about the return leg, and both that column and
   `getLatestInput` itself have since been retired outright.
 
 ⚠ **The listen-server fallback holds, but the stated reason for it was wrong** (§11, F-34-1). The
@@ -453,7 +454,8 @@ the authority registration facade calls `SimulationNetSync::registerPredictionOw
 provider, which takes the provider-absent branch and **does** allocate one for every character. The
 store is simply never written there — the ring notification is client-only and the attach-time replay
 sees a never-written ring — so `findLatest()` is invalid and the accessor answers nothing because the
-store is **cold**, not because it is absent.
+store is **cold**, not because it is absent. Since og-session-runtime task 14 no authority draws: a listen server starts
+no session, and a dedicated server has no game-thread viz world (§24).
 
 **The echoed value carries continuous fields only.** Every discrete field is pinned neutral by
 `simulatableBrawler::makeVisualizationPlayerInput`, so an attack or a Hadouken edge structurally cannot render-echo. It is
@@ -545,11 +547,12 @@ parameters this file used to build itself (simple collision, the owner ignored).
 volume id, which is empty while the Jolt slot acquire waits (§3). The visualizers are templates over the adapter types, so the
 calls compile against the pair `PhysicsBackendUImpl.h` names.
 
-In the Jolt configuration the two accessors return the step world's adapters on the authority and on
-a client stepping inline (`og.Sim.RunInline`), and the game-thread shadow world's on a client that
+In the Jolt configuration the two accessors return the game-thread shadow world's adapters on a client, which
 steps on a worker, where the step's own world may be queried only by the step or under the world
-mutex (`TickDriverBackendUImpl-rationale.md` §6). Either
-way the component gets a world it may query on the game thread, so both passes run on every peer, as
+mutex (`TickDriverBackendUImpl-rationale.md` §6). Until og-session-runtime task 14 they returned the step world's on an
+in-frame authority (and on a client stepping inline under og.Sim.RunInline, until task 11); since then only a client
+reaches them (§24). The
+component gets a world it may query on the game thread, so both passes run on every client, as
 they did in the former Chaos configuration. (og-simulationscheduler-withjolt task 53 returned null on a worker client
 and the component skipped the two passes there; task 56 removed that skip.)
 
@@ -957,9 +960,9 @@ member, whose overrides are `final` (`UESimulatableOwnerBinding-rationale.md` §
 
 **The brawler's part of the delivery route.** Until og-input-latency task P5-7 the skeleton registered the route on the
 authority (binding G-11); since P5-7 the session's `tryRegister` records every registered component itself. The ring-out
-score push (`BrawlerRosterUImpl::pushRingoutScores`, called by the `afterVisualization` hook with the session's
-`getRegisteredComponentsById`) walks that map as its list of characters whose scores leave the server, so a narrower
-registration silently drops their scores (`BrawlerRosterUImpl-rationale.md` §3; this file's G-07's second half, kept in its
+score's writer, `BrawlerSessionGameUImpl::presentAuthoritySlice`, looks each id up in that map (the push
+`BrawlerRosterUImpl::pushRingoutScores`, which walked it from the `afterVisualization` hook, ran nowhere since
+og-session-runtime task 14 and was deleted by task 16b), so a narrower registration silently drops their scores (`BrawlerRosterUImpl-rationale.md` §3; this file's G-07's second half, kept in its
 §R entry).
 
 **Which manager door.** The skeleton calls the session's `tryRegister` with the storage key (and, until og-input-latency task
@@ -1017,14 +1020,16 @@ empty as world up and supported-unknown; the camera and the mouse aim take world
 session's by-value read of the **visualization snapshot** (`getVizState` until og-input-latency task P5-16; the session's
 display copy since, §23), never the live state: that is the
 session's guard G-02 (`UESimulationSession-guards.md`), and the accessor offers no route to the live state. The
-snapshot is taken on the game thread once per post-physics pass, so a game-thread reader such as the character's
+snapshot is published after each step batch and acquired on the game thread once per post-physics pass
+(`UESimulationSession-rationale.md` §17), so a game-thread reader such as the character's
 `Tick` reads a copy no other thread writes, the same state `TickComponent` draws from. The two slices are read one
 after the other in the same game-thread call, with no snapshot update between them, so they belong to the same tick. On
 the Jolt host the presenter writes the rendered body poses into the snapshot's body states, so `guardUp` is the
 presented guard pose; on one face that is the face's normal to rounding.
 
 **Role.** The manager is picked with `GetNetMode() != NM_Client`, the predicate `TickComponent` uses (§1): a client
-reads its predicted snapshot, the authority (a listen-server host, standalone) its own.
+reads its predicted snapshot. Until og-session-runtime task 14 the authority (a listen-server host, standalone) read its
+own; since then no authority has one (a dedicated server publishes no display snapshot, the others start no session, §24).
 
 **The support law v2 (tasks 33-36) needs no change here.** It replaces the attack ground sample with the support
 estimate's face normal (GroundSupport's faceNormal), and the guard is posed from it, so the guard body's up stays the
@@ -1040,7 +1045,8 @@ sessions and the session's og-net hookup (`UESimulationSession-rationale.md` §1
 - **The client's key waits for the roster** (`⛔G-39`). `resolveRegistrationKey`, once the pawn's `SimCharacterId` has
   replicated, asks the session's `clientBindStep(key, engineSaysLocal)`, where `engineSaysLocal` is the pawn's
   `GetLocalRole() == ROLE_AutonomousProxy`: `Wait` while the roster has no entry for the id (the hook answers `retry()`, inside
-  the binding's 600 attempts), `Abandon` on a role mismatch with checks off or on a detached client (the hook answers
+  the binding's 600 attempts), `Abandon` on a role mismatch with checks off or in a client world without a session
+  (`UESimulationSession-rationale.md` §23; a detached client until og-session-runtime task 14) (the hook answers
   `abandon()`), `Ready` otherwise. The authority's branch is unchanged: it allocates the id, and the session adds the character
   to og-sim-net's server inside `tryRegister`. The id stays the Binding key (P7's C-1); the roster gives the slot and confirms
   the role (C-3).
@@ -1097,17 +1103,21 @@ sees the relayed input and the tick one step batch later than before (the task's
 
 ## §24 The dedicated server's visualization gate (og-input-latency task P5-20)
 
-A loop-on dedicated server (`og.Sim.AuthorityLoop=1`) steps its authority on the runner and has no game-thread viz world
-(`UESimulationSession-rationale.md` §21.4, in OGSimulationUnreal's docs). The component's two visualization paths ask the
-session first, through `hasGameThreadVizWorld()` (false exactly while the loop runs):
+A dedicated server steps its authority on the runner and has no game-thread viz world (`UESimulationSession-rationale.md`
+§21.4, in OGSimulationUnreal's docs; every dedicated server since og-session-runtime task 14, a loop-on one with
+`og.Sim.AuthorityLoop=1` before). The component's two visualization paths ask the session first, through
+`hasGameThreadVizWorld()`, which is true exactly on a client with a session: `m_manager.has_value() && runsPrediction()` since
+task 14 (false while the loop ran before, and in a world without a session since task 11, `UESimulationSession-rationale.md`
+§23):
 
 - **`initializeWithManager`** returns `Ready` right after it caches the input collection, before the target-visualization
   volume and the three visualization states. The volume would be registered with the free-running tick backend, which refuses
   it (its `OG_CHECK`, `TickDriverBackendUImpl-rationale.md` §15), and the states feed only `TickComponent`'s drawing. The
   registration itself does not depend on either: the binding calls `tryRegister` after `Ready` as before.
-- **`TickComponent`** returns right after it finds the manager, before it reads the display snapshot. On the loop the session
+- **`TickComponent`** returns right after it finds the manager, before it reads the display snapshot. On the authority the session
   publishes none, so the snapshot read already returned early; the gate makes the order explicit, and it keeps the three
   visualization states' `value()` calls below unreachable while they are empty.
 
-Everywhere else (clients, listen servers, an inline dedicated server) `hasGameThreadVizWorld()` is true and both paths
-run as before.
+On a client with a session `hasGameThreadVizWorld()` is true and both paths run as before. Until og-session-runtime task 14 it
+was true on listen servers and an inline dedicated server too; those start no session since (`UESimulationSession-rationale.md`
+§23).

@@ -1,4 +1,6 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
 <!-- lint-external-ref: bGlobalGravitySet -- Unreal Engine AWorldSettings field, outside every scan root (§6.1; moved with OGBrawlerSimulationManager-rationale.md §13.2, task 27b) -->
 <!-- lint-external-ref: GlobalGravityZ -- Unreal Engine AWorldSettings field, outside every scan root (§6.1; moved with OGBrawlerSimulationManager-rationale.md §13.2, task 27b) -->
 <!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (§7.3, moved with OGBrawlerSimulationManager-rationale.md §13.4, task 28): the record field deleted with the two-source tripwire. It must NOT resolve -->
@@ -14,12 +16,13 @@ code.
 * **§1** says what the class is.
 * **§2** is the two latency hooks and the brawler's input-sample time (hop `H1`'s start).
 * **§4** is the static-data hook, `makeStaticData` (task 24a).
-* **§5** is the post-visualization hook, `afterVisualization` (task 27a): the ring-out score push.
+* **§5** is the post-visualization hook, `afterVisualization` (task 27a): empty since og-session-runtime task 16b (its
+  ring-out score push reached no authority since task 14).
 * **§6** is the six start-up hooks (task 27b), with the gravity cross-check and the neutral input's guard.
 * **§7** is the four registration hooks (task 28), with the brawler's part of the registration: the capsule body id, the
   movement sub-simulation, the notify's dependants and the first-call pass's quoted comments.
-* **§8** is the two authority presentation hooks (og-input-latency task P5-20): the ring-out score push on a loop-on
-  dedicated server, from the session's authority presentation snapshot.
+* **§8** is the two authority presentation hooks (og-input-latency task P5-20): the ring-out score push on a dedicated
+  server, every authority since og-session-runtime task 14, from the session's authority presentation snapshot.
 * **§3** is how the header and the `.cpp` are compiled, and who includes the header.
 
 ---
@@ -135,7 +138,14 @@ provider on the client branch, and a listen host's local players have no client 
 
 | hook | brawler statements | when, which thread |
 |---|---|---|
-| `static afterVisualization(session)` | on the authority (a manager that does not predict) with its systems executor built: `BrawlerRosterUImpl::pushRingoutScores` with the executor's `brawlerRingout::ScoreSystem` and the session's registered-component map (`getRegisteredComponentsById`, the authority's registered characters; its delayed-input map, the route table, until og-input-latency task P5-7) | once per frame, from the session's `onPostPhysicsStep`, after the backend's visualization update and before the latency tick, on the game thread |
+| `static afterVisualization(session)` | none since og-session-runtime task 16b (an empty body). Until then: on the authority (a manager that does not predict) with its systems executor built: `BrawlerRosterUImpl::pushRingoutScores` with the executor's `brawlerRingout::ScoreSystem` and the session's registered-component map (`getRegisteredComponentsById`, the authority's registered characters; its delayed-input map, the route table, until og-input-latency task P5-7) | once per frame on a client, from the session's `onPostPhysicsStep`, after the display view's refresh and before the latency tick, on the game thread; the gate was false there, so it pushed nothing (below) |
+
+* **No authority reaches it since og-session-runtime task 14.** The session's `onPostPhysicsStep` calls the hook only on a
+  client, where the gate (`!runsPrediction()`) is false; every authority is a dedicated server, whose scores the two
+  presentation hooks write (§8). Until task 14 an in-frame authority (a listen server, a standalone world, a dedicated
+  server with og.Sim.AuthorityLoop=0) ran the push here once per frame. Task 16b deleted the unreachable branch and the push
+  (`BrawlerRosterUImpl-rationale.md` §3); the hook stays, empty, because the session calls it on every client. The
+  bullets below are the record of the branch.
 
 * **The statements are the actor's, in its order.** Until task 27a they sat in the actor's `OnPostPhysicsStep` at the
   same position: the gate (`m_manager.has_value() && m_systemsExec.has_value() && !m_manager->runsPrediction()`), then
@@ -452,17 +462,17 @@ section, now split between this §7 and the session's §12.
 | `static authorityPresentationSlice_Step(systems, id)` | the executor's `brawlerRingout::ScoreSystem`: `scoreOf(id)` and `hasScoreEntry(id)` | once per stepping wake per simulatable, on the authority runner, after the batch (the session's `publishAuthorityPresentation_Runner`) |
 | `static presentAuthoritySlice(session, id, slice)` | with a score entry: the registered component for `id` (`getRegisteredComponentsById()`), its owner as the brawler character, `SetAuthoritativeRingoutScore(slice.ringoutScore)` | once per frame per entry of the newest snapshot, from the session's `onPostPhysicsStep`, on the game thread |
 
-* **Only with the authority loop on.** A loop-on dedicated server steps on the runner, so the score system is the runner's
-  and the game thread may not read it; `afterVisualization` (§5) is not called there (`UESimulationSession-rationale.md`
-  §19.5, in OGSimulationUnreal's docs). Instead the session publishes, after each batch, a snapshot with one slice per
-  simulatable from the first hook, and the game thread applies the newest one with the second (that file's §21.3). Every
-  other world keeps §5's push unchanged.
+* **On every authority.** A dedicated server steps on the runner, so the score system is the runner's and the game thread
+  may not read it; `afterVisualization` (§5) is not called there (`UESimulationSession-rationale.md` §19.5, in
+  OGSimulationUnreal's docs). Instead the session publishes, after each batch, a snapshot with one slice per simulatable
+  from the first hook, and the game thread applies the newest one with the second (that file's §21.3). Until
+  og-session-runtime task 14 this ran only with the authority loop on, and every other world kept §5's push.
 * **The same write, from a copy.** `presentAuthoritySlice` writes the replicated score property exactly as
-  `BrawlerRosterUImpl::pushRingoutScores` does (the property's setter returns early on an unchanged value), so clients
+  `BrawlerRosterUImpl::pushRingoutScores` did until og-session-runtime task 16b deleted it (the property's setter returns early on an unchanged value), so clients
   learn it through the same `OnRep_RingoutScore` and the scoreboard reads the same property. The values are those of the
   runner's newest published batch when the game thread reads the snapshot.
-* **No `checkf` on the entry.** `pushRingoutScores` `checkf`s that every routed id has a score entry, because its
-  game-thread read of the live map may not insert. The snapshot is a copy, so an id the runner has not yet notified to its
+* **No `checkf` on the entry.** `pushRingoutScores` `checkf`ed that every routed id had a score entry, because its
+  game-thread read of the live map could not insert. The snapshot is a copy, so an id the runner has not yet notified to its
   systems (its entry is created in `onCharacterRegistered`) carries `hasScoreEntry` false and is skipped; its score is 0
   until then anyway.
 * **Defined in `BrawlerSessionGameUImpl.cpp`, in its `OGSIM_OPTIMIZE_OFF` region**, beside `afterVisualization`: the

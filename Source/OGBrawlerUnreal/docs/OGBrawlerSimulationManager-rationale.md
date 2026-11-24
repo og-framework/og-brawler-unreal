@@ -1,4 +1,12 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: m_connectionBudgetProbe -- PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
+<!-- lint-external-ref: QueuedBits -- an Unreal Engine UNetConnection field outside every scan root, read for PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
+<!-- lint-external-ref: usableSingleBunchBytes -- the [PacketBudget] line of PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
+<!-- lint-external-ref: (usableBits / 32) * 4 -- the [PacketBudget] arithmetic of PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
+<!-- lint-external-ref: usableBits / 8 -- the [PacketBudget] arithmetic of PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
+<!-- lint-external-ref: stampCorrectionReceived -- the latency diagnostics game-thread correction door, deleted by og-session-runtime task 14 (no caller since task 12); kept in the history -->
+<!-- lint-external-ref: m_lastHandedCorrectionTick -- the latency diagnostics game-thread dedup map, deleted by og-session-runtime task 14 with the in-frame server correction walk; kept in the history -->
 <!-- lint-external-ref: hadAnyTier -- retired by og-input-latency P6-2 (the client pays its effective delay's change, either sign); kept in the history -->
 <!-- lint-external-ref: applyTierTransitionStall -- retired by og-input-latency P6-2 (the client pays its effective delay's change, either sign); kept in the history -->
 <!-- lint-external-ref: shouldStallForTierTransition -- retired by og-input-latency P6-2 (the client pays its effective delay's change, either sign); kept in the history -->
@@ -286,12 +294,13 @@ removed the former Chaos configuration it is the only one (§18; `TickDriverBack
 * *"binds them to Chaos"* — the manager binds every character to a Jolt world it owns; Chaos was the
   gameplay physics only in the former Chaos configuration.
 * THREADS, the GAME row's *"InjectInputs_External -> releaseDelayedInputsForStep"* — that was the former Chaos
-  configuration's per-frame entry. In the Jolt configuration the frame host's `TG_StartPhysics` tick
-  function, through the tick driver, runs the per-frame half (`onFrameStepsDue_Step`, then, on the authority, the reap after
-  the inline steps), and the drain runs once per step from the authority's `beforeTick` (§7; `TickDriverBackendUImpl-rationale.md` §2).
+  configuration's per-frame entry. In the Jolt configuration the tick driver runs the per-frame half
+  (`onFrameStepsDue_Step`; on the authority the reap after the batch), on a client from the frame host's `TG_StartPhysics`
+  tick function, on the authority once per stepping wake of its runner, and the drain runs once per step from the
+  authority's `beforeTick` (§7; `TickDriverBackendUImpl-rationale.md` §2).
 * THREADS, the PHYSICS row's *"FSimulationManagerAsyncCallback's five _Internal hooks"* — the former Chaos
   configuration's. In the Jolt configuration the physics side is the step: one worker task per frame on
-  a client, inline on the game thread on the authority, each step running the step driver and the four
+  a client, inline on the runner on the authority (on the game thread until og-session-runtime task 14), each step running the step driver and the four
   step hooks under the world mutex (`TickDriverBackendUImpl-rationale.md` §2).
 * CROSSING — the count of three is unchanged in the Jolt configuration. The Jolt host adds its own
   game-thread-to-step mechanisms (J1–J6 and the shadow hand-over), which are the Jolt host's boundary and
@@ -319,11 +328,11 @@ since og-ue-simulationcomponentandmanagersplit task 25 (this file's G-16 until t
 | | runs on | what it is |
 |---|---|---|
 | `BeginPlay` / `EndPlay` | GAME | the composition root; since og-ue-simulationcomponentandmanagersplit task 27a `EndPlay` is `m_session.endPlay()`, then `Super` (the session's teardown, `UESimulationSession-rationale.md` §10, in OGSimulationUnreal's docs), and since task 27b `BeginPlay` is `Super`, then `m_session.beginPlay()` (the session's start-up, its §11) |
-| `onConnectionTierReceived`, `onRelayDelayFloorReceived`, `onTimingInfoReceived` (and the two `Replayed` members until og-input-latency task P5-9) | GAME; on an immediate client the step's thread (`UESimulationSession-rationale.md` §18) | the session's tier, floor and clock entry points (`m_session`'s since task 25): the relay listeners until og-input-latency task P5-7, called since by the og-net client host from the client session's drain, at the driver's `PostTickDispatch` frame-locked and at step start immediate (`UESimulationSession-rationale.md` §9, §16, §18, in OGSimulationUnreal's docs). *R0, task 25: the row said "the four replication listeners"; there were six entry points over three interfaces, and the timing callback was not listed* |
-| og-sim-net's server: its drain and flush, `releaseForStep`, `afterBatch` (`afterInlineBatch` on the authority loop) | GAME; on the authority loop (`og.Sim.AuthorityLoop=1`) the runner | the reception since og-input-latency task P5-7: og-sim-net's `SimNetServer`, which the session holds on the authority and which drains at the og-net driver's `PostTickDispatch` and flushes at its `TickFlush` (`UESimulationSession-rationale.md` §16); on the authority loop (og-input-latency task P5-19) its transport is immediate, and it drains in the game binding's `beforePump` and sends after each batch in `afterAuthorityBatch`, both on the runner (`UESimulationSession-rationale.md` §19.3). From task 26a until P5-7 the session's own sinks, driven from the net-sync RPC's receipt path, and the route's registration; this class kept the registration's `SimCharacterId` wrapper until task 36 |
-| `onPostPhysicsStep` (the session's since task 27a, `UESimulationSession-rationale.md` §10; this class's `OnPostPhysicsStep` before) | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, `TickDriverBackendUImpl-rationale.md` §6), the render interpolation and apply and the shadow overwrite (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §5, §7), visualization snapshot (with the rendered poses in the Jolt configuration), timing buffer, score push (the brawler's hook `BrawlerSessionGameUImpl::afterVisualization` since task 27a), latency probe; called by the frame host's `TG_EndPhysics` tick function (the former Chaos configuration bound it to the scene's post-tick delegate) |
-| the frame host's two tick functions → the tick driver → `onFrameStepsDue_Step`, the reap (authority), `onPostPhysicsStep`, through `BrawlerTickDriverGameUImpl` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | GAME; on the authority loop (`og.Sim.AuthorityLoop=1`) the tick driver runs on the runner, once per stepping wake (`UESimulationSession-rationale.md` §19, §21) | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`UETickDriverHost-rationale.md`; `SimulationTickDriver-rationale.md` §3) |
-| the tick driver's per-step body (`SimulationTickDriver`) → `SimulationStepDriver::runTick` and the four step hooks (`TickDriverStepHooks`), including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | PHYSICS: a worker task on a client; on the authority inline, on the game thread, or on the runner on the authority loop (`UESimulationSession-rationale.md` §19) | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
+| `onConnectionTierReceived`, `onRelayDelayFloorReceived`, `onTimingInfoReceived` (and the two `Replayed` members until og-input-latency task P5-9) | the client's step thread (`UESimulationSession-rationale.md` §18, §24) | the session's tier, floor and clock entry points (`m_session`'s since task 25): the relay listeners until og-input-latency task P5-7, called since by the og-net client host from the client session's drain at step start (`UESimulationSession-rationale.md` §9, §16, §18, in OGSimulationUnreal's docs). Until og-session-runtime task 12 a frame-locked client drained on the game thread, at the og-net driver's `PostTickDispatch`. *R0, task 25: the row said "the four replication listeners"; there were six entry points over three interfaces, and the timing callback was not listed* |
+| og-sim-net's server: its drain, `releaseForStep`, `afterInlineBatch` | the authority's runner (`UESimulationSession-rationale.md` §19, §24) | the reception since og-input-latency task P5-7: og-sim-net's `SimNetServer`, which the session holds on the authority and which drains in the game binding's `beforePump` and sends after each batch in `afterAuthorityBatch`, both on the runner (`UESimulationSession-rationale.md` §19.3). Until og-session-runtime task 14 an in-frame server drained it on the game thread at the og-net driver's `PostTickDispatch` and flushed it at its `TickFlush` (`UESimulationSession-rationale.md` §16). From task 26a until P5-7 the session's own sinks, driven from the net-sync RPC's receipt path, and the route's registration; this class kept the registration's `SimCharacterId` wrapper until task 36 |
+| `onPostPhysicsStep` (the session's since task 27a, `UESimulationSession-rationale.md` §10; this class's `OnPostPhysicsStep` before) | GAME | the post-physics pass: the shadow-world restore (Jolt configuration, worker client, `TickDriverBackendUImpl-rationale.md` §6), the render interpolation and apply and the shadow overwrite (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §5, §7), the lifecycle outcomes, on a client the display view (with the rendered poses in the Jolt configuration) and the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`, on the authority the presentation slices (the ring-out scores, `BrawlerSessionGameUImpl::presentAuthoritySlice`; the score push was `afterVisualization`'s until og-session-runtime task 14), latency probe; called by the frame host's `TG_EndPhysics` tick function (the former Chaos configuration bound it to the scene's post-tick delegate) |
+| the frame host's two tick functions → the tick driver → `onFrameStepsDue_Step`, the reap (authority), `onPostPhysicsStep`, through `BrawlerTickDriverGameUImpl` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | GAME on a client; on the authority the tick driver runs on the runner, once per stepping wake, and the game thread runs only `onPostPhysicsStep` (`UESimulationSession-rationale.md` §19, §21, §24) | the per-frame work at `TG_StartPhysics` and `TG_EndPhysics` (`UETickDriverHost-rationale.md`; `SimulationTickDriver-rationale.md` §3) |
+| the tick driver's per-step body (`SimulationTickDriver`) → `SimulationStepDriver::runTick` and the four step hooks (`TickDriverStepHooks`), including the authority's per-step drain `releaseDelayedInputsForStep` (Jolt configuration, `TickDriverBackendUImpl-rationale.md` §4) | PHYSICS: a worker task on a client; the runner on the authority (`UESimulationSession-rationale.md` §19). Until og-session-runtime task 14 an in-frame authority stepped inline on the game thread | one simulation step under the world mutex; everything the core `SimulationManager` runs beneath it |
 | `pollInputHistory`, `pollInputHistoryLanes` (members of `BrawlerInputHistoryFeedUImpl`, this class's `m_inputHistoryFeed`, since task 22) | GAME | the input-history display's render-rate feed, driven from `UOGBrawlerSimulatableComponent::TickComponent`; it reads the session `m_session` through a `const` reference since task 24b, this class before (`InputHistoryDisplay-rationale.md` §8.6) |
 
 *Two rows left this table with the former Chaos configuration (og-session-runtime task 3): InjectInputs_External, the
@@ -888,7 +897,7 @@ beside it so no reader had to move and be moved back. The readers were then swit
 second write — and the whole correction-input channel with it — was removed. This tap is now the
 only path by which a character's input reaches other clients. The viz call site reads it through
 `SimulationInputResolution::getLastRelayedInput`, whose nullopt contract was modelled on the
-retired `editReconciliation().getLatestInput(...)` so `BrawlerVisualizationInputSource.h`'s
+retired editReconciliation().getLatestInput(...) (the door og-input-latency task P5-16 deleted) so `BrawlerVisualizationInputSource.h`'s
 cold-source skip did not have to be re-specified.
 
 ---
@@ -944,15 +953,15 @@ task 8; `BrawlerTickDriverGameUImpl-rationale.md` §2):
   `releaseDelayedInputsForStep(authorityTick, 1)`: one `[ReleaseBatch]` with `numSteps=1` per step,
   for the tick that step will simulate (`TickDriverStepHooks-guards.md` G-01 and `BrawlerTickDriverGameUImpl-guards.md`
   G-01, the successors of the retired G-01 of the brawler's former step hooks).
-* `reapConnections(first + offset)` **once per frame, after the frame's inline steps**, with the value
-  the probe call received. It stays per frame because it is the only feed of the coordinator's
+* `reapConnections(first + offset)` **once per batch, after the batch's inline steps** (once per stepping wake of the
+  authority's runner), with the value the probe call received. It stays per batch because it is the only feed of the coordinator's
   `noteServerTick`, the receipt gate's reference: per step, the reference would sit at the frame's last
   tick, not its first, when the next frame's receipts are judged, and the gate's window would shift by
   the frame's step count (`SimulationTickDriver-guards.md` G-06, which succeeds frame-host G-06). On the authority the value is exactly the server clock plus
   one, because every earlier step has completed inline and published its offset.
 
-No receipt can land between inline steps (receipts happen in the engine's receive dispatch, before the
-tick groups), so the queue a step drains holds what the batch would have held. The two patterns
+No receipt can land between the steps of a batch (the runner services og-net only between batches and drains og-sim-net's
+server before the pump), so the queue a step drains holds what the batch would have held. The two patterns
 released the same `(id, captureTick, releaseTick)` set and differed only in which step pops an input in a
 multi-step frame with a per-character gap (design D4): the batch handed the next input to the gap tick;
 per step, the gap tick underruns and the rest apply on time. The comparison of the two configurations was therefore
@@ -1079,7 +1088,7 @@ The Jolt host (`TickDriverBackendUImpl` since task 83) feeds it two game-thread 
   wait to the tick driver's `noteWorldLockWait` once it holds the mutex. That bind is the game thread's only
   J2 scope while the host steps (the shadow-world ruling, `TickDriverBackendUImpl-rationale.md` §2); the `BeginPlay` scopes run before the
   first step and are not timed. On a worker client a wait therefore shows only in a window with a
-  join; on the authority the step is inline and the wait is never contended.
+  join; on the authority the runner binds between its own steps, so the wait is never contended.
 * **The shadow restore.** The world host's `restore_GameThread` hands each restore's duration and whether it
   was refused, through the presenter's restore note, to the tick driver's `noteShadowRestore`, on a worker client.
 
@@ -2769,7 +2778,7 @@ Q-B: §13.4's generic part moves with task 28). The brawler part moved to `Brawl
 *Code moved to `BrawlerRosterUImpl.cpp` (og-ue-simulationcomponentandmanagersplit task 23): the walk is
 `BrawlerRosterUImpl::pushRingoutScores`, called from `OnPostPhysicsStep` at the position this section described (since
 task 27a from the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`, which the session's `onPostPhysicsStep`
-calls there). The
+calls there; deleted by og-session-runtime task 16b, which found it unreachable since task 14). The
 quoted comments, corrections C13-10 and C13-11, and task 23's R0 notes are `BrawlerRosterUImpl-rationale.md` §3
 (ruling Q-B: §13.5 moves with task 23). The cross-thread argument stays in §1, the second read crossing.*
 
@@ -3080,17 +3089,18 @@ game-thread sites reach the role's instance through `UELatencyBudgetDiagnostics:
 ### Threads — the brawler's reads add no crossing
 
 The template's own reads are same-thread with their writers (its rationale §6). The brawler's: the correction buffer's
-tick (written by `sendCorrectionAll` inside `onPostSimulationGameThread`) and `m_delayedInputComponentsById` are read on
-the game thread, where they are written; so were the former Chaos host's two dilation reads (the scene's network
+tick (written by `sendCorrectionAll` inside `onPostSimulationGameThread`) is read where it is written, on the authority's
+runner (`stampCorrectionsHanded_Runner`); until og-session-runtime task 14 an in-frame server read and wrote it on the
+game thread, and until og-input-latency task P5-7 `m_delayedInputComponentsById` was read there too; so were the former
+Chaos host's two dilation reads (the scene's network
 delta-time scale and the local player controller's physics tick offset, each written by an engine client RPC) until
 og-session-runtime task 3 removed them.
 The one value that crosses from the game thread to the step thread, the input-sample time, is a `std::atomic<double>` on
 the input collection component (`BrawlerSessionGameUImpl-rationale.md` §2). **This class's CROSSING count stays three**
 (§1), and this paragraph is the argument for it, made rather than assumed.
 
-On a dedicated server the step thread is the game thread when the authority steps inline, and the runner thread on
-the authority loop (`og.Sim.AuthorityLoop=1`, `UESimulationSession-rationale.md` §19); the former Chaos configuration
-stepped the authority inline.
+On a dedicated server the step thread is the runner thread (`UESimulationSession-rationale.md` §19); until
+og-session-runtime task 14 an in-frame authority stepped inline on the game thread, as the former Chaos configuration did.
 
 ### Why the capture stamp is a wrapper in `tryRegister`, not a line in the provider lambda
 
@@ -3145,7 +3155,7 @@ thread (a task-graph worker on a client, the game thread on a dedicated server).
 | `H3c` | `UELatencyBudgetDiagnostics.h` · `tick_GameThread`, when a character's correction-buffer tick changed since the last frame (GT, end of the session's `onPostPhysicsStep`, this class's `OnPostPhysicsStep` until task 27a) | `onPostTickFlush` (GT) | A property leaves only when the replication system polls and sends it; a correction written but not sent at this flush still reads as left. A **lower** bound. The start is late by the frame's visualization work (the backend's `updateVisualization_GameThread`; since og-input-latency task P5-16 the session's display-snapshot publish and its overlaid copies). |
 | `H4` | `UESimulatableOwnerBinding.h` · `receiveRemoteMoveBundle`, which the sibling's RPC calls after its version fence (task 20a), once per capture tick in the bundle, first arrival wins (GT, inside the net driver's receive dispatch) | `UELatencyBudgetDiagnostics.h` · `stampAfterStep_Internal`, for the capture tick `getLastUsedCaptureTick` reports after the step, stamped with that step's start time (PT) | The datagram reached the socket before the frame's receive dispatch: up to one server frame **under**-stated. An underrun step reports the sentinel and stamps nothing. |
 | `H4r` | as `H4` | the relay flush callback (as `H3` server) | The hand-off is the flush into the replicated ring, not the staging write at receipt: staging is synchronous with receipt and would read zero. |
-| `H5` | `stampStepEnd_Internal`, at each step's end (below), per character, for `currentIntegratedTick` (PT; inline on a dedicated server) | as `H3c` start | `noEnd` counts the ticks a character's state was not written: the correction rotation (`CorrectionRotationK`) skips a character on purpose, so on a rotation of 2 about half the ticks have no end. |
+| `H5` | `stampStepEnd_Internal`, at each step's end (below), per character, for `currentIntegratedTick` (PT; the runner on a dedicated server) | as `H3c` start | `noEnd` counts the ticks a character's state was not written: the correction rotation (`CorrectionRotationK`) skips a character on purpose, so on a rotation of 2 about half the ticks have no end. |
 | `H6` | `UESimulatableOwnerBinding.h` · `noteRelayedRingArrived`, which the sibling's `onRelayedInputRingArrived` calls after its owner-skip check (task 20b), once per capture tick in the ring, first arrival wins (GT, from the ring's OnRep) | `stampAfterStep_Internal`: the relayed-read observation for the step's tick names the applied capture tick, stamped with the step's start time (PT) | The bytes arrived up to one client frame before the OnRep. Only reads that applied a relayed capture stamp an end; a miss stamps nothing and the capture finalizes as `noEnd`. |
 | `H6c` | `UESimulatableOwnerBinding.h` · `onCorrectionStateAccepted`, called from the sibling's `OnRep_CorrectionState` (task 20a), for the peeked tick (GT) | `stampAfterStep_Internal`: a pending stamp at the start of the first client step after receipt (PT) | Measures when the correction is available to the next step, not when a resimulation applies it. |
 | `H6L` | as `H6` | the first of: `UELatencyBudgetDiagnostics.h` · `postRelayedReads_Internal`, a prediction `Hit` for the step's tick or a resimulation's `Hit` found in the observation ring, stamped with the step's start time (PT); or `stampCorrectionReceived`, from `onCorrectionStateAccepted`, for every pending capture `≤ X − dA` (GT) | A resimulation's use is late by at most the replay's length. `dA` is the newest relayed capture's delay stamp. og-input-latency task 6; `UELatencyBudgetDiagnostics-rationale.md` §11. |
@@ -3157,7 +3167,7 @@ provider, so the host role has no capture path to stamp.
 
 ### The step-side stamp sites per configuration (og-simulationscheduler-withjolt task 54)
 
-In the Jolt configuration "PT" is the step's thread (the tick driver's task on a client, the game thread inline on the
+In the Jolt configuration "PT" is the step's thread (the tick driver's task on a client, the runner on the
 authority), every game-thread site is unchanged, and the step-side sites are the game binding's step hooks
 (`BrawlerTickDriverGameUImpl-rationale.md`):
 
@@ -3421,8 +3431,8 @@ the slot's root body there on every declaration (`TickDriverBackendUImpl-rationa
   (gate 22).
 * **`og.Sim.TestGameThreadHitchMs`** (not in Shipping): *code moved to `UESimulationSession.cpp` and the session's
   `onPostPhysicsStep` (og-ue-simulationcomponentandmanagersplit task 27a); `UESimulationSession-rationale.md` §10, in
-  OGSimulationUnreal's docs, describes it.* The brawler's use: on its inline-stepping server, 250 ms gives a frame of
-  about 15 steps, which shows the release pattern in one `[ReleaseBatch]` line.
+  OGSimulationUnreal's docs, describes it.* The brawler's use until og-session-runtime task 14: on its inline-stepping server,
+  250 ms gave a frame of about 15 steps. On the authority's runner a game-thread hitch no longer delays the steps.
 * **`editVizQuery()`, `getVizReader()` and `registerVizVolume(descriptor, owner)`** replace
   `editQueryAdapter()` and `getPhysicsBodyReaderAdapter()`, and the unused body-adapter accessor is
   deleted, so no code outside this class can name a body adapter. The first two return references to

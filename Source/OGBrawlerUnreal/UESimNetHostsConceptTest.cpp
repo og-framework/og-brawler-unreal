@@ -18,8 +18,9 @@ namespace ueSimNetHostsConceptTest
 using Traits = BrawlerSessionTraitsUImpl;
 using Lanes = UESimNetLanes<Traits>;
 using ServerHost = UESimNetServerHost<Traits>;
+using LanesServerHost = Lanes::ServerHost;
 using ClientHost = UESimNetClientHost<Traits>;
-using Server = ogsimnet::SimNetServer<Traits::Composition, ServerHost, Lanes::Transport>;
+using Server = ogsimnet::SimNetServer<Traits::Composition, LanesServerHost, Lanes::Transport>;
 
 constexpr bool routesToNetAtLog(const TCHAR* body)
 {
@@ -28,13 +29,17 @@ constexpr bool routesToNetAtLog(const TCHAR* body)
 }
 } // namespace ueSimNetHostsConceptTest
 
-static_assert(ogsimnet::SimNetServerHost<ueSimNetHostsConceptTest::ServerHost>,
-	"UESimNetServerHost<BrawlerSessionTraitsUImpl> must satisfy og-sim-net's SimNetServerHost");
+static_assert(ogsimnet::SimNetServerHost<ueSimNetHostsConceptTest::LanesServerHost>,
+	"UESimNetLanesServerHost<BrawlerSessionTraitsUImpl>, the host the session's og-sim-net server runs on, must satisfy "
+	"og-sim-net's SimNetServerHost");
+static_assert(!ogsimnet::SimNetServerHost<ueSimNetHostsConceptTest::ServerHost>,
+	"UESimNetServerHost<BrawlerSessionTraitsUImpl> keeps no latency stamps of its own: the authority runner's lanes host "
+	"stamps through the diagnostics' mailbox. Was the in-frame server's game-thread stamps (og-session-runtime task 14)");
 static_assert(ogsimnet::SimNetClientHost<ueSimNetHostsConceptTest::ClientHost>,
 	"UESimNetClientHost<BrawlerSessionTraitsUImpl> must satisfy og-sim-net's SimNetClientHost");
-static_assert(ogsimnet::SimNetDeliveryHook<ueSimNetHostsConceptTest::ServerHost>
+static_assert(ogsimnet::SimNetDeliveryHook<ueSimNetHostsConceptTest::LanesServerHost>
 		&& ogsimnet::SimNetDeliveryHook<ueSimNetHostsConceptTest::ClientHost>
-		&& ogsimnet::SimNetDeliveryHookWellFormed<ueSimNetHostsConceptTest::ServerHost>
+		&& ogsimnet::SimNetDeliveryHookWellFormed<ueSimNetHostsConceptTest::LanesServerHost>
 		&& ogsimnet::SimNetDeliveryHookWellFormed<ueSimNetHostsConceptTest::ClientHost>,
 	"Both UE sim-net hosts have og-sim-net's delivery hook noteDelivered(SimLane, double), which writes the driver's "
 	"[OGNet.Window] sim-lane rows");
@@ -56,6 +61,18 @@ static_assert(ueSimNetHostsConceptTest::routesToNetAtLog(TEXT("[SimNet.Window] r
 		&& ueSimNetHostsConceptTest::routesToNetAtLog(TEXT("[Roster.InputRefused] conn=1 simId=2 reason=NotOwner"))
 		&& ueSimNetHostsConceptTest::routesToNetAtLog(TEXT("[Roster.BindMismatch] simId=1 roster=Local engine=Remote")),
 	"The [SimNet. and [Roster. rows route og-sim-net's lines to the Net route at plain level Log");
+static_assert(simTrafficImmediateKnobRefused(std::optional<int32>{0}) && !simTrafficImmediateKnobRefused(std::optional<int32>{1})
+		&& !simTrafficImmediateKnobRefused(std::nullopt),
+	"A client's lanes remember [OGNetcode] SimTrafficImmediate=0 as a refused knob, which the session refuses at beginPlay "
+	"([SimHost.Refused] knob=SimTrafficImmediate value=0 reason=retired); 1 and an absent key run the immediate client. Was the "
+	"frame-locked client the 0 selected (og-session-runtime task 12)");
+static_assert(simLanesIoMode(/*isServer=*/true, /*dedicatedServer=*/true) == ognetunreal::IoMode::HostServiced
+		&& simLanesIoMode(/*isServer=*/true, /*dedicatedServer=*/false) == ognetunreal::IoMode::OwnThread
+		&& simLanesIoMode(/*isServer=*/false, /*dedicatedServer=*/true) == ognetunreal::IoMode::OwnThread
+		&& simLanesIoMode(/*isServer=*/false, /*dedicatedServer=*/false) == ognetunreal::IoMode::OwnThread,
+	"A dedicated server's lanes are host-serviced (the authority runner services og-net); every other role's own thread "
+	"services them, so a listen server's engine lane still runs while its world starts no session. Was the authority-loop "
+	"decision og.Sim.AuthorityLoop selected (og-session-runtime task 14)");
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -67,8 +84,42 @@ static_assert(ueSimNetHostsConceptTest::routesToNetAtLog(TEXT("[SimNet.Window] r
 #include "OGSimulation/PCTimeManagement/TimeConfig.h"
 #include "UObject/Package.h"
 
+#include <atomic>
+
 namespace ueSimNetHostsConceptTest
 {
+struct FDroppingEndpoint
+{
+	explicit FDroppingEndpoint(const ognet::EndpointConfig& InConfig) : Config(InConfig), Endpoint(this, Ops()) {}
+
+	static void DropOne(void* Ctx) { static_cast<FDroppingEndpoint*>(Ctx)->Drops.fetch_add(1u, std::memory_order_relaxed); }
+
+	static ognetunreal::SimLaneEndpointOps Ops()
+	{
+		ognetunreal::SimLaneEndpointOps Out;
+		Out.send = [](void* Ctx, ognet::ConnectionId, ognet::Lane, std::span<const std::byte>) { DropOne(Ctx); };
+		Out.broadcastExcept = [](void* Ctx, ognet::ConnectionId, ognet::Lane, std::span<const std::byte>) { DropOne(Ctx); };
+		Out.setLaneHandler = [](void*, ognet::Lane, ognet::LaneHandler) {};
+		Out.setConnectionHandler = [](void*, ognet::ConnectionHandler) {};
+		Out.disconnect = [](void* Ctx, ognet::ConnectionId) { DropOne(Ctx); };
+		Out.noteDelivered = [](void*, ognet::Lane, double, double) {};
+		Out.config = [](const void* Ctx) -> const ognet::EndpointConfig& { return static_cast<const FDroppingEndpoint*>(Ctx)->Config; };
+		Out.serviceUntil = [](void*, double) {
+			ognet::ServiceResult Result;
+			Result.stopped = true;
+			return Result;
+		};
+		Out.hasHighResolutionWait = [](const void*) { return false; };
+		return Out;
+	}
+
+	uint64 DropCount() const { return Drops.load(std::memory_order_relaxed); }
+
+	ognet::EndpointConfig Config;
+	std::atomic<uint64> Drops{0u};
+	ognetunreal::SimLaneEndpoint Endpoint;
+};
+
 class FRouteCapture final : public FOutputDevice
 {
 public:
@@ -108,15 +159,26 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 {
 	using namespace ueSimNetHostsConceptTest;
 
-	TUniquePtr<Lanes> serverLanes = Lanes::makeDetached(ognet::Role::Server, ognet::EndpointConfig{});
-	TUniquePtr<Lanes> clientLanes = Lanes::makeDetached(ognet::Role::Client, ognet::EndpointConfig{});
-	TestTrue(TEXT("a detached server lanes object is the server's"), serverLanes->isServer() && serverLanes->isDetached());
-	TestTrue(TEXT("a detached server lanes object holds the transport only"), serverLanes->client() == nullptr);
-	TestTrue(TEXT("a detached client lanes object holds its client session"),
-		!clientLanes->isServer() && clientLanes->isDetached() && clientLanes->client() != nullptr);
+	ognet::EndpointConfig serverConfig;
+	serverConfig.role = ognet::Role::Server;
+	ognet::EndpointConfig clientConfig;
+	clientConfig.role = ognet::Role::Client;
+	FDroppingEndpoint serverEndpoint(serverConfig);
+	FDroppingEndpoint clientEndpoint(clientConfig);
+	TUniquePtr<Lanes> serverLanes = MakeUnique<Lanes>(nullptr, true);
+	TUniquePtr<Lanes> clientLanes = MakeUnique<Lanes>(nullptr, false);
+	serverLanes->beforeStart(serverEndpoint.Endpoint);
+	serverLanes->afterStart();
+	clientLanes->beforeStart(clientEndpoint.Endpoint);
+	clientLanes->afterStart();
+	TestTrue(TEXT("a server lanes object over a dropping endpoint is the server's"), serverLanes->isServer());
+	TestTrue(TEXT("a server lanes object holds the transport only"), serverLanes->client() == nullptr);
+	TestTrue(TEXT("a client lanes object over a dropping endpoint holds its client session"),
+		!clientLanes->isServer() && clientLanes->client() != nullptr);
 	TestTrue(TEXT("the server's transport is sized for the endpoint's connections"),
 		serverLanes->transport().config().maxConnections == ognet::EndpointConfig{}.maxConnections);
 	TestTrue(TEXT("the client's transport is sized for its one server"), clientLanes->transport().config().maxConnections == 1u);
+	TestFalse(TEXT("lanes the driver never asked for an I/O mode are not host-serviced"), serverLanes->hostServiced());
 	{
 		Lanes unstartedServer(nullptr, true);
 		Lanes unstartedClient(nullptr, false);
@@ -204,28 +266,24 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 			lines[3].Text.Contains(TEXT("[Warning][Roster.Refused] reason=Truncated p54probe")));
 	}
 
-	ServerHost serverHost(nullptr, serverLanes->endpoint(), nullptr);
+	LanesServerHost serverHost(nullptr, serverLanes->endpoint(), nullptr);
 	Server server(serverHost, serverLanes->transport(), TimeConfig{}, 0u);
-	serverLanes->bindServerSession([&server]() { server.dispatchFrame(); }, [&server]() { server.flushFrame(); });
-	const uint64 dropsBefore = serverLanes->endpoint().detachedDrops();
+	const uint64 dropsBefore = serverEndpoint.DropCount();
 	server.publishClock(120u);
 	serverLanes->afterDispatch();
 	serverLanes->onTickFlush();
-	TestEqual(TEXT("the server sent the staged clock once"), server.stats().clocksSent, uint64{1});
-	TestEqual(TEXT("the transport released the held clock at the flush"), serverLanes->transport().stats().releasedSends, uint64{1});
-	TestEqual(TEXT("nothing is left held after the flush"), serverLanes->transport().heldBytes(), size_t{0});
-	TestEqual(TEXT("the detached endpoint dropped and counted the clock"), serverLanes->endpoint().detachedDrops(), dropsBefore + 1u);
-	serverLanes->onTickFlush();
-	TestEqual(TEXT("an unchanged clock is not sent again"), serverLanes->endpoint().detachedDrops(), dropsBefore + 1u);
+	TestEqual(TEXT("a server lanes object's frame points send nothing: the in-frame server's dispatch and flush are retired"),
+		serverEndpoint.DropCount(), dropsBefore);
+	server.afterInlineBatch(120);
+	TestEqual(TEXT("the runner's batch hook sent the staged clock once"), server.stats().clocksSent, uint64{1});
+	TestEqual(TEXT("the clock reached the endpoint at once, in the batch hook"), serverEndpoint.DropCount(), dropsBefore + 1u);
+	server.afterInlineBatch(121);
+	TestEqual(TEXT("an unchanged clock is not sent again"), serverEndpoint.DropCount(), dropsBefore + 1u);
 	serverLanes->beforeStop();
-	TestFalse(TEXT("beforeStop unbinds the server session"), serverLanes->serverSessionBound());
-	server.publishClock(121u);
-	serverLanes->onTickFlush();
-	TestEqual(TEXT("an unbound server lanes object flushes nothing"), serverLanes->endpoint().detachedDrops(), dropsBefore + 1u);
 
 	clientLanes->afterDispatch();
 	clientLanes->onTickFlush();
-	TestEqual(TEXT("a detached client with nothing to send drops nothing"), clientLanes->endpoint().detachedDrops(), uint64{0});
+	TestEqual(TEXT("a client with nothing to send sends nothing"), clientEndpoint.DropCount(), uint64{0});
 	clientLanes->beforeStop();
 	return true;
 }

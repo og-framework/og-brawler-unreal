@@ -183,15 +183,15 @@ private:
 
 	static_assert(std::is_const_v<std::remove_reference_t<decltype(m_session)>>,
 		"BrawlerInputHistoryFeedUImpl reads production state through a CONST reference to the session only - the "
-		"manager, the storage, the reconciliation, the local and relayed input diagnostics, the tier consumer and the "
-		"effective input delay through the session's const reads - and mutates nothing but its own store. A mutable "
-		"reference here would be a write door from a diagnostic display into the session's mutable doors ("
-		"editServerClock, editReconciliation, the visualization query, the effective-delay publish) and, through "
-		"owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
+		"display snapshot (getDisplaySnapshot, findDisplayEntry, forEachDisplayVizState), the manager's role and time "
+		"config (getManager), isLocallyControlledOnThisPeer and the tier consumer (getReplicatedTierConsumer) - and "
+		"mutates nothing but its own store. A mutable reference here would be a write door from a diagnostic display "
+		"into the session's mutable doors (editServerClock, editVizQuery, publishClientEffectiveInputDelayTicks) and, "
+		"through owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
 		"og-ue-simulationcomponentandmanagersplit task 22, when the input-history feeds left AOGBrawlerSimulationManager, "
-		"on a const reference to the owner (its friend then); re-targeted to the session by task 24b; the tier consumer "
-		"and the effective delay are the session's own const reads since task 25 (read through its const owner() "
-		"before).");
+		"on a const reference to the owner (its friend then); re-targeted to the session by task 24b; its reads are the "
+		"display snapshot's since og-input-latency task P5-16, which also deleted the session's reconciliation door "
+		"(this list since og-session-runtime task 16).");
 
 	inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
 };
