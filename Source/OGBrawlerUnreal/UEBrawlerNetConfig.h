@@ -4,6 +4,7 @@
 
 #include "OGSimulation/SimulationManagerConcept.h"
 #include "OGSimNet/SimNetConnections.h"
+#include "OGSimNet/SimNetVersion.h"
 
 // ---------------------------------------------------------------------------
 // UEBrawlerNetConfig — OGBrawler's concrete NetConfig binding for Unreal.
@@ -40,6 +41,10 @@ struct UEBrawlerNetConfig
     // clock. They must move together — TimeConfigDefaultsTest pins the runtime
     // side, and NetConfigConceptTest pins this one against the same value.
     static constexpr int tickFrequencyHz = 60;
+
+    // og-sim-net's part of the build identity's OGWire token. The game reaches og-sim-net only
+    // through this file (og-session-runtime task 21; OGBuildIdentity-rationale.md section 8).
+    static constexpr simWireToken::Token kSimNetWireTokenFragment = ogsimnet::kWireTokenFragment;
 };
 
 // Build fails here if the concept or the handle regresses.

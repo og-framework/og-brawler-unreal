@@ -302,11 +302,20 @@ which the server classifies as `Different` (a `static_assert` row checks both di
 og-sim-net's `SimNetClock-rationale.md` §2.
 
 **The token.** `buildIdentityUImpl::wireToken()` is
-`c<correction>.r<ring>.b<bundle>.e<envelope>.ro<roster>.ck<clock>`, each version in decimal (`wireTokenFor`; a
-`static_assert` pins the format). It is built at compile time from the six constants, so the token cannot disagree
-with the compiled codecs, envelope, roster and clock. Its 32-character buffer holds the longest token,
-`c255.r255.b255.e255.ro255.ck255` (31 characters); a row of the same `static_assert` writes that token, so a buffer
-too small for it fails the build.
+`c<correction>.r<ring>.b<bundle>.e<envelope>.ro<roster>.ck<clock>`, each version in decimal without leading zeros.
+Since og-session-runtime task 21 each module exports its own fields as one compile-time fragment, and
+`OGBuildIdentityUImpl.cpp` joins them with og-simulation's `simWireToken::join` (`SimWireToken.h`): og-simulation's
+`simWireToken::kSimFragment`, `c15.r3.b3.e1` from its four versions, then og-sim-net's `ogsimnet::kWireTokenFragment`,
+`ro1.ck2` from its roster and clock versions (`OGSimNet-rationale.md` §7). The game has no field of its own. It reaches
+og-sim-net only through `UEBrawlerNetConfig.h`, its binding to og-sim-net, which carries that fragment as
+`UEBrawlerNetConfig::kSimNetWireTokenFragment`, so the build identity includes neither `SimNetClock.h` nor
+`SimNetRoster.h`. The token is still built at compile time from the six constants, so it cannot disagree with the
+compiled codecs, envelope, roster and clock. A `static_assert` beside it pins the whole token to
+`c15.r3.b3.e1.ro1.ck2`: a version bump in any module fails the game's build there until that string and this section
+are updated, and the module's own test pins its fragment the same way (`SimWireTokenTest.cpp` in og-simulation-tests,
+`SimNetVersionTest.cpp` in og-sim-net's tests). The format and the 32-character buffer are og-simulation's now: its
+test writes the longest token, `c255.r255.b255.e255.ro255.ck255` (31 characters), so a buffer too small for it fails
+the build; those rows were this header's own format `static_assert` before task 21.
 
 **The check, at login.** The client's `UOGBrawlerLocalPlayer::GetGameLoginOptions` returns the backend option
 of §7, then `?`, then `OGWire=<token>` (`buildIdentityUImpl::wireLoginOption`, key `kWireLoginOptionKey`;

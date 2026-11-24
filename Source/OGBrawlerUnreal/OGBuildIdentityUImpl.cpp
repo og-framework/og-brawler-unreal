@@ -17,12 +17,8 @@
 
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
-#include "OGSimNet/SimNetClock.h"
-#include "OGSimNet/SimNetRoster.h"
-#include "OGSimulation/CorrectionStateBufferCodec.h"
-#include "OGSimulation/InputRedundancyBundleCodec.h"
-#include "OGSimulation/Network/SimEnvelope.h"
-#include "OGSimulation/RelayedInputRingCodec.h"
+#include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
+#include "OGSimulation/Network/SimWireToken.h"
 
 DEFINE_LOG_CATEGORY(LogOGBuildIdentity);
 
@@ -144,10 +140,13 @@ FString backendRefusalText(buildIdentityUImpl::BackendLoginVerdict verdict, cons
 	return FString();
 }
 
-constexpr buildIdentityUImpl::WireToken kWireToken = buildIdentityUImpl::wireTokenFor(
-	correctionStateBuffer::kWireFormatVersion, relayedInputRing::kWireFormatVersion,
-	inputRedundancyBundle::kWireFormatVersion, kSimEnvelopeVersion, ogsimnet::kRosterWireVersion,
-	ogsimnet::kClockWireVersion);
+constexpr simWireToken::Token kWireToken =
+	simWireToken::join({ simWireToken::kSimFragment, UEBrawlerNetConfig::kSimNetWireTokenFragment });
+
+static_assert(kWireToken.view() == "c15.r3.b3.e1.ro1.ck2",
+	"Was the wire token built here from the six version constants (og-sim-metres-yup task 15, og-input-latency P5-6, "
+	"og-time-dilation task 2); og-session-runtime task 21 joins og-simulation's and og-sim-net's fragments instead. "
+	"A version bump changes this string: update it with OGBuildIdentity-rationale.md section 8.");
 
 #if !UE_BUILD_SHIPPING
 std::optional<FString> wireTokenOverride()
