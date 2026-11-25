@@ -202,7 +202,7 @@ Separately, the component's `TickComponent` draws its debug visualization from t
 1. `UOGBrawlerSimulatableComponent::EndPlay` calls `AOGBrawlerSimulationManager::unregisterFromNewFramework` (skipped if
    `instanceFor` already returns null), which calls `UESimulationSession::unregisterFromNewFramework`. The core
    unregister is a request to the role's owner thread: a client queues it for its next step's drain
-   (`requestQueuedUnregister_GameThread`), the authority posts it to its runner, which removes the character from
+   (og-sim-session's `SessionLifecycle::requestUnregister` since og-session-runtime task 29), the authority posts it to its runner, which removes the character from
    og-sim-net's server and releases its bodies (`requestRunnerUnregister_GameThread`). On the game thread the session then
    runs `m_game.onUnregistered` (the roster and the input-history feed forget the id), the latency forget and the
    backend's host-side release. The call does nothing for an id the session already unregistered (a client's roster

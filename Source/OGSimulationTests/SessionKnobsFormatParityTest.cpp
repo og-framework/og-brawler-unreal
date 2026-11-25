@@ -12,6 +12,7 @@
 #include "catch_amalgamated.hpp"
 #include "OGSimSession/SessionClock.h"
 #include "OGSimSession/SessionKnobs.h"
+#include "OGSimSession/SessionLifecycle.h"
 #include "OGSimSession/SessionNetHooks.h"
 
 namespace sessionKnobsFormatParityTest
@@ -340,6 +341,48 @@ TEST_CASE("SessionNetHooksFormatParity.FStringPrintfEqualsSnprintfForTheReleaseL
 
 	CHECK(tally.formats == 1u);
 	CHECK(tally.compared == 45u);
+}
+
+TEST_CASE("SessionLifecycleFormatParity.FStringPrintfEqualsSnprintfForBothLines", "[Session][SessionLifecycle]")
+{
+	using namespace sessionKnobsFormatParityTest;
+	namespace lifecycleLines = ogsession::sessionLifecycleLines;
+	uint32 compared = 0u;
+	const std::vector<uint32> ids = { 0u, 1u, 7u, 255u, 256u, 65535u, std::numeric_limits<uint32>::max() };
+
+	// The old formats are transcribed from OGSimulation 6d424ec's OGSimSession/SessionLifecycle.h (og-session-runtime task 29
+	// (a), the verbatim copy of UESimulationSession.h at b836bc6): :115-118 UE_LOG(LogOGMgmt, Error, ...) with its two
+	// TEXT reasons, and :126 UE_LOG(LogOGMgmt, Log, ...) with isAuthority 0. The new lines go through RouteOGLevelLine: an
+	// [Error] token for the first, none for the second (the tryRegister: route's Log).
+	for (const uint32 id : ids)
+	{
+		for (const bool rosterRemoved : { true, false })
+		{
+			const FString old = FString::Printf(
+				TEXT("tryRegister: id=%u: the og-sim-net client's queued registration did not hold (%s); the character stays "
+					 "unsimulated"),
+				id, rosterRemoved ? TEXT("the roster removed it") : TEXT("its [SimNet.Lifecycle] line names why"));
+			char line[lifecycleLines::kLineBytes];
+			std::snprintf(line, sizeof(line), lifecycleLines::kQueuedRegistrationDidNotHold, static_cast<unsigned>(id),
+				rosterRemoved ? lifecycleLines::kRosterRemovedIt : lifecycleLines::kLifecycleLineNamesWhy);
+			const std::string routed(line);
+			INFO("old: " << utf8(old));
+			INFO("new: " << routed);
+			REQUIRE(routed.rfind("[Error]", 0) == 0);
+			CHECK(routed.substr(7) == utf8(old));
+			++compared;
+		}
+		const FString old = FString::Printf(TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, 0);
+		char line[lifecycleLines::kLineBytes];
+		std::snprintf(line, sizeof(line), lifecycleLines::kRegistered, static_cast<unsigned>(id), 0);
+		const std::string routed(line);
+		INFO("old: " << utf8(old));
+		INFO("new: " << routed);
+		CHECK(routed.rfind("[", 0) != 0);
+		CHECK(routed == utf8(old));
+		++compared;
+	}
+	CHECK(compared == 21u);
 }
 
 #endif
