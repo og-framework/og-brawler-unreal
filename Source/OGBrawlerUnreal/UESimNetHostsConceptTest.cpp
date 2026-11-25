@@ -253,10 +253,10 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(TEXT("[SimNet.Host] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] reason=Truncated p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
-	rttHost.log("[Warning][SimNet.Window] role=client p54probe");
-	rttHost.log("[Warning][SimNet.Host] role=server p54probe");
-	rttHost.log("[Warning][Roster.Refused] role=server p54probe");
-	rttHost.log("[Roster.Refused] reason=Truncated p54probe");
+	ueSimNetHost::routeLine("[Warning][SimNet.Window] role=client p54probe");
+	ueSimNetHost::routeLine("[Warning][SimNet.Host] role=server p54probe");
+	ueSimNetHost::routeLine("[Warning][Roster.Refused] role=server p54probe");
+	ueSimNetHost::routeLine("[Roster.Refused] reason=Truncated p54probe");
 	GLog->Flush();
 	GLog->RemoveOutputDevice(&capture);
 	LogOGNet.SetVerbosity(configuredNetVerbosity);
