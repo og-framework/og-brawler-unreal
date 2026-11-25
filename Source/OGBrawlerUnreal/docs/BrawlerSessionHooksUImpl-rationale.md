@@ -255,7 +255,7 @@ and fed the next step (og-input-latency task P5-17's finding F2: H6c one tick, N
 
 **The `static_assert`.** The step hooks call the hook under `if constexpr (TickDriverReceiveGame<...>)`, so a binding that
 lost it would compile and a client would never drain once its session binds (the lanes' game-thread drain stops then,
-`UESimNetLanes-guards.md` G-02, OGSimulationUnreal). The `static_assert` after the alias, beside `sampleInput`'s, makes that a compile error.
+og-sim-net's `SimNetLink-guards.md` G-02). The `static_assert` after the alias, beside `sampleInput`'s, makes that a compile error.
 
 ## §10 The authority loop's hooks (og-input-latency task P5-19)
 

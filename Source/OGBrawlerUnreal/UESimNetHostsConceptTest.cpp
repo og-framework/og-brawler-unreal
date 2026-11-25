@@ -19,7 +19,7 @@ using Traits = BrawlerSessionTraitsUImpl;
 using Lanes = UESimNetLanes<Traits>;
 using ServerHost = UESimNetServerHost<Traits>;
 using LanesServerHost = Lanes::ServerHost;
-using ClientHost = Lanes::ClientHost;
+using ClientHost = Lanes::Link::ClientHost;
 using Server = ogsimnet::SimNetServer<Traits::Composition, LanesServerHost, Lanes::Transport>;
 
 constexpr bool routesToNetAtLog(const TCHAR* body)
@@ -36,7 +36,12 @@ static_assert(!ogsimnet::SimNetServerHost<ueSimNetHostsConceptTest::ServerHost>,
 	"UESimNetServerHost<BrawlerSessionTraitsUImpl> keeps no latency stamps of its own: the authority runner's lanes host "
 	"stamps through the diagnostics' mailbox. Was the in-frame server's game-thread stamps (og-session-runtime task 14)");
 static_assert(ogsimnet::SimNetClientHost<ueSimNetHostsConceptTest::ClientHost>,
-	"UESimNetClientHost<BrawlerSessionTraitsUImpl> must satisfy og-sim-net's SimNetClientHost");
+	"UESimNetLanes<BrawlerSessionTraitsUImpl>::Link::ClientHost, og-sim-net's link client host the lanes' client session runs "
+	"on, must satisfy og-sim-net's SimNetClientHost");
+static_assert(ogsimnet::SimNetLinkServices<UESimNetLinkServices>
+		&& ogsimnet::SimNetLinkSession<UESimNetLinkSession<ueSimNetHostsConceptTest::Traits>>,
+	"UESimNetLinkServices is the link's engine services, and UESimNetLinkSession<BrawlerSessionTraitsUImpl> the hooks the "
+	"lanes attach for the world's session (og-session-runtime task 28)");
 static_assert(ogsimnet::SimNetDeliveryHook<ueSimNetHostsConceptTest::LanesServerHost>
 		&& ogsimnet::SimNetDeliveryHook<ueSimNetHostsConceptTest::ClientHost>
 		&& ogsimnet::SimNetDeliveryHookWellFormed<ueSimNetHostsConceptTest::LanesServerHost>

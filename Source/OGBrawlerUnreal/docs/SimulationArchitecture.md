@@ -226,8 +226,8 @@ delay floor, the connection tier and the roster) rides og-net's sim lanes, not U
 * **The lanes.** The og-net driver, `UOGNetDriver` (OGNetUnreal), owns one lanes object per driver, made by the game's
   factory `makeBrawlerSimNetLanes` (`BrawlerSimNetLanesUImpl.cpp`), which the game module's `StartupModule` registers with
   `UOGNetDriver::SetSimLanesFactory`. The object is `UESimNetLanes<BrawlerSessionTraitsUImpl>` (OGSimulationUnreal): it
-  holds og-sim-net's transport and, on a client, og-sim-net's client session `SimNetClient` with its host
-  `UESimNetClientHost` (`UESimNetLanes-rationale.md`).
+  holds og-sim-net's `SimNetLink`: the transport and, on a client, og-sim-net's client session `SimNetClient` with its host
+  `SimNetLinkClientHost` (`UESimNetLanes-rationale.md`, `SimNetLink-rationale.md`).
 * **The session's hookup.** On the authority the session holds og-sim-net's server `SimNetServer` with its host
   `UESimNetServerHost` (`beginServerSimNet`), which its runner drains and flushes; a client's session binds itself to
   the lanes' client session (`beginClientSimNet`), which its steps drain. The hosts are og-sim-net's view of Unreal: the round
@@ -301,7 +301,7 @@ Rationale and guards documents sit in the `docs` folder beside each module's sou
 | `BrawlerSessionHooksUImpl` | the session's brawler-side hooks: the input sample, gravity, the slot request | brawler, BUSL | `BrawlerSessionHooksUImpl-rationale.md` · `BrawlerSessionHooksUImpl-guards.md` | `BrawlerSessionHooksUImpl.h` |
 | `UELatencyBudgetDiagnostics` | latency stamps and reports | plugin, MPL | `UELatencyBudgetDiagnostics-rationale.md` · `UELatencyBudgetDiagnostics-guards.md` | `UELatencyBudgetDiagnostics.h` |
 | `UESimNetLanes` | the og-net driver's sim lanes: og-sim-net's transport, a client's session | plugin, MPL | `UESimNetLanes-rationale.md` · `UESimNetLanes-guards.md` | `UESimNetLanes.h` |
-| `UESimNetServerHost`, `UESimNetClientHost` | og-sim-net's hosts on Unreal: round trip, stamps, log | plugin, MPL | `UESimNetHost-rationale.md` · `UESimNetHost-guards.md` | `UESimNetHost.h` |
+| `UESimNetServerHost`, `UESimNetLinkServices`, `UESimNetLinkSession` | og-sim-net's server host, and the link's services and session hooks, on Unreal: round trip, stamps, log | plugin, MPL | `UESimNetHost-rationale.md` · `UESimNetHost-guards.md` | `UESimNetHost.h` |
 
 Until og-input-latency tasks P5-8 and P5-9 the table also listed `USimulatableNetSyncComponent` (the replicated wire
 surface, `SimulatableNetSyncComponent.h`, with `SimulatableNetSyncComponent-rationale.md` and

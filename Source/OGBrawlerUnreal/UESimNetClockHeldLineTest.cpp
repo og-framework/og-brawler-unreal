@@ -112,12 +112,13 @@ bool FUESimNetClockHeldLineTest::RunTest(const FString& Parameters)
 				&& std::memcmp(oldBytes.Get(), line.data(), oldBytes.Length()) == 0);
 	}
 
+	UESimNetLinkServices services(nullptr);
 	FHeldLineCapture capture;
 	GLog->AddOutputDevice(&capture);
 	for (const FHeldValues& values : kHeldValues)
 	{
 		logTheOldWay(values);
-		ueSimNetLanes::routeClientLine(
+		ogsimnet::routeSimNetClientLine(services,
 			ogsimnet::formatClockSourceHeld(values.AuthorityTick, values.RttMs, values.HeldMs).data());
 	}
 	GLog->Flush();
@@ -137,6 +138,132 @@ bool FUESimNetClockHeldLineTest::RunTest(const FString& Parameters)
 			static_cast<int32>(oldLine.Verbosity));
 		TestEqual(TEXT("the old UE_LOG's level is Warning"), static_cast<int32>(oldLine.Verbosity),
 			static_cast<int32>(ELogVerbosity::Warning));
+	}
+	return true;
+}
+
+namespace ueSimNetDisconnectLineTest
+{
+class FDisconnectLineCapture final : public FOutputDevice
+{
+public:
+	virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+	{
+		if (FCString::Strstr(V, TEXT("role=client disconnect")) == nullptr)
+			return;
+		FScopeLock lock(&m_lock);
+		m_lines.Add(ueSimNetClockHeldLineTest::FCapturedLine{
+			FString(V), static_cast<ELogVerbosity::Type>(Verbosity & ELogVerbosity::VerbosityMask), Category});
+	}
+
+	virtual bool CanBeUsedOnAnyThread() const override { return true; }
+	virtual bool CanBeUsedOnMultipleThreads() const override { return true; }
+
+	TArray<ueSimNetClockHeldLineTest::FCapturedLine> TakeLines()
+	{
+		FScopeLock lock(&m_lock);
+		return MoveTemp(m_lines);
+	}
+
+private:
+	FCriticalSection m_lock;
+	TArray<ueSimNetClockHeldLineTest::FCapturedLine> m_lines;
+};
+
+struct FDisconnectValues
+{
+	uint32 Conn = 0u;
+	ogsimnet::RosterRefusal Reason = ogsimnet::RosterRefusal::None;
+};
+
+// The old line, transcribed from UESimNetLanes::actOnDisconnectRequest (UESimNetLanes.h:439-441 at OGSimulation eefc8a3).
+void logTheOldWay(const FDisconnectValues& values)
+{
+	UE_LOG(LogOGNet, Error,
+		TEXT("[SimNet.Host] role=client disconnect conn=%u reason=%s: the server's roster was refused, so this client leaves the server"),
+		static_cast<unsigned>(values.Conn), UTF8_TO_TCHAR(ogsimnet::rosterRefusalName(values.Reason)));
+}
+
+FString formatTheOldWay(const FDisconnectValues& values)
+{
+	return FString::Printf(
+		TEXT("[SimNet.Host] role=client disconnect conn=%u reason=%s: the server's roster was refused, so this client leaves the server"),
+		static_cast<unsigned>(values.Conn), UTF8_TO_TCHAR(ogsimnet::rosterRefusalName(values.Reason)));
+}
+
+std::array<char, ogsimnet::kSimNetDisconnectLineBytes> formatTheNewWay(const FDisconnectValues& values)
+{
+	std::array<char, ogsimnet::kSimNetDisconnectLineBytes> line{};
+	std::snprintf(line.data(), line.size(), ogsimnet::kSimNetDisconnectFormat, static_cast<unsigned>(values.Conn),
+		ogsimnet::rosterRefusalName(values.Reason));
+	return line;
+}
+
+constexpr std::array<FDisconnectValues, 5> kDisconnectValues = {{
+	{1u, ogsimnet::RosterRefusal::RevisionGap},
+	{0u, ogsimnet::RosterRefusal::Version},
+	{4294967295u, ogsimnet::RosterRefusal::DuplicateLocalIndex},
+	{7u, ogsimnet::RosterRefusal::Truncated},
+	{65536u, ogsimnet::RosterRefusal::NotAttached},
+}};
+
+class FErrorLinesTestBase : public FAutomationTestBase
+{
+public:
+	FErrorLinesTestBase(const FString& InName, const bool bInComplexTask) : FAutomationTestBase(InName, bInComplexTask) {}
+
+	virtual bool SuppressLogErrors() override { return true; }
+	virtual bool SuppressLogWarnings() override { return true; }
+};
+} // namespace ueSimNetDisconnectLineTest
+
+IMPLEMENT_CUSTOM_SIMPLE_AUTOMATION_TEST(
+	FUESimNetDisconnectLineTest,
+	ueSimNetDisconnectLineTest::FErrorLinesTestBase,
+	"OGBrawler.SimNet.DisconnectLine",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FUESimNetDisconnectLineTest::RunTest(const FString& Parameters)
+{
+	using namespace ueSimNetDisconnectLineTest;
+
+	constexpr size_t kErrorTokenBytes = sizeof("[Error]") - 1u;
+	for (const FDisconnectValues& values : kDisconnectValues)
+	{
+		const std::array<char, ogsimnet::kSimNetDisconnectLineBytes> line = formatTheNewWay(values);
+		const FString old = formatTheOldWay(values);
+		const FTCHARToUTF8 oldBytes(*old);
+		TestTrue(FString::Printf(TEXT("og-sim-net's line is [Error] then the old UE_LOG format's bytes: %s"), *old),
+			std::strncmp(line.data(), "[Error]", kErrorTokenBytes) == 0
+				&& oldBytes.Length() + static_cast<int32>(kErrorTokenBytes) == static_cast<int32>(std::strlen(line.data()))
+				&& std::memcmp(oldBytes.Get(), line.data() + kErrorTokenBytes, oldBytes.Length()) == 0);
+	}
+
+	UESimNetLinkServices services(nullptr);
+	FDisconnectLineCapture capture;
+	GLog->AddOutputDevice(&capture);
+	for (const FDisconnectValues& values : kDisconnectValues)
+	{
+		logTheOldWay(values);
+		services.logRouted(formatTheNewWay(values).data());
+	}
+	GLog->Flush();
+	GLog->RemoveOutputDevice(&capture);
+
+	const TArray<ueSimNetClockHeldLineTest::FCapturedLine> lines = capture.TakeLines();
+	TestEqual(TEXT("each value set logged the old way and through the link's logRouted"), lines.Num(),
+		2 * static_cast<int32>(kDisconnectValues.size()));
+	for (int32 index = 0; index + 1 < lines.Num(); index += 2)
+	{
+		const ueSimNetClockHeldLineTest::FCapturedLine& oldLine = lines[index];
+		const ueSimNetClockHeldLineTest::FCapturedLine& newLine = lines[index + 1];
+		TestEqual(TEXT("the routed line's text equals the old UE_LOG's"), newLine.Text, oldLine.Text);
+		TestTrue(TEXT("the routed line's category equals the old UE_LOG's (LogOGNet)"), newLine.Category == oldLine.Category);
+		TestTrue(TEXT("the old UE_LOG's category is LogOGNet"), oldLine.Category == LogOGNet.GetCategoryName());
+		TestEqual(TEXT("the routed line's level equals the old UE_LOG's"), static_cast<int32>(newLine.Verbosity),
+			static_cast<int32>(oldLine.Verbosity));
+		TestEqual(TEXT("the old UE_LOG's level is Error"), static_cast<int32>(oldLine.Verbosity),
+			static_cast<int32>(ELogVerbosity::Error));
 	}
 	return true;
 }
