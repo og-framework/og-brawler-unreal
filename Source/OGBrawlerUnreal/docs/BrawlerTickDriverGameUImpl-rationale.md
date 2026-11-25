@@ -250,9 +250,10 @@ session's runner thread (`UESimulationSession-rationale.md` §19, OGSimulationUn
 
 ## §11 The display publish (og-input-latency task P5-36)
 
-**What `publishForDisplay()` does.** It forwards to the session's `publishDisplaySnapshot_Step()`, which fills the client's
-display snapshot from the storage, the input resolution and the reconciliation and publishes it to the game thread
-(`UESimulationSession-rationale.md` §17.2, OGSimulationUnreal). og-simulation calls it once after each client batch, on the
+**What `publishForDisplay()` does.** It forwards to the session's `publishDisplaySnapshot_Step()`, which forwards to
+og-sim-session's `SessionDisplay::publishAfterBatch` (since og-session-runtime task 25); that fills the client's display
+snapshot from the storage, the input resolution and the reconciliation and publishes it to the game thread
+(`UESimulationSession-rationale.md` §17.2, OGSimulationUnreal; `SessionDisplay-rationale.md` §3, og-sim-session). og-simulation calls it once after each client batch, on the
 thread that ran the batch, where no step runs (`TickDriverConcepts-rationale.md` §11, OGSimulation). Until P5-36 the session
 filled the snapshot inside `onPostPhysicsStep`, on the game thread, while the frame's own batch could still be stepping on a
 worker: under the frame-locked client's `EarlierFrames`, and under the immediate client's `ThisFramesSingleStep` in a frame
