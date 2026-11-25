@@ -22,7 +22,8 @@ public class OGSimulationTests : TestModuleRules
 		FPSemantics = FPSemanticsMode.Precise;
 		PrivatePCHHeaderFile = EngineDirectory + "/Source/Runtime/Core/Public/CoreSharedPCH.h";
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGSimulationJolt", "OGNet", "OGSimulationNet", "OGSimulationSession" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGTickDriver", "OGSimulationJolt", "OGNet",
+			"OGSimulationNet", "OGSimulationSession" });
 		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "..", "..", "Plugins", "OGSimulation", "Source"));
 
 		// Epic's bundled Catch2 v3.4.0 header (WITH_LOW_LEVEL_TESTS auto-defined by UBT for TestTargetRules)

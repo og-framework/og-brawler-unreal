@@ -3,5 +3,5 @@ tools/lint/README.md "Module tier lint"
 >>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/SimNetIdle.h
 #pragma once
 #include "OGSimulation/TickDriverGameTypes.h"
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"
 #include "OGNet/NetTypes.h"

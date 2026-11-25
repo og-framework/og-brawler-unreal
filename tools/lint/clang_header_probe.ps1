@@ -39,6 +39,12 @@
     (-SessionRoot) as well as og-sim-net's and og-net's, so an og-sim-net header
     that includes an og-sim-session header fails here too.
 
+    og-session-runtime task 27b gave og-tickdriver its own root
+    (<TickDriverRoot>/OGTickDriver). Its TUs and og-sim-session's get
+    -I<TickDriverRoot>; og-simulation's and og-sim-net's do not, so an
+    og-simulation or og-sim-net header that includes a tick-driver header fails
+    here too.
+
     ------------------------------------------------------------------------
     WHAT IT RUNS
     ------------------------------------------------------------------------
@@ -49,15 +55,16 @@
         clang-cl /nologo /std:c++20 /DOG_STANDALONE_BUILD /Zs
                  /clang:-fno-delayed-template-parsing
                  [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm
-                 [-I<SimNetRoot> -I<NetRoot>] [-I<SessionRoot>]  <tu>.cpp
+                 [-I<TickDriverRoot>] [-I<SimNetRoot> -I<NetRoot>] [-I<SessionRoot>]  <tu>.cpp
 
     libc++ (the NDK's clang++):
         clang++ --target=<AndroidTarget> -std=c++20 -stdlib=libc++ -fsyntax-only
                 -DOG_STANDALONE_BUILD
                 [-I<IncludeOverlay>] -I<SimRoot> -I<SimRoot>/glm
-                [-I<SimNetRoot> -I<NetRoot>] [-I<SessionRoot>]  <tu>.cpp
+                [-I<TickDriverRoot>] [-I<SimNetRoot> -I<NetRoot>] [-I<SessionRoot>]  <tu>.cpp
 
-    The bracketed -I<SimNetRoot> -I<NetRoot> are passed for og-sim-net and
+    The bracketed -I<TickDriverRoot> is passed for og-tickdriver and
+    og-sim-session headers, -I<SimNetRoot> -I<NetRoot> for og-sim-net and
     og-sim-session headers, -I<SessionRoot> for og-sim-session headers only.
 
     `/Zs` and `-fsyntax-only` are syntax-only modes: templates are instantiated
@@ -105,9 +112,10 @@
     -MaxErrorLines `error:` / `note:` lines, indented. Then, per arm that ran,
         [clang-probe] headers=N simnet=M session=S failed=F clang=<version> elapsed=S s
         [clang-probe] libc++ headers=N simnet=M session=S failed=F known=K clang=<version> ndk=<rev> target=<t> elapsed=S s
-    (N counts every header, M the og-sim-net ones among them, S the og-sim-session
-    ones; elapsed is the whole probe's). A seen-failing run on an old copy of a header:
-    put the copy at <dir>/OGSimulation/<Header>.h (an og-sim-net header at
+    (N counts every header, og-tickdriver's included, M the og-sim-net ones among
+    them, S the og-sim-session ones; elapsed is the whole probe's). A seen-failing run
+    on an old copy of a header: put the copy at <dir>/OGSimulation/<Header>.h (an
+    og-tickdriver header at <dir>/OGTickDriver/<Header>.h, an og-sim-net header at
     <dir>/OGSimNet/<Header>.h, an og-sim-session header at
     <dir>/OGSimSession/<Header>.h) and pass `-IncludeOverlay <dir>`;
     the overlay is searched first by both arms, so every TU that includes that
@@ -120,6 +128,13 @@
     og-simulation's include root (the directory that holds `OGSimulation/` and
     `glm/`), relative to -RepoRoot or absolute. Default:
     Plugins/OGSimulation/Source/OGSimulation/og-simulation.
+
+.PARAMETER TickDriverRoot
+    og-tickdriver's include root (the directory that holds `OGTickDriver/`),
+    relative to -RepoRoot or absolute. Default:
+    Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver. '' leaves
+    og-tickdriver out: no og-tickdriver header is probed by default, and one named
+    in -Headers is an exit 2.
 
 .PARAMETER SimNetRoot
     og-sim-net's include root (the directory that holds `OGSimNet/`), relative to
@@ -188,6 +203,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path,
     [string]$SimRoot = 'Plugins/OGSimulation/Source/OGSimulation/og-simulation',
+    [string]$TickDriverRoot = 'Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver',
     [string]$SimNetRoot = 'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net',
     [string]$NetRoot = 'Plugins/OGSimulation/Source/OGNet/og-net',
     [string]$SessionRoot = 'Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session',
@@ -223,6 +239,15 @@ $simDir = if ([IO.Path]::IsPathRooted($SimRoot)) { $SimRoot } else { Join-Path $
 if (-not (Test-Path -LiteralPath (Join-Path $simDir 'OGSimulation') -PathType Container)) { Exit-Usage "SimRoot has no OGSimulation/ directory: $simDir" }
 $simDir = (Resolve-Path -LiteralPath $simDir).Path
 
+$tickDriverDir = ''
+if ($TickDriverRoot -ne '') {
+    $tickDriverDir = if ([IO.Path]::IsPathRooted($TickDriverRoot)) { $TickDriverRoot } else { Join-Path $RepoRoot $TickDriverRoot }
+    if (-not (Test-Path -LiteralPath (Join-Path $tickDriverDir 'OGTickDriver') -PathType Container)) {
+        Exit-Usage "TickDriverRoot has no OGTickDriver/ directory: $tickDriverDir"
+    }
+    $tickDriverDir = (Resolve-Path -LiteralPath $tickDriverDir).Path
+}
+
 $simNetDir = ''
 $netDir = ''
 if ($SimNetRoot -ne '') {
@@ -249,6 +274,11 @@ function Test-SimNetHeader {
     return $Header.StartsWith('OGSimNet/')
 }
 
+function Test-TickDriverHeader {
+    param([string]$Header)
+    return $Header.StartsWith('OGTickDriver/')
+}
+
 function Test-SessionHeader {
     param([string]$Header)
     return $Header.StartsWith('OGSimSession/')
@@ -264,7 +294,10 @@ function Resolve-HeaderPath {
         if ($sessionDir -eq '') { return '' }
         return (Join-Path $sessionDir $Header)
     }
-    if ($Header.StartsWith('OGTickDriver/')) { return (Join-Path $simDir 'og-tickdriver' $Header) }
+    if (Test-TickDriverHeader $Header) {
+        if ($tickDriverDir -eq '') { return '' }
+        return (Join-Path $tickDriverDir $Header)
+    }
     return (Join-Path $simDir $Header)
 }
 
@@ -277,8 +310,10 @@ if ($IncludeOverlay -ne '') {
 if ($Headers.Count -eq 0) {
     $Headers = @(Get-ChildItem -LiteralPath (Join-Path $simDir 'OGSimulation') -Recurse -File -Filter '*.h' |
         ForEach-Object { [IO.Path]::GetRelativePath($simDir, $_.FullName).Replace('\', '/') } | Sort-Object)
-    $Headers += @(Get-ChildItem -LiteralPath (Join-Path $simDir 'og-tickdriver' 'OGTickDriver') -Recurse -File -Filter '*.h' |
-        ForEach-Object { [IO.Path]::GetRelativePath((Join-Path $simDir 'og-tickdriver'), $_.FullName).Replace('\', '/') } | Sort-Object)
+    if ($tickDriverDir -ne '') {
+        $Headers += @(Get-ChildItem -LiteralPath (Join-Path $tickDriverDir 'OGTickDriver') -Recurse -File -Filter '*.h' |
+            ForEach-Object { [IO.Path]::GetRelativePath($tickDriverDir, $_.FullName).Replace('\', '/') } | Sort-Object)
+    }
     if ($simNetDir -ne '') {
         $Headers += @(Get-ChildItem -LiteralPath (Join-Path $simNetDir 'OGSimNet') -Recurse -File -Filter '*.h' |
             ForEach-Object { [IO.Path]::GetRelativePath($simNetDir, $_.FullName).Replace('\', '/') } | Sort-Object)
@@ -291,11 +326,13 @@ if ($Headers.Count -eq 0) {
 if ($Headers.Count -eq 0) { Exit-Usage "no headers to probe under $simDir" }
 foreach ($h in $Headers) {
     $path = Resolve-HeaderPath $h
-    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "header not found under SimRoot, SimNetRoot or SessionRoot: $h" }
+    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        Exit-Usage "header not found under SimRoot, TickDriverRoot, SimNetRoot or SessionRoot: $h"
+    }
 }
 foreach ($k in $LibcxxKnownFailures.Keys) {
     $path = Resolve-HeaderPath $k
-    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "LibcxxKnownFailures header not found under SimRoot, SimNetRoot or SessionRoot: $k" }
+    if ($path -eq '' -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { Exit-Usage "LibcxxKnownFailures header not found under SimRoot, TickDriverRoot, SimNetRoot or SessionRoot: $k" }
 }
 
 $compilers = [ordered]@{}
@@ -350,10 +387,11 @@ if ($compilers.Count -eq 0) { exit 0 }
 
 $includes = @()
 if ($overlayDir -ne '') { $includes += "-I$overlayDir" }
-$includes += @("-I$simDir", ("-I" + (Join-Path $simDir 'glm')), ("-I" + (Join-Path $simDir 'og-tickdriver')))
+$includes += @("-I$simDir", ("-I" + (Join-Path $simDir 'glm')))
+$tickDriverIncludes = @(if ($tickDriverDir -ne '') { "-I$tickDriverDir" })
 $simNetIncludes = if ($simNetDir -ne '') { @("-I$simNetDir", "-I$netDir") } else { @() }
 $simNetCount = @($Headers | Where-Object { Test-SimNetHeader $_ }).Count
-$sessionIncludes = if ($sessionDir -ne '') { @($simNetIncludes + "-I$sessionDir") } else { @() }
+$sessionIncludes = if ($sessionDir -ne '') { @($tickDriverIncludes + $simNetIncludes + "-I$sessionDir") } else { @() }
 $sessionCount = @($Headers | Where-Object { Test-SessionHeader $_ }).Count
 $versions = @{}
 foreach ($arm in $compilers.Keys) {
@@ -374,7 +412,8 @@ try {
     $tus = for ($i = 0; $i -lt $Headers.Count; $i++) {
         $tu = Join-Path $scratch ("tu{0:d4}.cpp" -f $i)
         [IO.File]::WriteAllText($tu, "#include `"$($Headers[$i])`"`n")
-        $extra = if (Test-SimNetHeader $Headers[$i]) { $simNetIncludes } elseif (Test-SessionHeader $Headers[$i]) { $sessionIncludes } else { @() }
+        $extra = if (Test-SimNetHeader $Headers[$i]) { $simNetIncludes } elseif (Test-SessionHeader $Headers[$i]) { $sessionIncludes }
+                 elseif (Test-TickDriverHeader $Headers[$i]) { $tickDriverIncludes } else { @() }
         [pscustomobject]@{ Header = $Headers[$i]; Tu = $tu; Includes = @($includes + $extra) }
     }
     $jobs = foreach ($arm in $compilers.Keys) {

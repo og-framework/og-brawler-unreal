@@ -3,4 +3,4 @@ tools/lint/README.md "Module tier lint"
 >>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/SimulationLogRoutes.h
 #pragma once
 #include "OGSimulation/HostLog.h"
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"

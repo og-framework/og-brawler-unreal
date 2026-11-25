@@ -577,7 +577,7 @@ reported `absent`, not an error.
 |---|---|---|---|
 | `OGNet` | 0 | yes | `**/Source/OGNet`, `**/og-net/OGNet` |
 | `OGSimulation` | 0 | yes | `**/Source/OGSimulation`, `**/og-simulation/OGSimulation` |
-| `OGTickDriver` | 1 | yes | `**/og-tickdriver/OGTickDriver`, and `**/og-simulation/OGSimulation` by file name (below) |
+| `OGTickDriver` | 1 | yes | `**/Source/OGTickDriver`, `**/og-tickdriver/OGTickDriver` |
 | `OGSimulationJolt`, `OGSimNet`, `OGBrawler` | 2 | yes | their module folder and their library folder |
 | `OGSimSession` | 3 | yes | `**/Source/OGSimulationSession`, `**/og-sim-session/OGSimSession` |
 | `OGNetUnreal`, `DVolume`, `ProceduralMountainSide` | 4 | no | their module folder |
@@ -587,11 +587,10 @@ reported `absent`, not an error.
 
 - **A file belongs to the node with the deepest matching root**; at equal depth a node with `Names` wins. Two nodes
   claiming one file at the same depth is a misconfiguration (exit 2).
-- **og-tickdriver is a file set inside og-simulation**, so its node shares og-simulation's root and picks files by
-  `Names` (case-sensitive base-name patterns: `ThreadChainExecutor.h`, `TickDriver*`, `SimulationTickDriver*`,
-  `SimulationTickBackend*`, `SimulationStepDriver*`, `SimulationScheduler*`, `TickSlotTable*`), minus `ExceptNames`:
-  `TickDriverGameTypes.h` and `SimulationScheduler.h` are og-sim's vocabulary (a leaf that the vocabulary types take
-  by reference). The two share `Group = 'og-simulation'`, which R1 reads as one library.
+- **og-tickdriver is its own folder inside the og-simulation repository**, `og-simulation/og-tickdriver/OGTickDriver/`
+  (og-session-runtime task 27b; before it, a file set in `og-simulation/OGSimulation/` picked by `Names`). A node may
+  still pick files by `Names` (case-sensitive base-name patterns) minus `ExceptNames`; no node does today.
+  og-simulation and og-tickdriver share `Group = 'og-simulation'`, which R1 reads as one library.
 - `ModuleBoilerplate` names, per engine-free node, the UE module `.cpp` files A2 lets include `Modules/ModuleManager.h`.
 - `Unlinted`: source roots outside the graph on purpose, each with its reason (the test modules, the glm wrapper).
 - `SourceParents` are the folders whose children A3 checks; `ExcludeSegments` are directory names never walked
@@ -619,11 +618,12 @@ connection, lane and budget types are borrowed by og-sim-net only.
 | `OGSimNet` | `OGTickDriver`, `OGSimulationJolt`, `OGBrawler` | it uses the core's port and og-sim's vocabulary headers, not the tick driver |
 | `OGBrawler` | `OGNet`, `OGTickDriver`, `OGSimulationJolt`, `OGSimNet` | the game's sims use the core only |
 | `OGSimSession` | `OGNet`, `OGSimulationJolt`, `OGBrawler`, every engine node | templated on the engine traits (no og-sim-jolt) and on the game's traits; og-net only through og-sim-net |
+| `OGBrawlerUnreal` | `OGTickDriver` | og-sim-session's `SessionTickGame` is the tick driver's game (og-session-runtime task 26); the game module only links the OGTickDriver module, for the session templates it instantiates |
 
 The session's engine entries repeat what A1 already enforces (every engine node has a higher tier); they are listed so
 the row states the rule whole. Target-state rules for the engine adapters (OGSimulationUnreal stops including og-net,
-OGBrawlerUnreal stops including og-sim-net and og-tickdriver) are not in the table yet: today's tree still has those
-includes, and the task that removes them adds the row.
+OGBrawlerUnreal stops including og-sim-net) are not in the table yet: today's tree still has those includes, and the
+task that removes them adds the row.
 
 ## How an include is resolved
 

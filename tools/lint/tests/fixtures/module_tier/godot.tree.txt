@@ -6,12 +6,12 @@ tools/lint/README.md "Module tier lint"
 >>> thirdparty/og-simulation/OGSimulation/SimulationScheduler.h
 #pragma once
 #include "OGSimulation/OGAssert.h"
->>> thirdparty/og-simulation/OGSimulation/TickDriverConcepts.h
+>>> thirdparty/og-simulation/og-tickdriver/OGTickDriver/TickDriverConcepts.h
 #pragma once
 #include "OGSimulation/SimulationScheduler.h"
->>> thirdparty/og-simulation/OGSimulation/SimulationTickDriver.h
+>>> thirdparty/og-simulation/og-tickdriver/OGTickDriver/SimulationTickDriver.h
 #pragma once
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"
 >>> thirdparty/og-net/OGNet/NetTypes.h
 #pragma once
 #include <cstdint>
@@ -28,7 +28,7 @@ tools/lint/README.md "Module tier lint"
 >>> og-sim-session/OGSimSession/SessionTypes.h
 #pragma once
 #include "OGSimNet/SimNetIdle.h"
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"
 >>> og-sim-session/OGSimSession/SessionRuntime.h
 #pragma once
 #include "OGSimSession/SessionTypes.h"

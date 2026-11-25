@@ -50,19 +50,22 @@ inline const char* kHostLogSample = "#include \"CoreMinimal.h\"";
 #include "OGSimulation/PCTimeManagement/ClockDilationController.h"
 #include "OGSimulation/SimulationLogRoutes.h"
 #include "OGTypes.h"
->>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/TickDriverConcepts.h
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/TickDriverConcepts.h
 #pragma once
 #include "OGSimulation/TickDriverGameTypes.h"
->>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/TickDriverLog.h
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/TickDriverLog.h
 #pragma once
 #include "OGSimulation/HostLog.h"
->>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/SimulationTickDriver.h
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/SimulationTickDriver.h
 #pragma once
-#include "OGSimulation/TickDriverConcepts.h"
-#include "OGSimulation/TickDriverLog.h"
+#include "OGTickDriver/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverLog.h"
 #include "OGSimulation/SimulationManager.h"
 >>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/glm/glm.hpp
 #include "CoreMinimal.h"
+>>> Plugins/OGSimulation/Source/OGTickDriver/OGTickDriverModule.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGTickDriver)
 >>> Plugins/OGSimulation/Source/OGSimulationNet/OGSimulationNetModule.cpp
 #include "Modules/ModuleManager.h"
 IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationNet)
@@ -77,7 +80,7 @@ IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationNet)
 #pragma once
 #include "OGSimNet/SimNetClient.h"
 >>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/tests/SimNetIdleTest.cpp
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"
 #include "OGSimNet/SimNetIdle.h"
 >>> Plugins/OGSimulation/Source/OGSimulationSession/OGSimulationSessionModule.cpp
 #include "Modules/ModuleManager.h"
@@ -85,7 +88,7 @@ IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationSession)
 >>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSimSession/SessionTypes.h
 #pragma once
 #include "OGSimNet/SimNetIdle.h"
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"
 >>> Plugins/OGSimulation/Source/OGSimulationUnreal/OGSimulationUnreal.cpp
 #include "CoreMinimal.h"
 #include "UESimulationSession.h"
@@ -94,7 +97,7 @@ IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationSession)
 #include "CoreMinimal.h"
 #include "OGSimNet/SimNetClient.h"
 #include "OGSimulation/SimulationManager.h"
-#include "OGSimulation/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverConcepts.h"
 template <typename TraitsT>
 class UESimulationSession
 {

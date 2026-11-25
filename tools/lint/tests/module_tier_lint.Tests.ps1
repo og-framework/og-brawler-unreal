@@ -63,7 +63,7 @@ Describe 'module_tier_lint: the clean fixture' {
         $script:Clean.Text | Should -Match '(?m)^  OGNetUnreal +tier 4 +engine +absent'
     }
 
-    It 'classes og-tickdriver by name inside og-simulation, and the two vocabulary headers as og-sim' {
+    It 'classes og-tickdriver by its folder, and the two vocabulary headers in og-simulation as og-sim' {
         $r = Invoke-Lint "-RepoRoot '$(New-Tree @('clean'))' -ListFiles"
         $r.Text | Should -Match '(?m)^OGTickDriver\t\S+/TickDriverConcepts\.h$'
         $r.Text | Should -Match '(?m)^OGTickDriver\t\S+/SimulationTickDriver\.h$'
@@ -80,12 +80,12 @@ Describe 'module_tier_lint: the clean fixture' {
 
 Describe 'module_tier_lint: each arm fires on its own fixture and leaves the others at zero' {
     It '<Arm> fires on <Bundle>' -ForEach @(
-        @{ Arm = 'A1'; Bundle = 'a1'; Exit = 1; Line = 'SimulationLogRoutes\.h:3: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGSimulation/TickDriverConcepts\.h" of OGTickDriver \(tier 1\)' }
+        @{ Arm = 'A1'; Bundle = 'a1'; Exit = 1; Line = 'SimulationLogRoutes\.h:3: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGTickDriver/TickDriverConcepts\.h" of OGTickDriver \(tier 1\)' }
         @{ Arm = 'A1'; Bundle = 'a1_bare'; Exit = 1; Line = 'SimulationLogRoutes\.h:3: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "TickDriverConcepts\.h" of OGTickDriver' }
-        @{ Arm = 'A1'; Bundle = 'a1_relative'; Exit = 1; Line = 'ClockDilationController\.h:4: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "\.\./TickDriverConcepts\.h" of OGTickDriver' }
+        @{ Arm = 'A1'; Bundle = 'a1_relative'; Exit = 1; Line = 'ClockDilationController\.h:4: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "\.\./\.\./og-tickdriver/OGTickDriver/TickDriverConcepts\.h" of OGTickDriver' }
         @{ Arm = 'A2'; Bundle = 'a2'; Exit = 1; Line = 'SimNetClient\.h:2: \[ModuleTier\.A2\] OGSimNet is engine-free and includes the engine header "CoreMinimal\.h"' }
         @{ Arm = 'A3'; Bundle = 'a3'; Exit = 1; Line = 'Source/NewGameModule: \[ModuleTier\.A3\]' }
-        @{ Arm = 'A4'; Bundle = 'a4'; Exit = 1; Line = 'SimNetIdle\.h:3: \[ModuleTier\.A4\] OGSimNet may not include OGTickDriver: "OGSimulation/TickDriverConcepts\.h"' }
+        @{ Arm = 'A4'; Bundle = 'a4'; Exit = 1; Line = 'SimNetIdle\.h:3: \[ModuleTier\.A4\] OGSimNet may not include OGTickDriver: "OGTickDriver/TickDriverConcepts\.h"' }
         @{ Arm = 'A4'; Bundle = 'a4_session'; Exit = 1; Line = 'SessionTypes\.h:4: \[ModuleTier\.A4\] OGSimSession may not include OGSimulationJolt: "OGSimulationJolt/JoltWorld\.h"' }
         @{ Arm = 'R1'; Bundle = 'r1'; Exit = 0; Line = '\[ModuleTier\.R1\] OGSimulation/Network/SimInbox\.h \(OGSimulation\) is included by no file of its own group; used by OGSimNet \[passenger\]' }
         @{ Arm = 'R2'; Bundle = 'r2'; Exit = 0; Line = 'BrawlerTickDriverGameUImpl\.h:6: \[ModuleTier\.R2\] m_session\.m_manager reaches a member of UESimulationSession' }
@@ -104,8 +104,8 @@ Describe 'module_tier_lint: each arm fires on its own fixture and leaves the oth
         $r.Exit | Should -Be 1
         $r.Counts['A1'] | Should -Be 2
         foreach ($other in 'A2', 'A3', 'A4', 'R1', 'R2') { $r.Counts[$other] | Should -Be 0 }
-        $r.Text | Should -Match 'ClockDilationController\.h:4: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGSimulation/TickDriverConcepts\.h"'
-        $r.Text | Should -Match 'ClockDilationController\.h:5: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGSimulation/TickDriverLog\.h"'
+        $r.Text | Should -Match 'ClockDilationController\.h:4: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGTickDriver/TickDriverConcepts\.h"'
+        $r.Text | Should -Match 'ClockDilationController\.h:5: \[ModuleTier\.A1\] OGSimulation \(tier 0\) includes "OGTickDriver/TickDriverLog\.h"'
     }
 
     It 'every include task 18 removed: three upward lines are A1; og-sim-net -> og-tickdriver is not upward, so it is A4' {

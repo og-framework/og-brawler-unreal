@@ -4,4 +4,4 @@ tools/lint/README.md "Module tier lint"
 #pragma once
 #include "OGSimulation/TickDriverGameTypes.h"
 #include "OGSimulation/HostLog.h"
-#include "../TickDriverConcepts.h"
+#include "../../og-tickdriver/OGTickDriver/TickDriverConcepts.h"

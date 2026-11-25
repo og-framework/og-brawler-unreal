@@ -12,6 +12,7 @@ public class OGBrawlerUnreal : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJoltUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent", "OGNet", "OGNetUnreal", "OGSimulationNet", "OGSimulationSession" });
 		PrivateDependencyModuleNames.Add("ApplicationCore");
+		PrivateDependencyModuleNames.Add("OGTickDriver");
 		SetupIrisSupport(Target);
 	}
 }

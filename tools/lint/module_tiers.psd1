@@ -28,10 +28,8 @@
                                     ModuleBoilerplate = @('OGSimulation.cpp')
                                     MayNotInclude = @('OGNet') }
         OGTickDriver           = @{ Tier = 1; EngineFree = $true; Group = 'og-simulation'
-                                    Roots = @('**/og-simulation/OGSimulation', '**/og-tickdriver/OGTickDriver')
-                                    Names = @('ThreadChainExecutor.h', 'TickDriver*', 'SimulationTickDriver*', 'SimulationTickBackend*',
-                                              'SimulationStepDriver*', 'SimulationScheduler*', 'TickSlotTable*')
-                                    ExceptNames = @('TickDriverGameTypes.h', 'SimulationScheduler.h')
+                                    Roots = @('**/Source/OGTickDriver', '**/og-tickdriver/OGTickDriver')
+                                    ModuleBoilerplate = @('OGTickDriverModule.cpp')
                                     MayNotInclude = @('OGNet') }
         OGSimulationJolt       = @{ Tier = 2; EngineFree = $true
                                     Roots = @('**/Source/OGSimulationJolt', '**/og-simulation-jolt/OGSimulationJolt')
