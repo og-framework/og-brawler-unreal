@@ -491,8 +491,8 @@ The entry as it stood before the move:
 > ⛔ NOTHING TIER-RELATED IS BOUND HERE -- the tier is a WIRE property, bound once per world. §5
 
 **The prohibition.** Do not re-add a per-character tier consumer binding here. The client-side
-consumer is the session's `m_replicatedTierConsumer` (`UESimulationSession`, OGSimulationUnreal; the manager's own
-member until og-ue-simulationcomponentandmanagersplit task 25), emplaced from the manager's `BeginPlay` through the
+consumer is the session's (`UESimulationSession`, OGSimulationUnreal, through og-sim-session's `SessionClock` since
+og-session-runtime task 24; the manager's own member until og-ue-simulationcomponentandmanagersplit task 25), emplaced from the manager's `BeginPlay` through the
 session's `beginTierConsumer`, one per world; the tier itself replicates from the per-connection
 `ASimulationConnectionRelay`.
 

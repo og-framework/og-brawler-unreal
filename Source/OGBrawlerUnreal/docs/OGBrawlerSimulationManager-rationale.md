@@ -316,8 +316,9 @@ holds as `m_inputHistoryFeed`. The feed reads this class through a `const` refer
 ONE INTO AN ACCESSOR"*, *"⛔ ONE CATEGORY PER PROBE FAMILY"* and *"⛔ NOTHING ELSE CROSSES"* have
 no single site in the header — the wrong edit could be a new member anywhere in the class, or a
 router arm in the `.cpp` — so they carry no tag (§1, §4). *"⛔ both go through one recompute"* does
-have a site: G-05 of `UESimulationSession-guards.md` on `recomputeAndPublishEffectiveInputDelay`, a member of the session
-since og-ue-simulationcomponentandmanagersplit task 25 (this file's G-16 until then).
+have a site: G-03 of og-sim-session's `SessionClock-guards.md` on `recomputeAndPublishEffectiveInputDelay`, a member of its
+`SessionClock` since og-session-runtime task 24 (G-05 of `UESimulationSession-guards.md`, on the session's member, from
+og-ue-simulationcomponentandmanagersplit task 25; this file's G-16 until then).
 
 ---
 
@@ -346,7 +347,8 @@ accepted tear rather than a synchronized access. *(This sentence said "two cross
 11; the ring-out push added the third in ring-out task 5 — §11 C16.)*
 
 **The write crossing carries one scalar**, the client's effective input delay. Its writer,
-`publishClientEffectiveInputDelayTicks`, is the session's since og-ue-simulationcomponentandmanagersplit task 25, and the
+`publishClientEffectiveInputDelayTicks`, was the session's from og-ue-simulationcomponentandmanagersplit task 25 (the write
+is og-sim-session's `SessionClock`'s recompute since og-session-runtime task 24, `SessionClock-rationale.md` §4), and the
 argument moved with it, verified (it also names the resimulation's load), to `UESimulationSession-rationale.md` §9.3 (OGSimulationUnreal). The
 crossing is still one of the three this table counts.
 

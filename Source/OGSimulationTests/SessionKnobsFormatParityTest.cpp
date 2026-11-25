@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "CoreMinimal.h"
 #include "catch_amalgamated.hpp"
+#include "OGSimSession/SessionClock.h"
 #include "OGSimSession/SessionKnobs.h"
 
 namespace sessionKnobsFormatParityTest
@@ -209,6 +211,117 @@ TEST_CASE("SessionKnobsFormatParity.FStringPrintfEqualsSnprintfForEveryMovedLine
 
 	CHECK(tally.formats == 23u);
 	CHECK(tally.compared == 4271u);
+}
+
+TEST_CASE("SessionClockFormatParity.FStringPrintfEqualsSnprintfForEveryMovedLine", "[Session][SessionClock]")
+{
+	using namespace sessionKnobsFormatParityTest;
+	namespace clockLines = ogsession::sessionClockLines;
+	Tally tally;
+
+	// Each old format is transcribed from OGSimulation dae3018's OGSimSession/SessionClock.h (og-session-runtime task 24 (a),
+	// the verbatim copy of UESimulationSession.h at 0249ba8), at the line named; split literals are adjacent TEXT literals.
+	const std::vector<uint8_t> tiers = { 0u, 1u, 2u, 3u, 4u, 7u, 255u };
+	const std::vector<int32> deltas = { 0, 1, 2, 6, -1, -2, -6, std::numeric_limits<int32>::min() + 1,
+		std::numeric_limits<int32>::max() };
+	const std::vector<std::pair<const TCHAR*, const char*>> tags = { { TEXT("[ConnectionTier]"), clockLines::kConnectionTierTag },
+		{ TEXT("[RelayDelayFloor]"), clockLines::kRelayDelayFloorTag } };
+
+	++tally.formats; // :75, Warning: the dilation window's own line through %hs
+	for (const std::string& window : { std::string("[Dilation.Window] mode=On setpoint=Common calls=1000 lead=3.512/3.650/3.790"),
+			 std::string("[Dilation.Window] mode=Shadow setpoint=OwnRtt calls=0 frozenBy=sensor:0,recentre:0 stepLag=0.300"),
+			 std::string("[Dilation.Window] 100% %d %s"), std::string(3000u, 'w') })
+		checkLine(tally, FString::Printf(TEXT("%hs"), window.c_str()), OldLevel::Warning,
+			formatLine(clockLines::kDilationWindow, window.c_str()));
+
+	++tally.formats; // :91-92, Warning
+	for (const uint64_t refused : { uint64_t{ 0u }, uint64_t{ 1u }, uint64_t{ 37u }, std::numeric_limits<uint64_t>::max() })
+		for (const double scale : { 1.0, 0.99, 1.012345, 0.995, 1.000005, 1.0000049999, 0.0, -0.0 })
+			checkLine(tally, FString::Printf(TEXT("[Dilation.Authority] refusedRateChanges=%llu rateScale=%.5f"),
+					static_cast<unsigned long long>(refused), scale),
+				OldLevel::Warning,
+				formatLine(clockLines::kDilationAuthority, static_cast<unsigned long long>(refused), scale));
+
+	++tally.formats; // :115-116, Log
+	for (const uint8_t oldTier : tiers)
+		for (const uint8_t newTier : tiers)
+			for (const int32 delta : deltas)
+				checkLine(tally, FString::Printf(TEXT("[ConnectionTier] tier %u -> %u, effective delay delta=%d"),
+						(unsigned int)oldTier, (unsigned int)newTier, delta),
+					OldLevel::Log,
+					formatLine(clockLines::kConnectionTierChange, (unsigned int)oldTier, (unsigned int)newTier, delta));
+
+	++tally.formats; // :168-170, Log: delta 0, each tag
+	for (const auto& [oldTag, newTag] : tags)
+		for (const int32 floorTicks : kInts)
+			checkLine(tally, FString::Printf(TEXT("%s floor = %d ticks, effective delay delta=0, no stall or skip"), oldTag,
+					floorTicks),
+				OldLevel::Log, formatLine(clockLines::kNoTransition, newTag, floorTicks));
+
+	++tally.formats; // :176-180, Warning: +n (stall) and -n (skip), each tag
+	for (const auto& [oldTag, newTag] : tags)
+		for (const int32 floorTicks : kInts)
+			for (const int32 delta : deltas)
+			{
+				if (delta == 0)
+					continue;
+				checkLine(tally, FString::Printf(TEXT("%s floor = %d ticks, %s, requesting %d-tick prediction %s"),
+						oldTag, floorTicks, delta > 0 ? TEXT("UPWARD") : TEXT("DOWNWARD"),
+						delta > 0 ? delta : -delta,
+						delta > 0 ? TEXT("stall") : TEXT("skip")),
+					OldLevel::Warning,
+					formatLine(clockLines::kTransition, newTag, floorTicks, delta > 0 ? clockLines::kUpward : clockLines::kDownward,
+						delta > 0 ? delta : -delta, delta > 0 ? clockLines::kStall : clockLines::kSkip));
+			}
+
+	++tally.formats; // :149-151, Warning
+	for (const uint8_t received : tiers)
+		for (const int32 clamped : kInts)
+			checkLine(tally, FString::Printf(TEXT("[RelayDelayFloor] received floor %u out of range, clamped to %d ticks"),
+					(unsigned int)received, clamped),
+				OldLevel::Warning, formatLine(clockLines::kRelayFloorClamped, (unsigned int)received, clamped));
+
+	++tally.formats; // :193-195, Warning
+	for (const int32 floorTicks : kInts)
+		checkLine(tally, FString::Printf(TEXT("[RelayDelayFloor] floor=%d is below the hiccup-absorption baseline (>=2) and ")
+				TEXT("above off (0) — the one value that is neither"), floorTicks),
+			OldLevel::Warning, formatLine(clockLines::kRelayFloorBelowHiccupBaseline, floorTicks));
+
+	++tally.formats; // :198-200, Log
+	for (const int32 floorTicks : kInts)
+		checkLine(tally, FString::Printf(TEXT("[RelayDelayFloor] floor=%d >= max(rttTierInputDelays) — uniform-D fairness ")
+				TEXT("mode active; tiers and LAN override are inert"), floorTicks),
+			OldLevel::Log, formatLine(clockLines::kRelayFloorUniformD, floorTicks));
+
+	++tally.formats; // :225-230, Log
+	for (const int32 delay : kInts)
+		for (const int32 tier : { 0, 1, 3, -1 })
+			for (const int arrived : { 0, 1 })
+				for (const int32 floorTicks : { 0, 3, 6, std::numeric_limits<int32>::max() })
+					checkLine(tally, FString::Printf(TEXT("[ConnectionTier] applied client input delay = %d ticks (tier %d, ")
+							TEXT("arrived=%d, floor %d)"), delay, tier, arrived, floorTicks),
+						OldLevel::Log, formatLine(clockLines::kAppliedInputDelay, delay, tier, arrived, floorTicks));
+
+	++tally.formats; // :266-280, Warning
+	const std::vector<double> milliseconds = { -1.0, 0.0, 0.0005, 41.2, 123456.789, 1e308, -0.0 };
+	const std::vector<double> microseconds = { 0.0, -12617.4, 0.5, 1.5, -0.5, 2.5, 1e308, -1e308 };
+	for (const bool simClock : { true, false })
+		for (const double a : milliseconds)
+			for (const double b : microseconds)
+				for (const unsigned int samples : { 0u, 188u, std::numeric_limits<unsigned int>::max() })
+					for (const uint64_t pings : { uint64_t{ 0u }, uint64_t{ 41u }, std::numeric_limits<uint64_t>::max() })
+						checkLine(tally,
+							FString::Printf(TEXT("[ClockSource.Window] source=%s engineRttMs=%.3f simClockRttMs=%.3f ackSrttMs=%.3f minRttOffsetUs=%.0f ")
+								TEXT("owdVarUs=%.0f/%.0f smoothedRttMs=%.3f samples=%u invalid=%u pings=%llu pongs=%llu"),
+								simClock ? TEXT("SimClock") : TEXT("Engine"), a, a * 0.5, -a, b, b * 2.0, -b, a, samples, samples / 2u,
+								static_cast<unsigned long long>(pings), static_cast<unsigned long long>(pings / 3u)),
+							OldLevel::Warning,
+							formatLine(clockLines::kClockSourceWindow, simClock ? clockLines::kSourceSimClock : clockLines::kSourceEngine,
+								a, a * 0.5, -a, b, b * 2.0, -b, a, samples, samples / 2u, static_cast<unsigned long long>(pings),
+								static_cast<unsigned long long>(pings / 3u)));
+
+	CHECK(tally.formats == 10u);
+	CHECK(tally.compared == 2016u);
 }
 
 #endif
