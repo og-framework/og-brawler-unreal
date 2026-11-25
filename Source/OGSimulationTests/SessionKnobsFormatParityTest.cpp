@@ -385,4 +385,61 @@ TEST_CASE("SessionLifecycleFormatParity.FStringPrintfEqualsSnprintfForBothLines"
 	CHECK(compared == 21u);
 }
 
+TEST_CASE("SessionLifecycleFormatParity.FStringPrintfEqualsSnprintfForTheAuthorityLines", "[Session][SessionLifecycle]")
+{
+	using namespace sessionKnobsFormatParityTest;
+	namespace lifecycleLines = ogsession::sessionLifecycleLines;
+	uint32 compared = 0u;
+	const std::vector<uint32> ids = { 0u, 1u, 7u, 255u, 256u, 65535u, std::numeric_limits<uint32>::max() };
+
+	// The old formats are transcribed from OGSimulation 221b701's OGSimSession/SessionLifecycle.h (og-session-runtime task 30
+	// (a), the verbatim copy of UESimulationSession.h at 60350f3), tryRegisterOnRunner: :716-718 UE_LOG(LogOGMgmt, Error, ...)
+	// and :726 UE_LOG(LogOGMgmt, Log, ...) with isAuthority 1. The new lines go through RouteOGLevelLine: an [Error] token for
+	// the refusal, none for the registration (the tryRegister: route's Log). The roster-verdict mismatch line is new: its
+	// text is the old checkf's first clause (OGSimulation 6d424ec, SessionLifecycle.h :89-92), with the id and with/without.
+	for (const uint32 id : ids)
+	{
+		{
+			const FString old = FString::Printf(
+				TEXT("tryRegister: id=%u refused by the og-sim-net server (its [Roster.Refused] line names why); the character "
+					 "stays unsimulated"), id);
+			char line[lifecycleLines::kLineBytes];
+			std::snprintf(line, sizeof(line), lifecycleLines::kRunnerRegisterRefused, static_cast<unsigned>(id));
+			const std::string routed(line);
+			INFO("old: " << utf8(old));
+			INFO("new: " << routed);
+			REQUIRE(routed.rfind("[Error]", 0) == 0);
+			CHECK(routed.substr(7) == utf8(old));
+			++compared;
+		}
+		{
+			const FString old = FString::Printf(TEXT("tryRegister: registered simulatable id=%u isAuthority=%d"), id, 1);
+			char line[lifecycleLines::kLineBytes];
+			std::snprintf(line, sizeof(line), lifecycleLines::kRegistered, static_cast<unsigned>(id), 1);
+			const std::string routed(line);
+			INFO("old: " << utf8(old));
+			INFO("new: " << routed);
+			CHECK(routed.rfind("[", 0) != 0);
+			CHECK(routed == utf8(old));
+			++compared;
+		}
+		for (const bool hasProvider : { true, false })
+		{
+			const FString expected = FString::Printf(
+				TEXT("tryRegister: id=%u registers %s an input provider, and its roster entry says the other"), id,
+				hasProvider ? TEXT("with") : TEXT("without"));
+			char line[lifecycleLines::kLineBytes];
+			std::snprintf(line, sizeof(line), lifecycleLines::kRosterVerdictMismatch, static_cast<unsigned>(id),
+				hasProvider ? lifecycleLines::kWith : lifecycleLines::kWithout);
+			const std::string routed(line);
+			INFO("expected: " << utf8(expected));
+			INFO("new: " << routed);
+			REQUIRE(routed.rfind("[Error]", 0) == 0);
+			CHECK(routed.substr(7) == utf8(expected));
+			++compared;
+		}
+	}
+	CHECK(compared == 28u);
+}
+
 #endif
