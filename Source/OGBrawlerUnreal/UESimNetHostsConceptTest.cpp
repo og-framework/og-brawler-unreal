@@ -19,7 +19,7 @@ using Traits = BrawlerSessionTraitsUImpl;
 using Lanes = UESimNetLanes<Traits>;
 using ServerHost = UESimNetServerHost<Traits>;
 using LanesServerHost = Lanes::ServerHost;
-using ClientHost = UESimNetClientHost<Traits>;
+using ClientHost = Lanes::ClientHost;
 using Server = ogsimnet::SimNetServer<Traits::Composition, LanesServerHost, Lanes::Transport>;
 
 constexpr bool routesToNetAtLog(const TCHAR* body)
