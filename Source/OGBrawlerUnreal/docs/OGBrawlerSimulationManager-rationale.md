@@ -615,7 +615,8 @@ a reference**, so the state before the manager is built is representable): `UESi
 ## §3 The session knobs: moved to the session (task 26b)
 
 **Code moved to `UESimulationSession.h` (og-ue-simulationcomponentandmanagersplit task 26b).** The three ini intakes, the
-authority apply and the resim-policy apply with its proof line are the session's: `readSessionKnobs`,
+authority apply and the resim-policy apply with its proof line are the session's (og-sim-session's `SessionKnobs.h` since
+og-session-runtime task 23, which the session calls at the same positions): `readSessionKnobs`,
 `applySessionKnobs` and `applyResimTriggerPolicy`. The start-up calls them at the positions of the statements they hold
 (the session's `beginPlay` since task 27b, the actor's `BeginPlay` before):
 the intakes after the latency member's begin and before the backend builds its world, the apply in the authority branch
