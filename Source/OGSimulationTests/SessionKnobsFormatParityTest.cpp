@@ -12,6 +12,7 @@
 #include "catch_amalgamated.hpp"
 #include "OGSimSession/SessionClock.h"
 #include "OGSimSession/SessionKnobs.h"
+#include "OGSimSession/SessionNetHooks.h"
 
 namespace sessionKnobsFormatParityTest
 {
@@ -322,6 +323,23 @@ TEST_CASE("SessionClockFormatParity.FStringPrintfEqualsSnprintfForEveryMovedLine
 
 	CHECK(tally.formats == 10u);
 	CHECK(tally.compared == 2016u);
+}
+
+TEST_CASE("SessionNetHooksFormatParity.FStringPrintfEqualsSnprintfForTheReleaseLine", "[Session][SessionTickGame]")
+{
+	using namespace sessionKnobsFormatParityTest;
+	Tally tally;
+
+	// The old format is transcribed from OGSimulation ab09ccb's OGSimSession/SessionNetHooks.h :46 (og-session-runtime task 26 (a),
+	// the verbatim copy of UESimulationSession.h at 06ad51c): OG_LOG_ROUTED(LogOGNet, ...), no level token (the route's Verbose).
+	++tally.formats;
+	for (const int32 first : kInts)
+		for (const int32 steps : { 0, 1, 2, -1, std::numeric_limits<int32>::max() })
+			checkLine(tally, FString::Printf(TEXT("[ReleaseBatch] first=%d numSteps=%d"), first, steps), OldLevel::Log,
+				formatLine(ogsession::sessionNetHooksLines::kReleaseBatch, first, steps));
+
+	CHECK(tally.formats == 1u);
+	CHECK(tally.compared == 45u);
 }
 
 #endif

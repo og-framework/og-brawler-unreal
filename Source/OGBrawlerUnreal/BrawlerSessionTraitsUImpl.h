@@ -34,7 +34,6 @@ struct BrawlerSessionTraitsUImpl
 	using PhysicsBackendWorlds = physicsBackendUImpl::BackendWorlds;
 
 	template <typename SessionT> using PhysicsBackend = physicsBackendUImpl::BackendFor<SessionT>;
-	template <typename SessionT> using TickDriverGame = BrawlerTickDriverGameUImpl<SessionT>;
 
 	using Storage           = SimulationObjectStorage<SimulatableBrawler>;
 	using Reconciliation    = SimulationReconciliation<SimulatableBrawler>;

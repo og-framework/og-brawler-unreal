@@ -72,6 +72,6 @@ void BrawlerJoltBindingUImpl::checkCapsuleContract(const AOGBrawlerUECharacter& 
 		   descriptorCapsule != nullptr ? static_cast<float>(ueFrame::lengthToUe(descriptorCapsule->halfHeight)) : 0.f, id);
 }
 
-template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
+template class TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
 
 OGSIM_OPTIMIZE_ON

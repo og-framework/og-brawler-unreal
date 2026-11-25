@@ -24,8 +24,9 @@ no live entry and no source file.
 **Why it retired.** Task 8 deleted the header. The release is now og-simulation's `beforeTick`, which calls the
 game's `releaseInputsForAuthorityTick` with the upcoming authority tick. **Successors:** `TickDriverStepHooks-guards.md`
 G-01 (og-simulation; the hook releases that tick and calls no per-frame game hook), and
-`BrawlerSessionHooksUImpl-guards.md` G-01 (the binding forwards it to `releaseDelayedInputsForStep` with a step
-count of 1, the half of this prohibition that is typed in the brawler's file).
+`BrawlerSessionHooksUImpl-guards.md` G-01 (the binding forwarded it to `releaseDelayedInputsForStep` with a step
+count of 1, the half of this prohibition that was typed in the brawler's file; retired by og-session-runtime task 26 into
+og-sim-session's `SessionTickGame-guards.md` G-01, with the call).
 
 ### G-02 — RETIRED by og-tickdriver task 8 (2026-10-16): the published offset moved into og-simulation's step hooks
 

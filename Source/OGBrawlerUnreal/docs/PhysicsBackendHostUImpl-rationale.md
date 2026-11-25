@@ -16,7 +16,7 @@ the session as `BrawlerSessionTraitsUImpl::PhysicsBackendWorlds` and `PhysicsBac
 
 | name | names |
 |---|---|
-| `physicsBackendUImpl::Backend` | `TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>` (OGSimulationUnreal's host since og-tickdriver task 15e; §4): og-simulation's `SimulationTickDriver` schedules |
+| `physicsBackendUImpl::Backend` | `TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>` (OGSimulationUnreal's host since og-tickdriver task 15e; §4): og-simulation's `SimulationTickDriver` schedules |
 | `physicsBackendUImpl::BackendWorlds` | `Backend::Worlds`, that is `TickDriverBackendWorldsUImpl` over the host's world host |
 
 Until og-session-runtime task 3 the header picked a host per configuration, and the Chaos configuration named the Chaos
@@ -33,9 +33,9 @@ Chaos host and its documents, and the header names the tick-driver host uncondit
   through the traits' `PhysicsBackend` (this header's `BackendFor`, over the session; `Backend` is the same type over
   the brawler's session), so a selector that picked a different pair would hand the host adapters of another engine.
 * **The host's type names its game binding, engine traits and engine binding,**
-  `TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>` since og-tickdriver
+  `TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>` since og-tickdriver
   task 15e (the engine traits and the binding only, from task 15b), as the composition is written in og-tickdriver task 15's plan; a later driver-scheduled
-  engine (Box3D) would be one more choice, `TickDriverBackendUImpl<BrawlerTickDriverGame, Box3DEngineTraitsUImpl, BrawlerBox3DBindingUImpl>`. The host
+  engine (Box3D) would be one more choice, `TickDriverBackendUImpl<BrawlerSessionHooks, Box3DEngineTraitsUImpl, BrawlerBox3DBindingUImpl>`. The host
   template refuses any pair whose engine has no world host (`TickDriverBackendUImpl-rationale.md` §10; since
   og-session-runtime task 6 `PhysicsEngineTraits` itself requires one of every engine), which is why the former Chaos
   traits (deleted by og-session-runtime task 4) could never be put on it.
@@ -47,7 +47,7 @@ Chaos host and its documents, and the header names the tick-driver host uncondit
 
 **Why the selector is here and not in `BrawlerCompositionUImpl.h`.** og-tickdriver task 15's plan names the
 composition header as the selector's home. It cannot hold it: the tick-driver host's type names
-`BrawlerCompositionUImpl`'s types (its storage and render snapshot, through `BrawlerTickDriverGameUImpl`, whose header
+`BrawlerCompositionUImpl`'s types (its storage and render snapshot, through `BrawlerSessionHooksUImpl`, whose header
 includes the composition header; directly as well until og-tickdriver task 15e), so the composition header cannot
 include the host in turn to name `Backend`. This header is included
 after both, by the session only, so task 15b left the selector here.
@@ -104,9 +104,9 @@ names the parameters through forward declarations (`UWorld`, `AActor`, `UOGBrawl
 
 Since og-tickdriver task 15e the tick-driver host is OGSimulationUnreal's header template, which names no brawler
 type, so the header includes two headers (the Jolt arm's until og-session-runtime task 3): `OGSimulationUnreal/TickDriverBackendUImpl.h` (the host) and
-`OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (the game binding and its `BrawlerTickDriverGame` alias, which the host
-header included until then). It then declares
-`extern template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;`.
+`OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (the game binding and its `BrawlerSessionHooks` alias, BrawlerTickDriverGame until og-session-runtime task 26, which
+the host header included until then). It then declares
+`extern template class TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;`.
 
 * **Why `extern`.** The host's member definitions are in its header since task 15e. Without the declaration every
   game translation unit that calls the backend (the session's `.cpp`) would instantiate the members it calls,
@@ -120,7 +120,7 @@ header included until then). It then declares
 
 Since task 24a the composition lives in OGSimulationUnreal's `UESimulationSession<BrawlerSessionTraitsUImpl>`, which holds
 the backend over itself, so the backend's type depends on the session's: the header defines an alias template
-`BackendFor<SessionT>`, `TickDriverBackendUImpl` over `BrawlerTickDriverGameUImpl<SessionT>` (until og-session-runtime task 3
+`BackendFor<SessionT>`, `TickDriverBackendUImpl` over `BrawlerSessionHooksUImpl<SessionT>` (until og-session-runtime task 3
 each arm defined one, and the Chaos arm's ignored `SessionT`), and `Backend` is `BackendFor` over the brawler's session. The traits'
 `PhysicsBackend<SessionT>` is `BackendFor<SessionT>`, so the session's friend line and its `m_physicsBackend` name the same type the
 `extern template` and the explicit instantiation do.
@@ -128,9 +128,10 @@ each arm defined one, and the Chaos arm's ignored `SessionT`), and `Backend` is 
 * **The header forward-declares `BrawlerSessionTraitsUImpl` and `UESimulationSession`.** `BrawlerSessionTraitsUImpl.h`
   includes this header before it defines the struct, and `Backend` only names the session's specialization: the host's
   class is instantiated with the session incomplete, as it was with the actor incomplete before (it holds the session
-  by reference; the game binding too). The members that read the session are instantiated where it is complete: the
+  by reference; the game binding until og-session-runtime task 26, and since then the tick game through its host's
+  session pointer). The members that read the session are instantiated where it is complete: the
   explicit instantiation in `BrawlerJoltBindingUImpl.cpp`, which includes `OGBrawlerSimulationManager.h`, and so the
   session's header and the complete actor.
-* **The `extern template`** still names the host over `BrawlerTickDriverGame`, which is
-  `BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>` since task 24a: the same type as
+* **The `extern template`** still names the host over `BrawlerSessionHooks` (BrawlerTickDriverGame until og-session-runtime task 26), which is
+  `BrawlerSessionHooksUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>` since task 24a: the same type as
   `Backend`.

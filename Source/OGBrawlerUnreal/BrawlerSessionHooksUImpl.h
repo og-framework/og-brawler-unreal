@@ -4,14 +4,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/EngineBaseTypes.h"
 #include "Templates/Casts.h"
 
-#include "OGSimulation/TickDriverConcepts.h"
 #include "OGBrawler/SimCharacterId.h"
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 
 #include <cstdint>
+#include <utility>
 
 class AActor;
 class UOGBrawlerSimulatableComponent;
@@ -22,7 +21,7 @@ template <typename TraitsT> class UESimulationSession;
 #define HasAuthority HasAuthority_is_constant_true_on_AOGBrawlerSimulationManager_use_worldIsAuthority_or_runsPrediction
 
 template <typename SessionT>
-class BrawlerTickDriverGameUImpl
+class BrawlerSessionHooksUImpl
 {
 public:
 	using Manager        = BrawlerCompositionUImpl::Manager;
@@ -33,18 +32,10 @@ public:
 	using Character      = AOGBrawlerUECharacter;
 	using StaticData     = simulatableBrawler::StaticData;
 
-	explicit BrawlerTickDriverGameUImpl(SessionT& session) : m_session(session) {}
-
-	BrawlerTickDriverGameUImpl(const BrawlerTickDriverGameUImpl&) = delete;
-	BrawlerTickDriverGameUImpl& operator=(const BrawlerTickDriverGameUImpl&) = delete;
-
-	Manager& manager() { return *m_session.m_manager; }
-	Storage& storage() { return m_session.m_storage; }
-
 	template <typename CharacterT = Character>
-	void sampleInput()
+	static void sampleInput(SessionT& session)
 	{
-		for (const auto& entry : m_session.getRegisteredComponentsById())
+		for (const auto& entry : session.getRegisteredComponentsById())
 		{
 			auto* const registered = entry.second.Get();
 			CharacterT* const character = registered != nullptr ? Cast<CharacterT>(registered->GetOwner()) : nullptr;
@@ -53,46 +44,11 @@ public:
 		}
 	}
 
-	void beforePump(double hostNowSeconds, TickRateDoor& rate) { m_session.beforePump_Owner(hostNowSeconds, rate); }
+	static float gravity(const StaticData& staticData) { return staticData.m_movementStaticData.gravity; }
 
-	IdleWake idleUntil(double deadlineSeconds) { return m_session.idleUntil_Runner(deadlineSeconds); }
-
-	void onFrameStepsDue(int32_t firstUpcomingSimTick, int32_t numSteps)
-	{
-		m_session.onFrameStepsDue_Step(firstUpcomingSimTick, numSteps);
-	}
-
-	void afterInlineBatch(int32_t firstUpcomingSimTick) { m_session.afterAuthorityBatch(firstUpcomingSimTick); }
-
-	void releaseInputsForAuthorityTick(SimTick authorityTick)
-	{
-		m_session.noteAuthorityStepTime_Step();
-		// ⛔G-01  docs/BrawlerSessionHooksUImpl-guards.md
-		m_session.releaseDelayedInputsForStep(static_cast<int32>(authorityTick), 1);
-	}
-
-	void receiveForStep() { m_session.receiveForClientStep_Step(); }
-
-	void onStepStarted(double stepStartSeconds)
-	{
-		m_session.editLatencyBudgetDiagnostics().stampAfterStep_Internal(stepStartSeconds);
-		m_session.afterClientCapture_Step();
-	}
-
-	void onStepEnded()
-	{
-		m_session.editLatencyBudgetDiagnostics().stampStepEnd_Internal();
-		m_session.afterStep_Step();
-	}
-
-	void publishForDisplay() { m_session.publishDisplaySnapshot_Step(); }
-
-	void onPostPhysics() { m_session.onPostPhysicsStep(); }
-
-	static float gravity(const SessionT& session) { return session.m_staticData.m_movementStaticData.gravity; }
-
-	template <typename SlotCallF, typename CharacterT = Character>
-	static decltype(auto) callWithSlotRequest(SessionT& session, AActor& owner, uint64_t key, SlotCallF&& slotCall)
+	template <typename PhysicsSlotF, typename RecordSlotF, typename SlotCallF, typename CharacterT = Character>
+	static decltype(auto) callWithSlotRequest(AActor& owner, uint64_t key, bool isAuthority, PhysicsSlotF&& physicsSlotFor,
+		RecordSlotF&& recordSlot, SlotCallF&& slotCall)
 	{
 		const CharacterT* const character = Cast<CharacterT>(&owner);
 		checkf(character != nullptr,
@@ -102,36 +58,12 @@ public:
 			TEXT("slot rode a replicated property of that class until og-input-latency task P5-7)."),
 			*owner.GetName());
 		const FTCHARToUTF8 name(*owner.GetName());
-		return slotCall(key, name.Get(), session.owner().GetNetMode() != NM_Client,
-			session.physicsSlotFor(owner, key, toStorageKey(character != nullptr ? character->GetSimCharacterId() : SimCharacterId::None)),
-			[&session, &owner, key](uint32_t slot) { session.recordAuthoritativeSlot(owner, key, slot); });
+		return slotCall(key, name.Get(), isAuthority,
+			physicsSlotFor(toStorageKey(character != nullptr ? character->GetSimCharacterId() : SimCharacterId::None)),
+			std::forward<RecordSlotF>(recordSlot));
 	}
-
-private:
-	SessionT& m_session;
 };
 
-using BrawlerTickDriverGame = BrawlerTickDriverGameUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>;
-
-static_assert(TickDriverSampleGame<BrawlerTickDriverGame>,
-	"BrawlerTickDriverGame must keep a void sampleInput(): SimulationTickDriver calls it only under if constexpr, so "
-	"without it nothing publishes the input sample and every client buildPlayerInput returns the neutral input. Added by "
-	"og-input-latency task P5-15.");
-
-static_assert(TickDriverReceiveGame<BrawlerTickDriverGame>,
-	"BrawlerTickDriverGame must keep a void receiveForStep(): TickDriverStepHooks calls it only under if constexpr, so "
-	"without it an immediate client's step never drains og-sim-net and receives nothing once its session is bound. Was the "
-	"drain in onStepStarted, which fed the next step (og-input-latency task P5-30).");
-
-static_assert(TickDriverDisplayGame<BrawlerTickDriverGame>,
-	"BrawlerTickDriverGame must keep a void publishForDisplay(): SimulationTickDriver calls it only under if constexpr, after a "
-	"client's step batch on the step thread, so without it a Jolt client publishes no display snapshot and its HUD, input "
-	"history and visualization show nothing. Was the game-thread fill in onPostPhysicsStep, which raced the worker step "
-	"(og-input-latency task P5-36).");
-
-static_assert(TickDriverIdleGame<BrawlerTickDriverGame>,
-	"BrawlerTickDriverGame must keep IdleWake idleUntil(double): SimulationTickBackend::runAuthorityLoop requires it, and the "
-	"authority runner services og-net only through it, so without it the authority loop, which every dedicated server "
-	"runs, cannot build. Added by og-input-latency task P5-19 (P11 design section 4).");
+using BrawlerSessionHooks = BrawlerSessionHooksUImpl<UESimulationSession<BrawlerSessionTraitsUImpl>>;
 
 #undef HasAuthority

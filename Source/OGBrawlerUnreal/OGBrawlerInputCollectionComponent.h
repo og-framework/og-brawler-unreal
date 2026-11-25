@@ -29,7 +29,7 @@ struct FInputActionValue;
 // [og-input-latency P5-15] One frame's input sample: every game-thread value buildPlayerInput
 // reads, copied in one piece. The component stages it at the end of updateGameThreadCache (the
 // character's Tick, TG_PrePhysics, after the controller's Enhanced Input events), and the tick
-// driver's sampleInput hook (BrawlerTickDriverGameUImpl, first in startFrame, TG_StartPhysics,
+// driver's sampleInput hook (BrawlerSessionHooksUImpl, first in startFrame, TG_StartPhysics,
 // before the pump) publishes it through a TripleBuffer; buildPlayerInput, on the step's thread,
 // reads only the latest published sample. This replaces the step reading the component's fields
 // one by one while the game thread could be writing them (the "benign race" the caches carried:
@@ -107,7 +107,7 @@ public:
 
 	// [og-input-latency P5-15] Publishes the sample updateGameThreadCache last staged, so the next
 	// buildPlayerInput reads it. Game thread only (checkf: the TripleBuffer has one producer).
-	// Called once per frame by the tick driver's sampleInput hook (BrawlerTickDriverGameUImpl),
+	// Called once per frame by the tick driver's sampleInput hook (BrawlerSessionHooksUImpl),
 	// first in startFrame, before the pump.
 	void publishSample();
 

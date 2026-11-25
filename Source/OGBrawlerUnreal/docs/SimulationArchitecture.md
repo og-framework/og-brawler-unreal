@@ -183,12 +183,13 @@ runs steps 3 and 4, then steps (`UESimulationSession-rationale.md` §19.2).
 The component's fifth hook, `storageKeyOfOwner`, is the key the binding names the owner by when the session owner never
 spawns. Both it and the component's `EndPlay` read the replicated id through the component's helper `simCharacterId`.
 
-**Each frame.** The tick driver calls the session through `BrawlerTickDriverGameUImpl` (the tick driver's brawler side;
+**Each frame.** The tick driver calls the session through og-sim-session's `SessionTickGame` (the tick driver's game since
+og-session-runtime task 26; the brawler's binding BrawlerTickDriverGameUImpl forwarded to the session before;
 the former Chaos backend, removed by og-session-runtime task 3, called it from the physics scene's post-tick event). On a
 client, the game thread calls it before the steps (`onFrameStepsDue_Step`) and after them (`onPostPhysicsStep`), and each
 step on a worker task drains og-sim-net's client at its start, sends the input bundle at capture and, after the batch,
 publishes the display snapshot. On the authority the runner calls it per wake: og-sim-net's server drain before the
-steps, the release of delayed inputs per step, and after the batch `afterAuthorityBatch` (the core's post-simulation
+steps, the release of delayed inputs per step, and after the batch the net hooks' `afterBatch` (`SessionNetHooks`; the session's `afterAuthorityBatch` until task 26: the core's post-simulation
 send, the clock, the corrections and the ring-out scores' presentation slices); og-net is serviced on the runner between
 batches. The game thread's post-physics pass (`onPostPhysicsStep`) runs the backend's pre-present step and collects the
 lifecycle outcomes; then on a client it refreshes the display view and calls `Game::afterVisualization`, and on the
@@ -258,7 +259,7 @@ and the binding's net half with it (`UESimulatableOwnerBinding-rationale.md` §1
   other clients (`flushRelays`); a client stores it in the character's channel (`storeRing`).
 * **Input reception.** A client's channel sends its pending inputs as bundles on the SimInput lane. On the authority,
   og-sim-net's server checks each bundle against the roster, takes a round-trip sample and hands it to its reception
-  coordinator, which delays it, delivers it per step (`releaseDelayedInputsForStep`) and stages it for the relay.
+  coordinator, which delays it, delivers it per step (`SessionNetHooks::releaseForTick`, og-sim-session's since og-session-runtime task 26) and stages it for the relay.
 * **Roster.** og-sim-net's server gives every client each character's sim id, physics slot, owner and local index; a
   client registers a character only once the roster entry binds it (`clientBindStep`).
 * **Latency budget.** `UELatencyBudgetDiagnostics` stamps inputs and states at each hop (the receipt and hand-off stamps
@@ -296,7 +297,8 @@ Rationale and guards documents sit in the `docs` folder beside each module's sou
 | `BrawlerSessionGameUImpl` | the hooks; eleven bodies in `BrawlerSessionGameUImpl.cpp`, three inline in its header | brawler, BUSL | `BrawlerSessionGameUImpl-rationale.md` · `BrawlerSessionGameUImpl-guards.md` | `BrawlerSessionGameUImpl.h` |
 | `BrawlerSessionTraitsUImpl` | ties the templates to the brawler | brawler, BUSL | `BrawlerSessionTraitsUImpl-rationale.md` · `BrawlerSessionTraitsUImpl-guards.md` | `BrawlerSessionTraitsUImpl.h` |
 | `UESimulationSession` | the session: core, backend, transport, sequences | plugin, MPL | `UESimulationSession-rationale.md` · `UESimulationSession-guards.md` | `UESimulationSession.h` |
-| `BrawlerTickDriverGameUImpl` | the tick driver's brawler side | brawler, BUSL | `BrawlerSessionHooksUImpl-rationale.md` · `BrawlerSessionHooksUImpl-guards.md` | `BrawlerSessionHooksUImpl.h` |
+| `SessionTickGame` | the tick driver's game: the hooks, calling the session's components in order | og-sim-session, MPL | `SessionTickGame-rationale.md` · `SessionTickGame-guards.md` | `SessionTickGame.h` |
+| `BrawlerSessionHooksUImpl` | the session's brawler-side hooks: the input sample, gravity, the slot request | brawler, BUSL | `BrawlerSessionHooksUImpl-rationale.md` · `BrawlerSessionHooksUImpl-guards.md` | `BrawlerSessionHooksUImpl.h` |
 | `UELatencyBudgetDiagnostics` | latency stamps and reports | plugin, MPL | `UELatencyBudgetDiagnostics-rationale.md` · `UELatencyBudgetDiagnostics-guards.md` | `UELatencyBudgetDiagnostics.h` |
 | `UESimNetLanes` | the og-net driver's sim lanes: og-sim-net's transport, a client's session | plugin, MPL | `UESimNetLanes-rationale.md` · `UESimNetLanes-guards.md` | `UESimNetLanes.h` |
 | `UESimNetServerHost`, `UESimNetClientHost` | og-sim-net's hosts on Unreal: round trip, stamps, log | plugin, MPL | `UESimNetHost-rationale.md` · `UESimNetHost-guards.md` | `UESimNetHost.h` |

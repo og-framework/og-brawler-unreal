@@ -93,7 +93,7 @@ thread, when it fills the world host's configuration in `buildWorld` (`TickDrive
 
 ## §7 The host's instantiation (og-tickdriver task 15e)
 
-The `.cpp` ends with `template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl,
+The `.cpp` ends with `template class TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl,
 BrawlerJoltBindingUImpl>;`, inside its `OGSIM_OPTIMIZE_OFF` span, after `checkCapsuleContract`. It is the one place the
 Jolt configuration's host is instantiated: the header is OGSimulationUnreal's and game-agnostic, and
 `PhysicsBackendHostUImpl.h` declares the same instantiation `extern` (`PhysicsBackendHostUImpl-rationale.md` §4). So the

@@ -72,7 +72,7 @@ storage, input-resolution and reconciliation re-exports, which typed the feed's 
 The other nine rows of the table are history. `IntegrationLayerType` was the
 UImpl's own alias of `BrawlerIntegrationExec` until task 24a, and the Jolt-only step-driver alias stayed in the UImpl until task 83 moved it
 (og-tickdriver task 8 replaced it with `TickDriverBackendUImpl`'s tick-driver alias, over the game binding
-`BrawlerTickDriverGameUImpl`).
+BrawlerTickDriverGameUImpl; over og-sim-session's `SessionTickGame` since og-session-runtime task 26).
 
 **`Simulatables` is the single source of truth for the pack.** The storage, the three peers, the
 integration executor and the systems executor are all derived from it, and the manager from them;
@@ -108,7 +108,8 @@ the dependency runs the other way.
   asserts that the session's private `ManagerType` (this struct's `Manager`; since task 34 the session spells it as
   og-simulation's `SimulationManager` over its own aliases and asserts it equal to `Manager`, and before that it was its
   traits' `Composition::Manager`) is the
-  tick-driver binding's `Manager` (`BrawlerTickDriverGameUImpl`, which names this struct's member). Until task 24a
+  tick-driver binding's `Manager` (`BrawlerSessionHooksUImpl`, which names this struct's member; BrawlerTickDriverGameUImpl
+  until og-session-runtime task 26, since when the session compares it through its backend's `TickGame::Manager`). Until task 24a
   `compositionContractsHold()` in `OGBrawlerSimulationManager.h` asserted `std::is_same_v<ManagerType,
   BrawlerCompositionUImpl::Manager>`. It has to be inside the class,
   because `ManagerType` is private. A host outside the UImpl (task 83) names the manager through this

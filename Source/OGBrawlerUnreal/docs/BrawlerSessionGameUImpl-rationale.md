@@ -478,3 +478,14 @@ section, now split between this §7 and the session's §12.
 * **Defined in `BrawlerSessionGameUImpl.cpp`, in its `OGSIM_OPTIMIZE_OFF` region**, beside `afterVisualization`: the
   second hook needs the complete brawler character (§3). The slice's two fields are the only brawler state the snapshot
   carries; a new authority-only value a dedicated server must present joins the slice here.
+
+## §9 The statics that moved to og-brawler (og-session-runtime task 26)
+
+Three of the class's statics name no engine type, and og-session-runtime task 26 moved them into og-brawler's
+`OGBrawler/BrawlerSessionGame.h` (step (a), verbatim; step (b) gave them og-brawler's documents): `neutralInput()`'s body,
+the `AuthorityPresentationSlice` struct and `rootBodyId(simulatable)`'s body. The class keeps their declarations and forwards:
+`neutralInput()` and `rootBodyId(…)` return `BrawlerSessionGame`'s, and the slice is
+`using AuthorityPresentationSlice = BrawlerSessionGame::AuthorityPresentationSlice;`, so the session's `Game::neutralInput()`,
+`Game::rootBodyId(…)` and `typename Game::AuthorityPresentationSlice` resolve as before. The guard on the neutral input moved
+with it (`BrawlerSessionGame-guards.md` G-01; this file's G-01 is retired). Why the other statics on the design's list stay here
+is og-brawler's `BrawlerSessionGame-rationale.md` §2.

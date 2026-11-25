@@ -764,7 +764,7 @@ true today:
 > retired its guard G-20. Since task P5-7 the authority records the slot it chose in the session
 > (`UESimulationSession::recordAuthoritativeSlot`, which carries the three `checkf`s the write site had), og-sim-net's
 > roster carries it to every client, and a client binds the slot its roster entry carries
-> (`UESimulationSession::physicsSlotFor`, through `BrawlerTickDriverGameUImpl::callWithSlotRequest`). Why a slot travels at
+> (`UESimulationSession::physicsSlotFor`, through `BrawlerSessionHooksUImpl::callWithSlotRequest`). Why a slot travels at
 > all, the first bullet below, is unchanged. The text below describes the property as it stood until P5-8.
 
 `PhysicsSlotValue` is a replicated `uint8` carrying the Jolt world slot the authority chose for this

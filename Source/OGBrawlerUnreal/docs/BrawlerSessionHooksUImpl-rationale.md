@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-# `BrawlerTickDriverGameUImpl` — rationale
+# `BrawlerSessionHooksUImpl` — rationale
 
 Companion to `Source/OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (og-tickdriver task 8, 2026-10-16).
 Prohibitions: `BrawlerSessionHooksUImpl-guards.md`.
@@ -7,6 +7,33 @@ Prohibitions: `BrawlerSessionHooksUImpl-guards.md`.
 **If this file and the header disagree, the header is authoritative and this file is stale.**
 
 ---
+
+## §0 The file today (og-session-runtime task 26)
+
+`BrawlerSessionHooksUImpl<SessionT>` is the brawler's engine-side hooks for the Unreal session's tick driver, no longer its
+game. Since og-session-runtime task 26 the tick driver's game is og-sim-session's `SessionTickGame`, held by
+`TickDriverBackendUImpl` over OGSimulationUnreal's `UESessionTickHost` (`SessionTickGame-rationale.md`,
+`UESessionTickHost-rationale.md`); its hooks call the session's components in the order §2 to §12 below record. What is left
+here:
+
+| member | what | called by |
+|---|---|---|
+| `Manager`, `Storage`, `RenderSnapshot` | `BrawlerCompositionUImpl`'s, the types the tick driver needs before the session is complete | `UESessionTickHost` |
+| `Session`, `Component`, `Character`, `StaticData` | the session and the brawler's types | `TickDriverBackendUImpl` |
+| `sampleInput(session)` | each registered character publishes its input sample (§8) | `UESessionTickHost::sampleInput`, from `SessionTickGame::sampleInput` |
+| `gravity(staticData)` | the movement static data's gravity | `TickDriverBackendUImpl::buildWorld`, with the session's static data |
+| `callWithSlotRequest(owner, key, isAuthority, physicsSlotFor, recordSlot, slotCall)` | the brawler's part of a body slot request: the character check, the debug name, the storage key from the character's `SimCharacterId` | `TickDriverBackendUImpl::callWithSlotRequest`, which passes the session's slot query and its record |
+
+The class was BrawlerTickDriverGameUImpl (in BrawlerTickDriverGameUImpl.h) until task 26: the header and its two documents
+were renamed in the task's step (a), and the class in step (b). Its hook forwarders, its constructor, `manager()`, `storage()`
+and the four `static_assert`s on its refining concepts are gone (the asserts are `SessionTickGame`'s), and so is the session's
+friend line for it: `gravity` takes the static data and `callWithSlotRequest` the session's two slot calls from the backend,
+which is the session's friend. Its include of og-simulation's `TickDriverConcepts.h` went with the forwarders' types
+(`TickRateDoor`, `IdleWake`, `SimTick`), so OGBrawlerUnreal includes no og-tickdriver header (the module tier table's
+MayNotInclude row, og-session-runtime task 26).
+
+**§1 to §12 below are the binding as it stood until og-session-runtime task 26**, kept as its record: where they say "the
+binding forwards", the tick game now calls; their section numbers are cited from other documents.
 
 ## §1 What it is
 

@@ -8,7 +8,7 @@
 #include "OGSimulationUnreal/TickDriverBackendUImpl.h"
 #include "OGBrawlerUnreal/BrawlerSessionHooksUImpl.h"
 
-extern template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
+extern template class TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
 
 #include <concepts>
 #include <optional>
@@ -46,7 +46,7 @@ static_assert(std::is_same_v<EngineTraits, JoltEngineTraitsUImpl> && std::is_sam
 	"The Jolt composition is TickDriverBackendUImpl over JoltEngineTraitsUImpl and BrawlerJoltBindingUImpl, so "
 	"PhysicsBackendUImpl.h's selector must pick that pair in the same configuration. Added by og-tickdriver task 15b.");
 template <typename SessionT>
-using BackendFor    = TickDriverBackendUImpl<BrawlerTickDriverGameUImpl<SessionT>, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
+using BackendFor    = TickDriverBackendUImpl<BrawlerSessionHooksUImpl<SessionT>, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
 using Backend       = BackendFor<UESimulationSession<BrawlerSessionTraitsUImpl>>;
 using BackendWorlds = Backend::Worlds;
 
