@@ -126,6 +126,7 @@ param(
     [string[]]$SourceRoots = @('Plugins', 'Source'),
     [string[]]$DocDirs = @(
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/docs',
+        'Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/docs',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/docs',
         'Source/OGBrawlerUnreal/docs',
         'Plugins/OGSimulation/Source/OGSimulationUnreal/docs',

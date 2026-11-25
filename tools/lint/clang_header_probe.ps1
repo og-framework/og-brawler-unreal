@@ -264,6 +264,7 @@ function Resolve-HeaderPath {
         if ($sessionDir -eq '') { return '' }
         return (Join-Path $sessionDir $Header)
     }
+    if ($Header.StartsWith('OGTickDriver/')) { return (Join-Path $simDir 'og-tickdriver' $Header) }
     return (Join-Path $simDir $Header)
 }
 
@@ -276,6 +277,8 @@ if ($IncludeOverlay -ne '') {
 if ($Headers.Count -eq 0) {
     $Headers = @(Get-ChildItem -LiteralPath (Join-Path $simDir 'OGSimulation') -Recurse -File -Filter '*.h' |
         ForEach-Object { [IO.Path]::GetRelativePath($simDir, $_.FullName).Replace('\', '/') } | Sort-Object)
+    $Headers += @(Get-ChildItem -LiteralPath (Join-Path $simDir 'og-tickdriver' 'OGTickDriver') -Recurse -File -Filter '*.h' |
+        ForEach-Object { [IO.Path]::GetRelativePath((Join-Path $simDir 'og-tickdriver'), $_.FullName).Replace('\', '/') } | Sort-Object)
     if ($simNetDir -ne '') {
         $Headers += @(Get-ChildItem -LiteralPath (Join-Path $simNetDir 'OGSimNet') -Recurse -File -Filter '*.h' |
             ForEach-Object { [IO.Path]::GetRelativePath($simNetDir, $_.FullName).Replace('\', '/') } | Sort-Object)
@@ -347,7 +350,7 @@ if ($compilers.Count -eq 0) { exit 0 }
 
 $includes = @()
 if ($overlayDir -ne '') { $includes += "-I$overlayDir" }
-$includes += @("-I$simDir", ("-I" + (Join-Path $simDir 'glm')))
+$includes += @("-I$simDir", ("-I" + (Join-Path $simDir 'glm')), ("-I" + (Join-Path $simDir 'og-tickdriver')))
 $simNetIncludes = if ($simNetDir -ne '') { @("-I$simNetDir", "-I$netDir") } else { @() }
 $simNetCount = @($Headers | Where-Object { Test-SimNetHeader $_ }).Count
 $sessionIncludes = if ($sessionDir -ne '') { @($simNetIncludes + "-I$sessionDir") } else { @() }

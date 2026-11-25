@@ -38,6 +38,7 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path,
     [string[]]$ScanRoots = @(
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation',
+        'Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver',
         'Plugins/OGSimulation/Source/OGSimulationJolt/og-simulation-jolt/OGSimulationJolt',
         'Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net',
         'Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session',
@@ -47,7 +48,7 @@ param(
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/SimTrig.h',
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/RenderCorrectionSmoothing.h',
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/RenderInterpolation.h',
-        'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/TickDriverPresenter.h',
+        'Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/TickDriverPresenter.h',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/*Visualization*.h',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/DAttackCamera.h',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/DAttackCamera.cpp'

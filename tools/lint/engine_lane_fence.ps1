@@ -154,7 +154,7 @@
 
 .PARAMETER SimIncludePrefixes
     Include-path prefixes that mark a file as sim-side for T1. Default:
-    OGSimulation/, OGBrawler/, OGSimulationJolt/, OGNet/ (case-insensitive).
+    OGSimulation/, OGTickDriver/, OGBrawler/, OGSimulationJolt/, OGNet/ (case-insensitive).
 
 .PARAMETER ReflectionLog
     Optional. A log holding the `[EngineLane.Reflected]` lines of the Editor
@@ -176,7 +176,7 @@ param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path,
     [string[]]$ScanRoots = @('Source', 'Plugins'),
     [string]$ManifestPath = (Join-Path $RepoRoot 'tools/lint/engine_lane_manifest.md'),
-    [string[]]$SimIncludePrefixes = @('OGSimulation/', 'OGBrawler/', 'OGSimulationJolt/', 'OGNet/'),
+    [string[]]$SimIncludePrefixes = @('OGSimulation/', 'OGTickDriver/', 'OGBrawler/', 'OGSimulationJolt/', 'OGNet/'),
     [string]$ReflectionLog = ''
 )
 

@@ -176,6 +176,7 @@ param(
     # for. So discovery is the default; a caller must not have to remember.
     [string[]]$DefaultDocDirs = @(
         'Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/docs',
+        'Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/docs',
         'Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/docs',
         'Source/OGBrawlerUnreal/docs',
         'Plugins/OGSimulation/Source/OGSimulationUnreal/docs',

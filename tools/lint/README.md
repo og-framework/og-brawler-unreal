@@ -288,6 +288,7 @@ With no arguments it lints **every docs tier** against `Plugins`, `Source`,
 | tier | licence | travels with |
 |---|---|---|
 | `Plugins/OGSimulation/…/OGSimulation/docs` | MPL-2.0 | the `og-simulation` submodule |
+| `Plugins/OGSimulation/…/og-tickdriver/OGTickDriver/docs` | MPL-2.0 | the `og-simulation` submodule (og-tickdriver is a folder in it) |
 | `Source/OGBrawlerUnreal/docs` | BUSL-1.1 | this repository |
 | `Plugins/OGSimulation/…/OGSimulationUnreal/docs` | MPL-2.0 | the `og-simulation-ue` plugin submodule |
 | `Plugins/OGSimulation/…/OGSimulationJolt/docs` | MPL-2.0 | the `og-simulation-jolt` submodule |
@@ -576,7 +577,7 @@ reported `absent`, not an error.
 |---|---|---|---|
 | `OGNet` | 0 | yes | `**/Source/OGNet`, `**/og-net/OGNet` |
 | `OGSimulation` | 0 | yes | `**/Source/OGSimulation`, `**/og-simulation/OGSimulation` |
-| `OGTickDriver` | 1 | yes | `**/og-simulation/OGSimulation`, by file name (below) |
+| `OGTickDriver` | 1 | yes | `**/og-tickdriver/OGTickDriver`, and `**/og-simulation/OGSimulation` by file name (below) |
 | `OGSimulationJolt`, `OGSimNet`, `OGBrawler` | 2 | yes | their module folder and their library folder |
 | `OGSimSession` | 3 | yes | `**/Source/OGSimulationSession`, `**/og-sim-session/OGSimSession` |
 | `OGNetUnreal`, `DVolume`, `ProceduralMountainSide` | 4 | no | their module folder |
