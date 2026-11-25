@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-// docs/BrawlerTickDriverGameUImpl-rationale.md · docs/BrawlerTickDriverGameUImpl-guards.md
+// docs/BrawlerSessionHooksUImpl-rationale.md · docs/BrawlerSessionHooksUImpl-guards.md
 
 #pragma once
 
@@ -67,7 +67,7 @@ public:
 	void releaseInputsForAuthorityTick(SimTick authorityTick)
 	{
 		m_session.noteAuthorityStepTime_Step();
-		// ⛔G-01  docs/BrawlerTickDriverGameUImpl-guards.md
+		// ⛔G-01  docs/BrawlerSessionHooksUImpl-guards.md
 		m_session.releaseDelayedInputsForStep(static_cast<int32>(authorityTick), 1);
 	}
 

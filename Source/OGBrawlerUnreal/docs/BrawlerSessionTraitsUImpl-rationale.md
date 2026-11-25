@@ -75,7 +75,7 @@ their translation unit has the complete type.
 `BrawlerCompositionUImpl.h` (`Composition`'s members are named by the session, and since task 34 by the map of §4, whose
 og-simulation templates it brings too), `UEBrawlerNetConfig.h`,
 `PhysicsBackendHostUImpl.h` (the backend selector: `BackendWorlds`, `BackendFor` and the concept the assertion names) and
-`BrawlerTickDriverGameUImpl.h` (`TickDriverGame`; the selector includes it too, and did only in the Jolt configuration
+`BrawlerSessionHooksUImpl.h` (`TickDriverGame`; the selector includes it too, and did only in the Jolt configuration
 while there were two).
 The component's header includes this one, so every file that includes the component or the character now sees the
 backend header too (the tick-driver host's, with its `extern template`; in the former Chaos configuration, removed by

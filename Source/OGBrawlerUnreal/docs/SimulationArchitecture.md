@@ -296,7 +296,7 @@ Rationale and guards documents sit in the `docs` folder beside each module's sou
 | `BrawlerSessionGameUImpl` | the hooks; eleven bodies in `BrawlerSessionGameUImpl.cpp`, three inline in its header | brawler, BUSL | `BrawlerSessionGameUImpl-rationale.md` · `BrawlerSessionGameUImpl-guards.md` | `BrawlerSessionGameUImpl.h` |
 | `BrawlerSessionTraitsUImpl` | ties the templates to the brawler | brawler, BUSL | `BrawlerSessionTraitsUImpl-rationale.md` · `BrawlerSessionTraitsUImpl-guards.md` | `BrawlerSessionTraitsUImpl.h` |
 | `UESimulationSession` | the session: core, backend, transport, sequences | plugin, MPL | `UESimulationSession-rationale.md` · `UESimulationSession-guards.md` | `UESimulationSession.h` |
-| `BrawlerTickDriverGameUImpl` | the tick driver's brawler side | brawler, BUSL | `BrawlerTickDriverGameUImpl-rationale.md` · `BrawlerTickDriverGameUImpl-guards.md` | `BrawlerTickDriverGameUImpl.h` |
+| `BrawlerTickDriverGameUImpl` | the tick driver's brawler side | brawler, BUSL | `BrawlerSessionHooksUImpl-rationale.md` · `BrawlerSessionHooksUImpl-guards.md` | `BrawlerSessionHooksUImpl.h` |
 | `UELatencyBudgetDiagnostics` | latency stamps and reports | plugin, MPL | `UELatencyBudgetDiagnostics-rationale.md` · `UELatencyBudgetDiagnostics-guards.md` | `UELatencyBudgetDiagnostics.h` |
 | `UESimNetLanes` | the og-net driver's sim lanes: og-sim-net's transport, a client's session | plugin, MPL | `UESimNetLanes-rationale.md` · `UESimNetLanes-guards.md` | `UESimNetLanes.h` |
 | `UESimNetServerHost`, `UESimNetClientHost` | og-sim-net's hosts on Unreal: round trip, stamps, log | plugin, MPL | `UESimNetHost-rationale.md` · `UESimNetHost-guards.md` | `UESimNetHost.h` |

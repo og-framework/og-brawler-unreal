@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 # `BrawlerTickDriverGameUImpl` — rationale
 
-Companion to `Source/OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h` (og-tickdriver task 8, 2026-10-16).
-Prohibitions: `BrawlerTickDriverGameUImpl-guards.md`.
+Companion to `Source/OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (og-tickdriver task 8, 2026-10-16).
+Prohibitions: `BrawlerSessionHooksUImpl-guards.md`.
 
 **If this file and the header disagree, the header is authoritative and this file is stale.**
 

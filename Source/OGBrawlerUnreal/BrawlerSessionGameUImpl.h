@@ -6,6 +6,7 @@
 #include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulatableComponent.h"
 #include "OGBrawlerUnreal/OGBrawlerInputCollectionComponent.h"
+#include "OGBrawler/BrawlerSessionGame.h"
 #include "OGSimulation/BodyId.h"
 #include "OGSimulation/CompilerControl.h"
 #include "Engine/EngineBaseTypes.h"
@@ -45,11 +46,7 @@ public:
 
 	static void afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>& session);
 
-	struct AuthorityPresentationSlice
-	{
-		uint32 ringoutScore  = 0u;
-		bool   hasScoreEntry = false;
-	};
+	using AuthorityPresentationSlice = BrawlerSessionGame::AuthorityPresentationSlice;
 
 	static AuthorityPresentationSlice authorityPresentationSlice_Step(const BrawlerCompositionUImpl::SystemsExec& systems,
 		unsigned int id);
@@ -84,8 +81,7 @@ OGSIM_OPTIMIZE_OFF
 
 inline BrawlerSessionTraitsUImpl::PlayerInput BrawlerSessionGameUImpl::neutralInput()
 {
-	// ⛔G-01  docs/BrawlerSessionGameUImpl-guards.md
-	return simulatableBrawler::getZeroPlayerInput();
+	return BrawlerSessionGame::neutralInput();
 }
 
 inline BrawlerSessionTraitsUImpl::InputSampleSource BrawlerSessionGameUImpl::inputSampleSource(

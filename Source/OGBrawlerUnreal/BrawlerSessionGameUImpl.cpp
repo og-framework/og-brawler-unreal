@@ -108,8 +108,7 @@ void BrawlerSessionGameUImpl::presentAuthoritySlice(const UESimulationSession<Br
 
 BodyId BrawlerSessionGameUImpl::rootBodyId(const SimulatableBrawler& simulatable)
 {
-    return simulatable.getPhysicsComposite()
-        .get<brawlerMovementSimulation::PhysicsDeclaration>().bindings.ownBodyId;
+    return BrawlerSessionGame::rootBodyId(simulatable);
 }
 
 void BrawlerSessionGameUImpl::afterBodiesCreated(SimulatableBrawler& simulatable, AOGBrawlerUECharacter& character,

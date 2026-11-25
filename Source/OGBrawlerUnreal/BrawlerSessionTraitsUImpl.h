@@ -7,7 +7,7 @@
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 #include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
 #include "OGBrawlerUnreal/PhysicsBackendHostUImpl.h"
-#include "OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h"
+#include "OGBrawlerUnreal/BrawlerSessionHooksUImpl.h"
 
 class SimulatableBrawler;
 class UOGBrawlerSimulatableComponent;

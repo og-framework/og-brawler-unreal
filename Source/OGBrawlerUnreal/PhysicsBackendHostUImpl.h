@@ -6,7 +6,7 @@
 #include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 
 #include "OGSimulationUnreal/TickDriverBackendUImpl.h"
-#include "OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h"
+#include "OGBrawlerUnreal/BrawlerSessionHooksUImpl.h"
 
 extern template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
 

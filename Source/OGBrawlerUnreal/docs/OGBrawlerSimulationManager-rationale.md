@@ -96,7 +96,7 @@ collide.
 * **§17**, the map of the Jolt host, moved to `TickDriverBackendUImpl-rationale.md` §2 with the Jolt host
   (og-simulationscheduler-withjolt task 83). The frame host and the game's tick-driver binding have their own
   documents, OGSimulationUnreal's `UETickDriverHost-rationale.md` (since og-tickdriver task 11; a game-module
-  document before) and `BrawlerTickDriverGameUImpl-rationale.md`; since
+  document before) and `BrawlerSessionHooksUImpl-rationale.md`; since
   og-tickdriver task 8 the frame pipeline and the step hooks are og-simulation's `SimulationTickDriver` and
   `TickDriverStepHooks`.
 * **§18** is the history of the backend switch: the compile-time choice between the Chaos host and the Jolt host
@@ -947,14 +947,14 @@ physics-thread-written server clock.
 
 **The Jolt configuration's call pattern (og-simulationscheduler-withjolt task 54).** The same three
 pieces, at the three places design D3 puts them (`SimulationTickDriver-rationale.md` §3 since og-tickdriver
-task 8; `BrawlerTickDriverGameUImpl-rationale.md` §2):
+task 8; `BrawlerSessionHooksUImpl-rationale.md` §2):
 
 * `onFrameStepsDue_Step(first + offset, n)` once per frame at `TG_StartPhysics`, only when the
   scheduler made `n ≥ 1` steps due: the condition and the arguments under which the former Chaos host
   called it.
 * The drain **per simulation tick**, from the authority step's `beforeTick`, as
   `releaseDelayedInputsForStep(authorityTick, 1)`: one `[ReleaseBatch]` with `numSteps=1` per step,
-  for the tick that step will simulate (`TickDriverStepHooks-guards.md` G-01 and `BrawlerTickDriverGameUImpl-guards.md`
+  for the tick that step will simulate (`TickDriverStepHooks-guards.md` G-01 and `BrawlerSessionHooksUImpl-guards.md`
   G-01, the successors of the retired G-01 of the brawler's former step hooks).
 * `reapConnections(first + offset)` **once per batch, after the batch's inline steps** (once per stepping wake of the
   authority's runner), with the value the probe call received. It stays per batch because it is the only feed of the coordinator's
@@ -993,7 +993,7 @@ og-session-runtime tasks 3–6) that was the tick mapper's atomic offset, which 
 InjectInputs_External called `onFrameStepsDue_Step` with the mapper's tick (§7, §18). In the Jolt configuration
 the tick driver calls it at `TG_StartPhysics` with its dispatch counter plus the published offset J3 (§1), which is the
 mapper's value except that a client Skip or Stall's ±1 reaches the probe one frame earlier
-(`BrawlerTickDriverGameUImpl-rationale.md` §4; the frame host until og-tickdriver task 8); the line formats are unchanged
+(`BrawlerSessionHooksUImpl-rationale.md` §4; the frame host until og-tickdriver task 8); the line formats are unchanged
 (og-simulationscheduler-withjolt task 54). The `+ 1` in the former Chaos host's derivation was proved under an
 authority-only assumption (in its rationale, deleted with it); the session's §9.9 says why the probe's deltas are safe on
 a client anyway.
@@ -3172,9 +3172,9 @@ provider, so the host role has no capture path to stamp.
 
 In the Jolt configuration "PT" is the step's thread (the tick driver's task on a client, the runner on the
 authority), every game-thread site is unchanged, and the step-side sites are the game binding's step hooks
-(`BrawlerTickDriverGameUImpl-rationale.md`):
+(`BrawlerSessionHooksUImpl-rationale.md`):
 
-| stamp | Jolt configuration (`BrawlerTickDriverGameUImpl.h`) |
+| stamp | Jolt configuration (`BrawlerSessionHooksUImpl.h`) |
 |---|---|
 | step-start time for `H4`, `H6`, `H6c`, `H6L`'s use and the clock counts | og-simulation's `TickDriverStepHooks` `beforeSimulate`, after any replay and immediately before the normal step (`TickDriverStepHooks-guards.md` G-03); on a client early only by the Jolt scratch save |
 | `stampAfterStep_Internal(start)` | `onStepStarted`, from `beforePhysics`, after `onGameSimulation`, before the physics step |

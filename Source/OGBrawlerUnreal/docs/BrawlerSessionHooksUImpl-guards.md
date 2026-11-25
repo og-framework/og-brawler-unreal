@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
-# `BrawlerTickDriverGameUImpl.h` — guards
+# `BrawlerSessionHooksUImpl.h` — guards
 
-Prohibitions with a tagged site in `Source/OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h` (og-tickdriver task 8).
+Prohibitions with a tagged site in `Source/OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (og-tickdriver task 8).
 Ids are opaque, stable, and retired rather than reused. The reasoning lives in
-`BrawlerTickDriverGameUImpl-rationale.md`.
+`BrawlerSessionHooksUImpl-rationale.md`.
 
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 

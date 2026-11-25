@@ -104,7 +104,7 @@ names the parameters through forward declarations (`UWorld`, `AActor`, `UOGBrawl
 
 Since og-tickdriver task 15e the tick-driver host is OGSimulationUnreal's header template, which names no brawler
 type, so the header includes two headers (the Jolt arm's until og-session-runtime task 3): `OGSimulationUnreal/TickDriverBackendUImpl.h` (the host) and
-`OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h` (the game binding and its `BrawlerTickDriverGame` alias, which the host
+`OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (the game binding and its `BrawlerTickDriverGame` alias, which the host
 header included until then). It then declares
 `extern template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;`.
 

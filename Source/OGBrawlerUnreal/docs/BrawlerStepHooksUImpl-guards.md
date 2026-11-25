@@ -5,7 +5,7 @@ The brawler's engine-hosted step hooks, a header in `Source/OGBrawlerUnreal/` wr
 og-simulationscheduler-withjolt task 54, were **deleted by og-tickdriver task 8 (2026-10-16)**. og-simulation's
 `TickDriverStepHooks` (og-tickdriver task 3) replaced them, constructed by the tick driver `SimulationTickDriver`
 (task 7). The hooks' explanation went with them: `TickDriverStepHooks-rationale.md` (og-simulation) for the hooks,
-and `BrawlerTickDriverGameUImpl-rationale.md` for what the brawler's game binding does at each hook.
+and `BrawlerSessionHooksUImpl-rationale.md` for what the brawler's game binding does at each hook.
 
 This file is kept only as the record of the three ids the header's tags used, so that none is ever reused. It has
 no live entry and no source file.
@@ -24,7 +24,7 @@ no live entry and no source file.
 **Why it retired.** Task 8 deleted the header. The release is now og-simulation's `beforeTick`, which calls the
 game's `releaseInputsForAuthorityTick` with the upcoming authority tick. **Successors:** `TickDriverStepHooks-guards.md`
 G-01 (og-simulation; the hook releases that tick and calls no per-frame game hook), and
-`BrawlerTickDriverGameUImpl-guards.md` G-01 (the binding forwards it to `releaseDelayedInputsForStep` with a step
+`BrawlerSessionHooksUImpl-guards.md` G-01 (the binding forwards it to `releaseDelayedInputsForStep` with a step
 count of 1, the half of this prohibition that is typed in the brawler's file).
 
 ### G-02 — RETIRED by og-tickdriver task 8 (2026-10-16): the published offset moved into og-simulation's step hooks
