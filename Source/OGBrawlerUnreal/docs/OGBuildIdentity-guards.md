@@ -13,7 +13,7 @@ The rules the compiler holds need no entry: the `build_info.txt` parse (BOM, CR,
 `static_assert`s in `OGBuildIdentityUImpl.h` (rationale §2, §3).
 
 The physics-backend token and the login check (rationale §7, og-simulationscheduler-withjolt tasks 51
-and 18) need no entry either. The token is built from `PhysicsBackendUImpl.h`, the header that selects
+and 18) need no entry either. The token is built from `BrawlerSessionTraitsUImpl.h` (since og-session-runtime task 31), the header that selects
 the backend, so the token and the compiled host cannot disagree. The admission rule (a different
 backend and a missing token are refused; a different Jolt fingerprint is admitted with a Warning) is two
 `static_assert`s, over `classifyBackendLogin` and `refusesBackendLogin` in `OGBuildIdentityUImpl.h`. And every way the wiring can break fails closed and says why: a client whose

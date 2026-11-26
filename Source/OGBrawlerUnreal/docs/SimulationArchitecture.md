@@ -365,6 +365,7 @@ two executors, which the session spells from those choices (user rulings 2026-10
 the reverse). The session asserts each core alias and executor against the composition's, the traits each map row
 against `BrawlerCompositionUImpl` (`UESimulationSession-rationale.md` §13 and §14, `BrawlerSessionTraitsUImpl-rationale.md` §4).
 
-**`PhysicsBackend`** is the physics backend host: it owns and steps the physics worlds and updates the visuals (Jolt
-through the tick driver; the Chaos backend was removed by og-session-runtime task 3). The session holds it as `m_physicsBackend` and names it through the traits'
-`PhysicsBackend<SessionT>`.
+**The tick backend** owns and steps the physics worlds and updates the visuals (Jolt through the tick driver; the Chaos
+backend was removed by og-session-runtime task 3). Since og-session-runtime task 31 it is og-sim-session's `SessionRuntime`'s
+member `m_tickBackend` (og-simulation's `SimulationTickBackend`), and the engine's bodies are `TickDriverBackendUImpl`, which
+`UESessionRuntimeTraits` names; until then the Unreal session held a backend host the traits named.

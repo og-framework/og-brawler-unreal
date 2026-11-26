@@ -1,4 +1,8 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: UESessionTickHost-rationale.md -- deleted by og-session-runtime task 31 (the tick game's Unreal host: its hooks are og-sim-session's SessionRuntimeHost port, which UESimulationSession models); kept in the history -->
+<!-- lint-external-ref: getReceptionCoordinator -- deleted by og-session-runtime task 31 (no caller); kept in the history -->
+<!-- lint-external-ref: PhysicsBackendHostUImpl.h -- deleted by og-session-runtime task 31 (the brawler's backend selector: the PhysicsBackendHost concept, BackendFor, BackendWorlds, the traits' PhysicsBackend and PhysicsBackendWorlds, and the host's extern instantiation; the tick backend is og-sim-session's SessionRuntime member, the Unreal bodies TickDriverBackendUImpl, named by UESessionRuntimeTraits); kept in the history -->
+<!-- lint-external-ref: UESimulationSession::ReceptionCoordinator -- deleted by og-session-runtime task 31 (no caller); kept in the history -->
 # `BrawlerSessionHooksUImpl` — rationale
 
 Companion to `Source/OGBrawlerUnreal/BrawlerSessionHooksUImpl.h` (og-tickdriver task 8, 2026-10-16).
@@ -18,10 +22,10 @@ here:
 
 | member | what | called by |
 |---|---|---|
-| `Manager`, `Storage`, `RenderSnapshot` | `BrawlerCompositionUImpl`'s, the types the tick driver needs before the session is complete | `UESessionTickHost` |
+| `Manager`, `Storage`, `RenderSnapshot` | `BrawlerCompositionUImpl`'s, the types the tick driver needs before the session is complete | no reader since og-session-runtime task 31 (the runtime's tick host spells them from the composition); the Unreal tick host's before |
 | `Session`, `Component`, `Character`, `StaticData` | the session and the brawler's types | `TickDriverBackendUImpl` |
-| `sampleInput(session)` | each registered character publishes its input sample (§8) | `UESessionTickHost::sampleInput`, from `SessionTickGame::sampleInput` |
-| `gravity(staticData)` | the movement static data's gravity | `TickDriverBackendUImpl::buildWorld`, with the session's static data |
+| `sampleInput(session)` | each registered character publishes its input sample (§8) | the session's `sampleInput` (its `SessionRuntimeHost` hook, since og-session-runtime task 31), from `SessionTickGame::sampleInput` |
+| `gravity(staticData)` | the movement static data's gravity | `TickDriverBackendUImpl::worldConfig`, with the session's static data (the runtime's world build, since og-session-runtime task 31) |
 | `callWithSlotRequest(owner, key, isAuthority, physicsSlotFor, recordSlot, slotCall)` | the brawler's part of a body slot request: the character check, the debug name, the storage key from the character's `SimCharacterId` | `TickDriverBackendUImpl::callWithSlotRequest`, which passes the session's slot query and its record |
 
 The class was BrawlerTickDriverGameUImpl (in BrawlerTickDriverGameUImpl.h) until task 26: the header and its two documents

@@ -7,7 +7,7 @@
 #include "Templates/Casts.h"
 
 #include "OGBrawler/SimCharacterId.h"
-#include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
+#include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
 
 #include <cstdint>
 #include <utility>

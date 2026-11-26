@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: PhysicsBackendUImpl.h -- deleted by og-session-runtime task 31 (the brawler's engine seam header: its binding concept and the EngineTraits and EngineBinding aliases moved to the top of BrawlerSessionTraitsUImpl.h, its rationale with it); kept in the history -->
 <!-- lint-external-ref: BrawlerSystemList -- retired member list template: replaced by og-simulation's SystemList in og-ue-simulationcomponentandmanagersplit task 36; named in §2's record of that change -->
 <!-- lint-external-ref: BrawlerSimulatables -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
 <!-- lint-external-ref: BrawlerNetSync -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
@@ -95,8 +96,9 @@ class-scope `static_assert` in og-simulation's `TickDriverPresenter` checks it: 
 the render source's `kMaxSimulatableSlots` times the presenter's `kDeclarationsPerSlot` (`declarationCountOf` the
 source's `PhysicsComposite`, the brawler's physics composite).
 
-**No backend switch.** The adapter types come from `PhysicsBackendUImpl.h`, which held the switch until
-og-session-runtime task 3 removed it, so this header never had an `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
+**No backend switch.** The adapter types come from the configuration's `EngineTraits`, which `BrawlerSessionTraitsUImpl.h` names since
+og-session-runtime task 31 (`PhysicsBackendUImpl.h` before, which held the switch until
+og-session-runtime task 3 removed it), so this header never had an `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
 the dependency runs the other way.
 
 ## 3. The compile-time checks
@@ -104,7 +106,8 @@ the dependency runs the other way.
 * **Detection fires before routing.** The `brawlerHitDetection::firesBefore` `static_assert` under
   `SystemsExec`, moved here from the UImpl with its message unchanged. The message still names `BrawlerSystemsExec`, the UImpl's re-export of `SystemsExec`.
   Task 81 swapped the two systems in `SystemsExec` and saw the assert fail.
-* **The session's manager is this manager.** Since og-ue-simulationcomponentandmanagersplit task 24a `UESimulationSession::compositionContractsHold`
+* **The session's manager is this manager.** Since og-ue-simulationcomponentandmanagersplit task 24a the session's `compositionContractsHold` (og-sim-session's
+  `SessionRuntime::compositionContractsHold` since og-session-runtime task 31, the Unreal session's before)
   asserts that the session's private `ManagerType` (this struct's `Manager`; since task 34 the session spells it as
   og-simulation's `SimulationManager` over its own aliases and asserts it equal to `Manager`, and before that it was its
   traits' `Composition::Manager`) is the

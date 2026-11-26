@@ -16,7 +16,7 @@
 #include <optional>
 
 #include "OGBrawlerUnreal/JoinScreenUImpl.h"
-#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
+#include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
 #include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
 #include "OGSimulation/Network/SimWireToken.h"
 

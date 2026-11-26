@@ -306,12 +306,12 @@ std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUI
 
 } // namespace inputHistoryVisualizationUImpl
 
-static_assert(decltype(BrawlerInputHistoryFeedUImpl::Session::DisplayEntry::localCaptures)::kWindow
+static_assert(decltype(BrawlerInputHistoryFeedUImpl::Session::Runtime::DisplayEntry::localCaptures)::kWindow
 		>= brawlerInputHistoryVisualization::kCapturePollWindowTicks,
 	"The session's display snapshot must carry every capture tick the row poll reads "
 	"(pollWindowEndingAt(newestTick, kCapturePollWindowTicks)); a narrower window shows captured ticks as absent. "
 	"Was the row poll's read of the session's LocalInputCache, before og-input-latency task P5-16");
-static_assert(decltype(BrawlerInputHistoryFeedUImpl::Session::DisplayEntry::applied)::kWindow
+static_assert(decltype(BrawlerInputHistoryFeedUImpl::Session::Runtime::DisplayEntry::applied)::kWindow
 		>= brawlerInputHistoryVisualization::kAppliedPollWindowTicks,
 	"The session's display snapshot must carry every applied-capture tick the lanes poll reads "
 	"(pollWindowEndingAt(liveSimTick, kAppliedPollWindowTicks)); a narrower window shows applied ticks as unapplied. "
@@ -319,7 +319,7 @@ static_assert(decltype(BrawlerInputHistoryFeedUImpl::Session::DisplayEntry::appl
 
 void BrawlerInputHistoryFeedUImpl::pollInputHistory(unsigned int id, uint32 newestTick, float deadzone)
 {
-	const Session::DisplayEntry* const entry = m_session.findDisplayEntry(id);
+	const Session::Runtime::DisplayEntry* const entry = m_session.runtime().findDisplayEntry(id);
 	if (entry == nullptr || !entry->hasLocalInputCache)
 		return;
 
@@ -330,28 +330,28 @@ void BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes(unsigned int id, uint32
 	DAttackState machineState, std::optional<brawlerInputHistoryVisualization::CaptureRowFields> liveInput,
 	bool pauseWhileIdle, bool includeDelay)
 {
-	const Session::DisplayEntry* const entry = m_session.findDisplayEntry(id);
+	const Session::Runtime::DisplayEntry* const entry = m_session.runtime().findDisplayEntry(id);
 	if (entry == nullptr)
 		return;
 
-	const DisplayClockReading& displayClock = m_session.getDisplaySnapshot()->clock;
-	const DisplayTierReading&  displayTier  = m_session.getDisplaySnapshot()->tier;
+	const DisplayClockReading& displayClock = m_session.runtime().getDisplaySnapshot()->clock;
+	const DisplayTierReading&  displayTier  = m_session.runtime().getDisplaySnapshot()->tier;
 
 	const std::optional<uint32> predictionOffsetTicks =
 		// ⛔G-09  docs/InputHistoryVisualizationUImpl-guards.md
-		(m_session.getManager().has_value() && m_session.getManager()->runsPrediction())
+		(m_session.runtime().getManager().has_value() && m_session.runtime().getManager()->runsPrediction())
 			? std::optional<uint32>(displayClock.predictionOffsetTicks)
 			: std::nullopt;
 
 	// ⛔G-10  docs/InputHistoryVisualizationUImpl-guards.md
-	const bool isLocallyControlled = m_session.isLocallyControlledOnThisPeer(id);
+	const bool isLocallyControlled = m_session.runtime().isLocallyControlledOnThisPeer(id);
 
 	std::optional<brawlerInputHistoryVisualization::InputDelayDecomposition> delay;
 	// ⛔G-11  docs/InputHistoryVisualizationUImpl-guards.md
 	if (includeDelay && isLocallyControlled
-		&& m_session.getReplicatedTierConsumer() != nullptr && m_session.getManager().has_value())
+		&& m_session.runtime().getReplicatedTierConsumer() != nullptr && m_session.runtime().getManager().has_value())
 	{
-		TimeConfig delayConfig = m_session.getManager()->getTimeConfig();
+		TimeConfig delayConfig = m_session.runtime().getManager()->getTimeConfig();
 		delayConfig.relayDelayFloorTicks = displayTier.relayDelayFloorTicks;
 		delay = brawlerInputHistoryVisualization::decomposeInputDelay(
 			displayTier.hasReceivedTier,
@@ -363,7 +363,7 @@ void BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes(unsigned int id, uint32
 
 	std::optional<brawlerInputHistoryVisualization::ClockDriftReading> clock;
 	// ⛔G-12  docs/InputHistoryVisualizationUImpl-guards.md
-	if (m_session.getManager().has_value() && m_session.getManager()->runsPrediction())
+	if (m_session.runtime().getManager().has_value() && m_session.runtime().getManager()->runsPrediction())
 	{
 		brawlerInputHistoryVisualization::ClockDriftReading reading;
 		reading.predictionTick         = displayClock.predictionTick;
@@ -392,8 +392,8 @@ void BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes(unsigned int id, uint32
 
 	const uint32 rollbackWindowTicks =
 		// ⛔G-14  docs/InputHistoryVisualizationUImpl-guards.md
-		(m_session.getManager().has_value() && m_session.getManager()->getTimeConfig().rollbackWindowTicks > 0)
-			? static_cast<uint32>(m_session.getManager()->getTimeConfig().rollbackWindowTicks)
+		(m_session.runtime().getManager().has_value() && m_session.runtime().getManager()->getTimeConfig().rollbackWindowTicks > 0)
+			? static_cast<uint32>(m_session.runtime().getManager()->getTimeConfig().rollbackWindowTicks)
 			: 0u;
 
 	const auto& reader = entry->applied;
@@ -417,7 +417,7 @@ brawlerInputHistoryVisualization::RelayReadReadout BrawlerInputHistoryFeedUImpl:
 {
 	brawlerInputHistoryVisualization::RelayReadReadout readout;
 
-	const Session::DisplayEntry* const entry = m_session.findDisplayEntry(id);
+	const Session::Runtime::DisplayEntry* const entry = m_session.runtime().findDisplayEntry(id);
 	if (entry == nullptr || !entry->hasRelayedReadObservations)
 		return readout;
 	const RelayedReadObservationRing* const ring = &entry->relayedReadObservations;
@@ -456,7 +456,7 @@ brawlerInputHistoryVisualization::RelayReadReadout BrawlerInputHistoryFeedUImpl:
 void BrawlerInputHistoryFeedUImpl::gatherNearestCandidates(
 	brawlerInputHistoryVisualization::NearestCharacterCandidateList& out) const
 {
-	m_session.forEachDisplayVizState(
+	m_session.runtime().forEachDisplayVizState(
 		[&out](unsigned int id, const Session::DisplayVizState& vizState)
 		{
 			// ⛔G-17  docs/InputHistoryVisualizationUImpl-guards.md

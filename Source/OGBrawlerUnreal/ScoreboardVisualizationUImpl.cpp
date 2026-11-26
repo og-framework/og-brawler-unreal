@@ -115,7 +115,7 @@ std::optional<uint32_t> displayTick(const AOGBrawlerSimulationManager* manager)
 	if (manager == nullptr)
 		return std::nullopt;
 
-	const auto* const snapshot = manager->session().getDisplaySnapshot();
+	const auto* const snapshot = manager->session().runtime().getDisplaySnapshot();
 	if (snapshot == nullptr)
 		return std::nullopt;
 

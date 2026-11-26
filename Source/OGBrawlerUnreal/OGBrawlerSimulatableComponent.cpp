@@ -290,10 +290,10 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 		return;
 
 	const unsigned int ownKey = toStorageKey(simCharacterId());
-	const simulatableBrawler::AllState* const displayVizState = vizManager->session().findDisplayVizState(ownKey);
+	const simulatableBrawler::AllState* const displayVizState = vizManager->session().runtime().findDisplayVizState(ownKey);
 	if (displayVizState == nullptr)
 		return;
-	const DisplayClockReading& displayClock = vizManager->session().getDisplaySnapshot()->clock;
+	const DisplayClockReading& displayClock = vizManager->session().runtime().getDisplaySnapshot()->clock;
 
 	{
 		const glm::vec3 aimDirection = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildAimDirection() : simFrame::kForward;
@@ -346,7 +346,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 			simulatableBrawler::selectVisualizationInput(
 				hasLiveLocalInput,
 				[this]() { return m_ownerInputCollection->buildLatestVisualizationInput(); },
-				vizManager->session().getLastRelayedInput(ownKey));
+				vizManager->session().runtime().getLastRelayedInput(ownKey));
 
 		{
 			if (vizPlayerInput.has_value())

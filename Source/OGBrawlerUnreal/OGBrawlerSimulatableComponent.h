@@ -27,7 +27,6 @@
 #include <vector>
 #include "InputActionValue.h"
 
-#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGSimulationUnreal/UESimulatableOwnerBinding.h"
 #include "OGBrawlerUnreal/BrawlerSessionTraitsUImpl.h"
 #include "OGSimulationUnreal/InputMappingUETranslator.h"

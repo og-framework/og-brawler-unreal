@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: PhysicsBackendUImpl.h -- deleted by og-session-runtime task 31 (the brawler's engine seam header: its binding concept and the EngineTraits and EngineBinding aliases moved to the top of BrawlerSessionTraitsUImpl.h, its rationale with it); kept in the history -->
 <!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
 <!-- lint-external-ref: vizSimulationStep -- a local of UOGBrawlerSimulatableComponent::TickComponent until og-input-latency task P5-16 (the tick comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: FInputRedundancyBundle -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
@@ -480,7 +481,7 @@ lifetime arithmetic lines up with the simulation's own pruning.
 
 **The movement draw reads a sim-tick snapshot on the render clock.** `attackSimAllState` is
 `getVizState()` — the whole-`AllState` copy `updateVisualizationAll` takes in the session's
-`UESimulationSession::onPostPhysicsStep` (the manager actor's `OnPostPhysicsStep` until
+`UESimulationSession::onPostPhysics` (`onPostPhysicsStep` until og-session-runtime task 31; the manager actor's `OnPostPhysicsStep` until
 og-ue-simulationcomponentandmanagersplit task 27a), once per game frame at the end of physics, in both
 physics backends. So every drawn `State` / `DerivedState` value is the newest tick the copy saw: a
 frame that ran several ticks shows only the last, a client that steps on a worker can lag the frame,
@@ -540,12 +541,13 @@ visualization makes (`getLastRelayedInput`, `runsPrediction`, the two clocks, an
 task 7b deleted) go through `session()`
 too. (Since og-input-latency task P5-16 those reads are the display snapshot's doors instead, §23.) The manager owned the choice of physics backend
 (`OGBrawlerSimulationManager-rationale.md` §18) while there were two, and these members existed in both configurations, so this
-component contains no backend arm and names no adapter type: it includes `PhysicsBackendUImpl.h`
+component contains no backend arm and names no adapter type: it included `PhysicsBackendUImpl.h` (since og-session-runtime
+task 31 it reaches the engine traits through `BrawlerSessionTraitsUImpl.h`)
 instead of the two Chaos adapter headers it included before. In the former Chaos configuration (removed by og-session-runtime
 tasks 3–6) the members returned the Chaos query adapter and the game-thread reader, and `registerVizVolume` built the query
 parameters this file used to build itself (simple collision, the owner ignored). `registerVizVolume` returns an optional
 volume id, which is empty while the Jolt slot acquire waits (§3). The visualizers are templates over the adapter types, so the
-calls compile against the pair `PhysicsBackendUImpl.h` names.
+calls compile against the pair the configuration's `EngineTraits` names.
 
 In the Jolt configuration the two accessors return the game-thread shadow world's adapters on a client, which
 steps on a worker, where the step's own world may be queried only by the step or under the world

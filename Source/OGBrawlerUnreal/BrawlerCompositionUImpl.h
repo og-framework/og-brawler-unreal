@@ -19,7 +19,6 @@
 #include "OGBrawler/BrawlerHitRoutingSystem.h"
 #include "OGBrawler/BrawlerRingoutRespawnSystem.h"
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
-#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 
 struct BrawlerCompositionUImpl
 {

@@ -14,6 +14,7 @@
 #include "OGSimSession/SessionKnobs.h"
 #include "OGSimSession/SessionLifecycle.h"
 #include "OGSimSession/SessionNetHooks.h"
+#include "OGSimSession/SessionRuntime.h"
 
 namespace sessionKnobsFormatParityTest
 {
@@ -440,6 +441,43 @@ TEST_CASE("SessionLifecycleFormatParity.FStringPrintfEqualsSnprintfForTheAuthori
 		}
 	}
 	CHECK(compared == 28u);
+}
+
+TEST_CASE("SessionRuntimeFormatParity.FStringPrintfEqualsSnprintfForTheBackendAndManagerLines", "[Session]")
+{
+	namespace runtimeLines = ogsession::sessionRuntimeLines;
+	using sessionKnobsFormatParityTest::utf8;
+	uint32 compared = 0u;
+	const std::vector<std::string> kNames = { "jolt", "box3d", "", "100% %d %s" };
+	const std::vector<std::string> kFingerprints = { "da3fb8fcd6728b59", "", "0000000000000000", "%s%n", std::string(200u, 'f') };
+	for (const std::string& name : kNames)
+	{
+		for (const std::string& fingerprint : kFingerprints)
+		{
+			const FString old = FString::Printf(TEXT("[SimHost.Backend] backend=%hs fingerprint=%.*hs"), name.c_str(),
+				static_cast<int32>(fingerprint.size()), fingerprint.data());
+			char line[256];
+			std::snprintf(line, sizeof(line), runtimeLines::kBackend, name.c_str(), static_cast<int>(fingerprint.size()),
+				fingerprint.data());
+			const std::string routed(line);
+			INFO("old: " << utf8(old));
+			INFO("new: " << routed);
+			REQUIRE(routed.rfind("[Warning]", 0) == 0);
+			// The runtime formats into a 256-byte buffer (SessionRuntime.h, as the line's other snprintf sites); the old UE_LOG
+			// had no limit, so the two agree up to that buffer and the runtime cuts the rest (a real line is about 50 bytes).
+			CHECK(routed.substr(9) == utf8(old).substr(0, sizeof(line) - 1u - 9u));
+			++compared;
+		}
+	}
+	const FString oldManager = FString::Printf(TEXT("SimulationManager: adapters, integration layer, and manager initialized"));
+	CHECK(std::string(runtimeLines::kManagerInitialized) == utf8(oldManager));
+	++compared;
+	CHECK(compared == 21u);
+
+	// A non-ASCII name prints differently on the two paths (%hs widened byte by byte, logRouted keeps UTF-8); the runtime
+	// refuses one at compile time, so the parity above is over every name it can print.
+	CHECK_FALSE(runtimeLines::isAsciiName("O\xC3\xB1"));
+	CHECK(runtimeLines::isAsciiName("jolt"));
 }
 
 #endif

@@ -49,7 +49,6 @@
 
 #include "OGSimulationUnreal/OGSimulationUnreal.h"
 #include "OGSimulationUnreal/UESimulationLogRoutes.h"
-#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 #include "OGBrawlerUnreal/SimulatableBrawlerOwnerTraits.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"

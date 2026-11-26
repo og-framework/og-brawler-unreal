@@ -461,7 +461,7 @@ void AOGBrawlerUEHUD::drawInputHistoryFrameMeter()
 		// ⛔ THE SESSION'S ONE LOCALITY TEST, asked once and carried in the header from
 		//   here on: a ring that has not been created yet is not a local character.
 		nearestHeader.isLocallyControlled =
-			manager->session().isLocallyControlledOnThisPeer(*nearestId);
+			manager->session().runtime().isLocallyControlledOnThisPeer(*nearestId);
 
 		drawInputHistoryFrameMeterStack(*manager, *nearestId, 0.f, labelHeight, nearestHeader);
 		return;

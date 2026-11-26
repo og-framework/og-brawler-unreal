@@ -52,7 +52,8 @@
         OGNetUnreal            = @{ Tier = 4; EngineFree = $false; Roots = @('**/Source/OGNetUnreal') }
         DVolume                = @{ Tier = 4; EngineFree = $false; Roots = @('**/Source/dVolume') }
         ProceduralMountainSide = @{ Tier = 4; EngineFree = $false; Roots = @('**/Source/ProceduralMountainSide') }
-        OGSimulationUnreal     = @{ Tier = 5; EngineFree = $false; Roots = @('**/Source/OGSimulationUnreal') }
+        OGSimulationUnreal     = @{ Tier = 5; EngineFree = $false; Roots = @('**/Source/OGSimulationUnreal')
+                                    MayNotInclude = @('OGNet') }
         OGSimulationJoltUnreal = @{ Tier = 6; EngineFree = $false; Roots = @('**/Source/OGSimulationJoltUnreal') }
         OGBrawlerUnreal        = @{ Tier = 7; EngineFree = $false; Roots = @('**/Source/OGBrawlerUnreal')
                                     MayNotInclude = @('OGTickDriver') }

@@ -1,4 +1,6 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: PhysicsBackendHostUImpl.h -- deleted by og-session-runtime task 31 (the brawler's backend selector: the PhysicsBackendHost concept, BackendFor, BackendWorlds, the traits' PhysicsBackend and PhysicsBackendWorlds, and the host's extern instantiation; the tick backend is og-sim-session's SessionRuntime member, the Unreal bodies TickDriverBackendUImpl, named by UESessionRuntimeTraits); kept in the history -->
+<!-- lint-external-ref: PhysicsBackendHostUImpl-rationale.md -- deleted by og-session-runtime task 31 (the brawler's backend selector: the PhysicsBackendHost concept, BackendFor, BackendWorlds, the traits' PhysicsBackend and PhysicsBackendWorlds, and the host's extern instantiation; the tick backend is og-sim-session's SessionRuntime member, the Unreal bodies TickDriverBackendUImpl, named by UESessionRuntimeTraits); kept in the history -->
 # `BrawlerJoltBindingUImpl` — rationale
 
 Companion to `Source/OGBrawlerUnreal/BrawlerJoltBindingUImpl.h` and `.cpp` (og-tickdriver task 15a). Its guards are
@@ -91,9 +93,16 @@ thread, when it fills the world host's configuration in `buildWorld` (`TickDrive
 * Task 15e compared the console-variable dumps of both configurations before and after the move: unchanged, and an
   engine-ini override still reaches the variable (the dump's LastSetBy reads SystemSettingsIni).
 
-## §7 The host's instantiation (og-tickdriver task 15e)
+## §7 The host's instantiation (og-tickdriver task 15e; deleted by og-session-runtime task 31)
 
-The `.cpp` ends with `template class TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl,
+**Since og-session-runtime task 31 there is no explicit instantiation.** The tick backend is og-sim-session's
+`SessionRuntime` member, and `TickDriverBackendUImpl` holds only the Unreal bodies (`TickDriverBackendUImpl-rationale.md`),
+so the line and its `extern` twin were deleted. The runtime and the bodies are templates the game module instantiates
+implicitly where it uses the session, so the driver and its step scope still compile into the game module, as
+og-simulation's one-module rule requires, and the runtime's order rows are evaluated in every game build. The rest of
+this section is the record of the instantiation as it stood.
+
+Until then the `.cpp` ended with `template class TickDriverBackendUImpl<BrawlerSessionHooks, JoltEngineTraitsUImpl,
 BrawlerJoltBindingUImpl>;`, inside its `OGSIM_OPTIMIZE_OFF` span, after `checkCapsuleContract`. It is the one place the
 Jolt configuration's host is instantiated: the header is OGSimulationUnreal's and game-agnostic, and
 `PhysicsBackendHostUImpl.h` declares the same instantiation `extern` (`PhysicsBackendHostUImpl-rationale.md` §4). So the

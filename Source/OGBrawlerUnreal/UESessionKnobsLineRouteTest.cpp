@@ -1,6 +1,41 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 #include "OGSimulationUnreal/UESimulationLogRoutes.h"
+#include "OGSimSession/SessionKnobs.h"
+
+constexpr bool ueSessionKnobLineKeepsItsRoute(const char* line, ELogVerbosity::Type level)
+{
+	const OGLogRouteEntry* route = ogLogRouteForLevelLine(line);
+	return route != nullptr && route->route == OGLogRoute::Net && ogLogLevelOfLevelLine(line) == level;
+}
+
+static_assert(ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kRelayDelayFloorClamped, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kRelayDelayFloorSession, ELogVerbosity::Log)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kStateRotationClamped, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kStateRotationSession, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kResimGateUnrecognised, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kResimGateSession, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kLatencyKnobsRedundancyClamped, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kLatencyKnobsResendClamped, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kLatencyKnobsSession, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kRecentreClamped, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kRecentreSession, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kJitterNotFinite, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kJitterClamped, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kClockRttSourceUnrecognised, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kClockSourceSession, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationNotApplicable, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationUnrecognised, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationSetpointUnrecognised, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationSession, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationDoors, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationDoorNotFinite, ELogVerbosity::Warning)
+	&& ueSessionKnobLineKeepsItsRoute(ogsession::sessionKnobsLines::kDilationDoorClamped, ELogVerbosity::Warning),
+	"Each session-knob line (ogsession::sessionKnobsLines) reaches LogOGNet at the level its UE_LOG had: Log for the "
+	"floor's ini line, Warning for every other. Was each line's UE_LOG(LogOGNet, <Level>, ...) in UESimulationSession "
+	"(og-session-runtime task 23)");
+static_assert(ogsession::SessionLogSink<UESessionLogSink>,
+	"UESessionLogSink is the session knobs' log sink: og-sim-session's SessionLogSink");
 
 #if WITH_DEV_AUTOMATION_TESTS
 

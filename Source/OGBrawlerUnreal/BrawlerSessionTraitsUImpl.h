@@ -91,7 +91,6 @@ static_assert(BrawlerEngineBinding<EngineBinding, EngineTraits>,
 #include "OGBrawler/SimulatableBrawlerTypes.h"
 #include "OGBrawlerUnreal/BrawlerCompositionUImpl.h"
 #include "OGBrawlerUnreal/UEBrawlerNetConfig.h"
-#include "OGBrawlerUnreal/PhysicsBackendHostUImpl.h"
 #include "OGBrawlerUnreal/BrawlerSessionHooksUImpl.h"
 
 class SimulatableBrawler;
@@ -101,6 +100,7 @@ class AOGBrawlerSimulationManager;
 class UOGBrawlerInputCollectionComponent;
 class BrawlerSessionGameUImpl;
 template <typename TraitsT> class UESimulationSession;
+template <typename SessionT> class BrawlerSessionHooksUImpl;
 
 struct BrawlerSessionTraitsUImpl
 {
@@ -116,9 +116,9 @@ struct BrawlerSessionTraitsUImpl
 	using Composition          = BrawlerCompositionUImpl;
 	using NetConfig            = UEBrawlerNetConfig;
 	using EngineTraits         = ::EngineTraits;
-	using PhysicsBackendWorlds = physicsBackendUImpl::BackendWorlds;
+	using EngineBinding        = ::EngineBinding;
 
-	template <typename SessionT> using PhysicsBackend = physicsBackendUImpl::BackendFor<SessionT>;
+	template <typename SessionT> using SessionHooks = BrawlerSessionHooksUImpl<SessionT>;
 
 	using Storage           = SimulationObjectStorage<SimulatableBrawler>;
 	using Reconciliation    = SimulationReconciliation<SimulatableBrawler>;
@@ -150,11 +150,3 @@ static_assert(std::is_same_v<BrawlerSessionTraitsUImpl::SimulationCore, BrawlerC
 	"BrawlerSessionTraitsUImpl::SimulationCore must name the same type as BrawlerCompositionUImpl::Manager, which the "
 	"session checks against its own ManagerType because it requires og-simulation's own core systems (user ruling "
 	"2026-10-24).");
-
-static_assert(physicsBackendUImpl::PhysicsBackendHost<BrawlerSessionTraitsUImpl::PhysicsBackend<UESimulationSession<BrawlerSessionTraitsUImpl>>>,
-	"BrawlerSessionTraitsUImpl::PhysicsBackend<UESimulationSession<BrawlerSessionTraitsUImpl>> must provide every entry point of "
-	"the seam (the PhysicsBackendHost concept, PhysicsBackendHostUImpl.h): the session's owner calls each one from exactly "
-	"one site, unconditionally, in both configurations. PhysicsBackendHost is a brawler concept, so the MPL session cannot "
-	"assert it; it is asserted here, on the type the session holds as m_physicsBackend. Was the PhysicsBackendHost row of "
-	"AOGBrawlerSimulationManager::compositionContractsHold (og-simulationscheduler-withjolt task 83); moved beside the traits "
-	"by og-ue-simulationcomponentandmanagersplit task 24a.");

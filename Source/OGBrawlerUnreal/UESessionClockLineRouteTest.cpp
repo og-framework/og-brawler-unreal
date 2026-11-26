@@ -2,6 +2,64 @@
 
 #include "OGSimulationUnreal/UESimulationSession.h"
 
+constexpr bool ueSessionClockLineKeepsItsRoute(const char* line, ELogVerbosity::Type level)
+{
+	const OGLogRouteEntry* route = ogLogRouteForLevelLine(line);
+	return route != nullptr && route->route == OGLogRoute::Net && ogLogLevelOfLevelLine(line) == level;
+}
+
+static_assert(ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kConnectionTierChange, ELogVerbosity::Log)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kConnectionTierTag, ELogVerbosity::Log)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kRelayDelayFloorTag, ELogVerbosity::Log)
+	&& ogLogRouteStartsWithNarrow(ogsession::sessionClockLines::kNoTransition, TEXT("%s floor"))
+	&& ogLogRouteStartsWithNarrow(ogsession::sessionClockLines::kTransition, TEXT("[Warning]%s floor"))
+	&& ogLogRouteStartsWithNarrow(ogsession::sessionClockLines::kDilationWindow, TEXT("[Warning]%s"))
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kRelayFloorClamped, ELogVerbosity::Warning)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kRelayFloorBelowHiccupBaseline, ELogVerbosity::Warning)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kRelayFloorUniformD, ELogVerbosity::Log)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kAppliedInputDelay, ELogVerbosity::Log)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kClockSourceWindow, ELogVerbosity::Warning)
+	&& ueSessionClockLineKeepsItsRoute("[Warning][Dilation.Window] mode=%s", ELogVerbosity::Warning)
+	&& ueSessionClockLineKeepsItsRoute(ogsession::sessionClockLines::kDilationAuthority, ELogVerbosity::Warning),
+	"Each session-clock line (ogsession::sessionClockLines) reaches LogOGNet at the level its UE_LOG had: Log for the tier "
+	"change, the no-transition line (no token, led by its tag: [ConnectionTier] or [RelayDelayFloor]), the uniform-D "
+	"advisory and the applied delay; Warning for the transition line (a token, then its tag), the received floor's clamp, "
+	"the hiccup advisory, [ClockSource.Window], the dilation window's own [Dilation.Window] line after its token, and "
+	"[Dilation.Authority]. Was each line's UE_LOG(LogOGNet, <Level>, ...) in UESimulationSession (og-session-runtime task "
+	"24)");
+static_assert(ueSessionClockLineKeepsItsRoute(ogsession::sessionNetHooksLines::kReleaseBatch, ELogVerbosity::Verbose),
+	"The net hooks' [ReleaseBatch] line (ogsession::sessionNetHooksLines) reaches LogOGNet at Verbose, the level its "
+	"OG_LOG_ROUTED(LogOGNet, ...) took from the route table in releaseDelayedInputsForStep (og-session-runtime task 26)");
+
+constexpr bool ueSessionLifecycleLineKeepsItsRoute(const char* line, ELogVerbosity::Type level)
+{
+	const OGLogRouteEntry* route = ogLogRouteForLevelLine(line);
+	return route != nullptr && route->route == OGLogRoute::Mgmt && ogLogLevelOfLevelLine(line) == level;
+}
+
+static_assert(ueSessionLifecycleLineKeepsItsRoute(ogsession::sessionLifecycleLines::kQueuedRegistrationDidNotHold,
+		ELogVerbosity::Error)
+	&& ueSessionLifecycleLineKeepsItsRoute(ogsession::sessionLifecycleLines::kRegistered, ELogVerbosity::Log)
+	&& ueSessionLifecycleLineKeepsItsRoute(ogsession::sessionLifecycleLines::kRunnerRegisterRefused, ELogVerbosity::Error)
+	&& ueSessionLifecycleLineKeepsItsRoute(ogsession::sessionLifecycleLines::kRosterVerdictMismatch, ELogVerbosity::Error),
+	"Each lifecycle line (ogsession::sessionLifecycleLines) reaches LogOGMgmt at the level its UE_LOG had: Error for the "
+	"queued registration that did not hold and for the runner registration the og-sim-net server refused, Log for "
+	"tryRegister: registered (both roles). Was each line's UE_LOG(LogOGMgmt, <Level>, ...) in finishQueuedRegistration "
+	"(og-session-runtime task 29) and tryRegisterOnRunner (task 30). The roster-verdict mismatch line is new (task 30): Error, "
+	"before the check that stops on it, with the id and the with/without the check's old message printed");
+
+constexpr bool ueSessionRuntimeLineKeepsItsRoute(const char* line, OGLogRoute expected, ELogVerbosity::Type level)
+{
+	const OGLogRouteEntry* route = ogLogRouteForLevelLine(line);
+	return route != nullptr && route->route == expected && ogLogLevelOfLevelLine(line) == level;
+}
+
+static_assert(ueSessionRuntimeLineKeepsItsRoute(ogsession::sessionRuntimeLines::kBackend, OGLogRoute::SimHost, ELogVerbosity::Warning)
+	&& ueSessionRuntimeLineKeepsItsRoute(ogsession::sessionRuntimeLines::kManagerInitialized, OGLogRoute::Mgmt, ELogVerbosity::Log),
+	"The runtime's [SimHost.Backend] line reaches LogOGSimHost at Warning and its 'SimulationManager: ... initialized' "
+	"line reaches LogOGMgmt at Log: the categories and levels their UE_LOGs had in UESimulationSession::beginPlay "
+	"(og-session-runtime task 31)");
+
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
