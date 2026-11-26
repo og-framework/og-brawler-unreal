@@ -24,13 +24,10 @@ template <typename SessionT>
 class BrawlerSessionHooksUImpl
 {
 public:
-	using Manager        = BrawlerCompositionUImpl::Manager;
-	using Storage        = BrawlerCompositionUImpl::Storage;
-	using RenderSnapshot = BrawlerCompositionUImpl::RenderSnapshot;
-	using Session        = SessionT;
-	using Component      = UOGBrawlerSimulatableComponent;
-	using Character      = AOGBrawlerUECharacter;
-	using StaticData     = simulatableBrawler::StaticData;
+	using Session    = SessionT;
+	using Component  = UOGBrawlerSimulatableComponent;
+	using Character  = AOGBrawlerUECharacter;
+	using StaticData = simulatableBrawler::StaticData;
 
 	template <typename CharacterT = Character>
 	static void sampleInput(SessionT& session)

@@ -22,11 +22,12 @@ here:
 
 | member | what | called by |
 |---|---|---|
-| `Manager`, `Storage`, `RenderSnapshot` | `BrawlerCompositionUImpl`'s, the types the tick driver needs before the session is complete | no reader since og-session-runtime task 31 (the runtime's tick host spells them from the composition); the Unreal tick host's before |
 | `Session`, `Component`, `Character`, `StaticData` | the session and the brawler's types | `TickDriverBackendUImpl` |
 | `sampleInput(session)` | each registered character publishes its input sample (§8) | the session's `sampleInput` (its `SessionRuntimeHost` hook, since og-session-runtime task 31), from `SessionTickGame::sampleInput` |
 | `gravity(staticData)` | the movement static data's gravity | `TickDriverBackendUImpl::worldConfig`, with the session's static data (the runtime's world build, since og-session-runtime task 31) |
 | `callWithSlotRequest(owner, key, isAuthority, physicsSlotFor, recordSlot, slotCall)` | the brawler's part of a body slot request: the character check, the debug name, the storage key from the character's `SimCharacterId` | `TickDriverBackendUImpl::callWithSlotRequest`, which passes the session's slot query and its record |
+
+The aliases `Manager`, `Storage` and `RenderSnapshot` (the composition's, for the Unreal tick host before og-session-runtime task 31) had no reader after that task and were dropped by task 33b.
 
 The class was BrawlerTickDriverGameUImpl (in BrawlerTickDriverGameUImpl.h) until task 26: the header and its two documents
 were renamed in the task's step (a), and the class in step (b). Its hook forwarders, its constructor, `manager()`, `storage()`
