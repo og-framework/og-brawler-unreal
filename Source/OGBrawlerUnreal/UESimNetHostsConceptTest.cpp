@@ -18,6 +18,7 @@ namespace ueSimNetHostsConceptTest
 using Traits = BrawlerSessionTraitsUImpl;
 using Lanes = UESimNetLanes<Traits>;
 using ServerHost = UESimNetServerHost<Traits>;
+using ServerHostPort = UESimNetServerHostPort<Traits>;
 using LanesServerHost = Lanes::ServerHost;
 using ClientHost = Lanes::Link::ClientHost;
 using Server = ogsimnet::SimNetServer<Traits::Composition, LanesServerHost, Lanes::Transport>;
@@ -32,9 +33,14 @@ constexpr bool routesToNetAtLog(const TCHAR* body)
 static_assert(ogsimnet::SimNetServerHost<ueSimNetHostsConceptTest::LanesServerHost>,
 	"UESimNetLanesServerHost<BrawlerSessionTraitsUImpl>, the host the session's og-sim-net server runs on, must satisfy "
 	"og-sim-net's SimNetServerHost");
-static_assert(!ogsimnet::SimNetServerHost<ueSimNetHostsConceptTest::ServerHost>,
-	"UESimNetServerHost<BrawlerSessionTraitsUImpl> keeps no latency stamps of its own: the authority runner's lanes host "
-	"stamps through the diagnostics' mailbox. Was the in-frame server's game-thread stamps (og-session-runtime task 14)");
+static_assert(ogsimnet::SimNetServerHostServices<ueSimNetHostsConceptTest::ServerHostPort>
+		&& ogsimnet::SimNetServerHostSession<ueSimNetHostsConceptTest::ServerHostPort>
+		&& ogsimnet::SimNetServerHostEndpoint<ognetunreal::SimLaneEndpoint>
+		&& ogsimnet::SimNetLifecycleUnregisteringHook<ueSimNetHostsConceptTest::LanesServerHost>,
+	"UESimNetServerHostPort<BrawlerSessionTraitsUImpl> is og-sim-net's server host core's engine services and session hooks, the "
+	"lanes' endpoint its delivery endpoint, and the core passes the world session's unregistering hook on. Was "
+	"static_assert(!SimNetServerHost<UESimNetServerHost>), which og-sim-net's per-requirement negatives replace "
+	"(og-session-runtime task 31a)");
 static_assert(ogsimnet::SimNetClientHost<ueSimNetHostsConceptTest::ClientHost>,
 	"UESimNetLanes<BrawlerSessionTraitsUImpl>::Link::ClientHost, og-sim-net's link client host the lanes' client session runs "
 	"on, must satisfy og-sim-net's SimNetClientHost");
@@ -192,7 +198,7 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 	}
 
 	UOGNetDriver* const driver = NewObject<UOGNetDriver>(GetTransientPackage());
-	ServerHost rttHost(driver, serverLanes->endpoint(), nullptr);
+	ServerHost rttHost(driver, nullptr);
 	AddExpectedMessagePlain(TEXT("[RttSample] SERVER tier RTT source unavailable"), ELogVerbosity::Warning,
 		EAutomationExpectedMessageFlags::Contains, 1);
 	TestEqual(TEXT("rttMs of an unknown og-net id is the no-reading sentinel"), rttHost.rttMs(4242u), kNoRttReadingMs);
@@ -253,10 +259,11 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(TEXT("[SimNet.Host] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] reason=Truncated p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
-	ueSimNetHost::routeLine("[Warning][SimNet.Window] role=client p54probe");
-	ueSimNetHost::routeLine("[Warning][SimNet.Host] role=server p54probe");
-	ueSimNetHost::routeLine("[Warning][Roster.Refused] role=server p54probe");
-	ueSimNetHost::routeLine("[Roster.Refused] reason=Truncated p54probe");
+	LanesServerHost serverHost(nullptr, serverLanes->endpoint(), nullptr);
+	serverHost.log("[Warning][SimNet.Window] role=client p54probe");
+	serverHost.log("[Warning][SimNet.Host] role=server p54probe");
+	serverHost.log("[Warning][Roster.Refused] role=server p54probe");
+	serverHost.log("[Roster.Refused] reason=Truncated p54probe");
 	GLog->Flush();
 	GLog->RemoveOutputDevice(&capture);
 	LogOGNet.SetVerbosity(configuredNetVerbosity);
@@ -271,7 +278,6 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 			lines[3].Text.Contains(TEXT("[Warning][Roster.Refused] reason=Truncated p54probe")));
 	}
 
-	LanesServerHost serverHost(nullptr, serverLanes->endpoint(), nullptr);
 	Server server(serverHost, serverLanes->transport(), TimeConfig{}, 0u);
 	const uint64 dropsBefore = serverEndpoint.DropCount();
 	server.publishClock(120u);
