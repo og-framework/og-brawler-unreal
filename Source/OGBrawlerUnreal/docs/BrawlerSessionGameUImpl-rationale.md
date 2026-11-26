@@ -56,8 +56,8 @@ input-history feed, bound in `m_game{ m_roster, m_inputHistoryFeed }` (the feed 
 
 The read is **two-phase**, as it was before the move: the component is resolved once, on the game thread, and the step
 thread only loads the time the input collection component published. Why that matters, and the guard on the call site,
-are the plugin's (`UELatencyBudgetDiagnostics-rationale.md` §2 and `UELatencyBudgetDiagnostics-guards.md` G-02, in
-OGSimulationUnreal's docs).
+are the plugin's (`UELatencyBudgetDiagnostics-rationale.md` §2, in OGSimulationUnreal's docs, and
+`SessionLatencyDiagnostics-guards.md` G-02, in og-sim-session's since og-session-runtime task 37).
 
 **The input-sample time** is `UOGBrawlerInputCollectionComponent`'s `std::atomic<double>` `m_consumedSampledSeconds`: the
 `sampledSeconds` of the input sample the latest `buildPlayerInput` consumed, stored by `buildPlayerInput` (relaxed) on the

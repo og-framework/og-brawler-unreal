@@ -11,7 +11,8 @@ out-of-line hook bodies) carries no tag. Its one prohibition, no `HasAuthority()
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The rule on the latency hooks' call site (the source is resolved once, outside the wrapper's lambda) is typed in the
-plugin template, so its guard is there: `UELatencyBudgetDiagnostics-guards.md` G-02 (OGSimulationUnreal).
+plugin's engine-free template, so its guard is there: `SessionLatencyDiagnostics-guards.md` G-02 (og-sim-session; it was
+`UELatencyBudgetDiagnostics-guards.md` G-02 in OGSimulationUnreal until og-session-runtime task 37).
 
 ---
 

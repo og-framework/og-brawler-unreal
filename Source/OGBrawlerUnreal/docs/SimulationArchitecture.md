@@ -178,7 +178,8 @@ input relay listeners instead, and the authority started the reception coordinat
    Later calls wait for every body to resolve (`Game::rootBodyId` first); then a client queues the character on
    og-sim-net's client and the authority's runner registers it on og-sim-net's server (a refusal answers `Refused`), and
    og-sim-net registers the simulatable with the core, its channel as its owner (the client's input provider wrapped by
-   `UELatencyBudgetDiagnostics::wrapInputProvider`), and notifies the systems executor in its applied hook. On the next
+   `SessionLatencyDiagnostics::wrapInputProvider`, og-sim-session's, through the Unreal adapter since og-session-runtime
+   task 37), and notifies the systems executor in its applied hook. On the next
    call after that the session runs `m_game.afterRegistered` (the authority's character-cap warning) and the backend's
    registration hook. The binding retries every `Pending` on the next tick. Until og-session-runtime task 14 an in-frame
    authority (a listen server, a standalone world) registered the character on the game thread in one call.
