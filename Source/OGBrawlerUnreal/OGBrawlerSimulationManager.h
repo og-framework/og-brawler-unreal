@@ -21,7 +21,6 @@
 #include "OGSimulation/RenderSnapshot.h"
 #include "OGSimulation/SimulatableList.h"
 #include "OGSimulation/SystemsExecutor.h"
-#include "OGBrawlerUnreal/PhysicsBackendHostUImpl.h"
 #include "OGSimulation/PCTimeManagement/ServerTickClock.h"
 #include "OGSimulation/PCTimeManagement/ClientPredictionClock.h"
 #include "OGSimulation/SimulationManagerConcept.h"
