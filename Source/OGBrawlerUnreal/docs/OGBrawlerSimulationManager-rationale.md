@@ -338,6 +338,13 @@ og-ue-simulationcomponentandmanagersplit task 25; this file's G-16 until then).
 
 `AOGBrawlerSimulationManager` straddles two threads and owns the boundary between them.
 
+*Today (og-session-runtime task 33).* The actor's own entry points are `BeginPlay` and `EndPlay` (game thread), which call
+the Unreal session's `beginPlay` and `endPlay`; every other row below is the session's, and since og-session-runtime
+tasks 23 to 31 og-sim-session's: the tier, floor and clock receipts are `SessionClock`'s (task 24), the authority's drain,
+release and reap are `SessionNetHooks`' and `SessionTickGame`'s (task 26), the post-physics pass is
+`UESimulationSession::onPostPhysics` (task 31), and who calls what on which thread is og-sim-session's
+`SessionThreads-rationale.md` §7. The rows keep the names they had when this table was written.
+
 | | runs on | what it is |
 |---|---|---|
 | `BeginPlay` / `EndPlay` | GAME | the composition root; since og-ue-simulationcomponentandmanagersplit task 27a `EndPlay` is `m_session.endPlay()`, then `Super` (the session's teardown, `UESimulationSession-rationale.md` §10, in OGSimulationUnreal's docs), and since task 27b `BeginPlay` is `Super`, then `m_session.beginPlay()` (the session's start-up, its §11) |
@@ -351,6 +358,15 @@ og-ue-simulationcomponentandmanagersplit task 25; this file's G-16 until then).
 *Two rows left this table with the former Chaos configuration (og-session-runtime task 3): InjectInputs_External, the
 Chaos host's per-frame entry on the game thread (PROBE A and PROBE 6, then the drain and the reap), and the six
 FSimulationManagerAsyncCallback hook overrides on the physics thread.*
+
+*Today (og-session-runtime task 33): none of the three is this class's, and one is gone.* The write is og-sim-session's
+`SessionClock`'s recompute (task 24, below). The ring-out scores no longer cross by a torn read: since og-input-latency
+task P5-20 (the authority loop; every authority since og-session-runtime task 14) the authority reads them on its runner
+after each step as presentation slices
+(`authorityPresentationSlice_Step`) and the game thread applies the newest through a triple buffer
+(`SessionDisplay`'s presentation buffer since task 25; `SessionDisplay-rationale.md` §5; og-sim-session's
+`SessionThreads-rationale.md` §7.3, "the presentation slices"). The input-history feed's read is the feed's
+(`BrawlerInputHistoryFeedUImpl`), through the session's const reads. The paragraphs below are the argument as it stood.
 
 **There are three crossings, and they are not alike.** One is a write of one scalar; the other
 two are reads — of a whole capture by the input-history feed (argued in `InputHistoryDisplay-rationale.md` §8.6 since
@@ -3148,18 +3164,20 @@ check, `samples>0`, the same way; that line went with the Chaos host in og-sessi
 ### The hop table: stamp sites and known measurement error
 
 > **History for the network hops.** Since og-input-latency task P5-7 the receipt and hand-off stamps of `H2`, `H3`, `H4`,
-> `H4r`, `H6`, `H6c` and `H6L` are taken by og-sim-net through the Unreal sim-net hosts (`UESimNetHost.h`:
-> `stampServerReceived`, `stampHanded`, `stampClientReceived`; `UESimNetHost-rationale.md` §4), and `WIRE`'s server
-> sample is taken in the server host's `rttMs`, which og-sim-net's server calls once per bundle; its client sample is
-> still `onTimingInfoReceived`'s, the round trip the Unreal client host's `onTimingInfo` hands it from og-sim-net's
-> client (the timing relay's until P5-9). P5-8 deleted the binding's stamp sites the table names
+> `H4r`, `H6`, `H6c` and `H6L` are taken by og-sim-net (the Unreal sim-net hosts' `stampServerReceived`, `stampHanded` and
+> `stampClientReceived` until og-session-runtime tasks 28 and 31a; since then og-sim-net's own `SimNetLink` client host and
+> `SimNetServerHostCore`, which reach the latency diagnostics through the Unreal ports in `UESimNetHost.h`), and `WIRE`'s
+> server sample is taken in the server host's `rttMs`, which og-sim-net's server calls once per bundle; its client sample
+> is the runtime's `onTimingInfoReceived` (og-sim-session's `SessionRuntime`, since task 31; the Unreal session's before),
+> the round trip the Unreal client host's `onTimingInfo` hands it from og-sim-net's client (the timing relay's until P5-9). P5-8 deleted the binding's stamp sites the table names
 > (`sendLocalInputToAuthority`, `receiveRemoteMoveBundle`, `noteRelayedRingArrived`, `onCorrectionStateAccepted`, the
 > flush callback from `makeRingFlushedCallback`) and P5-9 the relay actor (`ASimulationInputRelay::PreReplication`) and
 > the timing relay. The rows below give those sites as they stood until P5-7; the step-side and game-thread sites
 > (`H1`, `H5`, `H7`, the ends in `UELatencyBudgetDiagnostics.h`) are unchanged.
 
 Times are `FPlatformTime::Seconds` (one monotonic clock per process). "GT" is the game thread and "PT" the step's
-thread (a task-graph worker on a client, the game thread on a dedicated server).
+thread (a task-graph worker on a client; on a dedicated server the game thread when this table was written, the
+authority's runner since og-input-latency task P5-19 and on every server since og-session-runtime task 14).
 
 | hop | start: file · function (thread) | end: file · function (thread) | known error |
 |---|---|---|---|

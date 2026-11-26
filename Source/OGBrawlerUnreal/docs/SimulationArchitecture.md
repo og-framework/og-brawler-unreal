@@ -66,9 +66,10 @@ The code is split in two halves by licence:
 |  +------------------------------------------------------------------------+  |
 |  +------------------------------------------------------------------------+  |
 |  | m_session  UESimulationSession<BrawlerSessionTraitsUImpl>              |  |
-|  |            calls m_game's hooks; holds the core, the physics backend,  |  |
-|  |            og-sim-net's server (authority), the lanes binding,         |  |
-|  |            UELatencyBudgetDiagnostics                    [plugin, MPL] |  |
+|  |            the Unreal adapter: calls m_game's hooks; holds             |  |
+|  |            og-sim-session's SessionRuntime (the core, the tick         |  |
+|  |            backend, og-sim-net's server, the lanes binding)            |  |
+|  |            and UELatencyBudgetDiagnostics                [plugin, MPL] |  |
 |  +------------------------------------------------------------------------+  |
 +------------------------------------------------------------------------------+
         | binds to the driver's sim lanes                | drives
@@ -104,20 +105,24 @@ The code is split in two halves by licence:
   `m_inputHistoryFeed` (the `BrawlerInputHistoryFeedUImpl`: the input-history display's data; it stores a const reference
   to the session, which is constructed after it), `m_game` (the `BrawlerSessionGameUImpl`, which holds references to the
   roster and the feed) and `m_session`, which holds references to the actor and to `m_game`.
-* **`UESimulationSession<BrawlerSessionTraitsUImpl>`** is the game-agnostic session: the og-simulation core (storage,
-  reconciliation, input resolution, net sync, the systems executor and the `SimulationManager`, the core's step loop),
-  the physics backend, the og-sim-net hookup (on the authority og-sim-net's server `SimNetServer`, which holds the input
-  reception, and on both roles the binding to the og-net driver's sim lanes) and `UELatencyBudgetDiagnostics` (the
-  latency stamps). Its `m_staticData` is built during the actor's construction by the hook `makeStaticData`.
+* **`UESimulationSession<BrawlerSessionTraitsUImpl>`** is the game-agnostic Unreal adapter (since og-session-runtime task 31).
+  It holds og-sim-session's `SessionRuntime`, which holds the og-simulation core (storage, reconciliation, input resolution,
+  net sync, the systems executor and the `SimulationManager`, the core's step loop), the tick backend, the clock, the
+  display, the lifecycle and the og-sim-net hookup (on the authority og-sim-net's server `SimNetServer`, which holds the
+  input reception, and on both roles the binding to the og-net driver's sim lanes). The adapter keeps the Unreal parts: the
+  frame host, the bodies, the registry, the component maps and `UELatencyBudgetDiagnostics` (the latency stamps)
+  (`UESimulationSession-rationale.md` §0.1). The runtime's `m_staticData` is built during the actor's construction by the
+  hook `makeStaticData`.
 * **`BrawlerSessionTraitsUImpl`** is the type list that ties the plugin templates to the brawler: the simulatable, its
   input and state, the component, the character, the session owner, the hooks class, the composition, the net config
-  and the physics backend. `SimulatableBrawlerOwnerTraits.h` binds the core's owner concept to the character's og-sim-net
+  and the physics engine's traits and binding (`EngineTraits`, `EngineBinding`; the backend selector went with
+  og-session-runtime task 31). `SimulatableBrawlerOwnerTraits.h` binds the core's owner concept to the character's og-sim-net
   channel for both roles (to the component until og-input-latency task P5-7).
 * **`instanceFor(world, isAuthority)`** finds the session of the caller's world. The session registry holds one slot per
   world (several in one editor process: a single-process PIE session), taken when `UESimulationSession::beginPlay` starts
   or refuses the world (the authority's on its runner, before its first batch) and
   released in `UESimulationSession::endPlay`; a second world of a role in one process starts no session
-  (`UESimulationSession-rationale.md` §9.2, §23.1). `AOGBrawlerSimulationManager::instanceFor` returns the session's owner. "Authority" means any world
+  (`UESimulationSession-rationale.md` §0.3, the runtime's `onConfigure` hook, and §23.1). `AOGBrawlerSimulationManager::instanceFor` returns the session's owner. "Authority" means any world
   whose net mode is not `NM_Client`; the binding, the component and the session compute it that way.
 
 **Where the hook bodies are.** `neutralInput` and the two latency hooks are inline in `BrawlerSessionGameUImpl.h`; the
@@ -136,22 +141,24 @@ standalone or listen-server world, a world whose driver is not og-net and a reti
 then exits); the session still takes its role's instance slot (`UESimulationSession-rationale.md` §23). Then:
 
 1. `m_game.beforeWorldBuild`: the gravity cross-check, then the roster seeds the level's spawn points.
-2. The step-size check, then the latency diagnostics begin and the session knobs are read.
-3. In the role's branch, on both roles: claim the instance slot; emplace the integration layer; `Game::emplaceSystems`
-   emplaces the brawler's systems; emplace the core `SimulationManager` (the authority's without prediction, the
-   client's with it); set the loggers and `Game::neutralInput`. Then the authority binds og-sim-net (`beginServerSimNet`:
-   it finds the og-net driver's sim lanes, emplaces og-sim-net's server and its host and gives the lanes the runner's RTT
-   publish and join), applies the session knobs (publishing the relay delay floor through og-sim-net's server) and starts
-   the tier consumer; the client starts the tier consumer, then binds itself to the lanes' client session
-   (`beginClientSimNet`), which replays the relay delay floor and the connection tier that arrived before it. Both then
-   call `Game::installGameLoggers`. (Until og-input-latency task P5-7 the branches registered the timing, connection and
-   input relay listeners instead, and the authority started the reception coordinator itself.)
-4. The resim trigger policy, then the latency knobs (`applyLatencyKnobs`), then `m_game.afterSessionConfigured` (the
-   roster checks it was seeded), then the backend log line with `Game::backendFingerprint`.
+2. The step-size check, the latency diagnostics' begin, the `SessionStart` (the role, the step length, the caps, the
+   authority's idle slack) and the static geometry's import (`UESimulationSession-rationale.md` §0.2).
+3. og-sim-session's `SessionRuntime::start` runs the rest in the order `beginPlay` ran it until og-session-runtime task 31
+   (`SessionRuntime-rationale.md` §2): it reads the session knobs; builds the world; claims the instance slot (the
+   adapter's `onConfigure`); emplaces the integration layer, `Game::emplaceSystems`'s systems, the core
+   `SimulationManager` (the authority's without prediction, the client's with it), the clock, the display, the net hooks and
+   the lifecycle; sets the loggers and `Game::neutralInput`; on the authority it attaches og-sim-net (`attachServerLink`:
+   og-sim-net's server and its host, the runner's RTT publish and join on the lanes) and applies the session knobs
+   (publishing the relay delay floor through og-sim-net's server); on both roles it starts the tier consumer; a client then
+   attaches to the lanes' client session (`attachClientLink`, which replays the relay delay floor and the connection tier
+   that arrived before it). Both then install `Game::installGameLoggers`.
+4. The resim trigger policy, the latency knobs (`applyLatencyKnobs`), `m_game.afterSessionConfigured` (the roster checks it
+   was seeded), then the backend log line with `Game::backendFingerprint`.
 
-A client runs steps 3 and 4 on the game thread, between the backend's world build and the start of its stepping. On the
-authority the game thread starts the runner and waits for it (`runAuthorityLoop_GameThread`): the runner builds the world,
-runs steps 3 and 4, then steps (`UESimulationSession-rationale.md` §19.2).
+A client runs steps 3 and 4 on the game thread, between the world build and the start of its stepping. On the authority the
+runtime starts the runner and the game thread waits for it: the runner builds the world, runs steps 3 and 4, then steps
+(`SessionRuntime-rationale.md` §2). (Until og-input-latency task P5-7 the branches registered the timing, connection and
+input relay listeners instead, and the authority started the reception coordinator itself.)
 
 **Registration.** Every character on every peer registers, on the instance its own world selects:
 
@@ -186,15 +193,16 @@ spawns. Both it and the component's `EndPlay` read the replicated id through the
 **Each frame.** The tick driver calls the session through og-sim-session's `SessionTickGame` (the tick driver's game since
 og-session-runtime task 26; the brawler's binding BrawlerTickDriverGameUImpl forwarded to the session before;
 the former Chaos backend, removed by og-session-runtime task 3, called it from the physics scene's post-tick event). On a
-client, the game thread calls it before the steps (`onFrameStepsDue_Step`) and after them (`onPostPhysicsStep`), and each
+client, the game thread calls it before the steps (the frame probe, `onFrameStepsDue`) and after them (the adapter's
+`onPostPhysics`), and each
 step on a worker task drains og-sim-net's client at its start, sends the input bundle at capture and, after the batch,
 publishes the display snapshot. On the authority the runner calls it per wake: og-sim-net's server drain before the
 steps, the release of delayed inputs per step, and after the batch the net hooks' `afterBatch` (`SessionNetHooks`; the session's `afterAuthorityBatch` until task 26: the core's post-simulation
 send, the clock, the corrections and the ring-out scores' presentation slices); og-net is serviced on the runner between
-batches. The game thread's post-physics pass (`onPostPhysicsStep`) runs the backend's pre-present step and collects the
-lifecycle outcomes; then on a client it refreshes the display view and calls `Game::afterVisualization`, and on the
+batches. The game thread's post-physics pass (`UESimulationSession::onPostPhysics`) presents the rendered poses and collects
+the lifecycle outcomes; then on a client it refreshes the display view and calls `Game::afterVisualization`, and on the
 authority it applies the presentation slices (`BrawlerSessionGameUImpl::presentAuthoritySlice` sets each character's ring-out score); then the
-latency diagnostics' tick. Who calls what on which thread: `UESimulationSession-rationale.md` §24 (OGSimulationUnreal).
+latency diagnostics' tick. Who calls what on which thread: og-sim-session's `SessionThreads-rationale.md` §7.
 Separately, the component's `TickComponent` draws its debug visualization from the session's display snapshot.
 
 **Teardown.** No code here relies on an order between the manager's and the characters' `EndPlay`.
@@ -210,11 +218,11 @@ Separately, the component's `TickComponent` draws its debug visualization from t
 2. `UOGBrawlerSimulatableComponent::EndPlay` then calls `Super::EndPlay`. Until og-input-latency task P5-8 it also
    detached the input relay host here, if bound (`USimulatableNetSyncComponent::detachInputRelayHost`; P5-7 already
    removed that call), and then unbound the netsync component (`unbindNetSync`).
-3. `AOGBrawlerSimulationManager::EndPlay` calls `UESimulationSession::endPlay` before `Super::EndPlay`: the backend's
-   end-play start (the tick functions unregistered, the authority's runner joined, the steps waited for), a client's
-   teardown drain, the detach from the og-net driver's sim lanes, the reset of og-sim-net's server, its host and the
-   registered characters' maps, the tier consumer, the held display snapshot, the instance slot, then the latency
-   diagnostics.
+3. `AOGBrawlerSimulationManager::EndPlay` calls `UESimulationSession::endPlay` before `Super::EndPlay`, which calls
+   og-sim-session's `SessionRuntime::stop` first (`SessionRuntime-rationale.md` §3): the steps stopped (the tick functions
+   unregistered, the authority's runner joined, the outstanding step waited for), a client's teardown drain, the detach
+   from the og-net driver's sim lanes, the reset of og-sim-net's server and its host, the registered characters' maps, the
+   tier consumer, the held display snapshot; then the adapter clears the instance slot and ends the latency diagnostics.
 
 ---
 
@@ -297,7 +305,7 @@ Rationale and guards documents sit in the `docs` folder beside each module's sou
 | `BrawlerInputHistoryFeedUImpl` | input-history display data | brawler, BUSL | `InputHistoryDisplay-rationale.md` · `InputHistoryVisualizationUImpl-guards.md` | `InputHistoryVisualizationUImpl.h` |
 | `BrawlerSessionGameUImpl` | the hooks; eleven bodies in `BrawlerSessionGameUImpl.cpp`, three inline in its header | brawler, BUSL | `BrawlerSessionGameUImpl-rationale.md` · `BrawlerSessionGameUImpl-guards.md` | `BrawlerSessionGameUImpl.h` |
 | `BrawlerSessionTraitsUImpl` | ties the templates to the brawler | brawler, BUSL | `BrawlerSessionTraitsUImpl-rationale.md` · `BrawlerSessionTraitsUImpl-guards.md` | `BrawlerSessionTraitsUImpl.h` |
-| `UESimulationSession` | the session: core, backend, transport, sequences | plugin, MPL | `UESimulationSession-rationale.md` · `UESimulationSession-guards.md` | `UESimulationSession.h` |
+| `UESimulationSession` | the Unreal adapter over og-sim-session's `SessionRuntime` (which holds the core, the tick backend, the transport and the sequences) | plugin, MPL | `UESimulationSession-rationale.md` · `UESimulationSession-guards.md` | `UESimulationSession.h` |
 | `SessionTickGame` | the tick driver's game: the hooks, calling the session's components in order | og-sim-session, MPL | `SessionTickGame-rationale.md` · `SessionTickGame-guards.md` | `SessionTickGame.h` |
 | `BrawlerSessionHooksUImpl` | the session's brawler-side hooks: the input sample, gravity, the slot request | brawler, BUSL | `BrawlerSessionHooksUImpl-rationale.md` · `BrawlerSessionHooksUImpl-guards.md` | `BrawlerSessionHooksUImpl.h` |
 | `UELatencyBudgetDiagnostics` | latency stamps and reports | plugin, MPL | `UELatencyBudgetDiagnostics-rationale.md` · `UELatencyBudgetDiagnostics-guards.md` | `UELatencyBudgetDiagnostics.h` |
@@ -316,13 +324,14 @@ guards documents; task 3 deleted all three.
 ## 7. Adding a second game
 
 A second game supplies a traits struct like `BrawlerSessionTraitsUImpl`, a hooks class like `BrawlerSessionGameUImpl`
-(the session checks each hook's signature at compile time), a physics backend named in the traits, a session-owner
+(the session checks each hook's signature at compile time), the physics engine's traits and binding named in the traits
+(`EngineTraits`, `EngineBinding`; a physics backend until og-session-runtime task 31), a session-owner
 actor that holds the session and offers `instanceFor` and `session()`, a character, an owner component deriving from
 `UESimulatableOwnerBinding` with its registration hooks and `storageKeyOfOwner`, its specialization of the core's
 `SimulatableOwnerTraits` (naming the og-sim-net channel for both roles), and a sim lanes factory registered with the
 og-net driver (the brawler's `makeBrawlerSimNetLanes`). It gets for free the session's start, registration, per-frame
 and teardown sequences, the sim traffic over og-net, input reception, the registration retry loop and the latency
-diagnostics. Start with `UESimulationSession-rationale.md` §1 and
+diagnostics. Start with `UESimulationSession-rationale.md` §0, og-sim-session's `SessionRuntime-rationale.md` and
 `UESimulatableOwnerBinding-rationale.md` §9.
 
 ---
@@ -332,6 +341,8 @@ diagnostics. Start with `UESimulationSession-rationale.md` §1 and
 The session spells its core types with og-simulation's own templates, so Go To Definition (F12) reaches the core. From
 the manager: F12 on `BrawlerSessionTraitsUImpl` in `m_session`'s type, then on the template of a row of its core-system
 map (`SimulationNetSync` in `NetSync = SimulationNetSync<SimulatableBrawler>`). From the session: F12 on the template.
+Since og-session-runtime task 31 the members and aliases below are og-sim-session's `SessionRuntime`'s
+(`SessionRuntime.h`), which the Unreal session holds as `m_runtime`; they kept their names.
 
 | session member | alias | og-simulation template | header |
 |---|---|---|---|
@@ -345,7 +356,8 @@ map (`SimulationNetSync` in `NetSync = SimulationNetSync<SimulatableBrawler>`). 
 | none: the engine contract | `EngineTraits` | the concept `PhysicsEngineTraits` | `PhysicsEngineTraits.h` |
 
 The two executors are spelled the same way: an alias template that fixes the executor's leading parameters, and
-`apply_t` to unpack the list. For the systems, in the session (`UESimulationSession.h`):
+`apply_t` to unpack the list. For the systems, in the runtime (`SessionRuntime.h`; `UESimulationSession.h` until
+og-session-runtime task 31):
 
 ```cpp
 template <typename... SystemTs>
@@ -363,9 +375,23 @@ data, the engine (`EngineTraits`) and the physics backend are the game's; it doe
 two executors, which the session spells from those choices (user rulings 2026-10-24). The session reads them from
 `TraitsT` and `TraitsT::Composition`: the MPL plugin names no brawler type (the brawler may name og-simulation's, never
 the reverse). The session asserts each core alias and executor against the composition's, the traits each map row
-against `BrawlerCompositionUImpl` (`UESimulationSession-rationale.md` §13 and §14, `BrawlerSessionTraitsUImpl-rationale.md` §4).
+against `BrawlerCompositionUImpl` (`UESimulationSession-rationale.md` §13 and §14, the record; since og-session-runtime
+task 31 the runtime's `compositionContractsHold()` in `SessionRuntime.h`; `BrawlerSessionTraitsUImpl-rationale.md` §4).
 
 **The tick backend** owns and steps the physics worlds and updates the visuals (Jolt through the tick driver; the Chaos
 backend was removed by og-session-runtime task 3). Since og-session-runtime task 31 it is og-sim-session's `SessionRuntime`'s
 member `m_tickBackend` (og-simulation's `SimulationTickBackend`), and the engine's bodies are `TickDriverBackendUImpl`, which
 `UESessionRuntimeTraits` names; until then the Unreal session held a backend host the traits named.
+
+---
+
+## Retired guard ids of the game's session docs (og-session-runtime tasks 23 to 31a)
+
+The game's two, both by task 26 (each file's `§R` has the entry):
+
+| Task | Retired id | Successor |
+|---|---|---|
+| 26 | `BrawlerSessionGameUImpl-guards.md` G-01 | og-brawler's `BrawlerSessionGame-guards.md` G-01 |
+| 26 | `BrawlerSessionHooksUImpl-guards.md` G-01 | og-sim-session's `SessionTickGame-guards.md` G-01 |
+
+The plugin's 35 are in OGSimulationUnreal's `UESimulationSession-rationale.md` §R.

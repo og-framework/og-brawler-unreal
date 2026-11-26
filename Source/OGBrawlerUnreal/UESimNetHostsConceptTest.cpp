@@ -278,7 +278,8 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 			lines[3].Text.Contains(TEXT("[Warning][Roster.Refused] reason=Truncated p54probe")));
 	}
 
-	Server server(serverHost, serverLanes->transport(), TimeConfig{}, 0u);
+	const TimeConfig timeConfig{};
+	Server server(serverHost, serverLanes->transport(), timeConfig, 0u);
 	const uint64 dropsBefore = serverEndpoint.DropCount();
 	server.publishClock(120u);
 	serverLanes->afterDispatch();

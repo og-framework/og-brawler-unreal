@@ -668,9 +668,12 @@ PARAMETER" (§6). Everything else is here.
 *History: the header prose task 25 carried, as it stood then. og-input-latency tasks P5-7 and P5-8 deleted the typedefs,
 the bundle send and its RPC, the delivery entry point and the host link it describes, and P5-9 the relay actors (§21,
 §22). The tier is still the server's: since P5-7 og-sim-net's server takes the round-trip sample per bundle and is the
-tier sink (`SimNetServer`'s `sendConnectionTierToOwningClient`).*
+tier sink (`SimNetServer`'s `sendConnectionTierToOwningClient`).* **The paragraphs below keep the present tense of the
+header they were carried from (task 25's): nothing they describe exists in today's component** (re-marked by
+og-session-runtime task 33; each paragraph names what deleted its subject).
 
-**The concept typedefs.** `SyncedCorrectionBufferType` is the correction-state role
+**The concept typedefs** (deleted by og-input-latency tasks P5-7 and P5-8; the owner traits name og-sim-net's channel since).
+`SyncedCorrectionBufferType` is the correction-state role
 (`FSimulationStateSyncBuffer`). `RelayedInputRingType` is named through a typedef for the same
 reason: `SimulationNetSync` binds the arrival callback and reads the ring at registration, and must do
 so without naming a UE type. A third typedef, for the client→server input buffer, was retired with
@@ -678,21 +681,24 @@ that buffer in og-syncedInput-rework task 9 (2026-10-03); see §9. `SimulatableO
 `SimulatableBrawlerOwnerTraits.h`; any site that instantiates `SimulationNetSync<SimulatableBrawler>`
 includes that header.
 
-**`sendLocalInputToAuthority`** builds an `FInputRedundancyBundle` from the most recent
+**`sendLocalInputToAuthority`** (deleted with the RPC by og-input-latency tasks P5-7 and P5-8; og-sim-net's channel sends the
+bundle since) builds an `FInputRedundancyBundle` from the most recent
 `redundancyDepth` ticks still in the core's `PendingInputQueue` (the builder clamps the depth to the
 bundle's slot capacity) and fires the unreliable `ServerReceiveRemoteMove`. It is defined in the `.cpp`
 so the bundle-builder include stays out of this widely included header. The RPC is **unreliable**
 since Stage 1: no head-of-line blocking on input RPCs, and a dropped datagram self-heals because each
 send repeats the last `redundancyDepthTicks` ticks.
 
-**`deliverDelayedRemoteInput`** is the delivery entry point for an input released from the server's
+**`deliverDelayedRemoteInput`** (deleted by og-input-latency tasks P5-7 and P5-8; og-sim-net's server delivers to the channel since) was
+the delivery entry point for an input released from the server's
 `ServerInputDelayQueue`, reached on the game thread from `UESimulationSession::deliverRemoteInput` (the manager's until task 26a)
 before the authority physics step. It routes through the **same** callback the RPC's no-wire fallback
 uses, with the **original** capture tick, so from `RemoteMoveQueue` onward a delayed input is
 indistinguishable from an undelayed one and the capture-tick dedup keeps working. The delay is
 expressed only as *when* this is called (G-23).
 
-**The tier (Option A, server-authoritative).** The server derives the tier from its own per-connection
+**The tier (Option A, server-authoritative).** *(The relay actor and the RPC below were deleted by og-input-latency tasks
+P5-8 and P5-9; the rule, one producer on the server, holds in og-sim-net's server.)* The server derives the tier from its own per-connection
 round-trip time (`ServerReceiveRemoteMove` resolves the primitive and forwards it to
 `ServerReceptionCoordinator::noteRttSample`) and publishes it; the client only reads it. With one
 producer there is no second estimator to disagree with, so the boundary-RTT tier split and its
@@ -706,7 +712,7 @@ arrive, and the core records a tier as published **before** calling the sink
 `sendConnectionTierToOwningClient`), so a publish the sink could not route would never be retried. The
 `ConnectionTierSink` `static_assert` pins that this component is the sink.
 
-**The host link.** `m_inputRelayHost` is weak because the host is destroyed with the character and the
+**The host link** (deleted by og-input-latency tasks P5-7 and P5-8, the relay actors by P5-9). `m_inputRelayHost` is weak because the host is destroyed with the character and the
 teardown order between the two is not guaranteed. It is set on the authority at spawn — registration
 completion, strictly before the first relay write (G-06) — and on a client by whichever link path gets
 there first. `m_detachedRelayRing` is the **read** fallback: the core reads the ring once at

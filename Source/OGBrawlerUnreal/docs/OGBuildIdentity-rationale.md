@@ -309,8 +309,11 @@ Since og-session-runtime task 21 each module exports its own fields as one compi
 `simWireToken::kSimFragment`, `c15.r3.b3.e1` from its four versions, then og-sim-net's `ogsimnet::kWireTokenFragment`,
 `ro1.ck2` from its roster and clock versions (`OGSimNet-rationale.md` §7). The game has no field of its own. It reaches
 og-sim-net only through `UEBrawlerNetConfig.h`, its binding to og-sim-net, which carries that fragment as
-`UEBrawlerNetConfig::kSimNetWireTokenFragment`, so the build identity includes neither `SimNetClock.h` nor
-`SimNetRoster.h`. The token is still built at compile time from the six constants, so it cannot disagree with the
+`UEBrawlerNetConfig::kSimNetWireTokenFragment`, so `OGBuildIdentityUImpl.cpp` includes neither `SimNetClock.h` nor
+`SimNetRoster.h` directly, and names none of their versions. *Not "at all" (corrected by og-session-runtime task 33):* both
+still reach the translation unit transitively, through `UEBrawlerNetConfig.h` → og-sim-net's `SimNetVersion.h`, which
+includes both to build the fragment (`BrawlerSessionTraitsUImpl.h`, which the file also includes, includes
+`UEBrawlerNetConfig.h` too). The token is still built at compile time from the six constants, so it cannot disagree with the
 compiled codecs, envelope, roster and clock. A `static_assert` beside it pins the whole token to
 `c15.r3.b3.e1.ro1.ck2`: a version bump in any module fails the game's build there until that string and this section
 are updated, and the module's own test pins its fragment the same way (`SimWireTokenTest.cpp` in og-simulation-tests,
