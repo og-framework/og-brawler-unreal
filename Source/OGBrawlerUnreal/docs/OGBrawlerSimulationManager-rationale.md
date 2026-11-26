@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: readRoundTripMs -- the server's engine-ping read, deleted by og-session-runtime task 39 (the authority's round trip is og-net's smoothed RTT); kept in the history -->
 <!-- lint-external-ref: TickDriverBackendWorldsUImpl -- og-tickdriver task 15b's worlds pair (the world host's engine beside the host), folded into og-sim-session's SessionRuntime::Worlds by og-session-runtime task 31; its last mention in code, the Worlds engine < host row, went with that engine in task 33b; kept in the history -->
 <!-- lint-external-ref: m_onTimingInfoReceivedCallback -- deleted by og-session-runtime task 31 (no caller); kept in the history -->
 <!-- lint-external-ref: getTimeConfigPtr -- deleted by og-session-runtime task 31 (no caller); kept in the history -->

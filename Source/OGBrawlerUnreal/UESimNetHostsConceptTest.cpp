@@ -17,7 +17,6 @@ namespace ueSimNetHostsConceptTest
 {
 using Traits = BrawlerSessionTraitsUImpl;
 using Lanes = UESimNetLanes<Traits>;
-using ServerHost = UESimNetServerHost<Traits>;
 using ServerHostPort = UESimNetServerHostPort<Traits>;
 using LanesServerHost = Lanes::ServerHost;
 using ClientHost = Lanes::Link::ClientHost;
@@ -38,9 +37,9 @@ static_assert(ogsimnet::SimNetServerHostServices<ueSimNetHostsConceptTest::Serve
 		&& ogsimnet::SimNetServerHostEndpoint<ognetunreal::SimLaneEndpoint>
 		&& ogsimnet::SimNetLifecycleUnregisteringHook<ueSimNetHostsConceptTest::LanesServerHost>,
 	"UESimNetServerHostPort<BrawlerSessionTraitsUImpl> is og-sim-net's server host core's engine services and session hooks, the "
-	"lanes' endpoint its delivery endpoint, and the core passes the world session's unregistering hook on. Was "
-	"static_assert(!SimNetServerHost<UESimNetServerHost>), which og-sim-net's per-requirement negatives replace "
-	"(og-session-runtime task 31a)");
+	"lanes' endpoint its delivery endpoint and its round trip's source (og-net's stats, og-session-runtime task 39), and the "
+	"core passes the world session's unregistering hook on. Was static_assert(!SimNetServerHost<UESimNetServerHost>), which "
+	"og-sim-net's per-requirement negatives replace (og-session-runtime task 31a)");
 static_assert(ogsimnet::SimNetClientHost<ueSimNetHostsConceptTest::ClientHost>,
 	"UESimNetLanes<BrawlerSessionTraitsUImpl>::Link::ClientHost, og-sim-net's link client host the lanes' client session runs "
 	"on, must satisfy og-sim-net's SimNetClientHost");
@@ -121,6 +120,17 @@ struct FDroppingEndpoint
 			return Result;
 		};
 		Out.hasHighResolutionWait = [](const void*) { return false; };
+		Out.stats = [](const void* Ctx, ognet::ConnectionId Id) {
+			const FDroppingEndpoint& Self = *static_cast<const FDroppingEndpoint*>(Ctx);
+			ognet::ConnectionStats Stats;
+			if (Id == Self.RttId)
+			{
+				Stats.id = Id;
+				Stats.hasRttSample = true;
+				Stats.smoothedRttSeconds = Self.RttSeconds;
+			}
+			return Stats;
+		};
 		return Out;
 	}
 
@@ -128,6 +138,8 @@ struct FDroppingEndpoint
 
 	ognet::EndpointConfig Config;
 	std::atomic<uint64> Drops{0u};
+	ognet::ConnectionId RttId = ognet::kInvalidConnection;
+	double RttSeconds = 0.0;
 	ognetunreal::SimLaneEndpoint Endpoint;
 };
 
@@ -197,45 +209,14 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 			unstartedServer.client() == nullptr && unstartedClient.client() == nullptr);
 	}
 
-	UOGNetDriver* const driver = NewObject<UOGNetDriver>(GetTransientPackage());
-	ServerHost rttHost(driver, nullptr);
-	AddExpectedMessagePlain(TEXT("[RttSample] SERVER tier RTT source unavailable"), ELogVerbosity::Warning,
-		EAutomationExpectedMessageFlags::Contains, 1);
-	TestEqual(TEXT("rttMs of an unknown og-net id is the no-reading sentinel"), rttHost.rttMs(4242u), kNoRttReadingMs);
-	TestEqual(TEXT("rttMs of a second unknown og-net id is the sentinel too"), rttHost.rttMs(4243u), kNoRttReadingMs);
+	serverEndpoint.RttId = 5001u;
+	serverEndpoint.RttSeconds = 0.125;
 	{
-		FServerRttWarnings warnings;
-		const bool firstNoConnection = warnings.first(EServerRttUnavailable::NoConnection);
-		const bool secondNoConnection = warnings.first(EServerRttUnavailable::NoConnection);
-		const bool firstNoNetPing = warnings.first(EServerRttUnavailable::NoNetPing);
-		const bool secondNoNetPing = warnings.first(EServerRttUnavailable::NoNetPing);
-		TestTrue(TEXT("the server's RTT warning fires once per cause: a later cause still warns after an earlier one"),
-			firstNoConnection && !secondNoConnection && firstNoNetPing && !secondNoNetPing);
-	}
-	{
-		FServerConnectionLookup lookup;
-		FServerRttWarnings warnings;
-		constexpr double joinedSeconds = 100.0;
-		constexpr double leftSeconds = 100.1;
-		lookup.noteFound(*driver, 5001u, joinedSeconds);
-		const FServerConnectionFound leftMiss = lookup.find(driver, 5001u, leftSeconds);
-		const FServerConnectionFound unknownMiss = lookup.find(driver, 5002u, leftSeconds);
-		const bool leaveWarned = leftMiss.missingCause != EServerRttUnavailable::None && warnings.first(leftMiss.missingCause);
-		const bool outageWarned = unknownMiss.missingCause != EServerRttUnavailable::None && warnings.first(unknownMiss.missingCause);
-		TestTrue(TEXT("a graceful leave's miss spends no NoConnection warning, so a later unknown og-net id still warns"),
-			leftMiss.connection == nullptr && unknownMiss.connection == nullptr && !leaveWarned && outageWarned);
-		TestTrue(TEXT("the leaver's later bundles in its drained close are still a leave"),
-			lookup.find(driver, 5001u, leftSeconds + ognetunreal::kDrainedCloseSeconds).missingCause == EServerRttUnavailable::None);
-		lookup.noteFound(*driver, 5003u, joinedSeconds);
-		lookup.noteFound(*driver, 5004u, leftSeconds);
-		TestTrue(TEXT("a found og-net id that the driver dropped before any miss is a leave too"),
-			lookup.find(driver, 5003u, leftSeconds + 1.0).missingCause == EServerRttUnavailable::None);
-		const double forgetSeconds = leftSeconds + kServerGoneConnectionForgetSeconds + 1.0;
-		lookup.noteFound(*driver, 5005u, forgetSeconds);
-		TestTrue(TEXT("a closed og-net id is forgotten once its forget window has passed"),
-			lookup.find(driver, 5001u, forgetSeconds).missingCause == EServerRttUnavailable::NoConnection);
-		TestTrue(TEXT("the connection lookup with no driver reports NoDriver"),
-			lookup.find(nullptr, 5001u, forgetSeconds).missingCause == EServerRttUnavailable::NoDriver);
+		LanesServerHost rttHost(serverEndpoint.Endpoint, nullptr);
+		TestEqual(TEXT("rttMs of an og-net id og-net has no round trip sample for is the no-reading sentinel"), rttHost.rttMs(4242u),
+			ogsimnet::kSimNetServerNoRttMs);
+		TestEqual(TEXT("rttMs of an og-net id with a sample is og-net's smoothed round trip in milliseconds"), rttHost.rttMs(5001u),
+			125.0);
 	}
 	{
 		FClientRttWarnings warnings;
@@ -259,7 +240,7 @@ bool FUESimNetHostsTest::RunTest(const FString& Parameters)
 	AddExpectedMessagePlain(TEXT("[SimNet.Host] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] role=server p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
 	AddExpectedMessagePlain(TEXT("[Roster.Refused] reason=Truncated p54probe"), ELogVerbosity::Warning, EAutomationExpectedMessageFlags::Contains, 1);
-	LanesServerHost serverHost(nullptr, serverLanes->endpoint(), nullptr);
+	LanesServerHost serverHost(serverLanes->endpoint(), nullptr);
 	serverHost.log("[Warning][SimNet.Window] role=client p54probe");
 	serverHost.log("[Warning][SimNet.Host] role=server p54probe");
 	serverHost.log("[Warning][Roster.Refused] role=server p54probe");
