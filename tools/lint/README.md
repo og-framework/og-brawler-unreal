@@ -168,6 +168,43 @@ default-drift updated."*
 - **Task 15 (flip default 5→3)** — no lint change needed; both `3` and `5` are
   already covered by the `redundancyDepthTicks` entry.
 
+### The knob table arm (og-session-runtime task 35)
+
+og-simulation's `OGSimulation/Config/KnobTable.h` describes a knob as a row
+(`KnobRow<Owner, Value>{ .intake = { .section, .key, .role }, .tag, .name, .clamp,
+.apply, .stored }`; `KnobTable-rationale.md`). The lint reads every row in the scanned
+tree, comments stripped and strings kept, and fails when:
+
+| check | fails when |
+|---|---|
+| clamp | a row has no `.clamp`, or `.clamp = nullptr` |
+| key | a row's key is not found: neither an inline `.intake = { .key = "…" }` nor a `KnobIntake<…> <name>{ .key = "…" }` in the same file that `.intake = <name>` names |
+| second intake | a key that has a row is also read as a literal, `readInt/readDouble/readString("<key>")`, anywhere in the scanned tree |
+| braces | a row's braces do not close (the lint cannot read it) |
+
+The keys come from the rows, so the lint checks only the keys that have one; the
+session's hand-written intake (og-sim-session `SessionKnobs.h`) reads the others.
+The compiler also refuses a row without a clamp (`KnobTable-rationale.md` §4); this
+arm names the key before a build does.
+
+The output gains one summary line before the result, and each problem prints as
+`<file>:<line>: <message>`:
+
+```
+Configurability lint: knob table: 7 row(s), 7 key(s): DummyKnobTicks, OtherKnobTicks, RecentreSettleSamples, …
+Configurability lint: clean (755 files scanned)
+```
+
+The Pester spec `tools/lint/tests/configurability_lint.Tests.ps1` runs each check on
+a fixture tree with one poison per case, and counts every kind of problem so a poison
+that fires a second check fails; the red case is a row without a clamp. It also keeps
+the blacklist arm's `commonLeadTicks = 3.65` entry firing (og-time-dilation task 14
+changed it) and quiet in `ClockDilationController.h`, its home:
+
+```pwsh
+pwsh -NoProfile -Command "Invoke-Pester tools/lint/tests/configurability_lint.Tests.ps1 -Output Detailed"
+```
+
 ## CI integration
 
 Both lints in this directory — R-P1 configurability and R-UE1 visualization

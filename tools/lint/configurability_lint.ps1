@@ -42,6 +42,11 @@
     THE BLACKLIST IS A CONTRACT: every PR that adds/changes a TimeConfig field MUST
     add/update a matching entry here in the same change. See tools/lint/README.md.
 
+    THE KNOB TABLE (og-session-runtime task 35): the keys that have a knob row
+    (og-simulation's OGSimulation/Config/KnobTable.h) are read from the rows
+    themselves. Each row must have a clamp and a findable key, and its key must not
+    also be read directly. See "KNOB TABLE" below and tools/lint/README.md.
+
 .PARAMETER RepoRoot
     Repository root. Defaults to two levels above this script (tools/lint/..).
 
@@ -847,6 +852,142 @@ function Test-BlacklistCoversTimeConfig {
 }
 
 # ---------------------------------------------------------------------------
+# KNOB TABLE — the keys that have a row (og-session-runtime task 35).
+#
+# og-simulation's OGSimulation/Config/KnobTable.h describes a config knob as a
+# row: `KnobRow<Owner, Value>{ .intake = { .section, .key, .role }, .tag, .name,
+# .clamp, .apply, .stored }`. This pass reads every such row in the scanned tree
+# (designated initialisers, so each field is named at its site) and fails when:
+#   * a row has no `.clamp`, or `.clamp = nullptr` — out of range must be
+#     reported and clamped, never stored as read (the compiler refuses such a row
+#     too; this arm names the key before a build does);
+#   * a row's key cannot be found: an inline `.intake = { .key = "…" }`, or a
+#     `KnobIntake<…> <name>{ .key = "…" }` in the same file that `.intake = <name>`
+#     names — a row the lint cannot key is a row it cannot check;
+#   * a key that has a row is ALSO read directly, `readInt/readDouble/readString
+#     ("<key>")`: a second intake beside the row's, the knob-table form of the
+#     second source of truth this lint exists for.
+# The keys without a row are the session intake's hand-written reads
+# (og-sim-session SessionKnobs.h); this pass does not police them.
+# ---------------------------------------------------------------------------
+function Remove-CommentsKeepStrings {
+    param([string]$Text)
+    $pattern = '//[^\n]*|/\*[\s\S]*?(?:\*/|\z)|"(?:\\.|[^"\\\n])*"|''(?:\\.|[^''\\\n])*'''
+    return [regex]::Replace($Text, $pattern, {
+        param($m)
+        if ($m.Value.StartsWith('//') -or $m.Value.StartsWith('/*')) {
+            return [regex]::Replace($m.Value, '[^\n]', ' ')
+        }
+        return $m.Value
+    })
+}
+
+# Index of the brace that closes the one at $Open, skipping string literals; -1 when unbalanced.
+function Find-ClosingBrace {
+    param([string]$Text, [int]$Open)
+    $depth = 0
+    $i = $Open
+    while ($i -lt $Text.Length) {
+        $c = $Text[$i]
+        if ($c -eq '"') {
+            $i++
+            while ($i -lt $Text.Length -and $Text[$i] -ne '"') { if ($Text[$i] -eq '\') { $i++ }; $i++ }
+        }
+        elseif ($c -eq '{') { $depth++ }
+        elseif ($c -eq '}') { $depth--; if ($depth -eq 0) { return $i } }
+        $i++
+    }
+    return -1
+}
+
+function Get-LineNumber {
+    param([string]$Text, [int]$Index)
+    return ([regex]::Matches($Text.Substring(0, $Index), "`n")).Count + 1
+}
+
+function Test-KnobTable {
+    param(
+        [System.Collections.Generic.List[System.IO.FileInfo]]$Files,
+        [string]$RepoRoot
+    )
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $problems = [System.Collections.Generic.List[object]]::new()
+    $reads = [System.Collections.Generic.List[object]]::new()
+    $rowRegex = '\bKnobRow\s*<[^;{}()]*>\s*(?:[A-Za-z_]\w*\s*)?\{'
+    $readRegex = '\bread(?:Int|Double|String)\s*\(\s*"(?<key>[^"\\]*)"\s*\)'
+
+    foreach ($f in $Files) {
+        $raw = [System.IO.File]::ReadAllText($f.FullName)
+        $hasRow = $raw.Contains('KnobRow')
+        $hasRead = $raw -match 'read(Int|Double|String)\s*\(\s*"'
+        if (-not ($hasRow -or $hasRead)) { continue }
+        $text = Remove-CommentsKeepStrings $raw
+        $rel = [System.IO.Path]::GetRelativePath($RepoRoot, $f.FullName)
+
+        foreach ($m in [regex]::Matches($text, $readRegex)) {
+            $reads.Add([pscustomobject]@{ File = $rel; Line = (Get-LineNumber $text $m.Index); Key = $m.Groups['key'].Value })
+        }
+        if (-not $hasRow) { continue }
+
+        foreach ($m in [regex]::Matches($text, $rowRegex)) {
+            $open = $m.Index + $m.Length - 1
+            $close = Find-ClosingBrace $text $open
+            $line = Get-LineNumber $text $m.Index
+            if ($close -lt 0) {
+                $problems.Add([pscustomobject]@{ File = $rel; Line = $line; Message = 'knob row: its braces do not close; the lint cannot read it' })
+                continue
+            }
+            $body = $text.Substring($open + 1, $close - $open - 1)
+
+            $key = $null
+            $inline = [regex]::Match($body, '\.intake\s*=\s*\{(?<b>[^{}]*)\}')
+            if ($inline.Success) {
+                $k = [regex]::Match($inline.Groups['b'].Value, '\.key\s*=\s*"(?<key>[^"\\]*)"')
+                if ($k.Success) { $key = $k.Groups['key'].Value }
+            }
+            else {
+                $ref = [regex]::Match($body, '\.intake\s*=\s*(?<ref>[A-Za-z_][\w:]*)')
+                if ($ref.Success) {
+                    $name = ($ref.Groups['ref'].Value -split '::')[-1]
+                    $decl = [regex]::Match($text, '\bKnobIntake\s*<[^;{}()]*>\s*' + [regex]::Escape($name) + '\s*\{(?<b>[^{}]*)\}')
+                    if ($decl.Success) {
+                        $k = [regex]::Match($decl.Groups['b'].Value, '\.key\s*=\s*"(?<key>[^"\\]*)"')
+                        if ($k.Success) { $key = $k.Groups['key'].Value }
+                    }
+                }
+            }
+            $shownKey = if ($key) { $key } else { '<unresolved>' }
+            if (-not $key) {
+                $message = 'knob row: its key was not found (an inline .intake = { .key = "..." }, ' +
+                    'or a KnobIntake<...> in this file named by .intake)'
+                $problems.Add([pscustomobject]@{ File = $rel; Line = $line; Message = $message })
+            }
+
+            $clamp = [regex]::Match($body, '\.clamp\s*=\s*(?<v>[^,}]+)')
+            if (-not $clamp.Success -or $clamp.Groups['v'].Value.Trim() -eq 'nullptr') {
+                $message = ("knob row for key '{0}' has no clamp: give it .clamp = <a constexpr clamp>; " +
+                    'out of range is reported and clamped, never stored as read (KnobTable.h)') -f $shownKey
+                $problems.Add([pscustomobject]@{ File = $rel; Line = $line; Message = $message })
+            }
+            $rows.Add([pscustomobject]@{ File = $rel; Line = $line; Key = $key })
+        }
+    }
+
+    $keyed = @($rows | Where-Object { $_.Key })
+    foreach ($r in $reads) {
+        $row = $keyed | Where-Object { $_.Key -ceq $r.Key } | Select-Object -First 1
+        if ($row) {
+            $message = ("key '{0}' has a knob row ({1}:{2}) and is read here too: " +
+                "read it through the row's intake (knobTable::readKnob / applyKnobs), not a second read") -f $r.Key, $row.File, $row.Line
+            $problems.Add([pscustomobject]@{ File = $r.File; Line = $r.Line; Message = $message })
+        }
+    }
+
+    return @{ Rows = $rows; Problems = $problems }
+}
+
+# ---------------------------------------------------------------------------
 # Main scan
 # ---------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $RepoRoot)) {
@@ -914,16 +1055,29 @@ foreach ($f in $files) {
 }
 
 # ---------------------------------------------------------------------------
+# Knob table pass (see KNOB TABLE above).
+# ---------------------------------------------------------------------------
+$knobFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+foreach ($f in $files) { if ($f.FullName -notmatch $ExcludeRegex) { $knobFiles.Add($f) } }
+$knob = Test-KnobTable -Files $knobFiles -RepoRoot $RepoRoot
+$knobKeys = @($knob.Rows | Where-Object { $_.Key } | ForEach-Object { $_.Key } | Sort-Object -Unique)
+Write-Host ("Configurability lint: knob table: {0} row(s), {1} key(s){2}" -f `
+    $knob.Rows.Count, $knobKeys.Count, $(if ($knobKeys.Count -gt 0) { ': ' + ($knobKeys -join ', ') } else { '' }))
+foreach ($p in $knob.Problems) {
+    Write-Host ("{0}:{1}: {2}" -f $p.File, $p.Line, $p.Message)
+}
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
-if ($violations.Count -gt 0) {
+if ($violations.Count -gt 0 -or $knob.Problems.Count -gt 0) {
     foreach ($v in $violations) {
         Write-Host ("{0}:{1}: {2} (Synthesis Addendum Correction 5 binding rule)" -f `
             $v.File, $v.Line, $v.Message)
     }
     Write-Host ''
-    Write-Host ("Configurability lint: FAILED ({0} violation(s) across {1} files scanned)" -f `
-        $violations.Count, $scanned)
+    Write-Host ("Configurability lint: FAILED ({0} violation(s) and {1} knob table problem(s) across {2} files scanned)" -f `
+        $violations.Count, $knob.Problems.Count, $scanned)
     Write-Host 'See tools/lint/README.md — every TimeConfig value must be read from TimeConfig, not re-declared.'
     exit 1
 }
