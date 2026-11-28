@@ -29,9 +29,10 @@ public static class OGBrawlerUnrealTargetCommon
 
 		// [movement-sim T90] Chaos::IsInPhysicsThreadContext() is compiled out of Shipping and Test
 		// (Chaos/Public/Framework/Threading.h: PHYSICS_THREAD_CONTEXT defaults to 0 there, behind an
-		// #ifndef). ChaosSpatialQueryAdapter.cpp reads it on every query to choose the physics-thread vs
-		// game-thread particle view, and the answer is load-bearing (MEASURED true inside the pre-simulate
-		// callback; impl/arch_pt_static_query.md Q1). Keep the engine's own tracking in the two
+		// #ifndef). The former Chaos spatial query adapter (removed by og-session-runtime task 4) read it on
+		// every query to choose the physics-thread vs game-thread particle view, and the answer was load-bearing
+		// (MEASURED true inside the pre-simulate callback; impl/arch_pt_static_query.md Q1). No code reads it
+		// now; the define is kept (og-session-runtime design Q5). Keep the engine's own tracking in the two
 		// configurations that would drop it. Scoped so Development/DebugGame action graphs are untouched.
 		// Requires the Unique build environment (source engine, monolithic target): the tracking's TLS
 		// singleton is defined inside the Chaos module under the same macro, so the define must reach the

@@ -1,4 +1,7 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: getSystemsExec -- deleted by og-session-runtime task 31 (no caller); kept in the history -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
 <!-- lint-external-ref: bGlobalGravitySet -- Unreal Engine AWorldSettings field, outside every scan root (§6.1; moved with OGBrawlerSimulationManager-rationale.md §13.2, task 27b) -->
 <!-- lint-external-ref: GlobalGravityZ -- Unreal Engine AWorldSettings field, outside every scan root (§6.1; moved with OGBrawlerSimulationManager-rationale.md §13.2, task 27b) -->
 <!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (§7.3, moved with OGBrawlerSimulationManager-rationale.md §13.4, task 28): the record field deleted with the two-source tripwire. It must NOT resolve -->
@@ -14,10 +17,13 @@ code.
 * **§1** says what the class is.
 * **§2** is the two latency hooks and the brawler's input-sample time (hop `H1`'s start).
 * **§4** is the static-data hook, `makeStaticData` (task 24a).
-* **§5** is the post-visualization hook, `afterVisualization` (task 27a): the ring-out score push.
+* **§5** is the post-visualization hook, `afterVisualization` (task 27a): empty since og-session-runtime task 16b (its
+  ring-out score push reached no authority since task 14).
 * **§6** is the six start-up hooks (task 27b), with the gravity cross-check and the neutral input's guard.
 * **§7** is the four registration hooks (task 28), with the brawler's part of the registration: the capsule body id, the
   movement sub-simulation, the notify's dependants and the first-call pass's quoted comments.
+* **§8** is the two authority presentation hooks (og-input-latency task P5-20): the ring-out score push on a dedicated
+  server, every authority since og-session-runtime task 14, from the session's authority presentation snapshot.
 * **§3** is how the header and the `.cpp` are compiled, and who includes the header.
 
 ---
@@ -50,12 +56,14 @@ input-history feed, bound in `m_game{ m_roster, m_inputHistoryFeed }` (the feed 
 
 The read is **two-phase**, as it was before the move: the component is resolved once, on the game thread, and the step
 thread only loads the time the input collection component published. Why that matters, and the guard on the call site,
-are the plugin's (`UELatencyBudgetDiagnostics-rationale.md` §2 and `UELatencyBudgetDiagnostics-guards.md` G-02, in
-OGSimulationUnreal's docs).
+are the plugin's (`UELatencyBudgetDiagnostics-rationale.md` §2, in OGSimulationUnreal's docs, and
+`SessionLatencyDiagnostics-guards.md` G-02, in og-sim-session's since og-session-runtime task 37).
 
-**The input-sample time** is `UOGBrawlerInputCollectionComponent`'s `std::atomic<double>`, written by `noteInputSampled`
-(`FPlatformTime::Seconds`, relaxed) as the first statement of `updateGameThreadCache` after the owner check, on the game
-thread, once per frame: hop `H1`'s start. It starts at the frame's input refresh, not at the device event: Enhanced Input
+**The input-sample time** is `UOGBrawlerInputCollectionComponent`'s `std::atomic<double>` `m_consumedSampledSeconds`: the
+`sampledSeconds` of the input sample the latest `buildPlayerInput` consumed, stored by `buildPlayerInput` (relaxed) on the
+step's thread. That plain `sampledSeconds` is written by `noteInputSampled` (`FPlatformTime::Seconds`) into the staged
+sample as the first statement of `updateGameThreadCache` after the owner check, on the game thread, once per frame, and
+travels with the sample (og-input-latency task P5-15): hop `H1`'s start. It starts at the frame's input refresh, not at the device event: Enhanced Input
 dispatched the frame's events earlier in the same frame, and the OS queued them up to one frame before that, so the true
 input age is **under**-stated by up to one game frame. It exists only while `OG_LATENCY_BUDGET_DIAGNOSTICS` is 1, as does
 its view `getDiagnostics()`, so `inputSampledSeconds` is declared only then; `inputSampleSource` is a production read and
@@ -82,8 +90,9 @@ provider on the client branch, and a listen host's local players have no client 
   them. `BrawlerSessionTraitsUImpl.h` still only forward-declares `BrawlerSessionGameUImpl`.
 * **The out-of-line hooks are defined in `BrawlerSessionGameUImpl.cpp`** (since task 33; until then in
   `OGBrawlerSimulationManager.cpp`, between the actor's own members, in its `OGSIM_OPTIMIZE_OFF` region). There are
-  eleven, in this order: `makeStaticData` (§4, task 24a), five of the six start-up hooks (§6, task 27b),
-  `afterVisualization` (§5, task 27a) and the four registration hooks (§7, task 28). They cannot be inline here: they
+  thirteen, in this order: `makeStaticData` (§4, task 24a), five of the six start-up hooks (§6, task 27b),
+  `afterVisualization` (§5, task 27a), the two authority presentation hooks (§8, og-input-latency task P5-20) and the four
+  registration hooks (§7, task 28). They cannot be inline here: they
   need what the actor's header declares (the complete actor, whose private `readMovementStaticDataCVars()`
   `makeStaticData` calls because the actor befriends this class, and `LogOGBrawler`), and that header includes this one
   before it declares them. So the `.cpp` includes the actor's header, right after this one (UBT requires a `.cpp`'s own
@@ -130,7 +139,14 @@ provider on the client branch, and a listen host's local players have no client 
 
 | hook | brawler statements | when, which thread |
 |---|---|---|
-| `static afterVisualization(session)` | on the authority (a manager that does not predict) with its systems executor built: `BrawlerRosterUImpl::pushRingoutScores` with the executor's `brawlerRingout::ScoreSystem` and the session's delayed-input map, the route table of the authority's characters | once per frame, from the session's `onPostPhysicsStep`, after the backend's visualization update and before the latency tick, on the game thread |
+| `static afterVisualization(session)` | none since og-session-runtime task 16b (an empty body). Until then: on the authority (a manager that does not predict) with its systems executor built: `BrawlerRosterUImpl::pushRingoutScores` with the executor's `brawlerRingout::ScoreSystem` and the session's registered-component map (`getRegisteredComponentsById`, the authority's registered characters; its delayed-input map, the route table, until og-input-latency task P5-7) | once per frame on a client, from the session's `onPostPhysicsStep`, after the display view's refresh and before the latency tick, on the game thread; the gate was false there, so it pushed nothing (below) |
+
+* **No authority reaches it since og-session-runtime task 14.** The session's `onPostPhysicsStep` calls the hook only on a
+  client, where the gate (`!runsPrediction()`) is false; every authority is a dedicated server, whose scores the two
+  presentation hooks write (§8). Until task 14 an in-frame authority (a listen server, a standalone world, a dedicated
+  server with og.Sim.AuthorityLoop=0) ran the push here once per frame. Task 16b deleted the unreachable branch and the push
+  (`BrawlerRosterUImpl-rationale.md` §3); the hook stays, empty, because the session calls it on every client. The
+  bullets below are the record of the branch.
 
 * **The statements are the actor's, in its order.** Until task 27a they sat in the actor's `OnPostPhysicsStep` at the
   same position: the gate (`m_manager.has_value() && m_systemsExec.has_value() && !m_manager->runsPrediction()`), then
@@ -138,9 +154,10 @@ provider on the client branch, and a listen host's local players have no client 
   (`UESimulationSession-rationale.md` §10, in OGSimulationUnreal's docs). The latency tick that followed it is the
   session's own statement.
 * **What it reads, and how.** The session passes itself, `const`. The hook reads the manager through `getManager()` and
-  the two const reads task 27a added to the session, `getSystemsExec()` and `getDelayedInputComponentsById()`: each
-  returns a const reference to the member the actor read (`m_session.m_manager`, `m_session.m_systemsExec`,
-  `m_session.m_delayedInputComponentsById`). The score system is reached through the executor's const `get`, the same
+  the two const reads task 27a added to the session, `getSystemsExec()` and the component map's read (since og-input-latency
+  task P5-7 `getRegisteredComponentsById()`, over the map the session's `tryRegister` writes; the delayed-input map's read
+  before): each returns a const reference to the session's member (the actor read the manager, the executor and the map
+  through `m_session` before task 27a). The score system is reached through the executor's const `get`, the same
   system the actor reached through the non-const one, and `pushRingoutScores` takes both by const reference, as before.
   The push is a static member of the roster (task 23), so the hook needs no roster.
 * **The crossing is unchanged.** The push reads the score table on the game thread while the step writes it on the physics
@@ -161,7 +178,7 @@ the position of the brawler statements that sat there in the actor's `BeginPlay`
 | hook | brawler statements | when, which thread |
 |---|---|---|
 | `beforeWorldBuild(world, netMode, compositionExists, staticData)`, a member | the gravity cross-check (§6.1), then `m_roster.seedSpawnPointsFromLevel(world, netMode, compositionExists, staticData)` (`BrawlerRosterUImpl-rationale.md` §1) | once per session, first after the world check, before the composition is emplaced; game thread |
-| `static emplaceSystems(systemsExec, bodyAdapter, queryAdapter)` | the systems executor's emplace: the hit detector over the two adapters, then the hit routing and the ring-out score systems | once per session, in the role's branch, after the integration layer, before the manager; game thread |
+| `static emplaceSystems(systemsExec, bodyAdapter, queryAdapter)` | the systems executor's emplace: the hit detector over the two adapters, then the hit routing, the ring-out score and (since og-input-latency task 2d) the ring-out respawn-slot systems | once per session, in the role's branch, after the integration layer, before the manager; game thread |
 | `static neutralInput()` | `simulatableBrawler::getZeroPlayerInput()`, the value of `setNeutralInput` | once per session, in the role's branch; game thread |
 | `static installGameLoggers(isAuthority)` | the `ogblog` sink lambda (`LogOGBrawler`, its verbosity from a leading `[Verbose]` / `[Warning]`), then `ogblog::setGlobal` | once per session, in the role's branch, after `simlog::setGlobal`; game thread |
 | `afterSessionConfigured(netMode)`, a member | `m_roster.checkSeeded(netMode)` (`BrawlerRosterUImpl-rationale.md` §1) | once per session, after the resim policy, before the backend line; game thread |
@@ -272,26 +289,31 @@ brawler's `CharacterBindings`, and its **source is the movement sub-simulation's
 creation fold has run. Before the fold that id is still zero, which is why the stamp sits below it.
 
 The value is the capsule's, and it is the capsule's *by construction* rather than by coincidence:
-the movement descriptor sets `isRoot`, so `ChaosPhysicsFactory` **adopts** the engine character's
-existing capsule instead of creating a body under it, and its adopt-root arm ends in a `checkf`
-that the adopted body's id equals the parent id the factory derived from that same component. One
-body, one id, reached through the sub-simulation's own declaration.
+the movement descriptor sets `isRoot`, so in the Jolt bind (`JoltTickWorldHost::bind`) the movement
+declaration's own body is the slot's one `isRoot` body, which `JoltPhysicsFactory` also hands every
+declaration as its `parentBodyId`; the roster's `checkf` that the two are equal watches it. One body,
+one id, reached through the sub-simulation's own declaration. In the former Chaos configuration
+(removed by og-session-runtime tasks 3–6) the Chaos factory adopted the engine character's existing
+capsule instead of creating a body under it, and its adopt-root arm ended in a `checkf` that the
+adopted body's id equalled the parent id it derived from that same component.
 
 A **two-source tripwire** used to sit at this stamp: a second `checkf`, comparing the declaration's
 `ownBodyId` against a capsule id cached on `PendingRegistration` for as long as the two sources
 coexisted. Both are gone. The cached `parentBodyId` field had exactly two readers — that tripwire
 and the resolvability gate — and the gate now reads the same declaration, so the field had none
-left. Removing it removes a duplicate, not the only witness: the factory's own assertion, which
-this file does not own, still watches the identity. The capsule id is still derived inside the
+left. Removing it removed a duplicate, not the only witness: the Chaos factory's own assertion watched
+the identity then; since og-session-runtime tasks 3–6 removed that factory, the roster's `checkf` (above) does.
+The capsule id is still derived inside the
 first-call pass, as a **local**, because the factory and each declaration's own
 `bindings.parentBodyId` consume it there.
 
 *R0, task 28:* verified: the stamp is `BrawlerRosterUImpl::onBodiesCreated`'s `setCharacterBindings`, after its read of
 the movement declaration's `bindings.ownBodyId`, which the hook `afterBodiesCreated` calls at the end of the first-call
-pass, after the backend's fold; `kCharacterCapsuleBody` sets `isRoot`; `ChaosPhysicsFactory`'s adopt-root arm ends in
-`checkf(bodyId == m_parentBodyId, …)`. The record (`PendingRegistration`, the session's since task 28) has no capsule-id
-field. Two precisions: the "first-call pass" that derives the capsule id is the backend's `createBodies_GameThread` (the
-self-scheduled host's local `parentBodyId`, from the capsule's handle), which `tryRegister`'s first call reaches; and the
+pass, after the backend's fold; `kCharacterCapsuleBody` sets `isRoot`; the Chaos factory's adopt-root arm ended in
+`checkf(bodyId == m_parentBodyId, …)` (deleted by og-session-runtime task 4). The record (`PendingRegistration`, the
+session's since task 28) has no capsule-id field. Two precisions: the "first-call pass" that derives the capsule id is the
+backend's `createBodies_GameThread` (in the former self-scheduled Chaos host, a local `parentBodyId` from the capsule's
+handle; in the Jolt host, the factory's `parentBodyId`), which `tryRegister`'s first call reaches; and the
 roster's stamp is preceded by a `checkf` that the declaration's own body is its parent body, both read from the
 declaration (task 23's restatement of the isRoot fence), which is not the retired two-source tripwire: that compared the
 declaration with the record's cached field.
@@ -322,9 +344,9 @@ the resim policy) and `StaticData::drivesBody`; the teleport seed is written by 
 capsule's location, and `InitialConditions` (`teleportPending`, `teleportPos`) is a serialized field set, append-only, so it
 rides the wire; the movement step consumes it with `setBodyTransform` without testing `drivesBody`. **Correction:** the
 second bullet's "one row in EACH of the two mapping tables in `BeginPlay` — authority branch and client branch" is stale:
-since og-tickdriver task 15a there is one category table per configuration (`BrawlerChaosBindingUImpl::categoryChannels`,
-`BrawlerJoltBindingUImpl::categoryChannels`; the Chaos table has the `collisionCategory::character` row), so a new
-category needs one row in each configuration's table (`OGBrawlerSimulationManager-rationale.md` §13.3).
+since og-tickdriver task 15a there is one category table per configuration, and since og-session-runtime task 3 deleted
+the Chaos binding's table one in all, `BrawlerJoltBindingUImpl::categoryChannels`, so a new category needs one row there
+(`OGBrawlerSimulationManager-rationale.md` §13.3).
 
 **Attach parent and parent body are the same capsule** under the one-deep hierarchy, so passing one
 handle expresses "these shapes belong to this character". They used to be passed separately, which
@@ -332,9 +354,9 @@ let callers get them out of sync; the factory derives the parent `BodyId` from t
 body-instance handle internally now, and that factory-owned parent id becomes the root for every
 shape it registers — so `overlap()` emits an actor-level `rootBodyId` equal to the capsule id.
 
-*R0, task 28:* this paragraph describes the Chaos configuration's factory (`ChaosPhysicsFactory`, the self-scheduled
-host's bind); verified: its adopt-root arm registers the adopted body's shapes with no parent (`registerShape(…,
-std::nullopt)`), so a direct hit on it reports the body itself as the root.
+*R0, task 28:* this paragraph describes the Chaos configuration's factory (the self-scheduled host's bind, removed by
+og-session-runtime tasks 3–6); verified then: its adopt-root arm registered the adopted body's shapes with no parent
+(`registerShape(…, std::nullopt)`), so a direct hit on it reported the body itself as the root.
 
 #### The notify's brawler dependants
 
@@ -399,8 +421,8 @@ and the quote is left intact.*
 > state both halves.
 
 Since this conversion there is **one** table per configuration (`OGBrawlerSimulationManager-rationale.md` §13.3; since og-tickdriver task 15a
-`BrawlerChaosBindingUImpl::categoryChannels` and `BrawlerJoltBindingUImpl::categoryChannels`), so a new
-category needs one row in each, not one per role branch.
+the bindings' tables, and since og-session-runtime task 3 deleted the Chaos binding's only
+`BrawlerJoltBindingUImpl::categoryChannels`), so a new category needs one row, not one per role branch.
 
 *R0, task 28:* the first quote's class is still the type the contract requires: the session's cast reads
 `TraitsT::Character`, which is `AOGBrawlerUECharacter` (`BrawlerSessionTraitsUImpl.h`), and since task 28 the check's
@@ -430,3 +452,41 @@ for the brawler, as the quote says (the session's §12.1 states it for any game)
 `onUnregistered`; the feed forwards it to its store, which erases the rows and the lanes under one key
 (`InputHistoryVisualizationUImpl-guards.md` G-04 and `InputHistoryDisplay-rationale.md` §8.1). The `§10` the note ends with was the actor's
 section, now split between this §7 and the session's §12.
+
+---
+
+## §8 The authority presentation hooks (og-input-latency task P5-20)
+
+| hook | brawler statements | when, which thread |
+|---|---|---|
+| `struct AuthorityPresentationSlice` | the ring-out score (`ringoutScore`) and whether the score system holds an entry for the id (`hasScoreEntry`) | the session's per-id entry type in its authority presentation snapshot |
+| `static authorityPresentationSlice_Step(systems, id)` | the executor's `brawlerRingout::ScoreSystem`: `scoreOf(id)` and `hasScoreEntry(id)` | once per stepping wake per simulatable, on the authority runner, after the batch (the session's `publishAuthorityPresentation_Runner`) |
+| `static presentAuthoritySlice(session, id, slice)` | with a score entry: the registered component for `id` (`getRegisteredComponentsById()`), its owner as the brawler character, `SetAuthoritativeRingoutScore(slice.ringoutScore)` | once per frame per entry of the newest snapshot, from the session's `onPostPhysicsStep`, on the game thread |
+
+* **On every authority.** A dedicated server steps on the runner, so the score system is the runner's and the game thread
+  may not read it; `afterVisualization` (§5) is not called there (`UESimulationSession-rationale.md` §19.5, in
+  OGSimulationUnreal's docs). Instead the session publishes, after each batch, a snapshot with one slice per simulatable
+  from the first hook, and the game thread applies the newest one with the second (that file's §21.3). Until
+  og-session-runtime task 14 this ran only with the authority loop on, and every other world kept §5's push.
+* **The same write, from a copy.** `presentAuthoritySlice` writes the replicated score property exactly as
+  `BrawlerRosterUImpl::pushRingoutScores` did until og-session-runtime task 16b deleted it (the property's setter returns early on an unchanged value), so clients
+  learn it through the same `OnRep_RingoutScore` and the scoreboard reads the same property. The values are those of the
+  runner's newest published batch when the game thread reads the snapshot.
+* **No `checkf` on the entry.** `pushRingoutScores` `checkf`ed that every routed id had a score entry, because its
+  game-thread read of the live map could not insert. The snapshot is a copy, so an id the runner has not yet notified to its
+  systems (its entry is created in `onCharacterRegistered`) carries `hasScoreEntry` false and is skipped; its score is 0
+  until then anyway.
+* **Defined in `BrawlerSessionGameUImpl.cpp`, in its `OGSIM_OPTIMIZE_OFF` region**, beside `afterVisualization`: the
+  second hook needs the complete brawler character (§3). The slice's two fields are the only brawler state the snapshot
+  carries; a new authority-only value a dedicated server must present joins the slice here.
+
+## §9 The statics that moved to og-brawler (og-session-runtime task 26)
+
+Three of the class's statics name no engine type, and og-session-runtime task 26 moved them into og-brawler's
+`OGBrawler/BrawlerSessionGame.h` (step (a), verbatim; step (b) gave them og-brawler's documents): `neutralInput()`'s body,
+the `AuthorityPresentationSlice` struct and `rootBodyId(simulatable)`'s body. The class keeps their declarations and forwards:
+`neutralInput()` and `rootBodyId(…)` return `BrawlerSessionGame`'s, and the slice is
+`using AuthorityPresentationSlice = BrawlerSessionGame::AuthorityPresentationSlice;`, so the session's `Game::neutralInput()`,
+`Game::rootBodyId(…)` and `typename Game::AuthorityPresentationSlice` resolve as before. The guard on the neutral input moved
+with it (`BrawlerSessionGame-guards.md` G-01; this file's G-01 is retired). Why the other statics on the design's list stay here
+is og-brawler's `BrawlerSessionGame-rationale.md` §2.

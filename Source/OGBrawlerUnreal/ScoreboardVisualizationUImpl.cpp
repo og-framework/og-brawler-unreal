@@ -18,7 +18,8 @@ static_assert(std::is_same_v<decltype(&UESimulationSession<BrawlerSessionTraitsU
 	"UESimulationSession<BrawlerSessionTraitsUImpl>::getVizSlice<brawlerRingout::State>, the scoreboard's read, must stay "
 	"a CONST member returning the slice BY VALUE. The scoreboard holds a const AOGBrawlerSimulationManager* and reads through "
 	"its const session(), so 'the scoreboard writes no simulation state' is a compile error to break; a reference would "
-	"hand a drawing surface a pointer into live storage for as long as it cared to keep it. Was the static_assert on "
+	"hand a drawing surface a pointer into the session's display view, which every frame rewrites, for as long as it "
+	"cared to keep it (live storage until og-input-latency task P5-16). Was the static_assert on "
 	"getRingoutVizState after the class in OGBrawlerSimulationManager.h, itself the 'const, AND BY VALUE' prose fence of "
 	"that header (task 11); re-expressed for getVizSlice by og-ue-simulationcomponentandmanagersplit task 22, and "
 	"re-targeted to the session's getVizSlice by task 24b.");
@@ -114,11 +115,11 @@ std::optional<uint32_t> displayTick(const AOGBrawlerSimulationManager* manager)
 	if (manager == nullptr)
 		return std::nullopt;
 
-	if (manager->session().runsPrediction())
-		return static_cast<uint32_t>(manager->session().getClientClock().getPredictionTick());
+	const auto* const snapshot = manager->session().runtime().getDisplaySnapshot();
+	if (snapshot == nullptr)
+		return std::nullopt;
 
-	return static_cast<uint32_t>(
-		manager->session().getServerClock().getSimulationStep().getTick());
+	return static_cast<uint32_t>(snapshot->clock.predictionTick);
 }
 
 std::vector<brawlerScoreboardVisualization::ScoreboardRow> gatherScoreboardRows(

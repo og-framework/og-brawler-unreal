@@ -1,0 +1,10 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Source/OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h
+#pragma once
+template <typename SessionT>
+class BrawlerTickDriverGameUImpl
+{
+	SessionT& m_session;
+	int manager() { return m_session.m_manager; }
+};

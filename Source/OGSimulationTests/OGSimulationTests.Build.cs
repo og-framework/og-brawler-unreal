@@ -19,8 +19,11 @@ public class OGSimulationTests : TestModuleRules
 	public OGSimulationTests(ReadOnlyTargetRules Target) : base(Target, true)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		FPSemantics = FPSemanticsMode.Precise;
+		PrivatePCHHeaderFile = EngineDirectory + "/Source/Runtime/Core/Public/CoreSharedPCH.h";
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGSimulationJolt" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGTickDriver", "OGSimulationJolt", "OGNet",
+			"OGSimulationNet", "OGSimulationSession" });
 		PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "..", "..", "Plugins", "OGSimulation", "Source"));
 
 		// Epic's bundled Catch2 v3.4.0 header (WITH_LOW_LEVEL_TESTS auto-defined by UBT for TestTargetRules)
@@ -30,5 +33,11 @@ public class OGSimulationTests : TestModuleRules
 		// Test source from og-simulation-tests submodule
 		string TestSource = Path.Combine(ModuleDirectory, "extern", "og-simulation-tests", "Source");
 		ConditionalAddModuleDirectory(new DirectoryReference(Path.Combine(TestSource, "OGSimulationTests")));
+
+		string PluginSource = Path.Combine(ModuleDirectory, "..", "..", "Plugins", "OGSimulation", "Source");
+		ConditionalAddModuleDirectory(new DirectoryReference(Path.Combine(PluginSource, "OGSimulationNet", "og-sim-net", "tests")));
+		PrivateIncludePaths.Add(Path.Combine(PluginSource, "OGNet", "og-net", "tests"));
+		ConditionalAddModuleDirectory(new DirectoryReference(Path.Combine(PluginSource, "OGSimulationSession", "og-sim-session", "tests")));
+		PrivateIncludePaths.Add(Path.Combine(TestSource, "OGSimulationTests"));
 	}
 }

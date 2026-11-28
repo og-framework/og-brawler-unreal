@@ -1,0 +1,156 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Plugins/OGSimulation/Source/OGNet/OGNetModule.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGNet)
+>>> Plugins/OGSimulation/Source/OGNet/og-net/OGNet/NetTypes.h
+#pragma once
+#include <cstdint>
+namespace ognet { using ConnectionId = uint32_t; }
+>>> Plugins/OGSimulation/Source/OGNet/og-net/OGNet/Endpoint/NetEndpoint.h
+#pragma once
+#include "OGNet/NetTypes.h"
+/* #include "OGSimNet/SimNetIdle.h"
+   #include "CoreMinimal.h" */
+namespace ognet { struct NetEndpoint { ConnectionId id = 0; }; }
+>>> Plugins/OGSimulation/Source/OGNet/og-net/tests/NetTypesTest.cpp
+#include "CoreMinimal.h"
+#include "OGSimNet/SimNetIdle.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/OGSimulation.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulation)
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/OGAssert.h
+#pragma once
+#include <cassert>
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/OGTypes.h
+#pragma once
+#include <cstdint>
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/SimulationScheduler.h
+#pragma once
+#include "OGSimulation/OGAssert.h"
+struct SimulationScheduler { int period = 1; };
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/TickDriverGameTypes.h
+#pragma once
+#include "OGSimulation/SimulationScheduler.h"
+enum class IdleWake { None };
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/HostLog.h
+#pragma once
+#include <string>
+inline const char* kHostLogSample = "#include \"CoreMinimal.h\"";
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/PCTimeManagement/ClockDilationController.h
+#pragma once
+#include "OGSimulation/TickDriverGameTypes.h"
+#include "OGSimulation/HostLog.h"
+//#include "CoreMinimal.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/SimulationLogRoutes.h
+#pragma once
+#include "OGSimulation/HostLog.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/SimulationManager.h
+#pragma once
+#include "OGSimulation/PCTimeManagement/ClockDilationController.h"
+#include "OGSimulation/SimulationLogRoutes.h"
+#include "OGTypes.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/TickDriverConcepts.h
+#pragma once
+#include "OGSimulation/TickDriverGameTypes.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/TickDriverLog.h
+#pragma once
+#include "OGSimulation/HostLog.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/og-tickdriver/OGTickDriver/SimulationTickDriver.h
+#pragma once
+#include "OGTickDriver/TickDriverConcepts.h"
+#include "OGTickDriver/TickDriverLog.h"
+#include "OGSimulation/SimulationManager.h"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/glm/glm.hpp
+#include "CoreMinimal.h"
+>>> Plugins/OGSimulation/Source/OGTickDriver/OGTickDriverModule.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGTickDriver)
+>>> Plugins/OGSimulation/Source/OGSimulationNet/OGSimulationNetModule.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationNet)
+>>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/SimNetIdle.h
+#pragma once
+#include "OGSimulation/TickDriverGameTypes.h"
+#include "OGNet/NetTypes.h"
+>>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/SimNetClient.h
+#pragma once
+#include "OGSimNet/SimNetIdle.h"
+>>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/SimNetHost.h
+#pragma once
+#include "OGSimNet/SimNetClient.h"
+>>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/tests/SimNetIdleTest.cpp
+#include "OGTickDriver/TickDriverConcepts.h"
+#include "OGSimNet/SimNetIdle.h"
+>>> Plugins/OGSimulation/Source/OGSimulationSession/OGSimulationSessionModule.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGSimulationSession)
+>>> Plugins/OGSimulation/Source/OGSimulationSession/og-sim-session/OGSimSession/SessionTypes.h
+#pragma once
+#include "OGSimNet/SimNetIdle.h"
+#include "OGTickDriver/TickDriverConcepts.h"
+>>> Plugins/OGSimulation/Source/OGSimulationUnreal/OGSimulationUnreal.cpp
+#include "CoreMinimal.h"
+#include "UESimulationSession.h"
+>>> Plugins/OGSimulation/Source/OGSimulationUnreal/UESimulationSession.h
+#pragma once
+#include "CoreMinimal.h"
+#include "OGSimNet/SimNetClient.h"
+#include "OGSimulation/SimulationManager.h"
+#include "OGTickDriver/TickDriverConcepts.h"
+template <typename TraitsT>
+class UESimulationSession
+{
+public:
+	static UESimulationSession* instanceFor(const void* world)
+	{
+		UESimulationSession* const session = nullptr;
+		return session != nullptr && session->m_registeredWorld == world ? session : nullptr;
+	}
+	int getManager() const { return m_manager; }
+private:
+	const void* m_registeredWorld = nullptr;
+	int m_manager = 0;
+};
+>>> Plugins/OGSimulation/Source/OGSimulationUnreal/UELatencyBudgetDiagnostics.h
+#pragma once
+#include "UESimulationSession.h"
+template <typename TraitsT>
+class UELatencyBudgetDiagnostics
+{
+	const UESimulationSession<TraitsT>& m_owner;
+	struct Other { int m_count = 0; } m_other;
+	int read() const
+	{
+		// m_owner.m_manager
+		const char* text = "m_owner.m_manager";
+		return m_owner.getManager() + m_other.m_count + text[0];
+	}
+};
+>>> Plugins/OGSimulation/Source/glm/glmModule.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, glm)
+>>> Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/OGBrawler.cpp
+#include "Modules/ModuleManager.h"
+IMPLEMENT_MODULE(FDefaultModuleImpl, OGBrawler)
+>>> Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/BrawlerSim.h
+#pragma once
+#include "OGSimulation/OGAssert.h"
+>>> Plugins/OGBrawler/Source/OGBrawler/og-brawler/OGBrawler/BrawlerGame.h
+#pragma once
+#include "OGBrawler/BrawlerSim.h"
+>>> Source/OGBrawlerUnreal/OGBrawlerUnreal.cpp
+#include "CoreMinimal.h"
+#include "UESimulationSession.h"
+#include "OGBrawler/BrawlerSim.h"
+>>> Source/OGBrawlerUnreal/BrawlerTickDriverGameUImpl.h
+#pragma once
+template <typename SessionT>
+class BrawlerTickDriverGameUImpl
+{
+	SessionT& m_session;
+	int manager() { return m_session.getManager(); }
+};
+>>> Source/OGSimulationTests/SomeSuiteTest.cpp
+#include "CoreMinimal.h"
+#include "UESimulationSession.h"

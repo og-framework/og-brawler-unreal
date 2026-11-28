@@ -1,7 +1,12 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: getLocalInputCache -- deleted by og-input-latency task P5-16 (the game-thread readers read the session's display snapshot); kept in the history -->
+<!-- lint-external-ref: makeReconciliationSlotReader -- deleted by og-input-latency task P5-16 (the lanes poll reads the display snapshot's applied window); kept in the history -->
+<!-- lint-external-ref: ReconciliationSlotReader::hasCorrectionCache -- deleted by og-input-latency task P5-16 (the lanes poll reads the display snapshot's applied window); kept in the history -->
+<!-- lint-external-ref: predictionClock -- a local of pollInputHistoryLanes until og-input-latency task P5-16 (the clock reading comes from the display snapshot); kept in the history -->
 <!-- lint-external-ref: UGameInstance::AddLocalPlayer -- Unreal Engine method (GameInstance.cpp), outside every scan root; quoted in the R0 correction of the index-0 claim -->
 <!-- lint-external-ref: UGameInstance::RemoveLocalPlayer -- Unreal Engine method (GameInstance.cpp), outside every scan root; its RemoveAt is why the local-player array is not append-only -->
 <!-- lint-external-ref: AddUnique -- Unreal Engine TArray method, outside every scan root -->
+<!-- lint-external-ref: RemoveAt -- Unreal Engine TArray method (UGameInstance::RemoveLocalPlayer calls it), outside every scan root; it resolved only through the Chaos spatial query adapter's own use until og-session-runtime task 4 deleted that file. The prose is about the engine, not Chaos: this declaration stays -->
 # `InputHistoryVisualizationUImpl.h` and `.cpp` — guards
 
 These are the prohibitions left after the comment conversion of the two files (og-netcode-v2-field-defects task 25,
@@ -120,29 +125,6 @@ header would then print a `d=` that does not belong to the character the stack f
 
 ---
 
-## G-06 — the presence test stays a presence test
-
-**Site:** `return m_reconciliation.template findCorrectionCache<SimulatableT>(m_id) != nullptr;` in
-`ReconciliationSlotReader::hasCorrectionCache`.
-
-**The prohibition, as it stood in the source:**
-
-> ⛔ SAME-THREAD, NOT A CROSSING -- the cache map is mutated on the GAME THREAD alone
-> (createCacheFor/removeCacheFor); a presence test, not the input read the fence bars.
-
-**Verified (R0).** `createCacheFor` is called only from `registerSimulatable`, and `removeCacheFor` only from
-`unregisterSimulatableContainers`, through the `unregisterSimulatable` facade. Both are reached from
-`tryRegister` / `unregisterFromNewFramework` on the game thread (the actor's until og-ue-simulationcomponentandmanagersplit
-task 28, the session's since). The reader is called from
-the lane poll, which `UOGBrawlerSimulatableComponent::TickComponent` runs on the game thread. The manager's own side of
-this argument is in `InputHistoryDisplay-rationale.md` §8.6 ("The presence test crosses nothing either"), which task 22
-moved there from `OGBrawlerSimulationManager-rationale.md` §1 with the feed.
-
-**Consequence.** Turning this into a read *through* the found cache (its states or inputs) is a game-thread read of
-physics-thread-written slots. That is a crossing this reader was argued free of.
-
----
-
 ## G-07 — the first local player is index 0
 
 **Site:** `ULocalPlayer* localPlayer = gameInstance->GetLocalPlayers()[0];` in `firstLocalPlayerController`.
@@ -198,6 +180,8 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 **Verified (R0, task 22).** `SimulationManager::getNetworkEstimator()` calls `std::terminate()` when `m_networkEstimator` is empty, and the manager's constructor emplaces the estimator (and the client clock) only on its `shouldRunPrediction` branch, so every authority manager holds none.
 
+**Since og-input-latency task P5-16** the offset comes from the session's display snapshot (`displayClock.predictionOffsetTicks`), so the read no longer reaches the estimator and the `std::terminate()` above is no longer the consequence. The guard stays for its second reason: an authority's snapshot carries only its step (the other clock fields are left 0, `UESimulationSession-rationale.md` §17.2 in OGSimulationUnreal's docs), so without the guard the authority passes an offset of 0, and a display told "the offset is 0" draws an authority marker on the newest cell.
+
 ---
 
 ## G-10 — Local control is the CAPTURE-LINE test, never a role test
@@ -219,6 +203,8 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 **Verified (R0, task 22).** `isLocallyControlledOnThisPeer` answers `getLocalInputCache(id) != nullptr`, and the capture line exists only for an id with a local input provider (`SimulationInputResolution::registerLocalCharacter`), which is per character, not per manager.
 
+**Since og-input-latency task P5-16** `isLocallyControlledOnThisPeer` answers from the display snapshot: the id's entry exists and its `hasLocalInputCache` is set, which the fill copies from the same capture-line presence at the end of the last step batch. Still per character.
+
 ---
 
 ## G-11 — The tier decomposition is drawn only for a LOCALLY controlled character
@@ -239,6 +225,8 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 **Verified (R0, task 22).** The three inputs are the tier consumer's `hasReceivedTier`, `currentTierIndex` and `effectiveInputDelayTicks`, the manager's `getTimeConfig()` and the resolution peer's `getClientEffectiveInputDelayTicks()`: this connection's state, read in the predicate's true arm only.
 
+**Since og-input-latency task P5-16** the predicate is an `if` around the decomposition, and the inputs come from the display snapshot's tier reading (tier received, index and delay, the runtime floor, the published delay) and a copy of the manager's `TimeConfig` with the snapshot's floor written in. They are still this connection's, and the tag still sits on the predicate.
+
 ---
 
 ## G-12 — The clock reading keeps its `runsPrediction()` guard
@@ -258,28 +246,7 @@ bars. The second half of the quoted sentence is corrected under G-03.
 
 **Verified (R0, task 22).** Both `SimulationManager::getClientClock()` and `getNetworkEstimator()` call `std::terminate()` on an empty optional, and both optionals are emplaced only on the constructor's `shouldRunPrediction` branch.
 
----
-
-## G-13 — Each event counter is read BEFORE its tick
-
-**Moved from** `OGBrawlerSimulationManager-guards.md` G-09 (og-ue-simulationcomponentandmanagersplit task 22, 2026-10-21), with the code; the text is that entry's, with its site and cross-references updated.
-
-**Site:** `InputHistoryVisualizationUImpl.cpp`, directly above the first of the seven `predictionClock.getDiagnostics()` reads in `BrawlerInputHistoryFeedUImpl::pollInputHistoryLanes` (`reading.skipCount`).
-
-**The fence, verbatim — the bytes it occupied in `OGBrawlerSimulationManager.h` before task 11:**
-
-<!-- header lines 606-606 at b9f6d81 -->
-```
-// ⛔ COUNT BEFORE ITS TICK: the clock writes tick then count, so the tear is one-way.
-```
-
-**What breaks if the edit is made.** `ClientPredictionClock` writes each pair tick-first, count-second (`ClientPredictionClock.cpp`: `lastSkipTick` then `++skipCount`, and likewise for stall and hard resync). Reading count-first makes the harmful straddle — a fresh count beside a stale tick, which files an event against a tick that predates it — the one the program order does not produce. Reversing the reads makes it the likely one.
-
-⛔ **R0, task 11 — the fence overclaims, and the rationale doc's copy said "CANNOT be observed".** Both sides are plain `unsigned int`s: neither the writes nor the reads are atomic, so C++ gives no ordering guarantee at all, and an optimizing compiler may reorder either pair. Source order makes the harmful straddle unlikely; it does not make it impossible. The guard is still worth keeping — reversing the order makes the wrong case the expected one — but the property it protects is "unlikely", not "unreachable". A real guarantee needs acquire/release atomics in `og-simulation`, which is not this file's to change.
-
-The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes no bare accessor"* — is not a guard. The compiler already holds it (task 11 measured `c.skipCount()` → `C2039` and `c.m_eventSeamDiagnostics` → `C2248`).
-
-**Verified (R0, task 22).** All four write sites are in `ClientPredictionClock::advancePrediction`, and each writes its tick (the hard resync: both ticks) before `++` on its count. The seven fields are plain `unsigned int`s of `EventSeamDiagnostics`, read through `getDiagnostics()`. The task-11 R0 paragraph above stands.
+**Since og-input-latency task P5-16** the reading is filled from the display snapshot's clock reading, so the block calls neither and nothing terminates. The guard stays: on an authority the snapshot's target tick, authority tick, drift action, stall debt and event words are left 0, so without it every authority would draw a clock line built from zeros instead of none.
 
 ---
 
@@ -368,8 +335,28 @@ The line above the fence — *"THE SEAM, THROUGH THE VIEW: the clock publishes n
 
 **Verified (R0, task 22).** The gather reads `getVizState()` inside `forEachSimulatable` on the manager's `const` storage; `getAllState()` is the live composite.
 
+**Since og-input-latency task P5-16** the gather walks the session's display copies (`forEachDisplayVizState`), and the prohibition reads: never the storage, neither `getAllState()` nor `getVizState()`. The storage's state is what the step writes, and nothing refreshes the storage's visualization copy any more (`UESimulationSession-guards.md` G-02, in OGSimulationUnreal's docs). The movement body is the root declaration, which the render-pose overlay leaves alone, so the position is the snapshot's.
+
 ---
 
 ## §R — Retired ids
 
-None.
+⛔ **An id is never reused.** A retired id may be named in prose; it may never again appear as a `⛔G-nn` tag.
+
+### G-06 — RETIRED by og-input-latency task P5-16 (2026-11-19): its subject was deleted
+
+**Was:** *"the presence test stays a presence test"*. Its tag sat on `ReconciliationSlotReader::hasCorrectionCache`.
+
+**Why it retired.** The lanes poll reads the display snapshot's applied window since P5-16, and `ReconciliationSlotReader`
+and `makeReconciliationSlotReader` were deleted. The window's `hasCorrectionCache` is a copy taken when the snapshot is
+filled, so there is no read through the found cache left to forbid. The entry's text is kept in
+`InputHistoryDisplay-rationale.md` §8.7.
+
+### G-13 — RETIRED by og-input-latency task P5-16 (2026-11-19): its subject was deleted
+
+**Was:** *"Each event counter is read BEFORE its tick"*. Its tag sat above the first of the seven
+`predictionClock.getDiagnostics()` reads in `pollInputHistoryLanes`.
+
+**Why it retired.** The poll reads the seven words from the display snapshot's clock reading since P5-16. The snapshot copies
+them after the step batch, on the thread that runs the post-physics pass, while nothing steps, so there is no writer to
+straddle and no read order to keep. The entry's text is kept in `InputHistoryDisplay-rationale.md` §8.7.

@@ -2,7 +2,6 @@
 
 #include "SimulationManagerSubsystem.h"
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
-#include "OGSimulationUnreal/SimulationTimingRelay.h"
 
 bool USimulationManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -12,16 +11,9 @@ bool USimulationManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 
 void USimulationManagerSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
-    // ORDER IS LOAD-BEARING since T11 (og-netcode-v2-input-relay): the timing
-    // relay is spawned FIRST so that the manager's BeginPlay — which runs
-    // synchronously inside SpawnActor, the world having already begun play — can
-    // find it and publish the session relay delay floor onto it. The relay does
-    // not touch the manager at spawn time (its client-side OnRep path does, and
-    // that cannot run on an authority world), so nothing depends on the previous
-    // order; the manager's own findTimingRelay() call sites were all post-BeginPlay
-    // before this change.
-    if (InWorld.GetNetMode() != NM_Client)
-        InWorld.SpawnActor<ASimulationTimingRelay>();
-
+    // The manager's BeginPlay runs synchronously inside SpawnActor (the world has
+    // already begun play). It publishes the session relay delay floor through
+    // og-sim-net's server (og-input-latency task P5-7); until then a timing relay
+    // actor carried it and was spawned here first.
     InWorld.SpawnActor<AOGBrawlerSimulationManager>();
 }

@@ -13,7 +13,7 @@ The rules the compiler holds need no entry: the `build_info.txt` parse (BOM, CR,
 `static_assert`s in `OGBuildIdentityUImpl.h` (rationale §2, §3).
 
 The physics-backend token and the login check (rationale §7, og-simulationscheduler-withjolt tasks 51
-and 18) need no entry either. The token is built from `PhysicsBackendUImpl.h`, the header that selects
+and 18) need no entry either. The token is built from `BrawlerSessionTraitsUImpl.h` (since og-session-runtime task 31), the header that selects
 the backend, so the token and the compiled host cannot disagree. The admission rule (a different
 backend and a missing token are refused; a different Jolt fingerprint is admitted with a Warning) is two
 `static_assert`s, over `classifyBackendLogin` and `refusesBackendLogin` in `OGBuildIdentityUImpl.h`. And every way the wiring can break fails closed and says why: a client whose
@@ -23,7 +23,8 @@ The one way it fails open is a game mode that stops calling the check, a deleted
 `[SimHost.Backend]`, so the logs show the mismatch.
 
 The wire token and its login check (rationale §8, og-sim-metres-yup task 15) need no entry beyond G-02. The
-token is built at compile time from the three codecs' version constants, so it cannot disagree with them.
+token is built at compile time from the three codecs' version constants, the sim envelope's and the og-sim-net
+roster's, so it cannot disagree with them.
 The token's format, the three verdicts and the refusal of `Missing` and `Different` (the user's ruling Q2) are
 `static_assert`s in `OGBuildIdentityUImpl.h`; the start line's `units=m axes=YupRH` is a literal in its format
 string. A client
@@ -72,8 +73,9 @@ parses it back and splits options at `?` only (URL.cpp:184-214), and UGameplaySt
 splits at `?` only (GameplayStatics.cpp:3405-3430). With `&`, the server reads one option `OGBackend` whose
 value is `<backend token>&OGWire=<wire token>`, and no `OGWire` option. Every login is then refused: a Jolt
 server sees the same backend name with a different fingerprint, admits the backend with a misleading
-fingerprint Warning, and refuses the login as "the client reports no wire format"; a Chaos server refuses it
-as a different physics backend whose name contains the wire token. With `?` the two arrive as two options.
+fingerprint Warning, and refuses the login as "the client reports no wire format"; a server of another backend
+(a Chaos server, until og-session-runtime tasks 3–6 removed that configuration) refuses it as a different
+physics backend whose name contains the wire token. With `?` the two arrive as two options.
 
 **What breaks if the tag moves.** The tag sits on the only statement that writes the separator. If the two
 options are ever built in one function instead, the tag moves with the separator.

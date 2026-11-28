@@ -1,4 +1,7 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 <!-- lint-external-ref: OnPhysScenePreTick -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in og-simulationscheduler-withjolt task 51 (§1 quotes the old source) -->
 <!-- lint-external-ref: OnPhysSceneStep -- Unreal Engine delegate (ChaosScene.h), outside every scan root; this module stopped binding it in og-simulationscheduler-withjolt task 51 (§1 quotes the old source) -->
 <!-- lint-external-ref: FastLess -- Unreal Engine FName comparator, outside every scan root -->
@@ -7,6 +10,11 @@
 <!-- lint-external-ref: UE_LOG -- Unreal Engine macro, outside every scan root -->
 <!-- lint-external-ref: USimmableUpdateComponent::tryRegisterWithNewFramework -- RETIRED by og-ue-simulationcomponentandmanagersplit task 29: the registration loop is UESimulatableOwnerBinding's skeleton since then; §2 and §3 quote the shipped comments verbatim. It must NOT resolve -->
 <!-- lint-external-ref: PendingRegistration::parentBodyId -- ABSENCE FENCE (§2): the record field deleted with the two-source tripwire. It must NOT resolve -->
+<!-- lint-external-ref: PlayerStart5 -- ThirdPersonMap actor label (level content, an external-actor package), not code (§1a) -->
+<!-- lint-external-ref: PlayerStart6 -- ThirdPersonMap actor label (level content, an external-actor package), not code (§1a) -->
+<!-- lint-external-ref: OnPhysScenePostTick -- Unreal Engine / Chaos API name, outside every scan root; its last in-tree code user, the brawler's Chaos host, was deleted by og-session-runtime task 3 -->
+<!-- lint-external-ref: ChaosPhysicsFactory::createPhysicalObject -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: ChaosPhysicsFactory.cpp -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
 # `BrawlerRosterUImpl` — rationale
 
 `BrawlerRosterUImpl.h` and `.cpp` (BUSL-1.1, `Source/OGBrawlerUnreal/`). The guards are in `BrawlerRosterUImpl-guards.md`;
@@ -48,7 +56,7 @@ own parameters through; the session's `beginPlay` computes those at the same sta
 | `onBodiesCreated(simulatable, character, id, isAuthority, netMode)` | `*record.simulatable`, `*character`, `id`, `record.isAuthority`, `GetNetMode()` | the same record fields and character; `GetNetMode()` in the authority `checkf` |
 | `onRegistered(id, isAuthority)` | `id`, `record.isAuthority` | the same |
 | `forgetCharacter(id)` | `id` | the same |
-| `pushRingoutScores(scoreSystem, routes)` | `m_systemsExec->get<brawlerRingout::ScoreSystem>()` and `m_delayedInputComponentsById` (both the session's; the map since task 26a), both by `const&` | the same two references, handed to the file-local function |
+| `pushRingoutScores(scoreSystem, routes)` | `m_systemsExec->get<brawlerRingout::ScoreSystem>()` and `m_registeredComponentsById` (both the session's; the session's delayed-input map from task 26a, its registered-component map since og-input-latency task P5-7), both by `const&` | the same two references, handed to the file-local function |
 
 Two arguments are now evaluated where they used to be read lazily: `GetNetMode()` at the `seedSpawnPointsFromLevel` and
 `onBodiesCreated` calls is evaluated before the call, also in Shipping, where the `checkf` that read it compiles out, and
@@ -66,12 +74,14 @@ session). It reads nothing at construction. The actor reaches it as `m_roster`; 
 `unregisterFromNewFramework` (the session's since og-ue-simulationcomponentandmanagersplit task 28, through the brawler's
 registration hooks), the component's registration attempt and the post-physics pass (the actor's
 `OnPostPhysicsStep` until og-ue-simulationcomponentandmanagersplit task 27a; since then the session's
-`onPostPhysicsStep`, through the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`). The score push is the one
-cross-thread read, and its argument (§3, and `OGBrawlerSimulationManager-rationale.md` §1, "The second read crossing") is
-unchanged: the roster adds no member to any crossing.
+`onPostPhysicsStep`, through the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`), until og-session-runtime
+task 16b deleted the score push it called. The push was the one cross-thread read (§3, and
+`OGBrawlerSimulationManager-rationale.md` §1, "The second read crossing"); the roster adds no member to any crossing.
+Since og-session-runtime task 14 the push ran nowhere, and task 16b deleted it (§3).
 
 **Optimization state (lead ruling F1).** Every moved body came from inside `OGBrawlerSimulationManager.cpp`'s
-`OGSIM_OPTIMIZE_OFF`/`ON` pair, so `BrawlerRosterUImpl.cpp` wraps all seven definitions in a pair of its own. None is a
+`OGSIM_OPTIMIZE_OFF`/`ON` pair, so `BrawlerRosterUImpl.cpp` wraps all its definitions (seven, six since og-session-runtime
+task 16b deleted the push) in a pair of its own. None is a
 template, so the pair keeps them unoptimized in Development, as before; task 23 measured it by disassembly before and
 after (its notes). The header defines no function.
 
@@ -212,6 +222,24 @@ At the call site in `BeginPlay`:
   call sits above both role branches, `LevelSpawnPoint::name` is a `std::string`, and zero placements leave the
   authored table whole.
 
+### 1a. Starts at or below the kill plane are rejected (og-input-latency task 2d, 2026-11-11)
+
+- `seedSpawnPointsFromLevel` calls `brawlerRingout::seedFromLevelPlacements` with the table's own `killPlaneHeight`. It
+  drops every start whose height is at or below the kill plane plus `brawlerRingout::kSpawnPointKillPlaneMargin` (1 m),
+  then merges the rest exactly as `spawnPointsFromLevelPlacements` did. The rejection is engine-free like the merge, and
+  `Ringout.SpawnPoints.AStartAtOrBelowTheKillPlanePlusTheMarginIsRejected` asserts it. The margin's reasoning is in
+  `BrawlerRingoutSimulation-rationale.md` §5e.
+- Each rejected actor gets one `LogOGMgmt` Warning, `[Ringout.spawnPoints] REJECTED <name> at (x, y, z), height <h> m`,
+  with the kill plane, the margin and the height to move it above. The rejected list is in the merge's key order, so
+  every peer prints the same lines in the same order. They come before the summary line.
+- The summary line gained `<n> rejected`. Its `slot(s) filled` and the per-slot `[level]` / `[authored]` labels now count
+  the accepted starts (`LevelSpawnSeed::levelSlotCount`), not every start found.
+- The engine's own spawn skips the same starts: `AOGBrawlerUEGameMode::ChoosePlayerStart_Implementation` asks
+  `brawlerPlayerStartUImpl::choosePlayerStart` first (`BrawlerPlayerStartUImpl-rationale.md`). Without it a pawn could
+  still be spawned on a rejected start and ring out at once.
+- Why the level still carries such starts: ThirdPersonMap's `PlayerStart5` and `PlayerStart6`, added in `1d89c37`, stand
+  at -55.66 m and -141.03 m (og-input-latency task 2c). Moving them is level content, the user's to do in the editor.
+
 ---
 
 ## 2. The per-character init after the bodies
@@ -302,6 +330,12 @@ is 16 B. `drivesBody` defaults to `true`. The teleport arm calls `setBodyTransfo
 (ids are authority-assigned `SimCharacterId`s and never reused, §15). A re-seed per call would therefore just return the same
 slot. The contract of seeding once is still right; the failure described cannot happen.
 
+⚠ **og-input-latency task 2d (2026-11-11): "written ONCE per character" is no longer true of the value.** This seed is still
+written once, at registration. After it, the authority's `brawlerRingout::RespawnSlotSystem` may rewrite `spawnSlot` on a
+death tick or a respawn tick, when another character occupies the slot's point (`BrawlerRingoutSimulation-rationale.md`
+§11d). It never rewrites an out-of-range value: `chooseRespawnSlot` returns `kNoFreeSlot` unchanged, so the over-capacity
+answer `⛔G-03` protects is still written through. Nothing consumes or clears the value, as before.
+
 > ⛔⛔ AUTHORITY ONLY, AND THIS IS NOT HasAuthority(). `bReplicates = false` makes
 > `GetLocalRole()` report authority on this actor in every role, which is why this file uses
 > the WORLD-level test everywhere. `record.isAuthority` IS that test: the caller
@@ -350,12 +384,18 @@ Verified: `respawnDelayTicks` defaults to `120u`. The caller computes `isAuthori
 Since task 27a the call and its gate are the brawler's hook `BrawlerSessionGameUImpl::afterVisualization`, which the
 session's `onPostPhysicsStep` calls at the same position (`BrawlerSessionGameUImpl-rationale.md` §5).*
 
+**Since og-session-runtime task 14 the push ran nowhere, and task 16b deleted it; this section is its record.** The hook's gate holds only on
+an authority, and the session's `onPostPhysicsStep` calls the hook only on a client. Every authority is a dedicated server
+on its runner, whose scores `BrawlerSessionGameUImpl::presentAuthoritySlice` writes from the runner's presentation
+snapshot (`BrawlerSessionGameUImpl-rationale.md` §8). Until task 14 an in-frame authority (a listen server, a standalone
+world, a dedicated server with og.Sim.AuthorityLoop=0) ran the push below.
+
 *The cross-thread argument is in §1, the second read crossing. What follows is the rest.*
 
-*Call site by configuration: the post-physics pass (the session's `onPostPhysicsStep` since task 27a, the actor's
-`OnPostPhysicsStep` before) is called by the scene's post-tick delegate in the
-Chaos configuration and by the frame host's `TG_EndPhysics` tick function, through the tick driver, in the Jolt one, at the same
-point of the frame (after the wait for earlier frames' steps) and every frame. On the authority every
+*Call site: the post-physics pass (the session's `onPostPhysicsStep` since task 27a, the actor's
+`OnPostPhysicsStep` before) is called by the frame host's `TG_EndPhysics` tick function, through the tick driver, after
+the wait for earlier frames' steps, every frame. The former Chaos configuration (removed by og-session-runtime tasks 3–6)
+called it from the scene's post-tick delegate at the same point of the frame. On the authority every
 step has run inline before it, so the push reads a score table no step is writing; the argument below
 is unchanged (task 54).*
 
@@ -397,7 +437,7 @@ is the binding's member now; the coupling is unchanged.
 > both driven from `tryRegister` / `unregisterFromNewFramework`, both GAME THREAD. The award
 > itself reaches an EXISTING entry, so it writes one naturally-aligned four-byte word and
 > cannot rehash. Worst case: a scoreboard number one tick stale, on a display that decides
-> nothing — which is the same bound `BrawlerColor` and this property both rest on.
+> nothing — which is the same bound `BrawlerColor` [since og-input-latency P7-4: `GetBrawlerColor()`, derived from the sim id] and this property both rest on.
 >
 > ⭐ THAT ARGUMENT HAS A PRECONDITION, AND THE PRECONDITION IS MACHINE-CHECKED BELOW rather
 > than asserted in prose. `postIntegrate` awards through `operator[]`, which INSERTS — and
@@ -456,7 +496,11 @@ would fire it in Development.
   unbind. The push reads it by `const&`, so `routes.erase(…)` still does not compile.
 - `SetAuthoritativeRingoutScore`'s `checkf` message names the push as `BrawlerRosterUImpl::pushRingoutScores`, called
   from `OnPostPhysicsStep`, since task 23. *Task 27a:* the message still says the actor's `OnPostPhysicsStep`; the call
-  is the hook's since then (the message is code, outside that task's ownership, and is listed for the lead).
+  is the hook's since then (the message is code, outside that task's ownership, and is listed for the lead). *og-input-latency
+  task P5-33:* the message names both writers now: this push, from the hook `BrawlerSessionGameUImpl::afterVisualization`
+  in the session's `onPostPhysicsStep`, and, with the authority loop on, `BrawlerSessionGameUImpl::presentAuthoritySlice`
+  from the runner's presentation snapshot (`UESimulationSession-rationale.md` §21.3). *og-session-runtime task 16b:* the
+  push is deleted, and the message names the one writer, `BrawlerSessionGameUImpl::presentAuthoritySlice`.
 
 ---
 

@@ -42,6 +42,11 @@
     THE BLACKLIST IS A CONTRACT: every PR that adds/changes a TimeConfig field MUST
     add/update a matching entry here in the same change. See tools/lint/README.md.
 
+    THE KNOB TABLE (og-session-runtime task 35): the keys that have a knob row
+    (og-simulation's OGSimulation/Config/KnobTable.h) are read from the rows
+    themselves. Each row must have a clamp and a findable key, and its key must not
+    also be read directly. See "KNOB TABLE" below and tools/lint/README.md.
+
 .PARAMETER RepoRoot
     Repository root. Defaults to two levels above this script (tools/lint/..).
 
@@ -144,9 +149,10 @@ $Blacklist = @(
         Field   = 'redundancyDepthTicks'
         # Catch the field and any sibling redundancyDepth* spelling assigned 3 or 5.
         Pattern = '(?<![\w.>])redundancyDepth\w*\s*=\s*[35]\b'
-        # T7 adds the FInputRedundancyBundle header; allow both candidate basenames
-        # (a dedicated header vs. SyncedSimulationStateBuffer.h) until T7 fixes the name.
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'InputRedundancyBundle.h', 'FInputRedundancyBundle.h')
+        # og-input-latency P5-33 (P3-10 A F3): SimNetClientSendAtCaptureTest.cpp's sendConfig()
+        # takes the depth as a PARAMETER default and writes it into a TimeConfig
+        # (config.redundancyDepthTicks = ...): a test input, not a second home for the default.
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'SimNetClientSendAtCaptureTest.cpp')
         Message = 'redundancyDepthTicks default (5 @100Hz interim / 3 @60Hz target) must live only in TimeConfig; read config.redundancyDepthTicks instead of re-declaring it (R-P1)'
     },
     # ⛔ RETIRED (item 63 / RN-13, 2026-08-16): the relay-ring retention-depth
@@ -169,18 +175,24 @@ $Blacklist = @(
         # is intentionally not guarded here: it is derived from two other config
         # quantities at the clamp site, not written as a tuning literal anywhere.
         Pattern = '(?<![\w.>])relayDelayFloorTicks\s*=\s*0\b'
-        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        # og-input-latency P5-33 (P3-10 A F3): SimulationDisplaySnapshot.h's DisplayTierReading
+        # holds a COPY of the floor the client received, for the game thread's display; its
+        # member initialiser is the empty reading, not the lever's default.
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'SimulationDisplaySnapshot.h')
         Message = 'relayDelayFloorTicks default (0 — degenerate, the floor lever ships off) must live only in TimeConfig; read config.relayDelayFloorTicks instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'correctionRotationK'
         # og-netcode-v2-input-relay T39: how many characters' correction-state
         # buffers SimulationNetSync::sendCorrectionAll writes per tick, round-robin
-        # (design_task38_input_first_replication.md §5.4). Ships at 2 — every-frame
-        # at two characters, 20 Hz at six — and is exactly the shape R-P1 exists to
-        # keep out of call sites: a cadence number that a future "just write two of
-        # them here" edit would re-declare locally.
-        # Field-anchored, so only a NON-member `correctionRotationK = 2` is flagged;
+        # (design_task38_input_first_replication.md §5.4). Ships at 1 since T34, which
+        # lowered it from 2 for the pre-diet window: with un-dieted states, K = 2 at
+        # four characters lands the second state's batch failure inside the
+        # adapter's blocking split window on about a third of frames, and K = 1 does
+        # not (TimeConfig-rationale.md §8; the wire diet restores 2). It is exactly
+        # the shape R-P1 exists to keep out of call sites: a cadence number that a
+        # future "just write one of them here" edit would re-declare locally.
+        # Field-anchored, so only a NON-member `correctionRotationK = 1` is flagged;
         # every consumer reads it as cfg.correctionRotationK / m_timeConfig
         # .correctionRotationK (member access, auto-excluded by the (?<![\w.>])
         # lookbehind), and the composition root's ini override writes it through
@@ -190,9 +202,51 @@ $Blacklist = @(
         # intentionally not guarded here — R-P1 guards tuning values, not the
         # guard rails around them, the same call already made for
         # relayedInputRing::kMaxDepth.
-        Pattern = '(?<![\w.>])correctionRotationK\s*=\s*2\b'
+        Pattern = '(?<![\w.>])correctionRotationK\s*=\s*1\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
-        Message = 'correctionRotationK default (2 — every-frame at two characters, the archived-baseline-preserving choice) must live only in TimeConfig; read config.correctionRotationK instead of re-declaring it (R-P1)'
+        Message = 'correctionRotationK default (1 — since T34, the pre-diet cadence floor that keeps the state batch out of the blocking split window; the wire diet restores 2) must live only in TimeConfig; read config.correctionRotationK instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # Latency knobs (og-input-latency task 4). Both ship at 0, which means
+    # "behave exactly as today", and both are exactly the shape R-P1 exists to
+    # keep out of call sites: a tuning number a future "just send three frames
+    # here" edit would re-declare locally.
+    # Field-anchored, so only a NON-member assignment of the default is flagged;
+    # every consumer reads them as cfg.<field> / m_timeConfig.<field> (member
+    # access, auto-excluded by the (?<![\w.>]) lookbehind), and the composition
+    # root's ini override writes them through SimulationManager::
+    # setRedundancyFrames / setRelayResendEntries rather than re-declaring a
+    # default.
+    # The CLAMP BOUNDS (latencyKnobs::kMinRedundancyFrames/kMaxRedundancyFrames
+    # = 0/8, kMinRelayResendEntries/kMaxRelayResendEntries = 0/2) are
+    # intentionally not guarded here — R-P1 guards tuning values, not the guard
+    # rails around them, the same call made for correctionRotationK above.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'redundancyFrames'
+        Pattern = '(?<![\w.>])redundancyFrames\s*=\s*0\b'
+        # og-input-latency P5-33: the same sendConfig() parameter default as redundancyDepthTicks.
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp', 'SimNetClientSendAtCaptureTest.cpp')
+        Message = 'redundancyFrames default (0 — use today''s redundancyDepthTicks) must live only in TimeConfig; read config.redundancyFrames instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'relayResendEntries'
+        Pattern = '(?<![\w.>])relayResendEntries\s*=\s*0\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'relayResendEntries default (0 — today''s flush, nothing re-sent) must live only in TimeConfig; read config.relayResendEntries instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # Back-dating detection (og-input-latency P3-1). The m0 p50 threshold below
+    # which a wire's window counts toward a back-dating episode; detect only.
+    # Its detector (P3-6) reads it as cfg.backDateM0P50ThresholdTicks, so a
+    # local `backDateM0P50ThresholdTicks = -5` would be a second source of truth
+    # for the threshold. Field-anchored, in the redundancyFrames shape above.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'backDateM0P50ThresholdTicks'
+        Pattern = '(?<![\w.>])backDateM0P50ThresholdTicks\s*=\s*-5\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'backDateM0P50ThresholdTicks default (-5 — the m0 p50 back-dating threshold, detect only) must live only in TimeConfig; read config.backDateM0P50ThresholdTicks instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'resimTriggerPolicy'
@@ -241,7 +295,8 @@ $Blacklist = @(
     #
     # NOT TimeConfig fields — these live in the og-brawler core header
     # SessionConstants.h (namespace og::brawler::session) and define the ratified
-    # player-count envelope (Tier 1 = 3, Tier 2 = 6, up to 3 LPs/client). Same
+    # player-count envelope (Tier 1 = 3, Tier 2 = 6, up to 4 LPs/client, and the
+    # hard ceiling of 8 players per server). Same
     # "single source of truth" rule as the TimeConfig entries above: the magic
     # 3/6 player-count literals must be read from SessionConstants.h, never
     # re-declared in game/UE/test code. Member-access reads
@@ -250,6 +305,10 @@ $Blacklist = @(
     # the magic literal is flagged. CONTRACT: a future server-session gate that
     # legitimately re-houses one of these values adds its file leaf to Allowed in
     # the same change. A test fixture that exercises a literal cap adds itself too.
+    # og-input-latency P7-5 (user ruling Q3, 2026-11-12): maxLocalPlayersPerClient
+    # rose 3 -> 4 and hardPlayerCeiling = 8 was added; AOGBrawlerUEGameMode::
+    # InitGame and UOGBrawlerGameViewportClient read them qualified, so neither
+    # file is in Allowed.
     # -----------------------------------------------------------------------
     @{
         Field   = 'maxPlayersPerServer'
@@ -265,9 +324,15 @@ $Blacklist = @(
     },
     @{
         Field   = 'maxLocalPlayersPerClient'
-        Pattern = '(?<![\w.>])maxLocalPlayersPerClient\s*=\s*3\b'
+        Pattern = '(?<![\w.>])maxLocalPlayersPerClient\s*=\s*4\b'
         Allowed = @('SessionConstants.h')
-        Message = 'maxLocalPlayersPerClient (3 LPs/client) must live only in SessionConstants.h; read og::brawler::session::maxLocalPlayersPerClient instead of re-declaring it (R-P1 / Phase 2a)'
+        Message = 'maxLocalPlayersPerClient (4 LPs/client, user ruling Q3) must live only in SessionConstants.h; read og::brawler::session::maxLocalPlayersPerClient instead of re-declaring it (R-P1 / Phase 2a)'
+    },
+    @{
+        Field   = 'hardPlayerCeiling'
+        Pattern = '(?<![\w.>])hardPlayerCeiling\s*=\s*8\b'
+        Allowed = @('SessionConstants.h')
+        Message = 'hardPlayerCeiling (8 players per server, user ruling Q3) must live only in SessionConstants.h; read og::brawler::session::hardPlayerCeiling instead of re-declaring it (R-P1 / og-input-latency P7-5)'
     },
     @{
         # Generic catch for hardcoded player-count caps that DON'T use the
@@ -331,6 +396,151 @@ $Blacklist = @(
         Message = 'jitterMultiplier default (2.0) must live only in TimeConfig; read config.jitterMultiplier instead of re-declaring it (R-P1)'
     },
     @{
+        Field   = 'simClockJitterMultiplier'
+        Pattern = '(?<![\w.>])simClockJitterMultiplier\s*=\s*0\.5\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'simClockJitterMultiplier default (0.5 - the SimClock source''s jitter multiplier, measured by og-input-latency P3-13) must live only in TimeConfig; read config.simClockJitterMultiplier instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # ServerTickEstimatorConfig (og-time-dilation task 3): the server-tick
+    # sensor's seven own defaults. Not TimeConfig fields, so the self-lint
+    # does not require them; listed so a second copy of a sensor constant is
+    # flagged like any TimeConfig one. Its eighth field, tickFrequency,
+    # defaults to TimeConfig{}.tickFrequency and is guarded by that entry.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'filterTauSeconds'
+        Pattern = '(?<![\w.>])filterTauSeconds\s*=\s*5\.0\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'filterTauSeconds default (5.0 s - the server-tick estimate''s filter time constant) must live only in ServerTickEstimatorConfig; read config.filterTauSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttGateMultiplier'
+        Pattern = '(?<![\w.>])rttGateMultiplier\s*=\s*1\.5\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'rttGateMultiplier default (1.5 - the server-tick estimate''s queued-sample gate) must live only in ServerTickEstimatorConfig; read config.rttGateMultiplier instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'rttGateMarginSeconds'
+        Pattern = '(?<![\w.>])rttGateMarginSeconds\s*=\s*0\.010\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'rttGateMarginSeconds default (0.010 s - the server-tick estimate''s queued-sample gate) must live only in ServerTickEstimatorConfig; read config.rttGateMarginSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'samplesToValid'
+        Pattern = '(?<![\w.>])samplesToValid\s*=\s*20u?\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'samplesToValid default (20 - samples since the seed before the server-tick estimate is valid) must live only in ServerTickEstimatorConfig; read config.samplesToValid instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'staleAfterSeconds'
+        Pattern = '(?<![\w.>])staleAfterSeconds\s*=\s*1\.0\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'staleAfterSeconds default (1.0 s - the server-tick estimate''s staleness) must live only in ServerTickEstimatorConfig; read config.staleAfterSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'reseedJumpTicks'
+        Pattern = '(?<![\w.>])reseedJumpTicks\s*=\s*3\.0\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'reseedJumpTicks default (3.0 ticks - the server-tick estimate''s re-seed jump) must live only in ServerTickEstimatorConfig; read config.reseedJumpTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'reseedRunSamples'
+        Pattern = '(?<![\w.>])reseedRunSamples\s*=\s*5u?\b'
+        Allowed = @('ServerTickEstimator.h')
+        Message = 'reseedRunSamples default (5 - consecutive jumps before the server-tick estimate re-seeds) must live only in ServerTickEstimatorConfig; read config.reseedRunSamples instead of re-declaring it (R-P1)'
+    },
+    # -----------------------------------------------------------------------
+    # ClockDilationConfig (og-time-dilation task 6): the client rate
+    # controller's fourteen own defaults (task 10c added the fourteenth). Not TimeConfig fields, so the
+    # self-lint does not require them; listed so a second copy of a
+    # controller constant is flagged like any TimeConfig one.
+    # -----------------------------------------------------------------------
+    @{
+        Field   = 'mode'
+        Pattern = '(?<![\w.>])mode\s*=\s*ClockDilationMode::Off\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'mode default (ClockDilationMode::Off - the rate controller is off unless a host turns it on) must live only in ClockDilationConfig; read config.mode instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'setpoint'
+        Pattern = '(?<![\w.>])setpoint\s*=\s*ClockDilationSetpoint::OwnRtt\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'setpoint default (ClockDilationSetpoint::OwnRtt - the rate controller''s per-client RTT target) must live only in ClockDilationConfig; read config.setpoint instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'gainPerTick'
+        Pattern = '(?<![\w.>])gainPerTick\s*=\s*0\.005\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'gainPerTick default (0.005 per tick - the rate law''s proportional gain) must live only in ClockDilationConfig; read config.gainPerTick instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'maxDeviation'
+        Pattern = '(?<![\w.>])maxDeviation\s*=\s*0\.01\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'maxDeviation default (0.01 - the rate scale''s clamp, bounded by the render bracket) must live only in ClockDilationConfig; read config.maxDeviation instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'slewPerCall'
+        Pattern = '(?<![\w.>])slewPerCall\s*=\s*0\.002\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'slewPerCall default (0.002 - the rate scale''s slew per call) must live only in ClockDilationConfig; read config.slewPerCall instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'quantum'
+        Pattern = '(?<![\w.>])quantum\s*=\s*1e-4\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'quantum default (1e-4 - the rate scale''s rounding step) must live only in ClockDilationConfig; read config.quantum instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'changeHysteresisQuanta'
+        Pattern = '(?<![\w.>])changeHysteresisQuanta\s*=\s*2\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'changeHysteresisQuanta default (2.0 quanta - the rate scale holds until the slewed value is this far away, except while frozen; og-time-dilation task 10c) must live only in ClockDilationConfig; read config.changeHysteresisQuanta instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'targetTauSeconds'
+        Pattern = '(?<![\w.>])targetTauSeconds\s*=\s*10\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'targetTauSeconds default (10.0 s - the rate controller''s target low-pass) must live only in ClockDilationConfig; read config.targetTauSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'guardTauSeconds'
+        Pattern = '(?<![\w.>])guardTauSeconds\s*=\s*2\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'guardTauSeconds default (2.0 s - the band guard centre''s low-pass) must live only in ClockDilationConfig; read config.guardTauSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'guardLowTicks'
+        Pattern = '(?<![\w.>])guardLowTicks\s*=\s*-0\.5\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'guardLowTicks default (-0.5 ticks - the band guard''s low edge below its frame-aware centre) must live only in ClockDilationConfig; read config.guardLowTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'guardHighTicks'
+        Pattern = '(?<![\w.>])guardHighTicks\s*=\s*2\.5\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'guardHighTicks default (2.5 ticks - the band guard''s high edge) must live only in ClockDilationConfig; read config.guardHighTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'freezeAfterResyncSeconds'
+        Pattern = '(?<![\w.>])freezeAfterResyncSeconds\s*=\s*1\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'freezeAfterResyncSeconds default (1.0 s - the rate controller''s freeze after a hard resync) must live only in ClockDilationConfig; read config.freezeAfterResyncSeconds instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'commonLeadTicks'
+        Pattern = '(?<![\w.>])commonLeadTicks\s*=\s*3\.65\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'commonLeadTicks default (3.65 ticks - the Common setpoint''s session lead, og-time-dilation task 14 from task 13''s report; [OGNetcode] ClockDilationCommonLeadTicks is its door) must live only in ClockDilationConfig; read config.commonLeadTicks instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'targetOffsetTicks'
+        Pattern = '(?<![\w.>])targetOffsetTicks\s*=\s*0\.0\b'
+        Allowed = @('ClockDilationController.h')
+        Message = 'targetOffsetTicks default (0.0 ticks - the rate controller''s target shift knob) must live only in ClockDilationConfig; read config.targetOffsetTicks instead of re-declaring it (R-P1)'
+    },
+    @{
         Field   = 'softDriftThresholdTicks'
         Pattern = '(?<![\w.>])softDriftThresholdTicks\s*=\s*3\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
@@ -347,6 +557,18 @@ $Blacklist = @(
         Pattern = '(?<![\w.>])minTicksBeforeDriftCheck\s*=\s*60\b'
         Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
         Message = 'minTicksBeforeDriftCheck default (60) must live only in TimeConfig; read config.minTicksBeforeDriftCheck instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'recentreSettleSamples'
+        Pattern = '(?<![\w.>])recentreSettleSamples\s*=\s*30\b'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'recentreSettleSamples default (30 - the one-shot re-centre''s settle window, og-input-latency task 27) must live only in TimeConfig; read config.recentreSettleSamples instead of re-declaring it (R-P1)'
+    },
+    @{
+        Field   = 'clockRttSource'
+        Pattern = '(?<![\w.>])clockRttSource\s*=\s*(TimeConfig::)?ClockRttSource::'
+        Allowed = @('TimeConfig.h', 'TimeConfigDefaultsTest.cpp')
+        Message = 'clockRttSource default (ClockRttSource::SimClock - the client clock''s RTT source since P3-10''s flip, Engine before it, og-input-latency P3-10) must live only in TimeConfig; read config.clockRttSource instead of re-declaring it (R-P1)'
     },
     @{
         Field   = 'harnessMode'
@@ -630,6 +852,142 @@ function Test-BlacklistCoversTimeConfig {
 }
 
 # ---------------------------------------------------------------------------
+# KNOB TABLE — the keys that have a row (og-session-runtime task 35).
+#
+# og-simulation's OGSimulation/Config/KnobTable.h describes a config knob as a
+# row: `KnobRow<Owner, Value>{ .intake = { .section, .key, .role }, .tag, .name,
+# .clamp, .apply, .stored }`. This pass reads every such row in the scanned tree
+# (designated initialisers, so each field is named at its site) and fails when:
+#   * a row has no `.clamp`, or `.clamp = nullptr` — out of range must be
+#     reported and clamped, never stored as read (the compiler refuses such a row
+#     too; this arm names the key before a build does);
+#   * a row's key cannot be found: an inline `.intake = { .key = "…" }`, or a
+#     `KnobIntake<…> <name>{ .key = "…" }` in the same file that `.intake = <name>`
+#     names — a row the lint cannot key is a row it cannot check;
+#   * a key that has a row is ALSO read directly, `readInt/readDouble/readString
+#     ("<key>")`: a second intake beside the row's, the knob-table form of the
+#     second source of truth this lint exists for.
+# The keys without a row are the session intake's hand-written reads
+# (og-sim-session SessionKnobs.h); this pass does not police them.
+# ---------------------------------------------------------------------------
+function Remove-CommentsKeepStrings {
+    param([string]$Text)
+    $pattern = '//[^\n]*|/\*[\s\S]*?(?:\*/|\z)|"(?:\\.|[^"\\\n])*"|''(?:\\.|[^''\\\n])*'''
+    return [regex]::Replace($Text, $pattern, {
+        param($m)
+        if ($m.Value.StartsWith('//') -or $m.Value.StartsWith('/*')) {
+            return [regex]::Replace($m.Value, '[^\n]', ' ')
+        }
+        return $m.Value
+    })
+}
+
+# Index of the brace that closes the one at $Open, skipping string literals; -1 when unbalanced.
+function Find-ClosingBrace {
+    param([string]$Text, [int]$Open)
+    $depth = 0
+    $i = $Open
+    while ($i -lt $Text.Length) {
+        $c = $Text[$i]
+        if ($c -eq '"') {
+            $i++
+            while ($i -lt $Text.Length -and $Text[$i] -ne '"') { if ($Text[$i] -eq '\') { $i++ }; $i++ }
+        }
+        elseif ($c -eq '{') { $depth++ }
+        elseif ($c -eq '}') { $depth--; if ($depth -eq 0) { return $i } }
+        $i++
+    }
+    return -1
+}
+
+function Get-LineNumber {
+    param([string]$Text, [int]$Index)
+    return ([regex]::Matches($Text.Substring(0, $Index), "`n")).Count + 1
+}
+
+function Test-KnobTable {
+    param(
+        [System.Collections.Generic.List[System.IO.FileInfo]]$Files,
+        [string]$RepoRoot
+    )
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $problems = [System.Collections.Generic.List[object]]::new()
+    $reads = [System.Collections.Generic.List[object]]::new()
+    $rowRegex = '\bKnobRow\s*<[^;{}()]*>\s*(?:[A-Za-z_]\w*\s*)?\{'
+    $readRegex = '\bread(?:Int|Double|String)\s*\(\s*"(?<key>[^"\\]*)"\s*\)'
+
+    foreach ($f in $Files) {
+        $raw = [System.IO.File]::ReadAllText($f.FullName)
+        $hasRow = $raw.Contains('KnobRow')
+        $hasRead = $raw -match 'read(Int|Double|String)\s*\(\s*"'
+        if (-not ($hasRow -or $hasRead)) { continue }
+        $text = Remove-CommentsKeepStrings $raw
+        $rel = [System.IO.Path]::GetRelativePath($RepoRoot, $f.FullName)
+
+        foreach ($m in [regex]::Matches($text, $readRegex)) {
+            $reads.Add([pscustomobject]@{ File = $rel; Line = (Get-LineNumber $text $m.Index); Key = $m.Groups['key'].Value })
+        }
+        if (-not $hasRow) { continue }
+
+        foreach ($m in [regex]::Matches($text, $rowRegex)) {
+            $open = $m.Index + $m.Length - 1
+            $close = Find-ClosingBrace $text $open
+            $line = Get-LineNumber $text $m.Index
+            if ($close -lt 0) {
+                $problems.Add([pscustomobject]@{ File = $rel; Line = $line; Message = 'knob row: its braces do not close; the lint cannot read it' })
+                continue
+            }
+            $body = $text.Substring($open + 1, $close - $open - 1)
+
+            $key = $null
+            $inline = [regex]::Match($body, '\.intake\s*=\s*\{(?<b>[^{}]*)\}')
+            if ($inline.Success) {
+                $k = [regex]::Match($inline.Groups['b'].Value, '\.key\s*=\s*"(?<key>[^"\\]*)"')
+                if ($k.Success) { $key = $k.Groups['key'].Value }
+            }
+            else {
+                $ref = [regex]::Match($body, '\.intake\s*=\s*(?<ref>[A-Za-z_][\w:]*)')
+                if ($ref.Success) {
+                    $name = ($ref.Groups['ref'].Value -split '::')[-1]
+                    $decl = [regex]::Match($text, '\bKnobIntake\s*<[^;{}()]*>\s*' + [regex]::Escape($name) + '\s*\{(?<b>[^{}]*)\}')
+                    if ($decl.Success) {
+                        $k = [regex]::Match($decl.Groups['b'].Value, '\.key\s*=\s*"(?<key>[^"\\]*)"')
+                        if ($k.Success) { $key = $k.Groups['key'].Value }
+                    }
+                }
+            }
+            $shownKey = if ($key) { $key } else { '<unresolved>' }
+            if (-not $key) {
+                $message = 'knob row: its key was not found (an inline .intake = { .key = "..." }, ' +
+                    'or a KnobIntake<...> in this file named by .intake)'
+                $problems.Add([pscustomobject]@{ File = $rel; Line = $line; Message = $message })
+            }
+
+            $clamp = [regex]::Match($body, '\.clamp\s*=\s*(?<v>[^,}]+)')
+            if (-not $clamp.Success -or $clamp.Groups['v'].Value.Trim() -eq 'nullptr') {
+                $message = ("knob row for key '{0}' has no clamp: give it .clamp = <a constexpr clamp>; " +
+                    'out of range is reported and clamped, never stored as read (KnobTable.h)') -f $shownKey
+                $problems.Add([pscustomobject]@{ File = $rel; Line = $line; Message = $message })
+            }
+            $rows.Add([pscustomobject]@{ File = $rel; Line = $line; Key = $key })
+        }
+    }
+
+    $keyed = @($rows | Where-Object { $_.Key })
+    foreach ($r in $reads) {
+        $row = $keyed | Where-Object { $_.Key -ceq $r.Key } | Select-Object -First 1
+        if ($row) {
+            $message = ("key '{0}' has a knob row ({1}:{2}) and is read here too: " +
+                "read it through the row's intake (knobTable::readKnob / applyKnobs), not a second read") -f $r.Key, $row.File, $row.Line
+            $problems.Add([pscustomobject]@{ File = $r.File; Line = $r.Line; Message = $message })
+        }
+    }
+
+    return @{ Rows = $rows; Problems = $problems }
+}
+
+# ---------------------------------------------------------------------------
 # Main scan
 # ---------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $RepoRoot)) {
@@ -697,16 +1055,29 @@ foreach ($f in $files) {
 }
 
 # ---------------------------------------------------------------------------
+# Knob table pass (see KNOB TABLE above).
+# ---------------------------------------------------------------------------
+$knobFiles = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+foreach ($f in $files) { if ($f.FullName -notmatch $ExcludeRegex) { $knobFiles.Add($f) } }
+$knob = Test-KnobTable -Files $knobFiles -RepoRoot $RepoRoot
+$knobKeys = @($knob.Rows | Where-Object { $_.Key } | ForEach-Object { $_.Key } | Sort-Object -Unique)
+Write-Host ("Configurability lint: knob table: {0} row(s), {1} key(s){2}" -f `
+    $knob.Rows.Count, $knobKeys.Count, $(if ($knobKeys.Count -gt 0) { ': ' + ($knobKeys -join ', ') } else { '' }))
+foreach ($p in $knob.Problems) {
+    Write-Host ("{0}:{1}: {2}" -f $p.File, $p.Line, $p.Message)
+}
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
-if ($violations.Count -gt 0) {
+if ($violations.Count -gt 0 -or $knob.Problems.Count -gt 0) {
     foreach ($v in $violations) {
         Write-Host ("{0}:{1}: {2} (Synthesis Addendum Correction 5 binding rule)" -f `
             $v.File, $v.Line, $v.Message)
     }
     Write-Host ''
-    Write-Host ("Configurability lint: FAILED ({0} violation(s) across {1} files scanned)" -f `
-        $violations.Count, $scanned)
+    Write-Host ("Configurability lint: FAILED ({0} violation(s) and {1} knob table problem(s) across {2} files scanned)" -f `
+        $violations.Count, $knob.Problems.Count, $scanned)
     Write-Host 'See tools/lint/README.md — every TimeConfig value must be read from TimeConfig, not re-declared.'
     exit 1
 }

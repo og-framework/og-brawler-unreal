@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: PhysicsBackendUImpl.h -- deleted by og-session-runtime task 31 (the brawler's engine seam header: its binding concept and the EngineTraits and EngineBinding aliases moved to the top of BrawlerSessionTraitsUImpl.h, its rationale with it); kept in the history -->
 <!-- lint-external-ref: BrawlerSystemList -- retired member list template: replaced by og-simulation's SystemList in og-ue-simulationcomponentandmanagersplit task 36; named in §2's record of that change -->
 <!-- lint-external-ref: BrawlerSimulatables -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
 <!-- lint-external-ref: BrawlerNetSync -- retired re-export: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; the table of §2 is task 81's -->
@@ -72,7 +73,7 @@ storage, input-resolution and reconciliation re-exports, which typed the feed's 
 The other nine rows of the table are history. `IntegrationLayerType` was the
 UImpl's own alias of `BrawlerIntegrationExec` until task 24a, and the Jolt-only step-driver alias stayed in the UImpl until task 83 moved it
 (og-tickdriver task 8 replaced it with `TickDriverBackendUImpl`'s tick-driver alias, over the game binding
-`BrawlerTickDriverGameUImpl`).
+BrawlerTickDriverGameUImpl; over og-sim-session's `SessionTickGame` since og-session-runtime task 26).
 
 **`Simulatables` is the single source of truth for the pack.** The storage, the three peers, the
 integration executor and the systems executor are all derived from it, and the manager from them;
@@ -95,8 +96,9 @@ class-scope `static_assert` in og-simulation's `TickDriverPresenter` checks it: 
 the render source's `kMaxSimulatableSlots` times the presenter's `kDeclarationsPerSlot` (`declarationCountOf` the
 source's `PhysicsComposite`, the brawler's physics composite).
 
-**No backend switch.** The adapter types come from `PhysicsBackendUImpl.h`, which holds the switch, so
-this header has no `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
+**No backend switch.** The adapter types come from the configuration's `EngineTraits`, which `BrawlerSessionTraitsUImpl.h` names since
+og-session-runtime task 31 (`PhysicsBackendUImpl.h` before, which held the switch until
+og-session-runtime task 3 removed it), so this header never had an `OG_PHYSICS_BACKEND_CHAOS` of its own. It does not include `OGBrawlerSimulationManager.h`;
 the dependency runs the other way.
 
 ## 3. The compile-time checks
@@ -104,11 +106,13 @@ the dependency runs the other way.
 * **Detection fires before routing.** The `brawlerHitDetection::firesBefore` `static_assert` under
   `SystemsExec`, moved here from the UImpl with its message unchanged. The message still names `BrawlerSystemsExec`, the UImpl's re-export of `SystemsExec`.
   Task 81 swapped the two systems in `SystemsExec` and saw the assert fail.
-* **The session's manager is this manager.** Since og-ue-simulationcomponentandmanagersplit task 24a `UESimulationSession::compositionContractsHold`
+* **The session's manager is this manager.** Since og-ue-simulationcomponentandmanagersplit task 24a the session's `compositionContractsHold` (og-sim-session's
+  `SessionRuntime::compositionContractsHold` since og-session-runtime task 31, the Unreal session's before)
   asserts that the session's private `ManagerType` (this struct's `Manager`; since task 34 the session spells it as
   og-simulation's `SimulationManager` over its own aliases and asserts it equal to `Manager`, and before that it was its
   traits' `Composition::Manager`) is the
-  tick-driver binding's `Manager` (`BrawlerTickDriverGameUImpl`, which names this struct's member). Until task 24a
+  tick-driver binding's `Manager` (`BrawlerSessionHooksUImpl`, which names this struct's member; BrawlerTickDriverGameUImpl
+  until og-session-runtime task 26, since when the session compares it through its backend's `TickGame::Manager`). Until task 24a
   `compositionContractsHold()` in `OGBrawlerSimulationManager.h` asserted `std::is_same_v<ManagerType,
   BrawlerCompositionUImpl::Manager>`. It has to be inside the class,
   because `ManagerType` is private. A host outside the UImpl (task 83) names the manager through this
@@ -138,6 +142,14 @@ brawlerRingout::ScoreSystem>`, and `SystemsExec` is `apply_t<SystemsExecFor, Sys
 (the session's row and the traits' row both compare it). The session spells its own `SystemsExec` from `Systems`
 (`UESimulationSession-rationale.md` §14, in OGSimulationUnreal's docs), so a game hands the session its list, not an
 executor.
+
+**The fourth system (og-input-latency task 2d, 2026-11-11).** `Systems` ends with `brawlerRingout::RespawnSlotSystem`
+(`BrawlerRingoutRespawnSystem.h`, og-brawler): `SystemList<HitDetectionSystem, brawlerHitRouting::System,
+brawlerRingout::ScoreSystem, brawlerRingout::RespawnSlotSystem>`. It is `AuthorityOnly`. It moves a respawn off a spawn
+point another character occupies, by rewriting the wire-carried `brawlerRingout::InitialConditions::spawnSlot` in its
+`preIntegrate` (the respawn tick) and `postIntegrate` (the death tick). Its position in the list is free: no other
+system reads or writes `spawnSlot`, and the score system reads only the ring-out `State` and `DerivedState`, which it does
+not write. The golden harness (`GoldenTraceScene.h`, og-brawler-tests) carries the same four systems in the same order.
 
 **Why og-simulation's `SystemList`, not `SimulatableList`.** `SimulatableList` is the simulatable pack: the systems
 executor takes the simulatables through it, and its `IsSimulatableList` concept gates each system's

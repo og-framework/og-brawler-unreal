@@ -17,8 +17,8 @@
 #include "OGBrawler/SimulatableBrawler.h"
 #include "OGBrawler/BrawlerHitDetectionSystem.h"
 #include "OGBrawler/BrawlerHitRoutingSystem.h"
+#include "OGBrawler/BrawlerRingoutRespawnSystem.h"
 #include "OGBrawler/BrawlerRingoutScoreSystem.h"
-#include "OGBrawlerUnreal/PhysicsBackendUImpl.h"
 
 struct BrawlerCompositionUImpl
 {
@@ -41,7 +41,8 @@ struct BrawlerCompositionUImpl
 	using Systems = SystemList<
 		HitDetectionSystem,
 		brawlerHitRouting::System,
-		brawlerRingout::ScoreSystem>;
+		brawlerRingout::ScoreSystem,
+		brawlerRingout::RespawnSlotSystem>;
 
 	template <typename... SystemTs>
 	using SystemsExecFor = SimulationSystemsExecutor<Simulatables, simulatableBrawler::StaticData, SystemTs...>;

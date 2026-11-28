@@ -75,7 +75,16 @@ Alternatively, open `OGBrawlerUnreal.sln` in Visual Studio and build the `Develo
 
 Double-click `OGBrawlerUnreal.uproject` or press **F5** in Visual Studio to launch the UE Editor. The default map (`ThirdPersonMap`) loads automatically on first open.
 
-For multiplayer testing, use the recommended PIE config: **1 dedicated server + 2 clients** (not Standalone).
+For multiplayer testing, use the recommended PIE config: **1 dedicated server + 2 clients** (not Standalone or a listen
+server: since og-session-runtime task 14 only a dedicated server and its clients start a simulation session; a standalone
+or listen-server world simulates nothing, `UESimulationSession-rationale.md` §23).
+
+In the Play button's dropdown set **Net Mode** to *Play As Client* and **Number of Players** to 2, and in its Advanced
+Settings (Editor Preferences > Level Editor > Play > Multiplayer Options) turn **Run Under One Process off**. One editor process runs one simulation session per
+role: with Run Under One Process on (the engine's default) the dedicated server and the first client simulate inside the
+editor, and the second client joins but simulates nothing (it shows a `one-session-per-role-per-process` refusal). With it
+off the editor starts the server and the second client as their own processes, and every peer simulates
+(`UESimulationSession-rationale.md` §23.1).
 
 ## 8. Run framework Catch2 tests
 

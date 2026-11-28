@@ -48,7 +48,7 @@ void BrawlerSessionGameUImpl::emplaceSystems(std::optional<BrawlerCompositionUIm
 {
 	systemsExec.emplace(std::piecewise_construct,
 		BrawlerHitDetectionSystem(bodyAdapter, queryAdapter),
-		brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{});
+		brawlerHitRouting::System{}, brawlerRingout::ScoreSystem{}, brawlerRingout::RespawnSlotSystem{});
 }
 
 void BrawlerSessionGameUImpl::installGameLoggers(bool isAuthority)
@@ -81,19 +81,34 @@ std::string_view BrawlerSessionGameUImpl::backendFingerprint()
 	return buildIdentityUImpl::backendFingerprint();
 }
 
-void BrawlerSessionGameUImpl::afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>& session)
+void BrawlerSessionGameUImpl::afterVisualization(const UESimulationSession<BrawlerSessionTraitsUImpl>&)
 {
-	if (session.getManager().has_value() && session.getSystemsExec().has_value() && !session.getManager()->runsPrediction())
-	{
-		BrawlerRosterUImpl::pushRingoutScores(session.getSystemsExec()->get<brawlerRingout::ScoreSystem>(),
-			session.getDelayedInputComponentsById());
-	}
+}
+
+BrawlerSessionGameUImpl::AuthorityPresentationSlice BrawlerSessionGameUImpl::authorityPresentationSlice_Step(
+	const BrawlerCompositionUImpl::SystemsExec& systems, unsigned int id)
+{
+	const brawlerRingout::ScoreSystem& scoreSystem = systems.get<brawlerRingout::ScoreSystem>();
+	return AuthorityPresentationSlice{ scoreSystem.scoreOf(id), scoreSystem.hasScoreEntry(id) };
+}
+
+void BrawlerSessionGameUImpl::presentAuthoritySlice(const UESimulationSession<BrawlerSessionTraitsUImpl>& session,
+	unsigned int id, const AuthorityPresentationSlice& slice)
+{
+	if (!slice.hasScoreEntry)
+		return;
+	const auto found = session.getRegisteredComponentsById().find(id);
+	if (found == session.getRegisteredComponentsById().end())
+		return;
+	UOGBrawlerSimulatableComponent* const component = found->second.Get();
+	AOGBrawlerUECharacter* const character = component != nullptr ? Cast<AOGBrawlerUECharacter>(component->GetOwner()) : nullptr;
+	if (character != nullptr)
+		character->SetAuthoritativeRingoutScore(static_cast<int32>(slice.ringoutScore));
 }
 
 BodyId BrawlerSessionGameUImpl::rootBodyId(const SimulatableBrawler& simulatable)
 {
-    return simulatable.getPhysicsComposite()
-        .get<brawlerMovementSimulation::PhysicsDeclaration>().bindings.ownBodyId;
+    return BrawlerSessionGame::rootBodyId(simulatable);
 }
 
 void BrawlerSessionGameUImpl::afterBodiesCreated(SimulatableBrawler& simulatable, AOGBrawlerUECharacter& character,

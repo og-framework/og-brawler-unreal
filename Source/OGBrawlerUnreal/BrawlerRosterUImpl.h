@@ -50,10 +50,6 @@ public:
 
     void forgetCharacter(unsigned int id);
 
-    static void pushRingoutScores(
-        const brawlerRingout::ScoreSystem& scoreSystem,
-        const std::unordered_map<unsigned int, TWeakObjectPtr<UOGBrawlerSimulatableComponent>>& routes);
-
 private:
     std::set<unsigned int> m_authorityRegisteredIds;
     static_assert(std::is_same_v<decltype(m_authorityRegisteredIds), std::set<unsigned int>>,

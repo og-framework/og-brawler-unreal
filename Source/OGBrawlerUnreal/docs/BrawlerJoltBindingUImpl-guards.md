@@ -6,7 +6,7 @@ source a single line `// ⛔G-nn  docs/BrawlerJoltBindingUImpl-guards.md` sits d
 forbidden edit would be typed.
 
 **There is no live entry.** What the binding must provide is the `BrawlerEngineBinding` concept, which
-`PhysicsBackendUImpl.h` asserts; the moved statements carried no guard. The capsule size contract is
+`BrawlerSessionTraitsUImpl.h` asserts (since og-session-runtime task 31 moved the assertion there); the moved statements carried no guard. The capsule size contract is
 `OGBrawlerUECharacter-guards.md` G-01, whose site is the capsule size, not this check. Why each member is what it is
 lives in `BrawlerJoltBindingUImpl-rationale.md`. G-01, found by measurement in og-sim-metres-yup task 8, retired in
 task 7b (§R).

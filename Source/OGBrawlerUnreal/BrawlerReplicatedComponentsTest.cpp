@@ -31,7 +31,7 @@ bool FBrawlerReplicatedComponentsTest::RunTest(const FString& Parameters)
     const FString listed = FString::Printf(TEXT("{%s}"), *FString::Join(replicated, TEXT(", ")));
     AddInfo(FString::Printf(TEXT("[ReplicatedComponents] %s"), *listed));
     TestEqual(TEXT("the character default object's replicated components"),
-        listed, FString(TEXT("{USimulatableNetSyncComponent}")));
+        listed, FString(TEXT("{}")));
     return true;
 }
 

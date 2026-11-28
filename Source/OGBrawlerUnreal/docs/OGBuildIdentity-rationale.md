@@ -1,4 +1,7 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: PhysicsBackendUImpl.h -- deleted by og-session-runtime task 31 (the brawler's engine seam header: its binding concept and the EngineTraits and EngineBinding aliases moved to the top of BrawlerSessionTraitsUImpl.h, its rationale with it); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent::OnRep_CorrectionState -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
 <!-- lint-external-ref: FCoreDelegates::OnPostEngineInit -- Unreal Engine delegate (CoreDelegates.h), outside every scan root -->
 <!-- lint-external-ref: FNetworkVersion::GetLocalNetworkVersion -- Unreal Engine function (NetworkVersion.cpp), outside every scan root -->
 <!-- lint-external-ref: FNetworkVersion::GetLocalNetworkVersionOverride -- Unreal Engine delegate (NetworkVersion.h), outside every scan root -->
@@ -139,8 +142,10 @@ hash rather than testing this code.
 
 ## 7. The physics backend: the token and the login check
 
-Until task 21 of og-simulationscheduler-withjolt, one build of this game runs either the Chaos host or
-the Jolt host, chosen at compile time (`OGBrawlerSimulationManager-rationale.md` §18). Two peers of
+Until og-session-runtime task 3 (the retirement og-simulationscheduler-withjolt task 21 had planned), one
+build of this game ran either the Chaos host or the Jolt host, chosen at compile time
+(`OGBrawlerSimulationManager-rationale.md` §18). Since then every build runs the Jolt host, and the token
+and the check below stay generic over the engine traits, for a later engine (Box3D). Two peers of
 different backends cannot play together: they simulate the same inputs differently, so every
 prediction would be corrected. The build identity therefore carries a **backend token**, and the server
 refuses a login whose backend differs from its own. Two Jolt peers whose Jolt builds step differently (a
@@ -151,8 +156,11 @@ a Warning that names both fingerprints (the policy below).
 
 | configuration | token | example |
 |---|---|---|
-| Chaos | `chaos` | `chaos` |
 | Jolt | `jolt:<fingerprint>`, the 16 lower-case hex digits of the Jolt determinism fingerprint's value | jolt:35a523518f873707 |
+
+An engine without a fingerprint has its bare name as its token: the former Chaos configuration (removed
+by og-session-runtime tasks 3–6) sent `chaos`, and the classification's `static_assert`s still use that
+string as a second backend.
 
 The fingerprint is og-simulation-jolt's `determinismFingerprint`: the Jolt version and feature bits,
 the instruction set the library was compiled for, fused multiply-add, the step's FP mode and the
@@ -161,13 +169,14 @@ state hash of a short probe simulation, folded into one 64-bit value
 (`EngineTraits::computeDeterminismFingerprint`, which the build identity calls directly since og-tickdriver task 15b
 and through a forwarder of the same name in `PhysicsBackendUImpl.h` before it: since og-tickdriver task 15a
 `JoltEngineTraitsUImpl::computeDeterminismFingerprint` acquires the Jolt runtime, runs the probe and releases the
-runtime; the Chaos configuration has none), and the build identity computes it once,
+runtime; the former Chaos configuration had none), and the build identity computes it once,
 on first use, and keeps it for the process. The first use is `applyNetworkVersion` at
 `FCoreDelegates::OnPostEngineInit`, so the start line (§1) already carries the full token, and the probe
 runs before any world exists. It takes about 2 ms; the runtime's two lines
 (initialised, shut down) are logged at `Log` on `LogOGBuildIdentity`.
-`buildIdentityUImpl::backendFingerprint()` is the hex alone (`none` for Chaos); the manager's
-`[SimHost.Backend] backend=<chaos|jolt> fingerprint=<hex|none>` line prints it.
+`buildIdentityUImpl::backendFingerprint()` is the hex alone (`none` for an engine without a fingerprint,
+as Chaos was); the manager's `[SimHost.Backend] backend=<name> fingerprint=<hex|none>` line prints it
+(`backend=jolt` in every build since og-session-runtime task 3).
 
 **The check, at login.** The client puts its token in its login URL, and the server compares it in its
 game mode's pre-login, before the player is admitted:
@@ -228,7 +237,9 @@ og-sim-metres-yup task 15 (the user's ruling Q2, 2026-10-25: a login lacking the
 og-simulation's three payloads carries its own version byte: the correction state
 (`correctionStateBuffer::kWireFormatVersion`), the relayed input ring (`relayedInputRing::kWireFormatVersion`)
 and the input redundancy bundle (`inputRedundancyBundle::kWireFormatVersion`). They are 15, 3 and 3, so the
-token is c15.r3.b3. og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
+token's first three fields are c15.r3.b3 (the next two are the envelope's and the roster's, and the last the og-sim-net
+clock's, below).
+og-sim-metres-yup moved og-simulation to metres and a Y-up frame, which changes what the bytes
 mean without changing their layout, so each step bumped the versions it changed. While the move ran, each version
 was a `constexpr` function of `SimulationFrame.h`'s two frame knobs; task 24 deleted the knobs and froze the
 versions at the third row, and task 26 (the native planar chart) bumped the correction version once more.
@@ -270,9 +281,45 @@ chart change left them alone too: the stick and the world vectors are not chart 
 correction state only, where the brawler movement's `committedStepDir` is a planar chart value and mirrors.
 `WireVersionKnobTest.cpp` in og-simulation-tests pins the three shipped numbers.
 
-**The token.** `buildIdentityUImpl::wireToken()` is `c<correction>.r<ring>.b<bundle>`, each version in
-decimal (`wireTokenFor`; a `static_assert` pins the format). It is built at compile time from the three
-constants, so the token and the compiled codecs cannot disagree.
+**The envelope and the roster (og-input-latency P5-6).** Two more versions follow the three. The sim envelope's
+(`kSimEnvelopeVersion`, `OGSimulation/Network/SimEnvelope.h`) is the first byte of every og-sim message sent over
+og-net; the og-sim-net roster's (`ogsimnet::kRosterWireVersion`, `OGSimNet/SimNetRoster.h`) is the first byte of
+every roster body. Both are 1, so P5-6's token was c15.r3.b3.e1.ro1. Neither describes a payload, so the three
+codec versions cannot stand in for them. A peer whose envelope version differs has every message refused by
+`simEnvelope::decode` (`DecodeRefusal::Version`), which `ogsimnet::SimNetServer` and `ogsimnet::SimNetClient`
+count as bad decodes and drop. A roster of another version is refused (`RosterRefusal::Version`), and the client
+then ignores all sim traffic and asks to be disconnected. Either way the player would be admitted into a session
+that cannot work, the case the login check exists for (below). A build from before P5-6 presents the three-field
+token, which the server classifies as `Different`. `SimEnvelopeTest.cpp` in og-simulation-tests refuses the
+envelope version bytes 0 and 2, and `SimNetRosterTest.cpp` in og-sim-net's tests pins the roster's 1.
+
+**The clock (og-time-dilation task 2).** A sixth version follows: og-sim-net's SimClock ping/pong
+(`ogsimnet::kClockWireVersion`, `OGSimNet/SimNetClock.h`), 2 since the pong carries its server tick's age (34 bytes; 1
+was the 30-byte pong). The pong has no version byte of its own, and og-simulation's envelope version does not change
+with it: a pong of the other length is dropped and counted as malformed (`pongsMalformed`), so a client of the other
+clock layout would join and never get a clock sample. The token is therefore c15.r3.b3.e1.ro1.ck2, following P5-6's `.ro`
+precedent (og-sim-net owns its own versions). A build from before task 2 presents the five-field token c15.r3.b3.e1.ro1,
+which the server classifies as `Different` (a `static_assert` row checks both directions). The pong's layout is in
+og-sim-net's `SimNetClock-rationale.md` §2.
+
+**The token.** `buildIdentityUImpl::wireToken()` is
+`c<correction>.r<ring>.b<bundle>.e<envelope>.ro<roster>.ck<clock>`, each version in decimal without leading zeros.
+Since og-session-runtime task 21 each module exports its own fields as one compile-time fragment, and
+`OGBuildIdentityUImpl.cpp` joins them with og-simulation's `simWireToken::join` (`SimWireToken.h`): og-simulation's
+`simWireToken::kSimFragment`, `c15.r3.b3.e1` from its four versions, then og-sim-net's `ogsimnet::kWireTokenFragment`,
+`ro1.ck2` from its roster and clock versions (`OGSimNet-rationale.md` §7). The game has no field of its own. It reaches
+og-sim-net only through `UEBrawlerNetConfig.h`, its binding to og-sim-net, which carries that fragment as
+`UEBrawlerNetConfig::kSimNetWireTokenFragment`, so `OGBuildIdentityUImpl.cpp` includes neither `SimNetClock.h` nor
+`SimNetRoster.h` directly, and names none of their versions. *Not "at all" (corrected by og-session-runtime task 33):* both
+still reach the translation unit transitively, through `UEBrawlerNetConfig.h` → og-sim-net's `SimNetVersion.h`, which
+includes both to build the fragment (`BrawlerSessionTraitsUImpl.h`, which the file also includes, includes
+`UEBrawlerNetConfig.h` too). The token is still built at compile time from the six constants, so it cannot disagree with the
+compiled codecs, envelope, roster and clock. A `static_assert` beside it pins the whole token to
+`c15.r3.b3.e1.ro1.ck2`: a version bump in any module fails the game's build there until that string and this section
+are updated, and the module's own test pins its fragment the same way (`SimWireTokenTest.cpp` in og-simulation-tests,
+`SimNetVersionTest.cpp` in og-sim-net's tests). The format and the 32-character buffer are og-simulation's now: its
+test writes the longest token, `c255.r255.b255.e255.ro255.ck255` (31 characters), so a buffer too small for it fails
+the build; those rows were this header's own format `static_assert` before task 21.
 
 **The check, at login.** The client's `UOGBrawlerLocalPlayer::GetGameLoginOptions` returns the backend option
 of §7, then `?`, then `OGWire=<token>` (`buildIdentityUImpl::wireLoginOption`, key `kWireLoginOptionKey`;
@@ -283,22 +330,26 @@ classifies it with `classifyWireLogin` (`WireLoginVerdict`: `Match`; `Missing` f
 `static_assert`s pin both functions. A refusal logs the same Warning as §7,
 `OGBuildIdentity: refused a login: <reason>`, with the server's token first:
 
-* "Different wire format: this server speaks c15.r3.b3, the client c0.r0.b0."
-* "Different build: the client reports no wire format, this server speaks c15.r3.b3." (a build from before
-  this check, or an empty token)
+* "Different wire format: this server speaks c15.r3.b3.e1.ro1.ck2, the client c15.r3.b3.e1.ro1." (a build from
+  before og-time-dilation task 2)
+* "Different build: the client reports no wire format, this server speaks c15.r3.b3.e1.ro1.ck2." (a build from
+  before this check, or an empty token)
 
 A backend refusal takes precedence: a client of the other backend is told about the backend. The client sees
 the text the way it sees §7's ("Server refused: <text>").
 
 **Why at login, when every payload has a version byte.** The version bytes are compared only when a payload
 arrives, after the player was admitted. A client that receives a correction of another version logs an
-`Error`, shows a build-mismatch message and ignores every later correction
-(`USimulatableNetSyncComponent::OnRep_CorrectionState`); the server drops every redundancy bundle of another
-version (`USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation`). The player is then in a
-session that cannot work. The login check refuses before admission, and its text names both tokens.
+`Error`, shows a build-mismatch message and ignores every later correction (og-sim-net's `SimNetClient`, through
+the Unreal client host's `onWireMismatch`, `UESimNetHost-rationale.md` §8). The server counts every sim message
+whose envelope version differs as a bad decode and drops it (`SimNetServer`'s `onMessage`, through
+`simEnvelope::decode`). Until og-input-latency task P5-7 the two paths were the net-sync component's
+(`USimulatableNetSyncComponent::OnRep_CorrectionState`, and the input RPC
+`USimulatableNetSyncComponent::ServerReceiveRemoteMove_Implementation`, which dropped every redundancy bundle of
+another version). The player is then in a session that cannot work. The login check refuses before admission, and its text names both tokens.
 
 **The start line.** The `OGBuildIdentity:` Display line (§1) ends with `wire=<token> units=m axes=YupRH`: the
-token from the same three constants, then the simulation's length unit and axes as literals in the format string.
+token from the same six constants, then the simulation's length unit and axes as literals in the format string.
 The fields are appended after the earlier ones, so a reader of the earlier fields is unaffected. `units=` is each
 capture's length-unit marker: a log line that reports simulation state prints its lengths in that unit, and log
 tooling reads the marker per capture (a capture with no marker predates it and is in centimetres). While the frame
@@ -311,6 +362,6 @@ knobs existed (og-sim-metres-yup tasks 15 to 23) the two values came from them, 
 which the server refuses as `Missing`. The empty case is detected before FParse::Value is called: that
 function skips whitespace after the `=` (engine Parse.cpp:306-308) and would read the next argument as the
 token. The process logs one Warning at start-up, "OGBuildIdentity: -OGWireTokenOverride: this process
-presents the wire token '<token>' at login instead of c6.r2.b2.", and its start line keeps the compiled
+presents the wire token '<token>' at login instead of c15.r3.b3.e1.ro1.ck2.", and its start line keeps the compiled
 token. The switch is compiled out of Shipping (`#if !UE_BUILD_SHIPPING`). It is read from the command line
 because the login options are built before any console command a test could send to the client.

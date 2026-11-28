@@ -19,8 +19,10 @@ public class OGBrawlerTests : TestModuleRules
 	public OGBrawlerTests(ReadOnlyTargetRules Target) : base(Target, true)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		FPSemantics = FPSemanticsMode.Precise;
+		PrivatePCHHeaderFile = EngineDirectory + "/Source/Runtime/Core/Public/CoreSharedPCH.h";
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGSimulationJolt", "OGBrawler" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "Core", "OGSimulation", "OGSimulationJolt", "OGBrawler", "OGNet", "OGSimulationNet" });
 
 		// Epic's bundled Catch2 v3.4.0 header
 		PublicSystemIncludePaths.Add(Path.Combine(

@@ -31,10 +31,13 @@ task 13). The host launcher that ships in the server depot parses them. Prohibit
   client's connection, so both sides are compared by that root connection.
 * `label` = the build label (`OGBuildIdentity-rationale.md` §1): the published build's label, or `dev`.
 * `tested` = `og::brawler::session::maxPlayersPerServer` (3). It is information only. ⛔ Nothing rejects
-  a player for being over it (NO HARD PLAYER CAP, user ruling 2026-09-26); the session keeps running
+  a player for being over it (NO HARD PLAYER CAP at the tested size, user ruling 2026-09-26; the hard
+  ceiling of 8 below is user ruling Q3, 2026-11-12); the session keeps running
   and the launcher says "above the tested 3, expect degraded performance".
-* The engine's own limits are separate and unchanged: 4 local players per client, refused on the
-  client (the join screen's notice, `JoinScreen-rationale.md` §14), and 16 players per server.
+* The admission caps are separate: 4 local players per client, refused on the client (the join
+  screen's notice, `JoinScreen-rationale.md` §14), and 8 players per server, refused at the login.
+  Both come from `SessionConstants.h` since og-input-latency P7-5 (user ruling Q3, 2026-11-12;
+  `JoinScreen-rationale.md` §15); before it they were the engine's defaults, 4 and 16.
 * Only a **dedicated** server logs (`NM_DedicatedServer`). A client and the front-end are standalone
   or client worlds and log nothing. The user's PIE server is a dedicated server too, so PIE logs these
   lines; that is harmless.
@@ -87,8 +90,11 @@ comment: the flag is the one edit that would make the counts silently wrong.
 The engine calls `UWorld::Listen` in `UEngine::LoadMap` **before** the world's `BeginPlay`, so the
 GameMode's `BeginPlay` is the first point where the net driver is listening, and the line is written
 there. The port is the net driver's local address port; if the driver has no address, the world URL's
-port is used. The engine also writes `IpNetDriver listening on port 7777`, but its wording is the
-engine's and can change with an engine upgrade. Task 17's `ReadyLinePattern` uses this line instead.
+port is used. The engine also writes the driver's own listen line, which names the driver class:
+`OGNetDriver listening on port 7777` with the project's default driver (og-net's), and
+`IpNetDriver listening on port 7777` after a switch back to IpNetDriver. Its wording is the engine's
+and changes with the driver and with an engine upgrade. Task 17's `ReadyLinePattern` uses the
+GameMode's line instead.
 
 ## 6. The patterns the host launcher uses (for task 17)
 

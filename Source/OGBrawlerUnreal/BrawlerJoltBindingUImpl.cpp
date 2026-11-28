@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // docs/BrawlerJoltBindingUImpl-rationale.md · docs/BrawlerJoltBindingUImpl-guards.md
 
-#if !OG_PHYSICS_BACKEND_CHAOS
 #include "BrawlerJoltBindingUImpl.h"
 
 #include "OGBrawlerUnreal/OGBrawlerUECharacter.h"
@@ -73,8 +72,4 @@ void BrawlerJoltBindingUImpl::checkCapsuleContract(const AOGBrawlerUECharacter& 
 		   descriptorCapsule != nullptr ? static_cast<float>(ueFrame::lengthToUe(descriptorCapsule->halfHeight)) : 0.f, id);
 }
 
-template class TickDriverBackendUImpl<BrawlerTickDriverGame, JoltEngineTraitsUImpl, BrawlerJoltBindingUImpl>;
-
 OGSIM_OPTIMIZE_ON
-
-#endif

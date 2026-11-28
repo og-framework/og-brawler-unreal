@@ -1,0 +1,9 @@
+SPDX-License-Identifier: MPL-2.0
+tools/lint/README.md "Module tier lint"
+>>> Plugins/OGSimulation/Source/OGSimulation/og-simulation/OGSimulation/Network/SimInbox.h
+#pragma once
+#include "OGSimulation/OGTypes.h"
+>>> Plugins/OGSimulation/Source/OGSimulationNet/og-sim-net/OGSimNet/SimNetClient.h
+#pragma once
+#include "OGSimNet/SimNetIdle.h"
+#include "OGSimulation/Network/SimInbox.h"

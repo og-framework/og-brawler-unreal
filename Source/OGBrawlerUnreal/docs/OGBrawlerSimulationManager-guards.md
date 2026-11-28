@@ -1,4 +1,16 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: getTimeConfigPtr -- deleted by og-session-runtime task 31 (no caller); kept in the history -->
+<!-- lint-external-ref: assertCompositionContracts -- moved by og-session-runtime task 31 (the world build and the stepping to og-sim-session's SessionRuntime: buildWorld, startStepping, stopStepping; the static import to ueSessionEngine::importStatics; the present to UESessionPresentation; the world config to TickDriverBackendUImpl::worldConfig; slotKeyOf is slotKeyFor); kept in the history -->
+<!-- lint-external-ref: m_connectionBudgetProbe.noteSample( -- PROBE 6, removed by og-session-runtime task 14 with the session in-frame server; kept in the history -->
+<!-- lint-external-ref: hadAnyTier -- retired by og-input-latency P6-2 (the client pays its effective delay's change, either sign); kept in the history -->
+<!-- lint-external-ref: predictionClock -- a local of pollInputHistoryLanes until og-input-latency task P5-16 (the clock reading comes from the display snapshot); kept in the history -->
+<!-- lint-external-ref: OnRep -- Unreal Engine replication hook name, outside every scan root -->
+<!-- lint-external-ref: registerInstance -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: noteDelayedInputComponent -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: replayLatchedClientValues -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_relayWriteProbe -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: beginReceptionCoordinator -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 <!-- lint-external-ref: BrawlerInputProviderFn -- retired alias: removed with the callerless wrappers by og-ue-simulationcomponentandmanagersplit task 36; named in the census and in retired G-01's entry and quoted last text -->
 <!-- lint-external-ref: SimulationManagerUImpl.h -- RENAMED by og-ue-simulationcomponentandmanagersplit task 30 to OGBrawlerSimulationManager.h; kept in retired G-18's quoted last text -->
 <!-- lint-external-ref: writesThisFrame -- a term in the stated ceiling formula (G-17), not a declared identifier -->
@@ -7,6 +19,19 @@
 <!-- lint-external-ref: m_movementStaticDataCVars -- retired member: folded into BrawlerSessionGameUImpl::makeStaticData by og-ue-simulationcomponentandmanagersplit task 24a; historical mention in the closed census -->
 <!-- lint-external-ref: BrawlerNetSync -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a (the session named the composition's NetSync until task 34, which spells it with og-simulation's template, checked against it); quoted text of retired G-18 -->
 <!-- lint-external-ref: BrawlerSimulatables -- retired alias: deleted from AOGBrawlerSimulationManager by og-ue-simulationcomponentandmanagersplit task 24a; quoted text of retired G-18 -->
+<!-- lint-external-ref: ChaosTickBackendUImpl -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: ChaosTickBackendUImpl-guards.md -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: FRewindPushProbeStashedBody::bodyName -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: bodyName -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: FSimulationManagerAsyncCallback::OnPreSimulate_Internal -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: readLiveBodyForPushProbe -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: pushProbeFieldsSimilar -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: pushProbeVerdictText -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: nonInert -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: noteResimGrant -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: wireCarriesRotationAndSpin -- deleted by og-session-runtime task 3 (the brawler's Chaos backend arm: the Chaos host, the Chaos binding and their four docs); kept in the history -->
+<!-- lint-external-ref: ChaosPhysicsBodyAdapter::getBodyTransform -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
+<!-- lint-external-ref: ChaosPhysicsBodyReaderAdapter::getBodyTransform -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
 # `OGBrawlerSimulationManager.h` and `.cpp` — guards
 
 Every prohibition that survived the triage of the header (task 11, ids G-01..G-49) and of the
@@ -53,7 +78,8 @@ below this line with the task that added it; it is not folded into the table abo
 * **G-18** — retired by og-simulationscheduler-withjolt task 81, 2026-10-15, when the alias chain moved to
   `BrawlerCompositionUImpl.h`; its successor is that file's G-01. See §R.
 * **G-02, G-51 to G-55, G-71, G-76, G-77** — retired by og-simulationscheduler-withjolt task 82, 2026-10-15,
-  when the Chaos host moved to `ChaosTickBackendUImpl`; their successors are that file's G-01 to G-09. See §R.
+  when the Chaos host moved to `ChaosTickBackendUImpl`; their successors were that file's G-01 to G-09, which
+  retired with that file in og-session-runtime task 3 (successor: none). See §R.
 * **G-80 to G-84** — retired by og-simulationscheduler-withjolt task 83, 2026-10-15, when the Jolt
   host moved to `TickDriverBackendUImpl`; their successors are that file's G-01 to G-05. See §R.
 * **G-85** — og-simulationscheduler-withjolt task 83 (rework 1), 2026-10-15: `EndPlay`'s first statement, the
@@ -227,6 +253,11 @@ here. The list, and how each was seen to fail, is in `OGBrawlerSimulationManager
 
 *(The compile-time conversions in the census never held an id — the header had none before task 11 —
 so they are recorded there, not here.)*
+
+The successors named below for G-02, G-51 to G-55, G-71, G-76 and G-77 are history too: og-session-runtime task 3
+(2026-11-23) deleted `ChaosTickBackendUImpl-guards.md` with the Chaos host it guarded, and that file's ids G-01 to
+G-11 retired with it; their successor is none: removed by og-session-runtime task 3. The entries below describe the code
+as it stood when each id retired.
 
 ### G-18 — RETIRED by og-simulationscheduler-withjolt task 81 (2026-10-15): the alias chain moved to `BrawlerCompositionUImpl.h`
 
@@ -936,14 +967,15 @@ manager exists, until task 27a moves `EndPlay` into the session.
 **Why it retired.** Its subject moved. Task 27a moved this class's teardown and post-physics pass out of this class into OGSimulationUnreal's `UESimulationSession` (`UESimulationSession.h`): `EndPlay`'s statements before `Super` became the session's `endPlay`, which `EndPlay` now calls before `Super`, and `OnPostPhysicsStep` became the session's `onPostPhysicsStep`. The tag moved with the call it marks. The entry moved with its text made game-neutral and verified (an R0 line, with a correction). **Successor:** `UESimulationSession-guards.md` G-20 (OGSimulationUnreal).
 
 The entry as it stood before the move (names as they stood then: the session's `m_backend` is `m_physicsBackend` since og-ue-simulationcomponentandmanagersplit
-task 35):
+task 35; the Chaos configuration it names was removed by og-session-runtime tasks 3–6, and the backend's onEndPlayWorld by
+task 5, so `onEndPlayBegin` on `TickDriverBackendUImpl` is the only backend teardown entry left):
 
 **Site:** `m_backend.onEndPlayBegin();`, the first statement of `EndPlay`.
 
 **The prohibition** (og-simulationscheduler-withjolt task 83; the half of the old G-80 that is typed in this
 class since the Jolt host left it). ⛔ Do not move any `EndPlay` statement above `m_backend.onEndPlayBegin()`, do
 not add one above it, and do not drop the call. Everything else in `EndPlay` (G-64's resets, the static instance
-table and listener unregistration, the post-tick-flush unbind, the backend's `onEndPlayWorld`) runs after it. The
+table and listener unregistration, the post-tick-flush unbind, the backend's onEndPlayWorld) runs after it. The
 rule is the same in both configurations:
 - on Jolt, `onEndPlayBegin` unregisters the frame host's two tick functions and waits for every outstanding step
   task (`TickDriverBackendUImpl-guards.md` G-01);

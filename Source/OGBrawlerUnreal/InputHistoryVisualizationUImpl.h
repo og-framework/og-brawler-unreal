@@ -59,71 +59,21 @@ std::optional<unsigned int> nearestCharacterIdTo(const BrawlerInputHistoryFeedUI
                                                  std::optional<unsigned int>         previousChoice,
                                                  float&                              outDistance);
 
-template <typename SimulatableT, typename ReconciliationT>
-class ReconciliationSlotReader
-{
-public:
-	ReconciliationSlotReader(const ReconciliationT& reconciliation, unsigned int id)
-		: m_reconciliation(reconciliation)
-		, m_id(id)
-	{
-	}
-
-	AppliedCaptureRef appliedCaptureRef(uint32_t simTick) const
-	{
-		return m_reconciliation.template getAppliedCaptureTickRef<SimulatableT>(m_id, simTick);
-	}
-
-	std::optional<SlotStateProvenance> slotProvenance(uint32_t simTick) const
-	{
-		return m_reconciliation.getDiagnostics()
-			.template slotStateProvenance<SimulatableT>(m_id, simTick);
-	}
-
-	bool hasCorrectionCache() const
-	{
-		// ⛔G-06  docs/InputHistoryVisualizationUImpl-guards.md
-		return m_reconciliation.template findCorrectionCache<SimulatableT>(m_id) != nullptr;
-	}
-
-private:
-	const ReconciliationT& m_reconciliation;
-	unsigned int           m_id;
-};
-
-template <typename SimulatableT, typename ReconciliationT>
-ReconciliationSlotReader<SimulatableT, ReconciliationT> makeReconciliationSlotReader(
-	const ReconciliationT& reconciliation, unsigned int id)
-{
-	return ReconciliationSlotReader<SimulatableT, ReconciliationT>(reconciliation, id);
-}
-
 class InputHistoryStore
 {
 public:
 	using Ring  = brawlerInputHistoryVisualization::InputHistoryRowRing;
 	using Lanes = brawlerInputHistoryVisualization::InputHistoryTickLanes;
 
+	template <typename CaptureHistoryT>
 	brawlerInputHistoryVisualization::InputHistoryPollCounts poll(
-		unsigned int                                           id,
-		const LocalInputCache<simulatableBrawler::PlayerInput>& captures,
-		uint32_t                                               newestTick,
-		float                                                  deadzone)
+		unsigned int           id,
+		const CaptureHistoryT& captures,
+		uint32_t               newestTick,
+		float                  deadzone)
 	{
-		static_assert(std::is_trivially_copyable_v<simulatableBrawler::PlayerInput>,
-			"A capture slot is read from the game thread while the physics thread may be "
-			"writing it. A capture that owned memory would make that tear a crash rather "
-			"than a wrong glyph, so the read must be re-argued before such a member lands. "
-			"This one check replaces two (og-syncedInput-rework task 3, when PlayerInput became "
-			"the flat SyncedPlayerInput): is_trivially_destructible on the old input composite, "
-			"which failed is_trivially_copyable through std::tuple alone, and "
-			"is_trivially_copyable on the machine sub-simulation's PlayerInput slice (deleted by "
-			"og-syncedInput-rework task 4), the sub-input the display read.");
-
-		const simulatableBrawler::DelayLineMotionHistory history(captures);
-
 		return brawlerInputHistoryVisualization::pollInputHistory(
-			history, newestTick, deadzone, m_byId[id].rows);
+			captures, newestTick, deadzone, m_byId[id].rows);
 	}
 
 	template <typename SlotReader, typename RemoteObservationsT, typename RemoteArrivalsT>
@@ -233,15 +183,16 @@ private:
 
 	static_assert(std::is_const_v<std::remove_reference_t<decltype(m_session)>>,
 		"BrawlerInputHistoryFeedUImpl reads production state through a CONST reference to the session only - the "
-		"manager, the storage, the reconciliation, the local and relayed input diagnostics, the tier consumer and the "
-		"effective input delay through the session's const reads - and mutates nothing but its own store. A mutable "
-		"reference here would be a write door from a diagnostic display into the session's mutable doors (editStorage, "
-		"editServerClock, editReconciliation, the visualization query, the effective-delay publish) and, through "
-		"owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
+		"display snapshot (getDisplaySnapshot, findDisplayEntry, forEachDisplayVizState), the manager's role and time "
+		"config (getManager), isLocallyControlledOnThisPeer and the tier consumer (getReplicatedTierConsumer) - and "
+		"mutates nothing but its own store. A mutable reference here would be a write door from a diagnostic display "
+		"into the session's mutable doors (editServerClock, editVizQuery; publishClientEffectiveInputDelayTicks until "
+		"og-session-runtime task 24 inlined it into og-sim-session's SessionClock) and, "
+		"through owner(), into the owner's. The pattern is UELatencyBudgetDiagnostics's (og-tickdriver task 18). Added by "
 		"og-ue-simulationcomponentandmanagersplit task 22, when the input-history feeds left AOGBrawlerSimulationManager, "
-		"on a const reference to the owner (its friend then); re-targeted to the session by task 24b; the tier consumer "
-		"and the effective delay are the session's own const reads since task 25 (read through its const owner() "
-		"before).");
+		"on a const reference to the owner (its friend then); re-targeted to the session by task 24b; its reads are the "
+		"display snapshot's since og-input-latency task P5-16, which also deleted the session's reconciliation door "
+		"(this list since og-session-runtime task 16).");
 
 	inputHistoryVisualizationUImpl::InputHistoryStore m_inputHistory;
 };

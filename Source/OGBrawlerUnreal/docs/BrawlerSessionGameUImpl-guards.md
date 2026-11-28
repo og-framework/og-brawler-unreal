@@ -11,11 +11,18 @@ out-of-line hook bodies) carries no tag. Its one prohibition, no `HasAuthority()
 **If this file and the source disagree, the source is authoritative and this file is stale.**
 
 The rule on the latency hooks' call site (the source is resolved once, outside the wrapper's lambda) is typed in the
-plugin template, so its guard is there: `UELatencyBudgetDiagnostics-guards.md` G-02 (OGSimulationUnreal).
+plugin's engine-free template, so its guard is there: `SessionLatencyDiagnostics-guards.md` G-02 (og-sim-session; it was
+`UELatencyBudgetDiagnostics-guards.md` G-02 in OGSimulationUnreal until og-session-runtime task 37).
 
 ---
 
-## G-01 — the neutral input is `getZeroPlayerInput()`, not `PlayerInput{}`
+The file has no live guard since og-session-runtime task 26: its one guard moved with `neutralInput()`'s body (§R).
+
+---
+
+## §R (moved) — G-01's text as it stood before its retirement
+
+### G-01 (retired) — the neutral input is `getZeroPlayerInput()`, not `PlayerInput{}`
 
 **Tag site:** `BrawlerSessionGameUImpl.h`, directly above `return simulatableBrawler::getZeroPlayerInput();` in the inline
 body of the hook `neutralInput()`, which the session's `beginPlay` passes to `setNeutralInput` on both role branches.
@@ -45,4 +52,13 @@ value, not the sequence, so it stays BUSL with the hook body; the sequence's gua
 
 ## §R — Retired ids
 
-None.
+⛔ **An id is never reused.** A retired id may be named in prose; it may never again appear as a `⛔G-nn` tag.
+
+### G-01 — RETIRED by og-session-runtime task 26 (2026-11-25): moved to og-brawler's `BrawlerSessionGame-guards.md` G-01
+
+**Was:** *"the neutral input is `getZeroPlayerInput()`, not `PlayerInput{}`"* (the text above). Its tag sat in
+`BrawlerSessionGameUImpl.h`, above `return simulatableBrawler::getZeroPlayerInput();` in `neutralInput()`.
+
+**Why it retired.** The function's body moved to og-brawler's `OGBrawler/BrawlerSessionGame.h` (step (a) of the task moved it with
+this file's tag; step (b) gave it its own guards file): `BrawlerSessionGameUImpl::neutralInput()` returns
+`BrawlerSessionGame::neutralInput()`, and the prohibition, its consequence and its test are og-brawler's G-01 there.

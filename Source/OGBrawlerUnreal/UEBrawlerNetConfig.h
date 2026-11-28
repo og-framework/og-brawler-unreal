@@ -3,7 +3,8 @@
 #pragma once
 
 #include "OGSimulation/SimulationManagerConcept.h"
-#include "OGSimulationUnreal/UEConnectionHandle.h"
+#include "OGSimNet/SimNetConnections.h"
+#include "OGSimNet/SimNetVersion.h"
 
 // ---------------------------------------------------------------------------
 // UEBrawlerNetConfig — OGBrawler's concrete NetConfig binding for Unreal.
@@ -17,7 +18,14 @@
 // that way so a second game — or a Godot adapter — can reuse it; a
 // brawler-named config type there would be its first hard brawler dependency.
 // The reusable halves live one level down and stay shared: the NetConfig
-// concept in og-simulation, FUEConnectionHandle in OGSimulationUnreal.
+// concept in og-simulation, the connection handle in og-sim-net.
+//
+// Address is og-sim-net's SimNetConnectionHandle since og-input-latency task P5-7:
+// the server's reception coordinator now lives in SimNetServer and keys its
+// per-connection tables on og-net connections. It was FUEConnectionHandle (deleted by
+// og-input-latency task P5-9; a weak
+// UNetConnection handle, OGSimulationUnreal) while sim traffic rode the engine's
+// replication.
 //
 // No Input / State members here — see the NetConfig doc comment in
 // SimulationManagerConcept.h for why those belong to the variadic simulatable
@@ -25,7 +33,7 @@
 // ---------------------------------------------------------------------------
 struct UEBrawlerNetConfig
 {
-    using Address = FUEConnectionHandle;
+    using Address = ogsimnet::SimNetConnectionHandle;
 
     // Mirrors TimeConfig::tickFrequency (60 Hz, set in Stage 2). These are two
     // separate declarations of one physical rate: this one parameterizes the
@@ -33,6 +41,10 @@ struct UEBrawlerNetConfig
     // clock. They must move together — TimeConfigDefaultsTest pins the runtime
     // side, and NetConfigConceptTest pins this one against the same value.
     static constexpr int tickFrequencyHz = 60;
+
+    // og-sim-net's part of the build identity's OGWire token. The game reaches og-sim-net only
+    // through this file (og-session-runtime task 21; OGBuildIdentity-rationale.md section 8).
+    static constexpr simWireToken::Token kSimNetWireTokenFragment = ogsimnet::kWireTokenFragment;
 };
 
 // Build fails here if the concept or the handle regresses.

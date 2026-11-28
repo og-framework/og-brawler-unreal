@@ -10,10 +10,10 @@
 // Compile-time concept checks
 // ---------------------------------------------------------------------------
 
-static_assert(SimulationManagerOwnerConcept<UESimulationSession<BrawlerSessionTraitsUImpl>>,
-    "UESimulationSession<BrawlerSessionTraitsUImpl> must satisfy SimulationManagerOwnerConcept: the session holds the "
-    "timing relay's buffer and the timing callback since og-ue-simulationcomponentandmanagersplit task 25, which "
-    "moved them off AOGBrawlerSimulationManager");
+// SimulationManagerOwnerConcept (a writable timing buffer and the timing callback) was asserted
+// on the session here from og-ue-simulationcomponentandmanagersplit task 25. Since og-input-latency
+// task P5-7 the server clock is og-sim-net's ClockPublish message (SimNetServer::publishClock), so
+// the session holds no timing buffer and no longer models that concept.
 
 static_assert(
     SimulationNetSyncConcept<
@@ -51,7 +51,6 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FOGBrawlerSimulationManagerConceptTest::RunTest(const FString& Parameters)
 {
-    TestTrue(TEXT("SimulationManagerOwnerConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationNetSyncConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationInputResolutionConcept satisfied at compile time"), true);
     TestTrue(TEXT("SimulationReconciliationConcept satisfied at compile time"), true);

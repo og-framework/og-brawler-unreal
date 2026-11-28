@@ -4,15 +4,15 @@ using UnrealBuildTool;
 
 public class OGBrawlerUnreal : ModuleRules
 {
-	private const int PhysicsBackendChaos = 0;
-
 	public OGBrawlerUnreal(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		FPSemantics = FPSemanticsMode.Precise;
+		PrivatePCHHeaderFile = EngineDirectory + "/Source/Runtime/Engine/Public/EngineSharedPCH.h";
 
-		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJoltUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Chaos", "Core", "PhysicsCore", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "DVolumeModule", "OGSimulation", "OGSimulationUnreal", "OGSimulationJoltUnreal", "OGSimulationJolt", "OGBrawler", "ProceduralMeshComponent", "OGNet", "OGNetUnreal", "OGSimulationNet", "OGSimulationSession" });
 		PrivateDependencyModuleNames.Add("ApplicationCore");
-		PublicDefinitions.Add("OG_PHYSICS_BACKEND_CHAOS=" + PhysicsBackendChaos);
+		PrivateDependencyModuleNames.Add("OGTickDriver");
 		SetupIrisSupport(Target);
 	}
 }

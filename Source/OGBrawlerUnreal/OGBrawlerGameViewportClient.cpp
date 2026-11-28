@@ -8,7 +8,16 @@
 #include "InputKeyEventArgs.h"
 #include "UnrealClient.h"
 
+#include "OGBrawler/SessionConstants.h"
 #include "OGBrawlerUnreal/OGBrawlerJoinSessionSubsystem.h"
+
+void UOGBrawlerGameViewportClient::PostInitProperties()
+{
+	Super::PostInitProperties();
+
+	// ⛔G-07  docs/JoinScreen-guards.md
+	MaxSplitscreenPlayers = og::brawler::session::maxLocalPlayersPerClient;
+}
 
 UOGBrawlerJoinSessionSubsystem* UOGBrawlerGameViewportClient::joinSessionTakingInput() const
 {

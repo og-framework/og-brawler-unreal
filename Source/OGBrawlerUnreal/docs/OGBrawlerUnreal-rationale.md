@@ -3,11 +3,15 @@
 
 `Source/OGBrawlerUnreal/OGBrawlerUnreal.cpp` is the primary game module: `FOGBrawlerUEModule`. Its
 `StartupModule` runs in every process that loads the game — the editor, `-game`, a client and a dedicated
-server, in every configuration — and does two things, in this order:
+server, in every configuration — and does three things, in this order:
 
 1. Registers the build-identity network-version hook, `buildIdentityUImpl::registerNetworkVersionHook`.
    Its reasoning and prohibitions are in `OGBuildIdentity-rationale.md` and `OGBuildIdentity-guards.md`.
-2. On Windows, starts the console-command named-pipe server on a detached thread (§1).
+2. Registers the game's og-net sim-lanes factory, `UOGNetDriver::SetSimLanesFactory(&makeBrawlerSimNetLanes)`
+   (og-input-latency task P5-7; `BrawlerSimNetLanesUImpl-rationale.md`). The driver reads the factory at its `InitBase`, and
+   a set after any driver's `InitBase` or a second set is a `checkf` in the driver; module start-up runs before any world
+   creates a net driver, and this is the factory's one registration.
+3. On Windows, starts the console-command named-pipe server on a detached thread (§1).
 
 `ShutdownModule` does nothing.
 

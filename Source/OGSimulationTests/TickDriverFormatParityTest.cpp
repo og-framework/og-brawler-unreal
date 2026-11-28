@@ -13,7 +13,7 @@
 #include "CoreMinimal.h"
 #include "catch_amalgamated.hpp"
 #include "OGSimulation/LatencyBudgetProbe.h"
-#include "OGSimulation/TickDriverWindow.h"
+#include "OGTickDriver/TickDriverWindow.h"
 
 namespace tickDriverFormatParityTest
 {
@@ -186,7 +186,7 @@ namespace tickDriverFormatParityTest
     std::string newFrameLine(const ValueSet& set)
     {
         TickDriverWindow window(set.isAuthority, set.stepsInline);
-        return window.formatFrameLine(set.dtSeconds, set.cap);
+        return window.formatFrameLine(set.dtSeconds, set.cap, 0.75, 1.25);
     }
 
     std::string newFirstStepLine(const ValueSet& set)

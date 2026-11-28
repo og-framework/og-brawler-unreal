@@ -155,6 +155,11 @@ pass, on the line immediately above the score push, and that copy is the sanctio
 physics→game handoff. A HUD calling `getAllState` would be a fresh, unargued cross-thread
 read of live simulation state, so the accessor deliberately offers no route to one.
 
+**Since og-input-latency task P5-16** `getVizSlice` answers from the session's display copy: the state as of the end of
+the last step batch, which the session copies out of its display snapshot once per post-physics pass
+(`UESimulationSession-rationale.md` §17, in OGSimulationUnreal's docs). The storage's `m_vizState` is no longer refreshed,
+and the guard now forbids the storage in both forms. The handoff argument above is the record of the copy it replaced.
+
 ⛔ The accessor returns **by value and `const`**. The slice is five bytes of plain data;
 returning a reference would hand a drawing surface a pointer into live storage for as long
 as it cared to keep it. Together with the `const AOGBrawlerSimulationManager*` the HUD holds, whose `session()` is then
@@ -163,10 +168,11 @@ promise made in a comment: the `static_assert` on the instantiation's signature 
 `ScoreboardVisualizationUImpl.cpp`, beside the call (since task 22; after the manager class before; on the session's
 member since task 24b).
 
-⚠ `m_delayedInputComponentsById` — the map the score push walks, the session's since
-og-ue-simulationcomponentandmanagersplit task 26a — is private and
-authority-only, so it is **not** this layer's route. A gather built on it would work
-perfectly on a listen server and return nothing on a client.
+⚠ `m_registeredComponentsById` — the map the score push walks, the session's (its delayed-input
+map from og-ue-simulationcomponentandmanagersplit task 26a, the registered-component map since
+og-input-latency task P5-7) — is private and is not this layer's route. Until P5-7 it was also
+authority-only, so a gather built on it would have worked on a listen server and returned
+nothing on a client.
 
 ### 2.5 The read-only guarantee holds by argument, not by the shape of the file
 
@@ -219,6 +225,12 @@ therefore gates on `runsPrediction` before reading `getPredictionTick`, and take
 `getServerClock` otherwise. This is the same guard `pollInputHistoryLanes` makes at the
 same accessor, and it is not defensive coding: without it, turning the board on during a
 listen-server session would close the editor.
+
+*Since og-input-latency task P5-16* `displayTick` reads neither clock: it answers the held display snapshot's
+`clock.predictionTick`, which the session fills from the prediction step on a predicting role and from the simulation step
+on an authority, the same two ticks as before, as of the last post-physics pass. With no snapshot yet it answers
+`nullopt`, and then `getVizSlice` answers nothing either, so no row has a countdown. The hazard above is the session's now:
+its publish reads `getClientClock` only on a predicting role.
 
 **2. The display tick moves BACKWARDS.** A hard resync rewinds the prediction clock. Both
 ticks are `uint32_t`, so an unguarded subtraction wraps to roughly four billion and the
@@ -431,10 +443,10 @@ column now draws that tint and the player reads the row the way they read the fi
 ⛔ **The id did not leave the row, and only the DISPLAYED column changed.** `characterId`
 is still what `gatherScoreboardRows` joins each row's other facts on, and still what
 `scoreboardRowPrecedes` orders the board by, so two peers continue to show the same player
-in the same row. Nothing on this board is ordered by, keyed on or compared by colour — a
-future edit that sorted by the swatch would put two peers back out of step the moment one
-of them assigned tints in a different order, because the assignment order is a
-possession-counter artefact and not a shared fact.
+in the same row. Nothing on this board is ordered by, keyed on or compared by colour. Since
+og-input-latency P7-4 every peer derives the tint from the same sim id, so a sort by swatch
+would no longer split two peers, but the tint is not unique: the 10-entry palette wraps, and
+id 11 wears id 1's tint, so two rows could tie where `characterId` never does.
 
 #### ⛔ The swatch does not change while a fighter is counting down. That is a choice.
 
@@ -467,18 +479,18 @@ beside the tint — an outline, a strike — never a transform applied to it.**
 
 #### Two brawlers never share a swatch in a session this mode is built for
 
-The palette holds ten hand-picked entries and `PossessedBy` hands them out round-robin, one
-per possession, on the authority only. ⭐ A `static_assert` at the palette's own declaration
+The palette holds ten hand-picked entries, and `GetBrawlerColor()` gives the brawler with
+sim id n entry (n - 1) mod 10, on every peer (og-input-latency P7-4). ⭐ A `static_assert` at the palette's own declaration
 now pins its cardinality against `kScoreboardMaxRows`, so shrinking it below the number of
 rows the board can draw is a **compile error** — and the compiler is one of only three
 mechanisms that reach a `Source/OGBrawlerUnreal` file at all.
 
-⚠ **The honest bound is per-possession, not per-concurrent-fighter.** The counter never
-reclaims a leaver's index, so what is guaranteed is "the first ten possessions of a run get
-distinct tints", not "no two live brawlers ever share one". A run with enough joins and
-rejoins to wrap past ten can hand a newcomer the tint of a fighter who never left. That is
-pre-existing palette behaviour, unchanged by this task, and far outside the four-player
-session the mode targets — but it is what the assert actually promises.
+⚠ **The honest bound is per-registration, not per-concurrent-fighter.** The authority never
+reuses a sim id, so what is guaranteed is "the first ten ids of a session get distinct
+tints", not "no two live brawlers ever share one". A session with enough joins and rejoins
+to wrap past ten can hand a newcomer the tint of a fighter who never left. The possession
+counter the id replaced wrapped the same way, per possession. It is far outside the
+four-player session the mode targets — but it is what the assert actually promises.
 
 ### 6.1 The status column says a word, and that is not decoration
 
@@ -500,12 +512,12 @@ checks: exactly the stale table that lint exists to prevent.
 ⭐⭐ **And task 10's swatch did not become one either — stated explicitly rather than left
 to be inferred, because it is the first colour on this board that is not a constant.**
 `scoreboardRowSwatch` is a **per-character runtime tint**: it returns a value carried in on
-the row, assigned at possession time from a palette that lives in a different module, and
+the row, picked by the sim id from a palette that lives in a different module, and
 this display neither names an entry of that palette nor selects between entries. The lint's
 subject is *a function that switches on an enumerator*, because that is the shape whose arms
 can silently fall out of step with a table listing those enumerator names. A function with
 no arms at all has nothing to list — a legend for this column would have to enumerate
-`kBrawlerPalette`, which is indexed by a possession counter rather than by any named state,
+`kBrawlerPalette`, which is indexed by the sim id rather than by any named state,
 and would go stale the day somebody appends an eleventh colour. **No legend table is owed,
 and none was added.**
 

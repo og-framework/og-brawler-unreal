@@ -14,7 +14,6 @@
 #include "OGBrawler/BrawlerVisualizationInputSource.h"
 #include "OGSimulation/DMathUtil.h"
 #include "OGBrawler/DAttackMachineSimulationRuntimeTweakables.h"
-#include "OGSimulationUnreal/SimulationInputRelay.h"
 
 #include "Logging/LogMacros.h"
 
@@ -37,9 +36,6 @@
 #include "OGBrawlerUnreal/OGBrawlerSimulationManager.h"
 #include "OGBrawlerUnreal/InputHistoryVisualizationUImpl.h"
 #include "OGSimulation/SimulationFrame.h"
-#include "OGSimulationUnreal/InputRedundancyBundleBuilder.h"
-#include "OGSimulationUnreal/UEConnectionHandle.h"
-#include "OGSimulationUnreal/SimulationConnectionRelay.h"
 
 #include "glm/ext/matrix_transform.hpp"
 #include "glm/mat4x4.hpp"
@@ -182,6 +178,9 @@ ueSimulatableOwnerRegistration::Initialization UOGBrawlerSimulatableComponent::i
 	if (AOGBrawlerUECharacter* brawlerOwner = Cast<AOGBrawlerUECharacter>(&owner))
 		m_ownerInputCollection = brawlerOwner->getInputCollection();
 
+	if (!manager.session().hasGameThreadVizWorld())
+		return ueSimulatableOwnerRegistration::Initialization::Ready;
+
 	{
 		QueryVolumeDescriptor targetVisDescriptor{
 			SphereGeometry{m_staticData->m_attackCircle.getOuterRadius() * 2.f},
@@ -228,6 +227,20 @@ ueSimulatableOwnerRegistration::ResolvedKey UOGBrawlerSimulatableComponent::reso
 	if (simId == SimCharacterId::None)
 		return ueSimulatableOwnerRegistration::ResolvedKey::retry();
 
+	if (!isAuthority)
+	{
+		// ⛔G-39  docs/OGBrawlerSimulatableComponent-guards.md
+		switch (manager.session().clientBindStep(toStorageKey(simId), character->GetLocalRole() == ROLE_AutonomousProxy))
+		{
+		case ClientBindStep::Wait:
+			return ueSimulatableOwnerRegistration::ResolvedKey::retry();
+		case ClientBindStep::Abandon:
+			return ueSimulatableOwnerRegistration::ResolvedKey::abandon();
+		case ClientBindStep::Ready:
+			break;
+		}
+	}
+
 	return ueSimulatableOwnerRegistration::ResolvedKey::ready(toStorageKey(simId));
 }
 
@@ -250,15 +263,9 @@ SimulatableBrawler UOGBrawlerSimulatableComponent::makeSimulatable()
 void UOGBrawlerSimulatableComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	const bool isAuthority = (GetNetMode() != NM_Client);
-	AOGBrawlerSimulationManager* manager = AOGBrawlerSimulationManager::instanceFor(isAuthority);
+	AOGBrawlerSimulationManager* manager = AOGBrawlerSimulationManager::instanceFor(GetWorld(), isAuthority);
 	if (manager != nullptr)
 		manager->unregisterFromNewFramework(simCharacterId(), *this, isAuthority);
-
-	// ⛔G-38  docs/OGBrawlerSimulatableComponent-guards.md
-	if (isNetSyncBound())
-		netSync().detachInputRelayHost(isAuthority);
-
-	unbindNetSync();
 
 	UActorComponent::EndPlay(EndPlayReason);
 }
@@ -276,15 +283,17 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	const bool vizIsAuthority = (GetNetMode() != NM_Client);
-	AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(vizIsAuthority);
+	AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetWorld(), vizIsAuthority);
 	if (vizManager == nullptr)
 		return;
-
-	SimulationObjectStorage<SimulatableBrawler>& storage = vizManager->session().editStorage();
-	const unsigned int ownKey = toStorageKey(simCharacterId());
-	if (!storage.has<SimulatableBrawler>(ownKey))
+	if (!vizManager->session().hasGameThreadVizWorld())
 		return;
-	SimulatableBrawler& simulatable = storage.get<SimulatableBrawler>(ownKey);
+
+	const unsigned int ownKey = toStorageKey(simCharacterId());
+	const simulatableBrawler::AllState* const displayVizState = vizManager->session().runtime().findDisplayVizState(ownKey);
+	if (displayVizState == nullptr)
+		return;
+	const DisplayClockReading& displayClock = vizManager->session().runtime().getDisplaySnapshot()->clock;
 
 	{
 		const glm::vec3 aimDirection = (m_ownerInputCollection != nullptr) ? m_ownerInputCollection->buildAimDirection() : simFrame::kForward;
@@ -294,7 +303,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 		LoggingFunctorUImpl loggingFunctor(DAttackRadialVisualizationCVars::loggingEnabled);
 		DAttackRendererFunctorUImpl rendererFunctorImpl(GetWorld());
 
-		const simulatableBrawler::AllState& attackSimAllState = simulatable.getVizState();
+		const simulatableBrawler::AllState& attackSimAllState = *displayVizState;
 		const simulatableBrawler::State* attackSimState = &(attackSimAllState.getState());
 
 		glm::vec3 tmpAimInput = simFrame::kForward;
@@ -337,7 +346,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 			simulatableBrawler::selectVisualizationInput(
 				hasLiveLocalInput,
 				[this]() { return m_ownerInputCollection->buildLatestVisualizationInput(); },
-				vizManager->session().getLastRelayedInput(ownKey));
+				vizManager->session().runtime().getLastRelayedInput(ownKey));
 
 		{
 			if (vizPlayerInput.has_value())
@@ -359,16 +368,12 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 			}
 		}
 
-		const SimulationTimeStep vizSimulationStep = vizManager->session().runsPrediction()
-			? vizManager->session().getClientClock().getPredictionStep()
-			: vizManager->session().getServerClock().getSimulationStep();
-
 		{
 			brawlerProjectileVisualization::Input projectileVisualizationInput(
 				rendererFunctorImpl,
 				m_staticData->m_projectileStaticData,
-				vizSimulationStep.getTick(),
-				vizSimulationStep.getDeltaSeconds());
+				displayClock.predictionTick,
+				displayClock.stepDeltaSeconds);
 			brawlerProjectileVisualization::visualize(projectileVisualizationInput,
 				(*attackSimState).get<brawlerProjectileSimulation::State>(),
 				attackSimAllState.getDerivedState().get<brawlerProjectileSimulation::DerivedState>(),
@@ -442,7 +447,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 				if (rowCharacterId.has_value() && *rowCharacterId == ownCharacterId)
 				{
 					vizManager->inputHistoryFeed().pollInputHistory(*rowCharacterId,
-						vizSimulationStep.getTick(),
+						displayClock.predictionTick,
 						dAttackMachineSimulation::g_moveStickDeadzone.load());
 				}
 			}
@@ -460,7 +465,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 
 				// ⛔G-30  docs/OGBrawlerSimulatableComponent-guards.md
 				vizManager->inputHistoryFeed().pollInputHistoryLanes(ownCharacterId,
-					vizSimulationStep.getTick(),
+					displayClock.predictionTick,
 					(*attackSimState).get<dAttackMachineSimulation::State>().m_currentState,
 					liveInput,
 					inputHistoryVisualizationUImpl::pauseLanesWhileIdle(),
@@ -476,7 +481,7 @@ void UOGBrawlerSimulatableComponent::TickComponent(float DeltaTime, enum ELevelT
 
 std::optional<BrawlerVizGround> UOGBrawlerSimulatableComponent::vizGround() const
 {
-	const AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetNetMode() != NM_Client);
+	const AOGBrawlerSimulationManager* vizManager = AOGBrawlerSimulationManager::instanceFor(GetWorld(), GetNetMode() != NM_Client);
 	if (vizManager == nullptr)
 		return std::nullopt;
 	const unsigned int ownKey = toStorageKey(simCharacterId());

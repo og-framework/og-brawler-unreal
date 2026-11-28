@@ -37,12 +37,6 @@
 #include "glm/ext/matrix_transform.hpp"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "Physics/Experimental/PhysScene_Chaos.h"
-#include "Chaos/Framework/PhysicsSolverBase.h"
-#include "Chaos/Declares.h"
-#include "PBDRigidsSolver.h"
-#include "Chaos/SimCallbackInput.h"
-#include "Chaos/ChaosMarshallingManager.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -189,7 +183,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 
 	CapsulePhysicalMaterial = CreateDefaultSubobject<UPhysicalMaterial>(TEXT("BrawlerCapsulePhysMat"));
 	CapsulePhysicalMaterial->Friction = 0.f;
-	// ⛔G-04  docs/OGBrawlerUECharacter-guards.md
 	CapsulePhysicalMaterial->Restitution = 0.f;
 	// ⛔G-17  docs/OGBrawlerUECharacter-guards.md
 
@@ -212,7 +205,6 @@ AOGBrawlerUECharacter::AOGBrawlerUECharacter()
 	m_cameraAxis->SetVisibility(true);
 	m_cameraAxis->SetEnableGravity(false);
 
-	SimulatableNetSync = CreateDefaultSubobject<USimulatableNetSyncComponent>(TEXT("SimulatableNetSync"));
 	BrawlerSimulatable = CreateDefaultSubobject<UOGBrawlerSimulatableComponent>(TEXT("BrawlerSimulatable"));
 	InputCollection = CreateDefaultSubobject<UOGBrawlerInputCollectionComponent>(TEXT("InputCollection"));
 
@@ -250,8 +242,6 @@ void AOGBrawlerUECharacter::PostInitializeComponents()
 	Super::PostInitializeComponents();
 	GetCapsuleComponent()->SetPhysMaterialOverride(CapsulePhysicalMaterial);
 	RebuildHumanoidMesh();
-	// ⛔G-21  docs/OGBrawlerUECharacter-guards.md
-	BrawlerSimulatable->bindNetSync(*SimulatableNetSync);
 }
 
 void AOGBrawlerUECharacter::RebuildHumanoidMesh()
@@ -326,27 +316,45 @@ namespace
 		"the brawler palette must carry at least one distinct tint per drawable scoreboard "
 		"row, or two rows of the ring-out scoreboard can show the same swatch");
 
-	int32 gNextBrawlerColorIndex = 0;
+	constexpr int32 paletteIndexFor(SimCharacterId id)
+	{
+		return static_cast<int32>((toStorageKey(id) - 1u) % static_cast<unsigned int>(kBrawlerPaletteCount));
+	}
+
+	static_assert(paletteIndexFor(static_cast<SimCharacterId>(1u)) == 0,
+		"sim id 1, the first character the authority registers, wears palette entry 0. Was the possession counter "
+		"gNextBrawlerColorIndex, whose first value 0 gave the first possessed brawler entry 0.");
+	static_assert(paletteIndexFor(static_cast<SimCharacterId>(10u)) == 9,
+		"sim id 10 wears the 10-entry palette's last entry, 9: the colour is (id - 1) mod kBrawlerPaletteCount, "
+		"derived on every peer from the replicated sim id. Was the replicated BrawlerColor property.");
+	static_assert(paletteIndexFor(static_cast<SimCharacterId>(11u)) == 0,
+		"sim id 11 wraps to entry 0 of the 10-entry palette, the tint of id 1. Was the counter's "
+		"'% kBrawlerPaletteCount' wrap in PossessedBy.");
+}
+
+FLinearColor AOGBrawlerUECharacter::GetBrawlerColor() const
+{
+	const SimCharacterId id = GetSimCharacterId();
+	if (id == SimCharacterId::None)
+		return FLinearColor::White;
+	checkf(id != SimCharacterId::None,
+		TEXT("GetBrawlerColor: paletteIndexFor has no entry for SimCharacterId::None (0 - 1 wraps to a real ")
+		TEXT("palette entry), so a character without an id must take the White branch above, never this call."));
+	return kBrawlerPalette[paletteIndexFor(id)];
 }
 
 void AOGBrawlerUECharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	// ⛔G-08  docs/OGBrawlerUECharacter-guards.md
-	DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);
-
 	// ⛔G-09  docs/OGBrawlerUECharacter-guards.md
 	DOREPLIFETIME(AOGBrawlerUECharacter, RingoutScore);
 
 	// ⛔G-10  docs/OGBrawlerUECharacter-guards.md
 	DOREPLIFETIME(AOGBrawlerUECharacter, SimCharacterIdValue);
-
-	// ⛔G-20  docs/OGBrawlerUECharacter-guards.md
-	DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);
 }
 
-void AOGBrawlerUECharacter::OnRep_BrawlerColor()
+void AOGBrawlerUECharacter::OnRep_SimCharacterIdValue()
 {
 	ApplyBrawlerColor();
 }
@@ -380,40 +388,17 @@ void AOGBrawlerUECharacter::SetAuthoritativeSimCharacterId(SimCharacterId NewId)
 		TEXT("A character's simulation id is assigned once and never changes (SimCharacterId G-01)."),
 		static_cast<unsigned int>(SimCharacterIdValue), toStorageKey(NewId));
 	SimCharacterIdValue = static_cast<uint8>(NewId);
-}
-
-std::optional<uint32> AOGBrawlerUECharacter::GetPhysicsSlot() const
-{
-	if (PhysicsSlotValue == 0u)
-		return std::nullopt;
-	return static_cast<uint32>(PhysicsSlotValue) - 1u;
-}
-
-void AOGBrawlerUECharacter::SetAuthoritativePhysicsSlot(uint32 Slot)
-{
-	static_assert(kMaxSimulatableSlots < 255u,
-		"PhysicsSlotValue carries slot + 1 in one byte, with 0 meaning 'no slot yet'; a slot count of 255 or more "
-		"does not fit.");
-	checkf(HasAuthority(),
-		TEXT("SetAuthoritativePhysicsSlot called on a non-authority peer. Only the authority chooses a Jolt slot ")
-		TEXT("(og-simulation-jolt's JoltTickWorldHost::acquire, through TickDriverBackendUImpl::callWithSlotRequest); a client ")
-		TEXT("binds the slot it receives through replication of PhysicsSlotValue."));
-	checkf(Slot < kMaxSimulatableSlots,
-		TEXT("SetAuthoritativePhysicsSlot: slot %u is not a slot of the Jolt world (kMaxSimulatableSlots = %u)."),
-		Slot, kMaxSimulatableSlots);
-	checkf(PhysicsSlotValue == 0u,
-		TEXT("SetAuthoritativePhysicsSlot: this character already holds slot %u and was handed slot %u. A ")
-		TEXT("character's physics slot is chosen once and never changes while it lives."),
-		static_cast<unsigned int>(PhysicsSlotValue) - 1u, Slot);
-	PhysicsSlotValue = static_cast<uint8>(Slot + 1u);
+	// ⛔G-22  docs/OGBrawlerUECharacter-guards.md
+	ApplyBrawlerColor();
 }
 
 void AOGBrawlerUECharacter::SetAuthoritativeRingoutScore(int32 NewScore)
 {
 	checkf(HasAuthority(),
 		TEXT("SetAuthoritativeRingoutScore called on a non-authority peer (id=%u). The score ")
-		TEXT("is pushed only by BrawlerRosterUImpl::pushRingoutScores, from AOGBrawlerSimulationManager::OnPostPhysicsStep under the ")
-		TEXT("authority manager's !runsPrediction() gate; a client learns it through OnRep_RingoutScore."),
+		TEXT("is pushed only on the authority, from the session's onPostPhysicsStep on the game thread, by ")
+		TEXT("BrawlerSessionGameUImpl::presentAuthoritySlice (the runner's presentation snapshot); a client learns it ")
+		TEXT("through OnRep_RingoutScore."),
 		toStorageKey(GetSimCharacterId()));
 
 	if (RingoutScore == NewScore)
@@ -438,7 +423,7 @@ void AOGBrawlerUECharacter::ApplyBrawlerColor()
 	}
 
 	// ⛔G-13  docs/OGBrawlerUECharacter-guards.md
-	HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), BrawlerColor);
+	HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), GetBrawlerColor());
 
 	const int32 sectionCount = HumanoidMesh->GetNumSections();
 	for (int32 section = 0; section < sectionCount; ++section)
@@ -450,16 +435,6 @@ void AOGBrawlerUECharacter::ApplyBrawlerColor()
 void AOGBrawlerUECharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
-
-	// ⛔G-14  docs/OGBrawlerUECharacter-guards.md
-	if (HasAuthority())
-	{
-		BrawlerColor = kBrawlerPalette[gNextBrawlerColorIndex % kBrawlerPaletteCount];
-		++gNextBrawlerColorIndex;
-
-		// ⛔G-15  docs/OGBrawlerUECharacter-guards.md
-		ApplyBrawlerColor();
-	}
 
 	InputCollection->addInputMappingContextForController(NewController);
 }

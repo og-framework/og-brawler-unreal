@@ -21,6 +21,14 @@
 <!-- lint-external-ref: UChildConnection::HandleClientPlayer -- Unreal Engine method (NetConnection.cpp), outside every scan root -->
 <!-- lint-external-ref: NetPlayerIndex -- Unreal Engine APlayerController member (PlayerController.h), outside every scan root -->
 <!-- lint-external-ref: BadChildConnectionIndex -- Unreal Engine ENetCloseResult enumerator (NetCloseResult.h), outside every scan root -->
+<!-- lint-external-ref: BaseGame.ini -- the engine's own config file (Engine/Config/BaseGame.ini), outside every scan root -->
+<!-- lint-external-ref: AGameSession::InitOptions -- Unreal Engine method (GameSession.cpp), outside every scan root -->
+<!-- lint-external-ref: AGameSession::AtCapacity -- Unreal Engine method (GameSession.cpp), outside every scan root -->
+<!-- lint-external-ref: AGameSession::ApproveLogin -- Unreal Engine method (GameSession.cpp), outside every scan root -->
+<!-- lint-external-ref: AGameModeBase::PreLogin -- Unreal Engine method (GameModeBase.cpp), outside every scan root -->
+<!-- lint-external-ref: AGameModeBase::Login -- Unreal Engine method (GameModeBase.cpp), outside every scan root -->
+<!-- lint-external-ref: SplitscreenCount -- Unreal Engine login URL option (World.cpp, GameSession.cpp), outside every scan root -->
+<!-- lint-external-ref: UWorld::PreLoginCheckError -- Unreal Engine method (World.cpp), outside every scan root -->
 # The join screen's UE layer — rationale
 
 Companion to the pure `og-brawler` header that holds the join screen's logic, texts and layout
@@ -36,6 +44,7 @@ tier), and to the `Source/OGBrawlerUnreal` files that turn it into a front-end
 | `OGBrawlerGameViewportClient.h` / `OGBrawlerGameViewportClient.cpp` | typed characters, keys and gamepad buttons while the screen is up |
 | `OGBrawlerUEHUD.cpp` (`drawJoinScreen`) | the canvas calls |
 | `Config/DefaultEngine.ini` | three lines that select the GameMode and the viewport client |
+| `OGBrawlerUEGameMode.cpp` (`InitGame`) | the server's admission caps (§15) |
 
 **The source files carry the guards (`JoinScreen-guards.md`); this file carries the reasoning.** The
 design is the T10 spike's, ruled binding by the user on 2026-09-29; the section numbers below are cited
@@ -258,7 +267,8 @@ failures is what makes the table right:
   same text (T10 spike, measured). The first one wins, so the screen says "Different build".
 * **A refusal during the login** is the one row where the T10 spike was wrong. The spike put
   `PendingConnectionFailure` under "can't reach server" and expected a refusal to arrive as
-  `FailureReceived`. Measured on 2026-09-29 with a server started as `ThirdPersonMap?MaxPlayers=1`:
+  `FailureReceived`. Measured on 2026-09-29 with a server started as `ThirdPersonMap?MaxPlayers=1`
+  (since og-input-latency P7-5 that URL option is overridden, §15; `net.MaxPlayersOverride=1` gives the same refusal):
   the second client logs `PendingConnectionFailure, ErrorString = Server full.` and no failure before
   it, and the screen shows "Server refused: Server full.". The engine's pending net game stores the
   server's `NMT_Failure` text as its connection error, and the engine's travel tick reports that error
@@ -284,7 +294,8 @@ the key is not handled and goes to the engine as before.
 ## 14. Local players on a network client (task 13)
 
 **Adding: the limit notice.** The engine refuses a client's 5th local player on the client itself
-(`UGameViewportClient::MaxSplitscreenPlayers`, 4). `AOGBrawlerPlayerController::JoinLocalPlayer`
+(`UGameViewportClient::MaxSplitscreenPlayers`, 4; since og-input-latency P7-5 set from
+`og::brawler::session::maxLocalPlayersPerClient`, §15). `AOGBrawlerPlayerController::JoinLocalPlayer`
 compares the local-player count before and after `UGameplayStatics::CreatePlayer`. An unchanged count
 at the limit means the player was refused, and the subsystem then records the time and the limit.
 `AOGBrawlerUEHUD` draws `localPlayerLimitNoticeText(limit)` near the top of the screen while
@@ -330,3 +341,63 @@ logged `no other local player to remove`; a Tab after that joined cleanly. Neith
 `BadChildConnectionIndex` or a network failure. After each leave the server logs a few
 `[InputDrop] ... never released` warnings for the removed slot's parked input. They stop after about
 ten ticks; they were not investigated further.
+
+## 15. The admission caps (og-input-latency P7-5)
+
+User ruling Q3 (2026-11-12): **at most 4 local players per connection and 8 players per server.** Both
+numbers live in `OGBrawler/SessionConstants.h`, as `og::brawler::session::maxLocalPlayersPerClient` (4)
+and `og::brawler::session::hardPlayerCeiling` (8). Before this task both caps were the engine's
+defaults: 4 local players and 16 players (`[/Script/Engine.GameSession]` in the engine's `BaseGame.ini`),
+not overridden by this project. So the local-player behaviour is unchanged, and the change a player
+sees is that the server refuses a 9th player.
+
+**The server.** `AOGBrawlerUEGameMode::InitGame` calls `Super::InitGame` first. That spawns the
+`AGameSession`, which reads its ini values and the URL's `?MaxPlayers=` option (`AGameSession::InitOptions`).
+Then it writes `MaxPlayers = hardPlayerCeiling` and `MaxSplitscreensPerConnection = maxLocalPlayersPerClient`
+on that session. Writing after `Super` is what makes the constants win over the ini and over a
+`?MaxPlayers=` URL option, which is overridden on purpose. The console variable `net.MaxPlayersOverride`
+still wins over `MaxPlayers`, because `AGameSession::AtCapacity` reads it first, so a test can still
+lower the cap.
+
+The engine does the refusing, in `AGameSession::ApproveLogin`. `AGameModeBase::PreLogin` calls it, and
+`AGameModeBase::Login` calls it again just before the controller spawns, so two concurrent joins cannot
+overrun the cap.
+* **"Server full."** when the server already has `MaxPlayers` players. The count is every player
+  controller, split players included, so 8 is 8 characters. A standalone world never refuses.
+* **"Maximum splitscreen players"** when a join's `SplitscreenCount` is above
+  `MaxSplitscreensPerConnection`. The server stamps that count itself: for a local player added on a
+  connected client it is the connection's player count including the new one, so a cap of 4 refuses the
+  5th.
+* ⚠ **A refused login closes the connection it came on**, and a local player added on a connected
+  client logs in on its parent connection. So when the server already has 8 players, adding a local
+  player on a connected client disconnects that whole client, not just the new player (engine source
+  `UWorld::PreLoginCheckError`; not measured). The client cap (below) keeps a matching client from ever
+  sending a 5th local player, so this only happens at the 8-player cap. A new client that joins a full
+  server is refused at its login and sees §13's "Server refused: Server full.".
+
+**The proof line.** `InitGame` logs one Warning on a server (any net mode but standalone):
+`LogGameSession: Warning: [Admission] maxPlayers=8 maxLocalPerConnection=4 (SessionConstants)`. It
+prints the session's fields after the write. A client never runs a GameMode, so no client logs it. The
+tag name is provisional until og-input-latency's P8 confirms it.
+
+**The compile-time ties.** `OGBrawlerUEGameMode.cpp` asserts that `hardPlayerCeiling` is at most
+`kMaxSimulatableSlots` (the physics slots) and at most `brawlerRingout::kMaxSpawnPoints` (the ring-out
+spawn table), and that `maxLocalPlayersPerClient` is at most `hardPlayerCeiling`. Raising the ceiling
+past either table fails the build with a message, rather than admitting a character that finds no slot.
+
+**The client.** `UOGBrawlerGameViewportClient::PostInitProperties` sets the inherited config property
+`MaxSplitscreenPlayers` to `maxLocalPlayersPerClient`, so the client refuses the 5th local player itself
+and the limit notice (§14) says 4. `AOGBrawlerPlayerController::JoinLocalPlayer` reads the viewport's live
+value and needs no change. **The constant wins over the ini** because the client cap must equal the
+server's split cap: a larger client cap would let a player send a split join the server refuses, and a
+smaller one would refuse players the server admits. The assignment sits in `PostInitProperties` and not in
+a constructor (guard G-07), because the class default object loads its config values after its
+constructor, reading the parent class's section too, and every viewport client copies those values from
+it. `PostInitProperties` runs after that load. Measured with a standalone `-game -nullrhi` run and
+`getall OGBrawlerGameViewportClient MaxSplitscreenPlayers`:
+
+| build | no ini line | `-ini:Engine:[/Script/Engine.GameViewportClient]:MaxSplitscreenPlayers=2` |
+|---|---|---|
+| before P7-5 (engine default) | 4 | 2 |
+| the assignment in a constructor | 4 | 2 |
+| the assignment in `PostInitProperties` | 4 | 4 |

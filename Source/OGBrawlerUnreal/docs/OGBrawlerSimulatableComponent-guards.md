@@ -1,4 +1,24 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: BrawlerRosterUImpl::pushRingoutScores -- the roster's ring-out score push, deleted by og-session-runtime task 16b (its one caller, afterVisualization's authority branch, ran nowhere since task 14); named in this file's history -->
+<!-- lint-external-ref: ASimulationConnectionRelay -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: ASimulationInputRelay::spawnForCharacter -- deleted by og-input-latency task P5-9 (the relay actors, their listeners, the Iris sim buffers, serializers and proofs, and UEConnectionHandle); kept in the history -->
+<!-- lint-external-ref: ServerReceiveRemoteMove -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: SimulatableNetSyncComponent-guards.md -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: USimulatableNetSyncComponent -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: attachInputRelayHost -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: detachInputRelayHost -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: isNetSyncBound -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: m_detachedRelayRing -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: m_detachedRelayStagingRing -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: m_hasLocalInputProvider -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: onRelayedInputRingArrived -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: receiveRemoteMoveBundle -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: relayStagingTarget -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: rootConn -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: noteDelayedInputComponent -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: UESimulationSession::relayRemoteInput -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: getDelayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
+<!-- lint-external-ref: m_delayedInputComponentsById -- removed by og-input-latency task P5-7 (the switch to og-net); kept in the history -->
 # `OGBrawlerSimulatableComponent.h` and `.cpp` — guards
 
 Every prohibition that survived the task-25 conversion of both files, except the fifteen that moved to
@@ -6,7 +26,8 @@ Every prohibition that survived the task-25 conversion of both files, except the
 reflected wire surface, ten) and 20b (the relay-host link, five), and the six that moved to
 `UESimulatableOwnerBinding-guards.md` in task 21 (the stage and the RPC tail), and the five that moved there in task 29
 with the registration loop (the role test, the tier absence, the local-prediction test, the spawn order and the delivery
-route); §R names each successor. G-38 is new in task 20b. Each entry has an **opaque,
+route); §R names each successor. G-38 was new in task 20b and is retired by og-input-latency task P5-7, which added G-39.
+Each entry has an **opaque,
 stable id**. In the source a single line `// ⛔G-nn  docs/OGBrawlerSimulatableComponent-guards.md` sits
 directly above the statement or declaration where the forbidden edit would be typed. An **absence
 tag** — one with a blank line under it — marks the place where something retired would be re-added.
@@ -175,19 +196,20 @@ invisible (rationale §10); a second machine-state source is a new cross-thread 
 
 ---
 
-## G-38 — `EndPlay` detaches the relay host through the sibling, between the unregister and the unbind
+## G-39 — a client registers only once its og-sim-net roster entry binds it
 
-**Site:** `if (isNetSyncBound()) netSync().detachInputRelayHost(isAuthority);` in `EndPlay`. (New in task 20b; since
-task 21 the sibling is reached through the binding's `isNetSyncBound()` and `netSync()`.)
+**Site:** the `switch` on `manager.session().clientBindStep(...)` in `resolveRegistrationKey`, the client's branch after the
+replicated id's wait (og-input-latency task P5-7).
 
-**The prohibition.** Keep this call, and keep it after `unregisterFromNewFramework` and before `unbindNetSync()`. Do
-not leave the detach to the sibling's own `EndPlay`: that one detaches only while no binding is attached (the sibling's
-G-11), so with this call gone a sibling that ends first never detaches, and one that ends last detaches after the
-unbind; the order between the two components' `EndPlay` calls is not a contract.
+**The prohibition.** On a client, return `ready(key)` only when `clientBindStep` answers `Ready`. Do not map `Wait` to
+`ready`, do not skip the call, and do not answer `retry()` for `Abandon`.
 
-**Consequence.** Moved above the unregister, the authority destroys the host before the manager has dropped the
-character. Moved below `unbindNetSync()`, it never runs, because the unbind clears the binding's sibling pointer. Deleted (or moved
-below the unbind), the host stays linked and, on the authority, alive whenever the sibling ends first (rationale §17).
+**Consequence.** The session registers a client's character with the client session's channel and the roster's slot, and both
+exist only once the roster entry has arrived: registered earlier, `tryRegister` finds no channel and answers `Pending` until the
+600-attempt `checkf`, and the slot request reads no slot. The role check is the point of the call (P7's C-3): the roster's
+local index decides which characters this client predicts, and a pawn the engine thinks is local but the roster does not (or
+the reverse) must fail loudly, not register with the wrong provider. Mapping `Abandon` to `retry()` turns a client world without a
+session (no og-net driver, or a refused knob; a detached client until og-session-runtime task 14) into a `checkf` after 600 frames, against the user's ruling Q1 (no Fatal).
 
 ---
 
@@ -208,6 +230,10 @@ the pair (verified: no script there names `OGSIM_OPTIMIZE_ON`), so this tag is t
 
 ⛔ **An id is never reused.** A retired id may be named in prose; it may never again appear as a
 `⛔G-nn` tag.
+
+The successors named below are history too: og-input-latency task P5-8 deleted `SimulatableNetSyncComponent-guards.md`
+with `USimulatableNetSyncComponent`, and the binding's net half with its guard G-01; P5-7 retired the binding's G-02 …
+G-06, G-10 and G-11 (`UESimulatableOwnerBinding-guards.md` §R). The entries below describe the code as it stood when each id retired.
 
 ### G-09 — RETIRED by og-ue-simulationcomponentandmanagersplit task 20a (2026-10-21): moved to `SimulatableNetSyncComponent-guards.md` G-03
 
@@ -431,7 +457,8 @@ The entry as it stood before the move:
 
 **Correction (R0).** The stated mechanism is about the wrong actor. "Always true on a non-replicated
 actor" describes the MANAGER (`bReplicates = false`); this component's owner is a replicated pawn. The
-prohibition stands for the other half of the sentence: `AOGBrawlerSimulationManager::instanceFor(isAuthority)`
+prohibition stands for the other half of the sentence: `AOGBrawlerSimulationManager::instanceFor(isAuthority)` (since
+og-session-runtime task 16b `instanceFor(world, isAuthority)`, keyed by the caller's world as well)
 indexes the manager slot that `AOGBrawlerSimulationManager::BeginPlay` filled from
 `worldIsAuthority = (worldNetMode != NM_Client)` (since og-ue-simulationcomponentandmanagersplit task 25 the slot is the
 session's registry, and since task 27b the session's `beginPlay` fills it, with the same predicate). Only the same world-level predicate is guaranteed to
@@ -464,8 +491,8 @@ The entry as it stood before the move:
 > ⛔ NOTHING TIER-RELATED IS BOUND HERE -- the tier is a WIRE property, bound once per world. §5
 
 **The prohibition.** Do not re-add a per-character tier consumer binding here. The client-side
-consumer is the session's `m_replicatedTierConsumer` (`UESimulationSession`, OGSimulationUnreal; the manager's own
-member until og-ue-simulationcomponentandmanagersplit task 25), emplaced from the manager's `BeginPlay` through the
+consumer is the session's (`UESimulationSession`, OGSimulationUnreal, through og-sim-session's `SessionClock` since
+og-session-runtime task 24; the manager's own member until og-ue-simulationcomponentandmanagersplit task 25), emplaced from the manager's `BeginPlay` through the
 session's `beginTierConsumer`, one per world; the tier itself replicates from the per-connection
 `ASimulationConnectionRelay`.
 
@@ -528,6 +555,14 @@ anywhere. The hazard is the opposite window: the route registered while no host 
 **The prohibition.** Do not move `noteDelayedInputComponent` above the host spawn. ⚠ This is an
 ordering fence.
 
+### G-38 — RETIRED by og-input-latency task P5-7 (2026-11-18): its statement was deleted
+
+**Was:** *"`EndPlay` detaches the relay host through the sibling, between the unregister and the unbind"*. Its tag sat in
+`OGBrawlerSimulatableComponent.cpp`, above `if (isNetSyncBound()) netSync().detachInputRelayHost(isAuthority);` in `EndPlay`.
+
+**Why it retired.** No input relay host is spawned or found since P5-7 (og-sim-net's server stages and sends each character's
+relays), so there is nothing to detach; the call went with the spawn (rationale §21).
+
 ### G-07 — RETIRED by og-ue-simulationcomponentandmanagersplit task 29 (2026-10-22): moved to `UESimulatableOwnerBinding-guards.md` G-11
 
 **Was:** *"the delivery route is registered once, authority only, and is the ring-out score push's roster"*. Its tag sat in `OGBrawlerSimulatableComponent.cpp`, above `if (isAuthority) regManager->noteDelayedInputComponent(simId, *this);` in `tryRegisterWithNewFramework`.
@@ -540,7 +575,7 @@ statements in four registration hooks of this component, and the guarded stateme
 text game-neutral and R0-checked (corrections are listed in the successor). **Successor:**
 `UESimulatableOwnerBinding-guards.md` G-11.
 
-**What stays here (brawler).** The second half of the title is the brawler's: `BrawlerRosterUImpl::pushRingoutScores` walks the session's delivery routes (`getDelayedInputComponentsById`) as the list of characters whose scores leave the server, so narrowing the registration silently drops their scores (`BrawlerRosterUImpl-rationale.md` §3; rationale §19 here). The successor states the generic half: a game may walk the same map.
+**What stays here (brawler).** The second half of the title was the brawler's: `BrawlerRosterUImpl::pushRingoutScores` walked the session's delivery routes (`getDelayedInputComponentsById`) as the list of characters whose scores leave the server, so narrowing the registration silently dropped their scores (`BrawlerRosterUImpl-rationale.md` §3; rationale §19 here). og-session-runtime task 16b deleted the push (it ran nowhere since task 14); the authority's scores leave through `BrawlerSessionGameUImpl::presentAuthoritySlice`, which looks each id up in the same map. The successor states the generic half: a game may walk the same map.
 
 The entry as it stood before the move:
 

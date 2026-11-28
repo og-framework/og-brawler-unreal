@@ -71,23 +71,32 @@ void BrawlerRosterUImpl::seedSpawnPointsFromLevel(UWorld& world, ENetMode netMod
 		placements.push_back(std::move(placement));
 	}
 
-	const std::array<glm::vec3, brawlerRingout::kMaxSpawnPoints> authoredFallback =
-		staticData.m_ringoutStaticData.spawnPoints;
+	const int32 foundCount = static_cast<int32>(placements.size());
+	const float killPlaneHeight = staticData.m_ringoutStaticData.killPlaneHeight;
+	const brawlerRingout::LevelSpawnSeed seed = brawlerRingout::seedFromLevelPlacements(
+		std::move(placements), staticData.m_ringoutStaticData.spawnPoints, killPlaneHeight);
 
-	staticData.m_ringoutStaticData.spawnPoints =
-		brawlerRingout::spawnPointsFromLevelPlacements(placements, authoredFallback);
+	staticData.m_ringoutStaticData.spawnPoints = seed.spawnPoints;
 
 	m_ringoutSpawnPointsSeeded = true;
 
+	for (const brawlerRingout::LevelSpawnPoint& rejected : seed.rejected)
+	{
+		UE_LOG(LogOGMgmt, Warning,
+			TEXT("[Ringout.spawnPoints] REJECTED %s at (%.4f, %.4f, %.4f), height %.4f m: at or below the kill ")
+			TEXT("plane (%.4f m) plus the %.2f m margin, so it is no ring-out spawn slot and no spawn start. ")
+			TEXT("Move it above %.4f m in the editor."),
+			UTF8_TO_TCHAR(rejected.name.c_str()), rejected.position.x, rejected.position.y, rejected.position.z,
+			simFrame::height(rejected.position), killPlaneHeight, brawlerRingout::kSpawnPointKillPlaneMargin,
+			killPlaneHeight + brawlerRingout::kSpawnPointKillPlaneMargin);
+	}
+
+	const int32 levelSlotCount = static_cast<int32>(seed.levelSlotCount);
 	UE_LOG(LogOGMgmt, Warning,
-		TEXT("[Ringout.spawnPoints] seeded from the level: %d APlayerStart actor(s) found, ")
+		TEXT("[Ringout.spawnPoints] seeded from the level: %d APlayerStart actor(s) found, %d rejected, ")
 		TEXT("%d slot(s) filled, %d left authored (netMode=%d)"),
-		static_cast<int32>(placements.size()),
-		FMath::Min(static_cast<int32>(placements.size()),
-			static_cast<int32>(brawlerRingout::kMaxSpawnPoints)),
-		static_cast<int32>(brawlerRingout::kMaxSpawnPoints)
-			- FMath::Min(static_cast<int32>(placements.size()),
-				static_cast<int32>(brawlerRingout::kMaxSpawnPoints)),
+		foundCount, static_cast<int32>(seed.rejected.size()), levelSlotCount,
+		static_cast<int32>(brawlerRingout::kMaxSpawnPoints) - levelSlotCount,
 		static_cast<int32>(netMode));
 
 	for (uint32 slot = 0u; slot < brawlerRingout::kMaxSpawnPoints; ++slot)
@@ -97,7 +106,7 @@ void BrawlerRosterUImpl::seedSpawnPointsFromLevel(UWorld& world, ENetMode netMod
 			TEXT("[Ringout.spawnPoints]   slot %u -> (%.4f, %.4f, %.4f) [%s]"),
 			slot, point.x, point.y,
 			point.z,
-			(slot < placements.size()) ? TEXT("level") : TEXT("authored"));
+			(slot < seed.levelSlotCount) ? TEXT("level") : TEXT("authored"));
 	}
 }
 
@@ -177,35 +186,6 @@ void BrawlerRosterUImpl::forgetCharacter(unsigned int id)
 
     // ⛔G-05  docs/BrawlerRosterUImpl-guards.md
     m_spawnSlots.release(id);
-}
-
-void BrawlerRosterUImpl::pushRingoutScores(
-    const brawlerRingout::ScoreSystem& scoreSystem,
-    const std::unordered_map<unsigned int, TWeakObjectPtr<UOGBrawlerSimulatableComponent>>& routes)
-{
-    for (const auto& entry : routes)
-    {
-        const unsigned int id = entry.first;
-
-        UOGBrawlerSimulatableComponent* component = entry.second.Get();
-        if (component == nullptr)
-            continue;
-
-        AOGBrawlerUECharacter* character = Cast<AOGBrawlerUECharacter>(component->GetOwner());
-        if (character == nullptr)
-            continue;
-
-        checkf(scoreSystem.hasScoreEntry(id),
-               TEXT("Ring-out score push: id=%u is in the authority route table but has no ")
-               TEXT("ScoreSystem roster entry. The game-thread read of the score table is ")
-               TEXT("safe only because the roster is seeded by onCharacterRegistered before ")
-               TEXT("tryRegister returns Ready - an unseeded id lets postIntegrate's ")
-               TEXT("operator[] INSERT, and rehash, on the physics thread under this walk."),
-               id);
-
-        character->SetAuthoritativeRingoutScore(
-            static_cast<int32>(scoreSystem.scoreOf(id)));
-    }
 }
 
 OGSIM_OPTIMIZE_ON

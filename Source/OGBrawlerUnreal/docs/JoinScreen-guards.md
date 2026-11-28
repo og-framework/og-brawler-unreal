@@ -136,3 +136,23 @@ is parsed as the protocol first, and everything `parseServerAddress` accepts the
 port fields.
 
 **What breaks if the tag moves.** The tag sits on the only statement that builds the travel URL.
+
+---
+
+## G-07 — the local-player cap is written after the config load, in `PostInitProperties`, never in a constructor
+
+**Site:** the `MaxSplitscreenPlayers = og::brawler::session::maxLocalPlayersPerClient;` statement in
+`UOGBrawlerGameViewportClient::PostInitProperties`.
+
+**The prohibition.** ⛔ Do not move the assignment into a constructor.
+
+**The consequence.** `MaxSplitscreenPlayers` is an engine config property. The class default object
+loads its config values after the constructor has run, and that load reads the parent class's section
+too (`[/Script/Engine.GameViewportClient]`); every viewport client then copies its config values from
+the class default. A constructor value therefore loses to any ini line for that key, and the client would
+let a player add more (or fewer) local players than the server's `MaxSplitscreensPerConnection`, which
+`AOGBrawlerUEGameMode::InitGame` sets from the same constant. Measured in og-input-latency P7-5 with
+`-ini:Engine:[/Script/Engine.GameViewportClient]:MaxSplitscreenPlayers=2`: the constructor variant read
+2 and this statement reads 4 (rationale §15).
+
+**What breaks if the tag moves.** The tag is on the one statement that sets the client's cap.

@@ -1,8 +1,11 @@
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
+<!-- lint-external-ref: USimulatableNetSyncComponent -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
+<!-- lint-external-ref: bindNetSync -- deleted by og-input-latency task P5-8 (the net-sync component, the pawn's subobject, the bundle builder and the owner binding's net half); kept in the history -->
 <!-- lint-external-ref: FBodyInstance::UpdatePhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: FBodyInstance::UpdateMassProperties -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: GetSimplePhysicalMaterial -- Unreal Engine body-instance method, outside every scan root -->
 <!-- lint-external-ref: GetComplexPhysicalMaterials -- Unreal Engine body-instance method, outside every scan root -->
+<!-- lint-external-ref: ChaosPhysicsFactory -- deleted by og-session-runtime task 4 (OGSimulationUnreal's Chaos adapters, factory, tick mapper, time context, the Chaos engine traits and their two docs); kept in the history -->
 # `OGBrawlerUECharacter.h` and `.cpp` — guards
 
 Every prohibition that survived the task-25 conversion of the pawn's two files. Each entry has an
@@ -35,26 +38,24 @@ entry replaced.
 > ⛔⛔ 42 / 96 IS A CONTRACT, NOT A TUNING VALUE. […] A different size in the constructor is an
 > immediate assert at the first character registration. Change both together or neither.
 
-**Consequence.** A size that disagrees fails a `checkf` at the first registration, one per physics
-backend (radius and half-height compared with `FMath::IsNearlyEqual`):
+**Consequence.** A size that disagrees fails a `checkf` at the first registration (radius and
+half-height compared with `FMath::IsNearlyEqual`): the check in `tryRegister`'s first-call bind (the
+session's since og-ue-simulationcomponentandmanagersplit task 28; og-simulationscheduler-withjolt task 53,
+design D14), which is `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's
+`createBodies_GameThread`, since og-tickdriver task 15a. Jolt builds the character body from the
+descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
+camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
 
-* **Chaos configuration:** `ChaosPhysicsFactory::createPhysicalObject`'s adopt-root branch, which
-  adopts this capsule as the root body.
-* **Jolt configuration** (og-simulationscheduler-withjolt task 53, design D14): the check in
-  `tryRegister`'s first-call bind (the session's since og-ue-simulationcomponentandmanagersplit task 28), which is
-  `BrawlerJoltBindingUImpl::checkCapsuleContract`, called first in the Jolt host's `createBodies_GameThread`, since
-  og-tickdriver task 15a. Jolt builds the character body from the
-  descriptor, so nothing would fail by itself; but this capsule stays the mouse-aim plane and the
-  camera anchor, so a size that disagrees makes aim and view disagree with the simulated body.
+The former Chaos configuration (removed by og-session-runtime tasks 3–6) had a second check, the one
+the quote names: the Chaos factory's adopt-root branch, which adopted this capsule as the root body.
 
 **Units (og-sim-metres-yup tasks 5a, 7, 8, 7b and 22).** 42 / 96 are UE centimetres. The descriptor ships
 `CapsuleGeometry{0.42f, 0.96f}` (`BrawlerMovementSimulation.h`), in og-simulation metres, and both checks convert the
 descriptor's sizes to UE units with `ueFrame::lengthToUe` before they compare. So the contract is 42 / 96 cm on this
 side and 0.42 / 0.96 m on the simulation's: change both together.
 
-⚠ Both `checkf`s compile out when `DO_CHECK == 0`, and a Shipping build would then run with a
-capsule whose size disagrees with the simulation's. Task 21 drops the Chaos bullet with the Chaos
-configuration.
+⚠ The `checkf` compiles out when `DO_CHECK == 0`, and a Shipping build would then run with a
+capsule whose size disagrees with the simulation's.
 
 **What breaks if the tag moves.** The mirror is also quoted by line in `SimulatableBrawlerTypes.h`
 and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
@@ -70,12 +71,12 @@ and `BrawlerMovementSimulation-rationale.md`. Neither is checked.
 > §GATE 1 onwards) records `CollisionCylinder`. Keeping it makes "PIE parity with task 15"
 > a line-for-line comparison instead of a judgement call.
 
-**Consequence.** A rename compiles and runs. In both physics configurations it renames a default
-subobject that serialized instances refer to by name. In the Chaos configuration it also breaks the
-line-for-line comparison of `[PhysicsFactory.AdoptRoot]` lines against the recorded transcripts:
-`ChaosPhysicsFactory`'s adopt-root branch logs the adopted component's name. The Jolt configuration
-adopts nothing, so it prints no such line (og-simulationscheduler-withjolt task 19); task 21 drops
-this half with the Chaos configuration.
+**Consequence.** A rename compiles and runs. It renames a default subobject that serialized instances
+refer to by name. The Jolt configuration adopts nothing, so it prints no `[PhysicsFactory.AdoptRoot]`
+line (og-simulationscheduler-withjolt task 19). In the former Chaos configuration (removed by
+og-session-runtime tasks 3–6) a rename also broke the line-for-line comparison of those lines against
+the recorded transcripts, because the Chaos factory's adopt-root branch logged the adopted component's
+name; no code emits that line since.
 
 ---
 
@@ -88,13 +89,9 @@ where a movement component would be created.
 > CLASS. Locomotion is `brawlerMovementSimulation`; do not re-introduce a second authority
 > over this capsule.
 
-**Consequence.** The capsule has exactly one writer in each physics configuration, and a second
-writer (a movement component, or re-basing the class on the engine's walking-pawn base) fights it:
+**Consequence.** The capsule has exactly one writer, and a second writer (a movement component, or
+re-basing the class on the engine's walking-pawn base) fights it:
 
-* **Chaos configuration:** the physics factory adopts and simulates the capsule, the movement
-  sub-simulation writes it every tick (`drivesBody`), and the engine's end-of-physics sync moves the
-  component to the interpolated result. A second writer fights the simulation and the correction
-  path.
 * **Jolt configuration** (og-simulationscheduler-withjolt task 19): the character's body is a Jolt
   slot body built from the movement descriptor, and this capsule does not simulate
   (`tryRegister`'s Ready path, `TickDriverBackendUImpl::onRegistered_GameThread`, switches its physics simulation
@@ -106,20 +103,9 @@ writer (a movement component, or re-basing the class on the engine's walking-paw
   the render apply's held check logs a `[SimHost.RenderApply]` MOVED Warning the first time it
   happens.
 
-Task 21 drops the Chaos bullet with the Chaos configuration.
-
----
-
-## G-04 — the capsule's restitution stays 0
-
-**Site:** `CapsulePhysicalMaterial->Restitution = 0.f;` in the constructor.
-
-> RESTITUTION 0 IS LOAD-BEARING (revision 6): step 6' measures the solver's positional
-> push-out and adopts it, so a bouncy capsule would feed a rebound back into the movement
-> state.
-
-**Consequence.** Any restitution above 0 turns contacts into a rebound that step 6' adopts as
-movement. Friction 0 is recorded in the rationale but is not relied on, so it has no guard.
+In the former Chaos configuration (removed by og-session-runtime tasks 3–6) the physics factory
+adopted and simulated the capsule, the movement sub-simulation wrote it every tick (`drivesBody`), and
+the engine's end-of-physics sync moved it to the interpolated result.
 
 ---
 
@@ -162,17 +148,6 @@ of a runtime-built `StaticData`, so a `static_assert` cannot reach it.
 scoreboard's swatch column matches is gone from the world. The **ordering** half ("do not move
 this above the sections") is an ordering prohibition a tag cannot stop; it is kept, untagged, in
 the rationale §4.
-
----
-
-## G-08 — `BrawlerColor` replicates with a plain `DOREPLIFETIME`, never `COND_OwnerOnly`
-
-**Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);`.
-
-> ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
-
-**Consequence.** Under `COND_OwnerOnly` every other machine's brawlers stay white on this machine,
-in the world and in the scoreboard's swatch column.
 
 ---
 
@@ -239,42 +214,20 @@ substituting the pawn's id here still compiles.
 > only duplicate the diagnostic line on the host and make the log lie about which side
 > received what.
 
+**Correction (og-input-latency P7-4).** The tint's self-call is no longer in `PossessedBy`: it is the
+last statement of `SetAuthoritativeSimCharacterId` (G-22), for the same reason. The prohibition here is
+unchanged.
+
 ---
 
 ## G-13 — the material parameter is named `Color`, once, at this write site
 
-**Site:** `HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), BrawlerColor);` in
-`ApplyBrawlerColor`.
+**Site:** `HumanoidColorMID->SetVectorParameterValue(TEXT("Color"), GetBrawlerColor());` in
+`ApplyBrawlerColor` (the value was the `BrawlerColor` member until og-input-latency P7-4).
 
 > `Color` is BasicShapeMaterial's vector parameter. A wrong name here fails
 > SILENTLY — the mesh renders in the base tint and nothing logs — so it is
 > named once, at this single write site, rather than being spread around.
-
----
-
-## G-14 — the colour counter advances on the authority only
-
-**Site:** `if (HasAuthority())` in `PossessedBy`.
-
-> ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
-> diverge from the authority's and hand two brawlers the same tint.
-
-> Authority only: PossessedBy does not run on clients, but HasAuthority() is
-> stated rather than assumed because the counter must never advance twice.
-
-**What breaks if the tag moves.** The counter `gNextBrawlerColorIndex` is declared at file scope,
-where a tag would not stand on the line a wrong read or write is typed. This branch holds its
-only read and its only write.
-
----
-
-## G-15 — `PossessedBy` applies the tint itself: the listen-server host's pawn gets no OnRep
-
-**Site:** `ApplyBrawlerColor();` inside `PossessedBy`'s `HasAuthority()` branch.
-
-> The listen-server's own pawn gets no OnRep, so apply here too.
-
-**Consequence.** Without it the host's own brawlers render in the base tint on the host.
 
 ---
 
@@ -357,7 +310,74 @@ this statement.
 
 ---
 
-## G-20 — `PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`
+## G-22 — `SetAuthoritativeSimCharacterId` applies the tint itself: the authority's pawn gets no OnRep
+
+**Site:** `ApplyBrawlerColor();`, the last statement of `SetAuthoritativeSimCharacterId`.
+
+**Moved from** G-15 (og-input-latency P7-4, 2026-11-12), with its reason. The colour is derived from
+the sim id since that task (rationale §5), so it is applied where the id is written, not in
+`PossessedBy`. G-15's text, the shipped comment:
+
+> The listen-server's own pawn gets no OnRep, so apply here too.
+
+**Prohibition.** Keep the call. A client tints a brawler in `OnRep_SimCharacterIdValue`, when the id
+replicates in. The authority writes `SimCharacterIdValue` here, and the engine runs no RepNotify for a
+C++ write on the authority, so this call is the only one that tints the authority's pawns once their
+id exists.
+
+**Consequence.** Without it, on a listen server or in standalone, every brawler renders in white on
+the authority. `RebuildHumanoidMesh`'s call (G-07) runs in `PostInitializeComponents`, before the id
+is assigned, when `GetBrawlerColor()` still returns `FLinearColor::White`. The scoreboard is not
+affected: it calls `GetBrawlerColor()` when it draws, so its swatch shows the palette colour while
+the mesh beside it stays white.
+
+**What breaks if the tag moves.** Nothing mechanical. The low-level test targets do not link this
+module, and a dedicated server renders nothing. Only a rendered run on a listen server or in
+standalone shows it.
+
+---
+
+## §R — Retired ids
+
+⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.
+
+### G-04 — RETIRED (og-session-runtime task 7b, 2026-11-23): its premise was removed
+
+**Was:** *the capsule's restitution stays 0*.
+
+**Why it retired.** Successor: none: premise removed by og-session-runtime tasks 3–6. The prohibition kept a rebound out
+of step 6' in the former Chaos configuration, where the physics factory simulated this capsule, and tasks 3–6 removed
+that configuration. Nothing simulates the capsule now: no code calls `SetSimulatePhysics` on it, and the Jolt character
+body takes friction 0 and restitution 0 from `JoltBodyDefaults.h`'s `kAdoptedRootMaterial`, which
+`JoltPhysicsFactory.cpp` gives every root body, never from this material. A restitution above 0 here changes nothing
+simulated. The constructor still writes 0 (rationale §2).
+
+**The entry as it stood:**
+
+**Site:** `CapsulePhysicalMaterial->Restitution = 0.f;` in the constructor.
+
+> RESTITUTION 0 IS LOAD-BEARING (revision 6): step 6' measures the solver's positional
+> push-out and adopts it, so a bouncy capsule would feed a rebound back into the movement
+> state.
+
+**Consequence.** In the former Chaos configuration (removed by og-session-runtime tasks 3–6), where
+the physics factory simulated this capsule, any restitution above 0 turned contacts into a rebound
+that step 6' adopted as movement. Since then the material is inert for gameplay: the capsule never
+simulates, and the Jolt character body takes friction 0 and restitution 0 from `JoltBodyDefaults.h`'s
+`kAdoptedRootMaterial` (`OGBrawlerUECharacter-rationale.md` §2). A restitution above 0 here changes
+nothing simulated; it would matter again only if this capsule simulated. Friction 0 is recorded in
+the rationale but is not relied on, so it has no guard.
+
+### G-20 — RETIRED (og-input-latency P5-8, 2026-11-18): the property it guarded was deleted
+
+**Was:** *`PhysicsSlotValue` replicates with a plain `DOREPLIFETIME`: never `COND_OwnerOnly`, never `COND_InitialOnly`*.
+
+**Why it retired.** Task P5-8 deleted `PhysicsSlotValue`, its accessors and its registration. Since task P5-7 the slot
+the authority chose reaches every client on that character's og-sim-net roster entry, which og-sim-net's server sends to
+every attached connection, and in its snapshot to a connection that attaches later, so no condition on an engine property
+can starve a client of it (rationale §9.1).
+
+**The entry as it stood:**
 
 **Site:** `DOREPLIFETIME(AOGBrawlerUECharacter, PhysicsSlotValue);`.
 
@@ -374,12 +394,16 @@ reasons as G-10.
   slot would never be sent.
 
 **What breaks if the tag moves.** Nothing mechanical checks the condition, and the LLT targets cannot
-reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot. The
-Chaos configuration never reads the property, so there the failure is silent.
+reach replication. The failure shows only in a networked run, as a client stuck waiting for a slot.
 
----
+### G-21 — RETIRED (og-input-latency P5-8, 2026-11-18): the statement it guarded was deleted
 
-## G-21 — the NetSync bind stays in `PostInitializeComponents`, never in a `BeginPlay`
+**Was:** *the NetSync bind stays in `PostInitializeComponents`, never in a `BeginPlay`*.
+
+**Why it retired.** Task P5-8 deleted the sibling component, its subobject on this pawn and the bind. Nothing on the pawn
+receives a replication notification before `BeginPlay` that needs a bound component any more (rationale §15).
+
+**The entry as it stood:**
 
 **Site:** `BrawlerSimulatable->bindNetSync(*SimulatableNetSync);`, the last statement of `PostInitializeComponents`.
 
@@ -396,11 +420,43 @@ before any `BeginPlay`. Unbound, `USimulatableNetSyncComponent` stops on its `ch
 client hit that `checkf` at its first join; with the move applied to the rejoining process only, the rejoining client hit
 it on an existing character, 5 s after it started. Rationale §15.
 
----
+### G-08 — RETIRED (og-input-latency P7-4, 2026-11-12): the property it guarded was deleted
 
-## §R — Retired ids
+**Was:** *`BrawlerColor` replicates with a plain `DOREPLIFETIME`, never `COND_OwnerOnly`*. The site
+was `DOREPLIFETIME(AOGBrawlerUECharacter, BrawlerColor);`, and the shipped comment read:
 
-⛔ **Spent forever.** This number may not appear as a `⛔G-nn` tag again.
+> ⛔ NOT COND_OwnerOnly — every client must see every brawler's colour.
+
+**Why it retired.** The `BrawlerColor` property, its `OnRep_BrawlerColor` and its registration are
+gone. Every peer derives the colour from the sim id through `GetBrawlerColor()` (rationale §5). The
+fact it protected, that every client needs every brawler's colour, now rests on
+`SimCharacterIdValue`'s plain `DOREPLIFETIME`, which G-10 already guards: under `COND_OwnerOnly` a
+proxy's id, and so its colour, would never arrive.
+
+### G-14 — RETIRED (og-input-latency P7-4, 2026-11-12): the counter was deleted
+
+**Was:** *the colour counter advances on the authority only*. The site was `if (HasAuthority())` in
+`PossessedBy`, and the shipped comments read:
+
+> ⛔ SERVER-ONLY. Never read or written on a client — a client's count would
+> diverge from the authority's and hand two brawlers the same tint.
+
+> Authority only: PossessedBy does not run on clients, but HasAuthority() is
+> stated rather than assumed because the counter must never advance twice.
+
+**Why it retired.** The file-scope counter `gNextBrawlerColorIndex` and the branch are gone, and
+nothing counts any more. `paletteIndexFor` is a pure function of the sim id, with `static_assert`s on
+ids 1, 10 and 11. The id itself is allocated once, on the authority (`SimCharacterId-guards.md`
+G-01). A client cannot diverge from the authority, because both compute from the same replicated
+byte.
+
+### G-15 — RETIRED (og-input-latency P7-4, 2026-11-12): moved to G-22
+
+**Was:** *`PossessedBy` applies the tint itself: the listen-server host's pawn gets no OnRep*. The
+site was `ApplyBrawlerColor();` inside `PossessedBy`'s `HasAuthority()` branch.
+
+**Why it retired.** The colour is known once the id is written, not at possession, so the self-apply
+moved to the end of `SetAuthoritativeSimCharacterId`, with its reason. **Successor:** G-22.
 
 ### G-18 — RETIRED (og-attackstatetransition-cleanup task 9, 2026-10-04): the mirrored length was deleted
 

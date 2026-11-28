@@ -15,6 +15,8 @@ class AOGBrawlerUEGameMode : public AGameModeBase
 public:
 	AOGBrawlerUEGameMode();
 
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+
 	virtual void BeginPlay() override;
 
 	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId,
@@ -25,6 +27,8 @@ public:
 	virtual void PostLogin(APlayerController* newPlayer) override;
 
 	virtual void Logout(AController* exiting) override;
+
+	virtual AActor* ChoosePlayerStart_Implementation(AController* player) override;
 
 private:
 	sessionLogUImpl::SessionLog m_sessionLog;
